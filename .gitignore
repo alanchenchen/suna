@@ -1,0 +1,33 @@
+# Binaries
+suna
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test
+*.test
+*.out
+*.prof
+coverage.txt
+
+# Go
+vendor/
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Suna runtime data
+memory.db
+memory.db-shm
+memory.db-wal
