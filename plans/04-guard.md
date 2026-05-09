@@ -59,7 +59,7 @@ Action 请求 (WriteFile / EditFile / Exec / WriteHTTP)
            │
            ▼
 ┌──────────────────────────┐
-│  Stage 3: LLM 审查       │  用 fast 模型，+50-100ms
+│  Stage 3: LLM 审查       │  用 active_model，+50-100ms
 │                          │
 │  输入:                    │
 │  - 操作类型和参数          │
@@ -168,7 +168,7 @@ reason = "读文件直接放行"
 ### 审查模型选择
 
 ```
-用最便宜的 fast 模型做审查:
+用 active_model 做审查:
   - 不需要强推理能力
   - 只需要理解意图和操作的对应关系
   - glm-4-flash 级别足够
@@ -279,11 +279,10 @@ func isReadOnlyCommand(cmd string) bool {
 | error | TEXT | 错误信息 (如有) |
 ```
 
-用户可以查看审计日志：
-```
-TUI 命令: /audit          # 查看最近操作
-TUI 命令: /audit --risk   # 只看高风险操作
-```
+用户可以通过自然语言查询审计记录:
+  "帮我看看最近做了哪些操作"
+  "有哪些高风险操作"
+  或通过 /memory search "audit" 查询
 
 ## Sub Agent 的 Guard
 
@@ -321,7 +320,7 @@ Guard 会学习用户的行为模式。
 信任从高到低:
   1. 行为信任    — 连续 10 次 approve 的操作 → 跳过 LLM 审查
   2. 低风险放行  — 只读命令等 → 跳过 LLM 审查
-  3. LLM 审查    — 中高风险操作 → fast 模型审查
+   3. LLM 审查    — 中高风险操作 → active_model 审查
   4. 用户确认    — 审查不确定或高风险 → 转用户
 
 远期: 意图信任 — 用户确认的意图下确定性操作直接执行 (见 10-stateful-entity.md)

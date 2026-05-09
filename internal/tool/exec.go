@@ -7,15 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 )
 
 const (
-	execTimeout       = 60 * time.Second
-	maxExecOutput     = 50 * 1024
-	execDefaultShell  = "bash"
+	execTimeout      = 60 * time.Second
+	maxExecOutput    = 50 * 1024
+	execDefaultShell = "bash"
 )
 
 type Exec struct{}
@@ -138,10 +137,7 @@ func resolveShell(shell string) (cmd string, name string) {
 	if shell != "auto" {
 		return findShell(shell)
 	}
-	if runtime.GOOS == "windows" {
-		return findShell("powershell")
-	}
-	return findShell("bash")
+	return autoShell()
 }
 
 func findShell(name string) (string, string) {

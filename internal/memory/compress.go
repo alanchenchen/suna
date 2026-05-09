@@ -9,10 +9,11 @@ import (
 )
 
 const (
-	compressThreshold    = 0.8
-	keepRecentTurns      = 10
-	maxToolOutputLines   = 500
-	maxToolOutputBytes   = 50 * 1024
+	compressThreshold   = 0.8
+	keepRecentTurns     = 10
+	maxToolOutputLines  = 500
+	maxToolOutputBytes  = 50 * 1024
+	AutoCompactMinTurns = 6
 )
 
 type Compressor struct {
@@ -26,6 +27,11 @@ func NewCompressor(fastProvider model.Provider) *Compressor {
 func (c *Compressor) ShouldCompress(messages []model.Message, contextWindow int) bool {
 	tokens := model.EstimateMessagesTokens(messages)
 	return float64(tokens) > float64(contextWindow)*compressThreshold
+}
+
+// EstimateTokens 返回消息列表的估算 token 数
+func (c *Compressor) EstimateTokens(messages []model.Message) int {
+	return model.EstimateMessagesTokens(messages)
 }
 
 func (c *Compressor) TruncateToolOutput(content string) string {
@@ -68,7 +74,7 @@ func (c *Compressor) CompressHistory(ctx context.Context, messages []model.Messa
 	summary := sb.String()
 	if c.fastProvider != nil && len(summary) > 500 {
 		ch, err := c.fastProvider.Complete(ctx, &model.CompletionRequest{
-			System: "你是一个对话摘要助手。将以下对话历史压缩为简洁摘要。保留：用户意图、已完成操作、关键决策、当前进展。忽略：具体代码细节、工具返回细节、中间调试过程。用中文回复。",
+			System: "Compress the following conversation history into a concise summary. Keep: user intent, completed operations, key decisions, current progress. Ignore: specific code details, tool output details, intermediate debugging steps.",
 			Messages: []model.Message{
 				model.NewTextMessage(model.RoleUser, summary),
 			},
@@ -93,8 +99,8 @@ func (c *Compressor) CompressHistory(ctx context.Context, messages []model.Messa
 	result := []model.Message{
 		{
 			Role:        model.RoleSystem,
-			TextContent: "之前的对话摘要: " + summary,
-			Content:     []model.ContentBlock{{Type: model.ContentText, Text: "之前的对话摘要: " + summary}},
+			TextContent: "Conversation summary: " + summary,
+			Content:     []model.ContentBlock{{Type: model.ContentText, Text: "Conversation summary: " + summary}},
 		},
 	}
 	result = append(result, keepRegion...)

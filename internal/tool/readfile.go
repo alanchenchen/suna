@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	maxReadSize     = 100 * 1024
-	defaultLimit    = 2000
-	maxBase64Size   = 10 * 1024 * 1024
+	maxReadSize   = 100 * 1024
+	defaultLimit  = 2000
+	maxBase64Size = 10 * 1024 * 1024
 )
 
 type ReadFile struct{}

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"runtime"
 	"strings"
 
 	"github.com/google/uuid"
@@ -36,12 +35,20 @@ const (
 type Guard struct {
 	db           *sql.DB
 	blockedRules []blockRule
+	userBlocked  []blockRule
+	userAllowed  []allowedRule
 	allowedCmds  []string
 	sessionID    string
 }
 
 type blockRule struct {
 	pattern *regexp.Regexp
+	reason  string
+}
+
+type allowedRule struct {
+	pattern *regexp.Regexp
+	tool    string
 	reason  string
 }
 
@@ -55,8 +62,40 @@ func NewGuard(db *sql.DB, sessionID string) *Guard {
 	return g
 }
 
+func NewGuardWithConfig(db *sql.DB, sessionID string, blockedPatterns []string, blockedReasons []string, allowedPatterns []string, allowedTools []string) *Guard {
+	g := &Guard{
+		db:        db,
+		sessionID: sessionID,
+	}
+	g.blockedRules = g.builtinBlockedRules()
+	g.allowedCmds = g.builtinAllowedCommands()
+	for i, p := range blockedPatterns {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			continue
+		}
+		reason := ""
+		if i < len(blockedReasons) {
+			reason = blockedReasons[i]
+		}
+		g.userBlocked = append(g.userBlocked, blockRule{pattern: re, reason: reason})
+	}
+	for i, p := range allowedPatterns {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			continue
+		}
+		tool := ""
+		if i < len(allowedTools) {
+			tool = allowedTools[i]
+		}
+		g.userAllowed = append(g.userAllowed, allowedRule{pattern: re, tool: tool, reason: ""})
+	}
+	return g
+}
+
 func (g *Guard) Check(ctx context.Context, tool string, params map[string]any) *GuardResult {
-	risk := assessRisk(tool, params)
+	risk := g.assessRisk(tool, params)
 
 	if blocked, reason := g.checkBlocked(tool, params); blocked {
 		g.audit(ctx, tool, params, risk, "blocked", reason)
@@ -90,6 +129,11 @@ func (g *Guard) checkBlocked(tool string, params map[string]any) (bool, string) 
 			return true, rule.reason
 		}
 	}
+	for _, rule := range g.userBlocked {
+		if rule.pattern.MatchString(target) {
+			return true, rule.reason
+		}
+	}
 	return false, ""
 }
 
@@ -118,46 +162,7 @@ func (g *Guard) audit(ctx context.Context, tool string, params map[string]any, r
 }
 
 func (g *Guard) builtinBlockedRules() []blockRule {
-	var rules []blockRule
-
-	if runtime.GOOS != "windows" {
-		unixRules := []struct {
-			pattern string
-			reason  string
-		}{
-			{`rm\s+-rf\s+/`, "blocked: recursive delete root"},
-			{`rm\s+-rf\s+~`, "blocked: recursive delete home"},
-			{`rm\s+-rf\s+\$HOME`, "blocked: recursive delete home"},
-			{`mkfs`, "blocked: disk format"},
-			{`dd\s+if=/dev/zero`, "blocked: disk wipe"},
-			{`:\s*/etc/|:\s*/usr/|:\s*/System/`, "blocked: write to system directory"},
-			{`chmod\s+-R\s+777\s+/`, "blocked: recursive open permissions"},
-			{`>\s*/dev/sd`, "blocked: write to disk device"},
-		}
-		for _, r := range unixRules {
-			re, err := regexp.Compile(r.pattern)
-			if err == nil {
-				rules = append(rules, blockRule{pattern: re, reason: r.reason})
-			}
-		}
-	} else {
-		winRules := []struct {
-			pattern string
-			reason  string
-		}{
-			{`rmdir\s+/s\s+/q\s+[A-Z]:\\`, "blocked: recursive force delete drive"},
-			{`rd\s+/s\s+/q\s+[A-Z]:\\`, "blocked: recursive force delete drive"},
-			{`del\s+/s\s+/q\s+[A-Z]:\\`, "blocked: recursive force delete drive"},
-			{`format\s+[A-Z]:`, "blocked: format drive"},
-			{`:\s*C:\\Windows|:\s*C:\\Program`, "blocked: write to system directory"},
-		}
-		for _, r := range winRules {
-			re, err := regexp.Compile(r.pattern)
-			if err == nil {
-				rules = append(rules, blockRule{pattern: re, reason: r.reason})
-			}
-		}
-	}
+	rules := platformBlockedRules()
 
 	genericRules := []struct {
 		pattern string
@@ -178,25 +183,14 @@ func (g *Guard) builtinBlockedRules() []blockRule {
 }
 
 func (g *Guard) builtinAllowedCommands() []string {
-	return []string{
-		"ls", "cat", "head", "tail", "wc", "stat", "du",
-		"grep", "rg", "ag", "ack",
-		"find", "glob", "locate",
-		"which", "type", "where", "command",
-		"echo", "printf", "date", "whoami",
-		"git status", "git log", "git diff",
-		"git branch", "git show", "git stash list",
-		"env", "printenv", "uname", "hostname",
-		"dir", "findstr",
-		"Get-ChildItem", "Get-Content",
-	}
+	return platformReadOnlyCommands()
 }
 
-func assessRisk(tool string, params map[string]any) RiskLevel {
+func (g *Guard) assessRisk(tool string, params map[string]any) RiskLevel {
 	switch tool {
 	case "exec":
 		cmd, _ := params["command"].(string)
-		if isReadOnlyCommand(cmd) {
+		if g.isReadOnlyCommand(cmd) {
 			return RiskLow
 		}
 		cmdLower := strings.ToLower(cmd)
@@ -223,29 +217,23 @@ func assessRisk(tool string, params map[string]any) RiskLevel {
 	}
 }
 
-func isReadOnlyCommand(cmd string) bool {
-	readOnly := []string{
-		"ls", "cat", "head", "tail", "wc", "stat", "du",
-		"grep", "rg", "ag", "ack",
-		"find", "glob", "locate",
-		"which", "type", "where", "command",
-		"echo", "printf", "date", "whoami",
-		"git status", "git log", "git diff",
-		"git branch", "git show", "git stash list",
-		"env", "printenv", "uname", "hostname",
-		"dir", "findstr",
-		"Get-ChildItem", "Get-Content",
-	}
+func (g *Guard) isReadOnlyCommand(cmd string) bool {
+	readOnly := platformReadOnlyCommands()
 	trimmed := strings.TrimSpace(cmd)
 	for _, ro := range readOnly {
 		if strings.HasPrefix(trimmed, ro+" ") || trimmed == ro {
 			return true
 		}
 	}
+	for _, rule := range g.userAllowed {
+		if rule.pattern.MatchString(trimmed) && rule.tool == "exec" {
+			return true
+		}
+	}
 	if strings.Contains(cmd, "|") {
 		parts := strings.Split(cmd, "|")
 		for _, p := range parts {
-			if !isReadOnlyCommand(strings.TrimSpace(p)) {
+			if !g.isReadOnlyCommand(strings.TrimSpace(p)) {
 				return false
 			}
 		}

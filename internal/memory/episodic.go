@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"math"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 type EpisodicMemory struct {
@@ -33,7 +31,7 @@ func NewEpisodicStore(db *sql.DB) *EpisodicStore {
 
 func (s *EpisodicStore) Store(ctx context.Context, mem *EpisodicMemory) error {
 	if mem.ID == "" {
-		mem.ID = uuid.New().String()
+		mem.ID = fmt.Sprintf("%d", time.Now().UnixNano())
 	}
 	if mem.Timestamp.IsZero() {
 		mem.Timestamp = time.Now()
@@ -44,7 +42,8 @@ func (s *EpisodicStore) Store(ctx context.Context, mem *EpisodicMemory) error {
 	if len(mem.Embedding) > 0 {
 		embeddingBlob = floatsToBlob(mem.Embedding)
 	}
-	_, err := s.db.ExecContext(ctx, `
+
+	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO episodic_memories (id, content, type, source, entities, embedding, ts, session_id, metadata)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		mem.ID, mem.Content, mem.Type, mem.Source, string(entitiesJSON), embeddingBlob,
@@ -53,8 +52,10 @@ func (s *EpisodicStore) Store(ctx context.Context, mem *EpisodicMemory) error {
 	if err != nil {
 		return fmt.Errorf("insert episodic memory: %w", err)
 	}
+
+	rowID, _ := result.LastInsertId()
 	_, err = s.db.ExecContext(ctx, `INSERT INTO episodic_fts(rowid, content) VALUES (?, ?)`,
-		mem.ID, mem.Content,
+		rowID, mem.Content,
 	)
 	if err != nil {
 		return fmt.Errorf("insert fts: %w", err)
@@ -62,10 +63,19 @@ func (s *EpisodicStore) Store(ctx context.Context, mem *EpisodicMemory) error {
 	return nil
 }
 
+// SearchFTS 先尝试 FTS5 全文搜索，如果无结果或查询包含 CJK 字符则降级为 LIKE 搜索。
+// FTS5 的 unicode61 tokenizer 不支持中文分词，CJK 查询直接走 LIKE。
 func (s *EpisodicStore) SearchFTS(ctx context.Context, query string, limit int) ([]*EpisodicMemory, error) {
 	if limit <= 0 {
 		limit = 10
 	}
+
+	// 包含 CJK 字符时直接走 LIKE
+	if hasCJK(query) {
+		return s.searchLike(ctx, query, limit)
+	}
+
+	// 先尝试 FTS
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT m.id, m.content, m.type, m.source, m.entities, m.ts, m.session_id, m.metadata
 		FROM episodic_fts f
@@ -76,10 +86,90 @@ func (s *EpisodicStore) SearchFTS(ctx context.Context, query string, limit int) 
 		query, limit,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("fts search: %w", err)
+		// FTS 语法错误时降级到 LIKE
+		return s.searchLike(ctx, query, limit)
+	}
+	defer rows.Close()
+
+	results, scanErr := scanMemories(rows)
+	if scanErr != nil {
+		return nil, scanErr
+	}
+	if len(results) > 0 {
+		return results, nil
+	}
+
+	// FTS 无结果，降级到 LIKE
+	return s.searchLike(ctx, query, limit)
+}
+
+// searchLike 使用 LIKE 模糊搜索，支持中文
+func (s *EpisodicStore) searchLike(ctx context.Context, query string, limit int) ([]*EpisodicMemory, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, content, type, source, entities, ts, session_id, metadata
+		FROM episodic_memories
+		WHERE content LIKE ?
+		ORDER BY ts DESC
+		LIMIT ?`,
+		"%"+query+"%", limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("like search: %w", err)
 	}
 	defer rows.Close()
 	return scanMemories(rows)
+}
+
+type RewriteProvider interface {
+	RewriteQuery(ctx context.Context, query string) (string, error)
+}
+
+func (s *EpisodicStore) SearchWithRewrite(ctx context.Context, query string, limit int, rewriter RewriteProvider) ([]*EpisodicMemory, error) {
+	results, err := s.SearchFTS(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) >= 3 || rewriter == nil {
+		return results, nil
+	}
+
+	rewritten, rwErr := rewriter.RewriteQuery(ctx, query)
+	if rwErr != nil || rewritten == "" || rewritten == query {
+		return results, nil
+	}
+
+	rewrittenResults, rwErr := s.SearchFTS(ctx, rewritten, limit)
+	if rwErr != nil {
+		return results, nil
+	}
+
+	seen := make(map[string]bool)
+	for _, m := range results {
+		seen[m.ID] = true
+	}
+	for _, m := range rewrittenResults {
+		if !seen[m.ID] {
+			results = append(results, m)
+			seen[m.ID] = true
+		}
+	}
+
+	if len(results) > limit {
+		results = results[:limit]
+	}
+	return results, nil
+}
+
+// hasCJK 判断字符串是否包含 CJK 字符
+func hasCJK(s string) bool {
+	for _, r := range s {
+		if (r >= 0x4E00 && r <= 0x9FFF) || (r >= 0x3400 && r <= 0x4DBF) ||
+			(r >= 0x2E80 && r <= 0x2EFF) || (r >= 0xF900 && r <= 0xFAFF) ||
+			(r >= 0xFE30 && r <= 0xFE4F) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *EpisodicStore) SearchByEmbedding(ctx context.Context, queryVec []float64, limit int) ([]*EpisodicMemory, error) {
@@ -132,6 +222,114 @@ func (s *EpisodicStore) SearchByEmbedding(ctx context.Context, queryVec []float6
 		memories[i] = r.mem
 	}
 	return memories, nil
+}
+
+// Recall 跨会话检索：用 FTS+时间衰减找到最相关的历史记忆。
+// 限制返回 top-N，按相关度降序。
+func (s *EpisodicStore) Recall(ctx context.Context, query string, limit int) ([]*EpisodicMemory, error) {
+	if limit <= 0 {
+		limit = 5
+	}
+
+	results, err := s.SearchFTS(ctx, query, limit*3)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+
+	now := time.Now()
+	for i := range results {
+		if results[i].Metadata == nil {
+			results[i].Metadata = make(map[string]any)
+		}
+		results[i].Metadata["_score"] = timeDecayScore(now, results[i].Timestamp)
+	}
+
+	for i := 0; i < len(results)-1; i++ {
+		for j := i + 1; j < len(results); j++ {
+			si, _ := results[i].Metadata["_score"].(float64)
+			sj, _ := results[j].Metadata["_score"].(float64)
+			if sj > si {
+				results[i], results[j] = results[j], results[i]
+			}
+		}
+	}
+
+	tokenBudget := 4000
+	var selected []*EpisodicMemory
+	usedTokens := 0
+	for _, m := range results {
+		estTokens := len(m.Content) / 4
+		if estTokens < 50 {
+			estTokens = 50
+		}
+		if usedTokens+estTokens > tokenBudget {
+			break
+		}
+		selected = append(selected, m)
+		usedTokens += estTokens
+	}
+
+	if len(selected) > limit {
+		selected = selected[:limit]
+	}
+	return selected, nil
+}
+
+func timeDecayScore(now time.Time, ts time.Time) float64 {
+	days := now.Sub(ts).Hours() / 24
+	switch {
+	case days <= 7:
+		return 1.0
+	case days <= 30:
+		return 0.8
+	case days <= 90:
+		return 0.5
+	default:
+		return 0.3
+	}
+}
+
+// RecallByEntities 根据实体列表查找相关记忆
+func (s *EpisodicStore) RecallByEntities(ctx context.Context, entities []string, limit int) ([]*EpisodicMemory, error) {
+	if len(entities) == 0 || limit <= 0 {
+		return nil, nil
+	}
+
+	var conditions []string
+	var args []any
+	for _, e := range entities {
+		conditions = append(conditions, "entities LIKE ?")
+		args = append(args, "%"+e+"%")
+	}
+
+	query := `
+		SELECT id, content, type, source, entities, ts, session_id, metadata
+		FROM episodic_memories
+		WHERE ` + joinOr(conditions) + `
+		ORDER BY ts DESC
+		LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("recall by entities: %w", err)
+	}
+	defer rows.Close()
+	return scanMemories(rows)
+}
+
+func joinOr(parts []string) string {
+	result := ""
+	for i, p := range parts {
+		if i > 0 {
+			result += " OR "
+		}
+		result += p
+	}
+	return result
 }
 
 func (s *EpisodicStore) Recent(ctx context.Context, limit int) ([]*EpisodicMemory, error) {
@@ -202,6 +400,9 @@ func scanMemories(rows *sql.Rows) ([]*EpisodicMemory, error) {
 		}
 		json.Unmarshal([]byte(entitiesJSON), &mem.Entities)
 		json.Unmarshal([]byte(metadataJSON), &mem.Metadata)
+		if mem.Metadata == nil {
+			mem.Metadata = make(map[string]any)
+		}
 		memories = append(memories, mem)
 	}
 	return memories, nil
@@ -225,6 +426,9 @@ func scanMemoryWithEmbedding(rows *sql.Rows) (*EpisodicMemory, error) {
 	}
 	json.Unmarshal([]byte(entitiesJSON), &mem.Entities)
 	json.Unmarshal([]byte(metadataJSON), &mem.Metadata)
+	if mem.Metadata == nil {
+		mem.Metadata = make(map[string]any)
+	}
 	if len(embeddingBlob) > 0 {
 		mem.Embedding = blobToFloats(embeddingBlob)
 	}
@@ -278,4 +482,10 @@ func blobToFloats(buf []byte) []float64 {
 		v[i] = math.Float64frombits(bits)
 	}
 	return v
+}
+
+func (s *EpisodicStore) Count(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM episodic_memories").Scan(&count)
+	return count, err
 }

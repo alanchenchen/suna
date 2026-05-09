@@ -294,24 +294,21 @@ type Message struct {
 ### TUI 中的输入方式
 
 ```
-用户向 agent 传递图片/文件的方式:
-
 1. 拖拽文件到终端窗口
    TUI 检测到文件拖拽事件 → 读取文件 → base64 编码
    → 作为 image/audio content block 发给模型
+   → 这是主要的多模态输入方式，不需要 /file 命令
 
-2. 剪贴板粘贴
+2. 剪贴板粘贴 (Ctrl+V)
    用户截图后 Ctrl+V → TUI 读取剪贴板图片
    → base64 → image content block
 
 3. 路径引用
    用户在对话中提到文件路径 (如 "看看这张截图 ~/Desktop/screenshot.png")
    → agent 通过 ReadFile 读取 → 编码为 base64 → 注入消息
+   → 纯自然语言交互，不需要额外命令
 
-4. /file 命令
-   /file path/to/image.png
-   /file path/to/audio.mp3
-   → 显式发送文件给 agent
+注: /file 命令已移除。所有文件输入通过拖拽、粘贴、或自然语言路径引用完成。
 ```
 
 ### 模型路由配合

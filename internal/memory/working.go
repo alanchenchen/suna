@@ -82,3 +82,15 @@ func (w *WorkingMemory) EstimatedTokens() int {
 	defer w.mu.RUnlock()
 	return model.EstimateMessagesTokens(w.messages)
 }
+
+// LastUserText 返回最后一条用户消息的文本内容
+func (w *WorkingMemory) LastUserText() string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	for i := len(w.messages) - 1; i >= 0; i-- {
+		if w.messages[i].Role == model.RoleUser {
+			return w.messages[i].Text()
+		}
+	}
+	return ""
+}

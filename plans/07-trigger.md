@@ -2,7 +2,7 @@
 
 感知层是 Suna 三层架构的第一层。传统 agent 的感知是被动的——只有当用户发消息时才"醒来"。Suna 的感知是主动的——持续监听环境变化，将信号直接传递给行动层。
 
-感知源在 TUI 进程内运行。TUI 打开时感知源活跃，TUI 关闭时感知源随进程停止。不需要 daemon。
+感知源在 Daemon (sunad) 进程内 24/7 运行，与 TUI 完全解耦。用户关闭 TUI 后，Timer、Watcher、Webhook、Stream 继续工作。结果存入 daemon，下次 TUI 连接时展示。
 
 ## 信号流转
 
@@ -110,8 +110,11 @@ enabled = true
   2. 注册到 cron.Scheduler
   3. 到点触发 → handler(task)
   4. handler 调 agent.Run(ctx, task)
-  5. agent 执行结果 → 通过 TUI 展示给用户
-     感知源随 TUI 进程运行，TUI 关闭时进程退出、感知源停止
+  5. agent 执行结果 → 存入 session_messages
+     如果 TUI 在线 → 通过 IPC 推送结果
+     如果 TUI 离线 → 结果存好，下次连接时展示
+
+感知源在 daemon 进程内运行，不依赖 TUI
 ```
 
 ### 边界处理
@@ -119,7 +122,7 @@ enabled = true
 ```
 - 上次任务未完成又触发 → 跳过本次 (防止堆积)
 - 任务执行失败 → 记录失败记忆 → 不重试 (避免无限循环)
-- Suna 退出时 → 感知源随进程停止 → 状态已持久化到 SQLite → 下次启动恢复
+- Daemon 退出时 → 感知源随 daemon 停止 → 状态已持久化到 SQLite → daemon 重启后恢复
 - 时区: 使用用户本地时区
 ```
 
@@ -187,7 +190,7 @@ task_template = "GitHub 仓库 {{.repository}} 有新的 Pull Request #{{.number
 ### 实现
 
 ```
-Suna 内置一个轻量 HTTP Server (net/http):
+Daemon (sunad) 内置一个轻量 HTTP Server (net/http):
   - 默认端口: 0 (随机分配) 或用户指定
   - 路径: /webhook/{id}
   - 方法: POST
@@ -296,32 +299,22 @@ cooldown 必要性:
 SQLite 表: triggers (表名不变，兼容旧数据)
 | id | type | config_json | signal_template | enabled | last_fire | created_at |
 
-agent 启动时:
+Daemon 启动时:
   1. 查询 triggers WHERE enabled=true
   2. 按 type 反序列化为具体 PerceptionSource
   3. 逐个 Start
   4. 某个 Start 失败 → 记录错误 → 继续
 
-agent 退出时:
+Daemon 退出时:
   1. 逐个 Stop
   2. 状态已经持久化
 ```
 
 ## 感知源的管理
 
-### TUI 命令
+### 感知源的管理
 
-```
-/trigger list                    — 查看所有感知源
-/trigger add timer "0 9 * * *" "每天9点汇总报告"
-/trigger add watcher "./src" "src目录变了就跑测试"
-/trigger remove <id>             — 删除感知源
-/trigger pause <id>              — 暂停
-/trigger resume <id>             — 恢复
-/trigger logs                    — 查看感知历史
-```
-
-### 用户交互方式
+感知源不通过 TUI 命令管理。用户通过自然语言交互:
 
 ```
 用户: "每天早上9点帮我汇总昨天的工作"
@@ -333,7 +326,15 @@ Agent: 创建 Watcher 感知源 → 保存 → 启动
 
 用户: "日志里出现 ERROR 就告诉我"
 Agent: 创建 Stream 感知源 → 保存 → 启动
+
+用户: "帮我看看设置了哪些定时任务"
+Agent: 查询 triggers 表 → 自然语言回复
+
+用户: "不需要那个文件监听了"
+Agent: 理解意图 → 删除对应感知源
 ```
+
+注：/trigger 命令已移除。所有感知源管理通过自然语言完成，降低命令学习成本。
 
 ## 新增依赖
 

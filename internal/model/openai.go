@@ -2,22 +2,26 @@ package model
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/sashabaranov/go-openai"
 )
 
 type OpenAIProvider struct {
-	client         *openai.Client
-	model          string
-	contextWindow  int
-	baseURL        string
-	apiKey         string
-	supportsEmbed  bool
-	embedModel     string
+	client        *openai.Client
+	model         string
+	contextWindow int
+	baseURL       string
+	apiKey        string
+	supportsEmbed bool
+	embedChecked  bool
+	embedModel    string
+	httpClient    *http.Client
 }
 
 func NewOpenAIProvider(apiKey, baseURL, model string, contextWindow int) *OpenAIProvider {
@@ -25,6 +29,15 @@ func NewOpenAIProvider(apiKey, baseURL, model string, contextWindow int) *OpenAI
 	if baseURL != "" {
 		cfg.BaseURL = baseURL
 	}
+
+	httpClient := &http.Client{}
+	if baseURL != "" && !strings.Contains(baseURL, "api.openai.com") {
+		httpClient.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+	}
+	cfg.HTTPClient = httpClient
+
 	client := openai.NewClientWithConfig(cfg)
 	return &OpenAIProvider{
 		client:        client,
@@ -32,6 +45,7 @@ func NewOpenAIProvider(apiKey, baseURL, model string, contextWindow int) *OpenAI
 		contextWindow: contextWindow,
 		baseURL:       baseURL,
 		apiKey:        apiKey,
+		httpClient:    httpClient,
 	}
 }
 
@@ -99,6 +113,10 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req *CompletionRequest) (
 				ch <- Chunk{Content: choice.Delta.Content, Done: false}
 			}
 
+			if choice.Delta.ReasoningContent != "" {
+				ch <- Chunk{ReasoningContent: choice.Delta.ReasoningContent, Done: false}
+			}
+
 			for _, tc := range choice.Delta.ToolCalls {
 				if toolCallsAcc == nil {
 					toolCallsAcc = make(map[int]*openai.ToolCall)
@@ -161,14 +179,16 @@ func (p *OpenAIProvider) ContextWindow() int {
 }
 
 func (p *OpenAIProvider) SupportsEmbedding() bool {
-	if p.supportsEmbed {
-		return true
+	if p.embedChecked {
+		return p.supportsEmbed
 	}
 	if p.baseURL == "" {
 		p.supportsEmbed = true
+		p.embedChecked = true
 		return true
 	}
 	p.detectEmbedding()
+	p.embedChecked = true
 	return p.supportsEmbed
 }
 
@@ -176,13 +196,13 @@ func (p *OpenAIProvider) Embed(ctx context.Context, texts []string) ([][]float64
 	if !p.SupportsEmbedding() {
 		return nil, fmt.Errorf("embedding not supported by this provider")
 	}
-	model := p.embedModel
-	if model == "" {
-		model = "embedding-3"
+	embedModel := p.embedModel
+	if embedModel == "" {
+		embedModel = "text-embedding-3-small"
 	}
 	resp, err := p.client.CreateEmbeddings(ctx, openai.EmbeddingRequestStrings{
 		Input: texts,
-		Model: openai.EmbeddingModel(model),
+		Model: openai.EmbeddingModel(embedModel),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("embedding API: %w", err)
@@ -198,16 +218,61 @@ func (p *OpenAIProvider) Embed(ctx context.Context, texts []string) ([][]float64
 }
 
 func (p *OpenAIProvider) detectEmbedding() {
-	url := p.baseURL + "/embeddings"
-	req, _ := http.NewRequest("POST", url, nil)
+	p.embedModel = resolveEmbedModel(p.baseURL)
+
+	reqBody := fmt.Sprintf(`{"input":"hi","model":"%s"}`, p.embedModel)
+	endpoint := strings.TrimRight(p.baseURL, "/") + "/embeddings"
+	if p.baseURL == "" {
+		endpoint = "https://api.openai.com/v1/embeddings"
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, endpoint, strings.NewReader(reqBody))
+	if err != nil {
+		p.supportsEmbed = false
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	resp, err := http.DefaultClient.Do(req)
+
+	client := p.httpClient
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		p.supportsEmbed = false
 		return
 	}
 	defer resp.Body.Close()
-	p.supportsEmbed = resp.StatusCode != http.StatusNotFound
+
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
+		p.supportsEmbed = true
+		return
+	}
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
+		p.supportsEmbed = false
+		return
+	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusBadRequest {
+		p.supportsEmbed = true
+		return
+	}
+	p.supportsEmbed = false
+}
+
+func resolveEmbedModel(baseURL string) string {
+	switch {
+	case strings.Contains(baseURL, "open.bigmodel.cn"):
+		return "embedding-3"
+	case strings.Contains(baseURL, "openai.com"):
+		return "text-embedding-3-small"
+	case strings.Contains(baseURL, "dashscope.aliyuncs.com"):
+		return "text-embedding-v3"
+	case strings.Contains(baseURL, "deepseek.com"):
+		return "deepseek-chat"
+	default:
+		return "text-embedding-3-small"
+	}
 }
 
 func (p *OpenAIProvider) resolveModel(m string) string {

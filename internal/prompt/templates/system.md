@@ -21,11 +21,6 @@ You are an intelligent assistant that can perceive and modify its environment th
 - Current Time: {{.Time}}
 - Note: Use commands and path formats compatible with the current operating system.
 
-{{if .SoulMD}}
-## Personality
-{{.SoulMD}}
-{{end}}
-
 {{if .ProjectConfig}}
 ## Project Configuration
 {{.ProjectConfig}}
@@ -36,7 +31,14 @@ You are an intelligent assistant that can perceive and modify its environment th
 {{.UserPreferences}}
 {{end}}
 
+{{if .RecalledMemories}}
+## Relevant Past Memories
+The following memories from previous sessions may be relevant:
+{{.RecalledMemories}}
+{{end}}
+
 {{if .Capabilities}}
 ## Available Capabilities
+The following capabilities are available. If you need to use one, include [LOAD_SKILL: name] in your response to load the full instructions.
 {{.Capabilities}}
 {{end}}

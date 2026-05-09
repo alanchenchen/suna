@@ -31,17 +31,17 @@ type ContentBlock struct {
 }
 
 type ToolCall struct {
-	ID        string         `json:"id"`
-	Name      string         `json:"name"`
-	Arguments string         `json:"arguments"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 type Message struct {
-	Role       Role           `json:"role"`
-	Content    []ContentBlock `json:"content,omitempty"`
-	TextContent string        `json:"-"`
-	ToolCalls  []ToolCall     `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Role        Role           `json:"role"`
+	Content     []ContentBlock `json:"content,omitempty"`
+	TextContent string         `json:"-"`
+	ToolCalls   []ToolCall     `json:"tool_calls,omitempty"`
+	ToolCallID  string         `json:"tool_call_id,omitempty"`
 }
 
 func NewTextMessage(role Role, text string) Message {
@@ -71,19 +71,20 @@ type ToolDef struct {
 }
 
 type CompletionRequest struct {
-	Model      string     `json:"model"`
-	System     string     `json:"system,omitempty"`
-	Messages   []Message  `json:"messages"`
-	Tools      []ToolDef  `json:"tools,omitempty"`
-	MaxTokens  int        `json:"max_tokens,omitempty"`
+	Model       string    `json:"model"`
+	System      string    `json:"system,omitempty"`
+	Messages    []Message `json:"messages"`
+	Tools       []ToolDef `json:"tools,omitempty"`
+	MaxTokens   int       `json:"max_tokens,omitempty"`
 	Temperature float64   `json:"temperature,omitempty"`
 }
 
 type Chunk struct {
-	Content   string     `json:"content,omitempty"`
-	ToolCalls []ToolCall `json:"tool_calls,omitempty"`
-	Done      bool       `json:"done"`
-	Usage     *Usage     `json:"usage,omitempty"`
+	Content          string     `json:"content,omitempty"`
+	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
+	Done             bool       `json:"done"`
+	Usage            *Usage     `json:"usage,omitempty"`
 }
 
 type Usage struct {

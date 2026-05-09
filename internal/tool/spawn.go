@@ -19,19 +19,19 @@ func NewSpawn(handler SpawnHandler) *Spawn {
 
 func (s *Spawn) Name() string { return "spawn" }
 func (s *Spawn) Description() string {
-	return "创建子 agent 执行子任务。仅主 agent 可用。子 agent 拥有独立上下文和受限工具集。"
+	return "Create a sub agent to execute a sub-task. Only available to the main agent. Sub agents have independent context and restricted tool set."
 }
 func (s *Spawn) Category() Category { return Communicate }
 func (s *Spawn) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"task":    map[string]any{"type": "string", "description": "子任务描述"},
-			"model":   map[string]any{"type": "string", "description": "使用的模型名称"},
-			"system":  map[string]any{"type": "string", "description": "子 agent 的系统提示词"},
-			"tools":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "子 agent 可用的工具列表"},
-			"timeout": map[string]any{"type": "integer", "description": "超时秒数（默认300）"},
-			"context": map[string]any{"type": "string", "description": "传给子 agent 的额外上下文"},
+			"task":    map[string]any{"type": "string", "description": "Sub-task description"},
+			"model":   map[string]any{"type": "string", "description": "Model name to use"},
+			"system":  map[string]any{"type": "string", "description": "System prompt for sub agent"},
+			"tools":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Available tools for sub agent"},
+			"timeout": map[string]any{"type": "integer", "description": "Timeout in seconds (default 300)"},
+			"context": map[string]any{"type": "string", "description": "Extra context for sub agent"},
 		},
 		"required": []string{"task"},
 	}

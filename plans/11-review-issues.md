@@ -63,7 +63,7 @@
 - 记忆膨胀管理：30 天未使用降低权重为当前策略，远期需设计重要性衰减和合并
 - 能力版本管理
 - 后台进程（Exec `&`）监控
-- Webhook 端口发现：设计为随机分配或用户指定 (见 07-trigger.md)，用户通过 /trigger list 查看已分配端口
+- Webhook 端口发现：设计为随机分配或用户指定 (见 07-trigger.md)，用户通过自然语言让 agent 查看已分配端口
 - 感知层资源消耗预算
 
 ## 第三轮审查修复 (2026-05-06)
@@ -101,3 +101,154 @@
 
 ### ✅ 07-trigger.md
 - Timer 行为: 删除 "TUI 关闭时写入日志"，改为 "TUI 关闭时进程退出"
+
+## 第四轮审查修复 (2026-05-08) — Daemon 架构升级
+
+### ✅ 架构从 TUI 单进程改为 Daemon + TUI 双进程
+- **根因**: 记忆提取与 TUI 生命周期耦合导致三个问题：(1) 提取被迫同步 (2) 感知层随 TUI 生死 (3) 状态丢失
+- **变更范围**: 01/06/07/08/09/10/index 共 8 个文件
+- **新架构**: sunad 守护进程 (Agent/Memory/Perception) + TUI 前端 (纯 UI)，IPC 通信 (Unix Socket + JSON-RPC 2.0)
+
+### ✅ 01-architecture.md Daemon 架构
+- 删除 "无 daemon 模式"
+- 新增: Daemon 架构节 (架构图、生命周期、自动退出策略)
+- 新增: IPC 协议节 (Transport 接口、JSON-RPC 方法、Streaming、连接管理)
+- I/O 抽象层: 从直接 IO 接口改为 IPC Client/Conn
+- 运行模式: 单二进制多模式 (suna / suna daemon / suna stop)
+- 数据目录: 新增 sunad.pid, sunad.sock
+- TUI 命令: 新增 /daemon status, /daemon stop, /daemon restart
+- Agent Loop 步骤 7: "自动提取" → "异步: 写入提取队列"
+
+### ✅ 06-memory.md 异步批量提取
+- 仅添加式提取: 从 "每轮同步提取" 改为 "异步队列 + 批量"
+- 新增: 显著性过滤 (高/中/低，规则判断零 LLM 成本)
+- 新增: Memory Worker goroutine (独立于 Agent Loop)
+- 提取队列: memory channel (热路径) + session_messages.memory_extracted (冷路径恢复)
+- 不新增 extraction_queue 表，复用 session_messages 加 memory_extracted BOOL 字段
+- 异常中断: 区分 TUI 崩溃 (daemon 继续) vs Daemon 崩溃 (扫描 memory_extracted=0 恢复)
+
+### ✅ 07-trigger.md 感知 24/7
+- 删除 "感知源随 TUI 进程停止"
+- 感知源在 daemon 进程内 24/7 运行
+- Timer: 执行结果存好，TUI 在线则推送，离线则下次展示
+- Daemon 启动/退出: 感知源恢复/停止
+- Webhook: 从 "Suna 内置" 改为 "Daemon (sunad) 内置"
+
+### ✅ 08-tech-stack.md 技术选型
+- 新增依赖: go-winio (Windows Named Pipe, 微软官方)
+- 删除: "CLI 框架" 从明确不引入列表
+- 项目结构: 新增 daemon/, ipc/ 目录
+- 项目结构: memory/ 新增 queue.go, worker.go, significance.go
+- 项目结构: tui/ 注释改为 "纯前端，无业务逻辑"
+- 数据目录: 新增 sunad.pid, sunad.sock
+- Phase 1: 4周 → 5周，新增 daemon/ipc 开发和跨平台测试
+- Phase 5: "多 I/O 渠道" → "WebSocket Transport"
+
+### ✅ 09-competitive-review.md 竞品对比
+- Daemon 行: "TUI 进程 (无 daemon) ⚠️" → "sunad 守护进程 + TUI 前端 ✅"
+- 有状态行: 更新为 "Daemon 常驻 + 感知 24/7 + 异步记忆"
+- 记忆行: 新增 "异步批量提取"
+- 长任务行: "TUI 进程" → "Daemon 常驻"
+- I/O 渠道: 评分描述更新为 "IPC 抽象层预留了扩展"
+
+### ✅ 10-stateful-entity.md
+- 架构图: "Entity" → "sunad"，"通信层 IO" → "IPC Server"
+- Phase 1: 4周 → 5周，新增 daemon + IPC
+- Phase 5: 新增 WebSocket Transport
+
+### ✅ 跨平台注意事项补充 (08-tech-stack.md)
+- 新增"跨平台注意事项"节，记录 IPC 和 Exec 两方面的坑
+- IPC: Windows Named Pipe (go-winio), Socket 残留清理, NDJSON 分帧, 重连状态, 写阻塞
+- Exec: LLM 生成 Windows 命令错误, Git Bash 优先策略, MVP 目标平台定义
+- 与前面讨论的 5 个确定性坑完全一致
+
+### ✅ extraction_queue 表改为复用 session_messages
+- 删除独立的 extraction_queue 表
+- session_messages 新增 memory_extracted BOOL + significance TEXT 字段
+- 热路径: memory channel (内存), 冷路径: 扫描 memory_extracted=0 (daemon 恢复)
+- 01/06/08/11 四个文件同步修正
+
+### ✅ index.md
+- 架构图: 全面替换为 Daemon + TUI 双进程
+- 新增 "Daemon + TUI 双进程架构" 节 (含为什么需要 Daemon)
+- 新增 "单二进制多模式" 说明
+- 新增 "IPC 通信" 说明
+- 关键差异化: 感知 24/7、异步批量提取
+- MVP Phase 1: 4周 → 5周
+
+## 第五轮审查修复 (2026-05-08) — 记忆系统优化
+
+### ✅ 合并情景+语义提取为一次 LLM 调用
+- Memory Worker 每次 LLM 调用同时输出 episodes + facts + entities
+- 删除 "语义记忆每 5 轮单独提炼" 的独立步骤
+- 语义记忆的写入时机改为 "Memory Worker 每次提取时同时产出"
+- 减少 LLM 调用次数，不丢失任何信息
+
+### ✅ 按需查询改写
+- 新增三级检索策略: Level 0 (直接 FTS5) → Level 1 (FTS5 不足时改写) → Level 2 (放弃)
+- 仅 ~30% 交互触发 Level 1 改写 → 每天 ~60 次额外 LLM 调用 → ¥1.8/月
+- 弥补 FTS5 在无 embedding 时的语义弱点
+
+### ✅ 会话切换零延迟记忆传递
+- /new 切换会话时不等待 flush (LLM 响应慢)
+- 直接从旧 session 的 session_messages 取最近 5 轮未提取原文注入新 session
+- 同时推给 Memory Worker 异步处理，完成后自然替代临时注入
+
+### ✅ 检索筛选流程细化
+- 新增时间衰减排序 (7天内×1.0, 30天×0.8, 90天×0.5, 更早×0.3)
+- 新增 Token 预算控制 (~4K tokens → 放 ~20-30 条记忆)
+- 候选得分都低时不注入 → 宁可不放，不塞噪音
+
+### ✅ 程序记忆触发方式明确
+- MVP 只做路径 A (failure_records pattern 聚合 ≥3 次) + 路径 B (用户主动触发)
+- 路径 C (LLM 判断重复模式) 标记为 Phase 3
+
+### ✅ LLM 成本预算
+- 新增成本预算节: 重度用户 ~¥303/月，记忆相关 LLM 调用 < 1%
+
+### ✅ 跨平台文件分布更新
+- 08-tech-stack.md 项目结构改为 _unix.go / _windows.go 后缀
+- 新增完整跨平台文件分布图 (ipc/tool/guard 三个包)
+
+## 第六轮审查修复 (2026-05-08) — 交互精简 + 提示词简化 + 项目结构对齐
+
+### ✅ TUI 命令精简
+- 合并 /new + /reset → 只有 /new (新建会话 = 清空记忆 + 新 session)
+- 移除命令: /verbose, /session, /audit, /file, /think, /intent, /trigger, /daemon, /skill
+- 保留 5 个命令: /new, /model, /compact, /memory search, /help
+- 新增键盘快捷键: Ctrl+N (新建), Ctrl+T (工具细节 toggle), Ctrl+K (切换模型)
+- 拖拽文件到终端直接读取，替代 /file 命令
+- 01-architecture.md, 06-memory.md, 03-tools.md 同步更新
+
+### ✅ 提示词上下文简化
+- 对话历史不再作为独立区块
+- 压缩后的对话摘要归入"相关记忆"区块
+- 提示词只有两部分: 固定指令 + 相关记忆
+- 用户偏好 + 检索记忆 + 压缩摘要 → 统一为"相关记忆"区块
+- 01-architecture.md 上下文窗口分配 + 缓存友好策略更新
+- 06-memory.md 注入策略 + 压缩策略更新
+
+### ✅ 移除 SOUL.md
+- 人格定义改为 capability: ~/.suna/capabilities/persona/SKILL.md
+- 不引入额外概念，统一到能力系统
+- 用户可以让 agent 自己创建/调整人格
+- 01-architecture.md 人格定义节重写
+- 08-tech-stack.md 用户数据目录更新
+
+### ✅ 09-competitive-review.md 全面重写
+- 新增"架构对比"节 (进程模型/IPC/状态管理/感知/记忆)
+- 功能矩阵更新: 人格 → capability, TUI 命令 → 精简 (5 个)
+- 移除已过时的建议/决策分离格式，直接记录决策
+- 设计完备度评估新增"架构模式"和"TUI 交互"维度
+
+### ✅ 08-tech-stack.md 项目结构对齐实际实现
+- 移除 cmd/ 目录 (main.go 在根目录)
+- 新增 prompt/ 目录 (go:embed 模板)
+- 新增 i18n/ 目录 (内置国际化)
+- tech stack 更新: bubbles/v2, uuid, 移除未引入的依赖
+- 新增"与文档设计的差异"节
+- 用户数据目录: 新增 credentials.toml, persona/SKILL.md, suna.log
+
+### ✅ 10-stateful-entity.md 架构图修正
+- 移除图中"意图层"框，改为感知→记忆→行动三层
+- 与 index.md 和 01-architecture.md 保持一致

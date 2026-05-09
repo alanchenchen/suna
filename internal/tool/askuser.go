@@ -18,15 +18,15 @@ func NewAskUser(handler AskUserHandler) *AskUser {
 
 func (a *AskUser) Name() string { return "askuser" }
 func (a *AskUser) Description() string {
-	return "向用户提问并等待回复。用于需要确认、获取信息或选择分支。"
+	return "Ask the user a question and wait for their reply. Used for confirmation, information gathering, or branching decisions."
 }
 func (a *AskUser) Category() Category { return Communicate }
 func (a *AskUser) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"question": map[string]any{"type": "string", "description": "要问用户的问题"},
-			"options":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "选项列表"},
+			"question": map[string]any{"type": "string", "description": "Question to ask the user"},
+			"options":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "List of options"},
 		},
 		"required": []string{"question"},
 	}

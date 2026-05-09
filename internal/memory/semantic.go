@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -24,6 +25,8 @@ func NewSemanticStore(db *sql.DB) *SemanticStore {
 	return &SemanticStore{db: db}
 }
 
+// Store 写入一条语义事实。仅添加式：不覆盖旧事实，新旧共存。
+// 同 key 的新旧事实通过 ts 区分，读取时按 ts DESC 取最新。
 func (s *SemanticStore) Store(ctx context.Context, factType, key, value, source string) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO semantic_facts (type, key, value, source, ts)
@@ -76,25 +79,46 @@ func (s *SemanticStore) GetAll(ctx context.Context, factType string) ([]*Semanti
 	return facts, nil
 }
 
+func (s *SemanticStore) Count(ctx context.Context) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM semantic_facts").Scan(&count)
+	return count, err
+}
+
+// Summary 返回用户知识和偏好的摘要文本，用于注入 system prompt。
+// 设计原则（06-memory.md）：新旧事实共存，用时间戳区分，LLM 做时间推理。
+// 同 key 最多保留最近 3 条（新+旧），总条数限制。
 func (s *SemanticStore) Summary(ctx context.Context) (string, error) {
-	facts, err := s.GetAll(ctx, "preference")
+	const maxPerKey = 3
+	const maxTotal = 20
+
+	facts, err := s.GetAll(ctx, "")
 	if err != nil {
 		return "", err
 	}
 	if len(facts) == 0 {
 		return "", nil
 	}
-	latest := make(map[string]string)
+
+	// 同 key 最多保留 maxPerKey 条（GetAll 已按 ts DESC）
+	countPerKey := make(map[string]int)
+	var lines []string
 	for _, f := range facts {
-		if _, seen := latest[f.Key]; !seen {
-			latest[f.Key] = f.Value
+		if countPerKey[f.Key] >= maxPerKey {
+			continue
+		}
+		countPerKey[f.Key]++
+		dateStr := f.Ts.Format("2006-01-02")
+		lines = append(lines, fmt.Sprintf("- %s: %s (%s, %s)", f.Key, f.Value, f.Source, dateStr))
+		if len(lines) >= maxTotal {
+			break
 		}
 	}
-	result := ""
-	for k, v := range latest {
-		result += fmt.Sprintf("- %s: %s\n", k, v)
+
+	if len(lines) == 0 {
+		return "", nil
 	}
-	return result, nil
+	return strings.Join(lines, "\n"), nil
 }
 
 func scanFact(row *sql.Row) (*SemanticFact, error) {

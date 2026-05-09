@@ -34,8 +34,8 @@ var sensitiveFilePatterns = []struct {
 	{"service-account", "service account key"},
 	{".docker/config.json", "Docker credentials"},
 	{".kube/config", "Kubernetes config with tokens"},
-	{".suna/.credentials", "Suna API credentials"},
-	{".suna/.credentials", "Suna stored keys"},
+	{".suna/credentials.toml", "Suna API credentials"},
+	{"credentials.toml", "Suna stored keys"},
 }
 
 // IsSensitivePath 检查文件路径是否指向敏感文件。
@@ -62,9 +62,9 @@ func IsSensitivePath(path string) (bool, string) {
 
 // 敏感内容正则：匹配 API key、token、密码等模式
 var sensitivePatterns = []struct {
-	re      *regexp.Regexp
-	group   int
-	label   string
+	re    *regexp.Regexp
+	group int
+	label string
 }{
 	// API Key 模式：常见前缀
 	{regexp.MustCompile(`(?i)(sk-|sk_live_|sk_test_|key_)[a-zA-Z0-9_\-]{20,}`), 0, "api_key"},

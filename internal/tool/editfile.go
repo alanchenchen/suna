@@ -18,9 +18,9 @@ func (EditFile) Parameters() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"path":       map[string]any{"type": "string", "description": "文件路径"},
-			"old_string": map[string]any{"type": "string", "description": "要替换的原文本"},
-			"new_string": map[string]any{"type": "string", "description": "替换后的新文本"},
+			"path":        map[string]any{"type": "string", "description": "文件路径"},
+			"old_string":  map[string]any{"type": "string", "description": "要替换的原文本"},
+			"new_string":  map[string]any{"type": "string", "description": "替换后的新文本"},
 			"replace_all": map[string]any{"type": "boolean", "description": "是否替换所有匹配项"},
 		},
 		"required": []string{"path", "old_string", "new_string"},
