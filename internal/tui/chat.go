@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
@@ -26,16 +25,15 @@ const (
 )
 
 var (
-	styleUserLine  = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
-	styleAgentLine = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
-	styleToolPill  = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(lipgloss.Color("11")).Padding(0, 1).Bold(true)
-	styleToolOk    = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
-	styleToolErr   = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
-	styleToolRun   = lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true)
-	styleToolDim   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	styleReasoning = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Italic(true)
-	styleSysLine   = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	styleErrLine   = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Bold(true)
+	styleUserLine  = lipgloss.NewStyle().Foreground(ColorUser).Bold(true)
+	styleAgentLine = lipgloss.NewStyle().Foreground(ColorAgent).Bold(true)
+	styleToolPill  = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(ColorTool).Padding(0, 1).Bold(true)
+	styleToolOk    = lipgloss.NewStyle().Foreground(ColorAgent).Bold(true)
+	styleToolErr   = lipgloss.NewStyle().Foreground(ColorError).Bold(true)
+	styleToolRun   = lipgloss.NewStyle().Foreground(ColorBrand).Bold(true)
+	styleToolDim   = lipgloss.NewStyle().Foreground(ColorDim)
+	styleSysLine   = lipgloss.NewStyle().Foreground(ColorDim)
+	styleErrLine   = lipgloss.NewStyle().Foreground(ColorError).Bold(true)
 )
 
 type toolStatus int
@@ -49,8 +47,10 @@ const (
 type toolEntry struct {
 	id       string
 	name     string
+	rawName  string
 	intent   string
 	params   string
+	summary  string
 	status   toolStatus
 	duration time.Duration
 	result   string
@@ -75,18 +75,7 @@ func (t *TUI) initChatComponents() tea.Cmd {
 	ta.MinHeight = 1
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
-	ta.KeyMap.InsertNewline = key.NewBinding(key.WithDisabled())
-	styles := textarea.DefaultStyles(false)
-	styles.Focused.Text = lipgloss.NewStyle()
-	styles.Focused.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	styles.Focused.Prompt = lipgloss.NewStyle().Foreground(ColorUser).Bold(true)
-	styles.Focused.CursorLine = lipgloss.NewStyle()
-	styles.Blurred.Text = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
-	styles.Blurred.Placeholder = lipgloss.NewStyle().Foreground(lipgloss.Color("244"))
-	styles.Blurred.Prompt = lipgloss.NewStyle().Foreground(lipgloss.Color("25"))
-	styles.Focused.EndOfBuffer = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	styles.Blurred.EndOfBuffer = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	ta.SetStyles(styles)
+	ta.SetStyles(textareaStyles())
 	t.ta = ta
 
 	t.sp = spinner.New(spinner.WithSpinner(spinner.Dot))
@@ -116,12 +105,11 @@ func (t *TUI) syncContent() {
 		switch msg.role {
 		case "user":
 			content, _ := msg.content.(string)
-			sb.WriteString(styleUserLine.Render("  ▶ " + t.tr("tui.chat.you")))
-			sb.WriteString("\n  " + content + "\n\n")
+			sb.WriteString("\n" + renderInlineUserMessage(content, max(20, t.width-8)) + "\n")
 		case "assistant":
 			content, _ := msg.content.(string)
-			sb.WriteString(styleAgentLine.Render("  ● " + t.tr("tui.chat.suna")))
-			sb.WriteString("\n" + indentLines(RenderMarkdown(content, t.width-6), "  ") + "\n")
+			sb.WriteString("\n  " + styleAgentLine.Render("● "+t.tr("tui.chat.suna")) + "\n")
+			sb.WriteString(indentLines(RenderMarkdown(content, t.width-6), "  ") + "\n")
 		case "reasoning":
 			content, _ := msg.content.(string)
 			sb.WriteString(t.renderThinkingBox(content, false))
@@ -131,18 +119,37 @@ func (t *TUI) syncContent() {
 			}
 		case "error":
 			content, _ := msg.content.(string)
-			sb.WriteString(styleErrLine.Render("  ✗ " + content))
-			sb.WriteString("\n\n")
+			sb.WriteString("\n" + styleErrLine.Render("  ✗ "+content) + "\n")
 		default:
 			content, _ := msg.content.(string)
-			sb.WriteString(styleSysLine.Render("  ◆ " + content))
-			sb.WriteString("\n\n")
+			sb.WriteString("\n" + styleSysLine.Render("  ◆ "+content) + "\n")
 		}
 	}
 
+	if t.pendingAskID != "" && len(t.pendingAskOptions) > 0 {
+		for i, opt := range t.pendingAskOptions {
+			if i == t.pendingAskCursor {
+				sb.WriteString(fmt.Sprintf("  %s %s\n",
+					styleToolOk.Render("●"),
+					styleAgentLine.Render(opt)))
+			} else {
+				sb.WriteString(fmt.Sprintf("  %s %s\n",
+					styleToolDim.Render("○"),
+					styleSysLine.Render(opt)))
+			}
+		}
+		sb.WriteString(styleDim.Render("  "+t.tr("tui.ask.help")) + "\n\n")
+	}
+
+	if t.modelPickerOpen {
+		sb.WriteString(t.renderModelPicker())
+	}
+
 	if t.loading && t.phase == phaseFirstLLM && t.phaseStart.After(time.Time{}) {
-		sb.WriteString("  " + t.sp.View())
-		sb.WriteString("\n")
+		sb.WriteString(t.renderPhaseLine())
+	}
+	if t.loading && t.phase == phaseLLM && t.phaseStart.After(time.Time{}) {
+		sb.WriteString(t.renderPhaseLine())
 	}
 
 	if t.loading && t.phaseStart.After(time.Time{}) && t.phase == phaseThinking {
@@ -157,11 +164,7 @@ func (t *TUI) syncContent() {
 				start = time.Now()
 			}
 			elapsed := time.Since(start)
-			intent := te.intent
-			if intent != "" {
-				intent = styleToolDim.Render("(" + intent + ")")
-			}
-			sb.WriteString(fmt.Sprintf("  %s %s %s %.1fs\n", styleToolRun.Render("⋯"), styleToolPill.Render(te.name), intent, elapsed.Seconds()))
+			sb.WriteString(fmt.Sprintf("  %s %s %.1fs\n", styleToolRun.Render("⋯"), styleToolCallLabel(te), elapsed.Seconds()))
 		}
 	}
 
@@ -181,15 +184,19 @@ func (t *TUI) renderThinkingBox(content string, running bool) string {
 		}
 		display += "    [Ctrl+T " + t.tr("tui.key.detail") + "]"
 	}
-	lines := strings.Split(display, "\n")
+	if t.showToolDetail {
+		display = RenderMarkdown(strings.TrimSpace(content), inner)
+	}
+	lines := strings.Split(strings.TrimRight(display, "\n"), "\n")
 	if t.showToolDetail && len(lines) > 15 {
 		lines = append(lines[:15], "...")
 	}
 	var sb strings.Builder
 	sb.WriteString("  " + styleDim.Render("┌─"+title+strings.Repeat("─", max(0, width-lipgloss.Width(title)-3))+"┐") + "\n")
 	for _, line := range lines {
-		line = truncateRunes(line, inner)
-		sb.WriteString("  " + styleDim.Render("│ ") + line + strings.Repeat(" ", max(0, inner-lipgloss.Width(line))) + styleDim.Render(" │") + "\n")
+		for _, wrapped := range wrapLine(line, inner) {
+			sb.WriteString("  " + styleDim.Render("│ ") + wrapped + strings.Repeat(" ", max(0, inner-lipgloss.Width(wrapped))) + styleDim.Render(" │") + "\n")
+		}
 	}
 	sb.WriteString("  " + styleDim.Render("└"+strings.Repeat("─", width-2)+"┘") + "\n")
 	return sb.String()
@@ -200,7 +207,7 @@ func (t *TUI) phaseLabel() string {
 	case phaseFirstLLM:
 		return ""
 	case phaseLLM:
-		return t.i18n.T("status.waiting_llm")
+		return t.i18n.T("status.responding")
 	case phaseThinking:
 		return t.i18n.T("status.thinking")
 	case phaseTool:
@@ -208,6 +215,18 @@ func (t *TUI) phaseLabel() string {
 	default:
 		return ""
 	}
+}
+
+func (t *TUI) renderPhaseLine() string {
+	label := t.phaseLabel()
+	if label == "" {
+		return "  " + t.sp.View() + "\n"
+	}
+	elapsed := 0.0
+	if !t.phaseStart.IsZero() {
+		elapsed = time.Since(t.phaseStart).Seconds()
+	}
+	return fmt.Sprintf("  %s %s %.1fs\n", t.sp.View(), styleDim.Render(label), elapsed)
 }
 
 func (t *TUI) renderToolEntry(te *toolEntry) string {
@@ -224,15 +243,27 @@ func (t *TUI) renderToolEntry(te *toolEntry) string {
 	default:
 		statusIcon = styleToolDim.Render("·")
 	}
-	intent := styleToolDim.Render(te.intent)
-	line := fmt.Sprintf("  %s %s%s %s", statusIcon, styleToolPill.Render(te.name), dur, intent)
-	if t.showToolDetail && te.result != "" {
-		resultLines := strings.Split(te.result, "\n")
-		if len(resultLines) > 5 {
-			resultLines = append(resultLines[:5], "...")
+	line := fmt.Sprintf("  %s %s%s", statusIcon, styleToolCallLabel(te), dur)
+	if t.showToolDetail {
+		if te.params != "" {
+			line += "\n    " + styleDim.Render(t.tr("tui.tool.params"))
+			for _, l := range strings.Split(te.params, "\n") {
+				for _, wrapped := range wrapLine(l, max(20, t.width-8)) {
+					line += "\n    " + styleToolDim.Render(wrapped)
+				}
+			}
 		}
-		for _, l := range resultLines {
-			line += "\n    " + styleToolDim.Render(l)
+		if te.result != "" {
+			line += "\n    " + styleDim.Render(t.tr("tui.tool.result"))
+			resultLines := strings.Split(te.result, "\n")
+			if len(resultLines) > 10 {
+				resultLines = append(resultLines[:10], "...")
+			}
+			for _, l := range resultLines {
+				for _, wrapped := range wrapLine(l, max(20, t.width-8)) {
+					line += "\n    " + styleToolDim.Render(wrapped)
+				}
+			}
 		}
 	}
 	return line + "\n"
@@ -250,6 +281,9 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		ks := m.String()
+		if t.modelPickerOpen {
+			return t.updateModelPicker(ks)
+		}
 		switch {
 		case ks == "ctrl+c":
 			t.doQuit()
@@ -259,18 +293,33 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, nil
 		case ks == "enter":
 			if len(t.cmdSuggestions) > 0 {
-				t.acceptCommandSuggestion()
+				cmd := t.acceptCommandSuggestion()
+				if cmd != nil {
+					return t, cmd
+				}
 				return t, t.ta.Focus()
+			}
+			if t.pendingAskID != "" && len(t.pendingAskOptions) > 0 && t.ta.Value() == "" {
+				idx := t.pendingAskCursor
+				if idx >= 0 && idx < len(t.pendingAskOptions) {
+					answer := t.pendingAskOptions[idx]
+					askID := t.pendingAskID
+					t.pendingAskID = ""
+					t.pendingAskOptions = nil
+					t.ipcCli.AskReply(askID, answer)
+					t.messages = append(t.messages, chatMsg{role: "user", content: answer})
+					t.syncContent()
+					return t, t.ta.Focus()
+				}
 			}
 			if !t.loading {
 				return t, t.handleSend()
 			}
 			return t, nil
 		case ks == "shift+enter", ks == "alt+enter":
-			var cmd tea.Cmd
-			t.ta, cmd = t.ta.Update(msg)
+			t.ta.InsertString("\n")
 			t.layoutChat()
-			return t, cmd
+			return t, nil
 		case ks == "esc":
 			if t.showHelp {
 				t.showHelp = false
@@ -293,6 +342,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !t.loading {
 				t.ipcCli.NewSession()
 				t.messages = []chatMsg{}
+				t.resetConversationStats()
 				t.resetPhase()
 				t.lastAssistantText = ""
 				t.syncContent()
@@ -303,6 +353,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t.configFromMode = "chat"
 			t.configSetupMode = false
 			t.configFormOpen = false
+			t.configPage = "home"
 			return t, nil
 		case ks == "ctrl+t":
 			t.showToolDetail = !t.showToolDetail
@@ -314,14 +365,28 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case ks == "pgdown", ks == "ctrl+d":
 			t.vp.HalfPageDown()
 			return t, nil
-		case ks == "up" && len(t.cmdSuggestions) > 0:
-			if t.cmdSuggestionIdx > 0 {
-				t.cmdSuggestionIdx--
+		case ks == "up":
+			if len(t.cmdSuggestions) > 0 {
+				if t.cmdSuggestionIdx > 0 {
+					t.cmdSuggestionIdx--
+				}
+			} else if t.pendingAskID != "" && len(t.pendingAskOptions) > 0 {
+				if t.pendingAskCursor > 0 {
+					t.pendingAskCursor--
+				}
+				t.syncContent()
 			}
 			return t, nil
-		case ks == "down" && len(t.cmdSuggestions) > 0:
-			if t.cmdSuggestionIdx < len(t.cmdSuggestions)-1 {
-				t.cmdSuggestionIdx++
+		case ks == "down":
+			if len(t.cmdSuggestions) > 0 {
+				if t.cmdSuggestionIdx < len(t.cmdSuggestions)-1 {
+					t.cmdSuggestionIdx++
+				}
+			} else if t.pendingAskID != "" && len(t.pendingAskOptions) > 0 {
+				if t.pendingAskCursor < len(t.pendingAskOptions)-1 {
+					t.pendingAskCursor++
+				}
+				t.syncContent()
 			}
 			return t, nil
 		}
@@ -398,14 +463,17 @@ func (t *TUI) updateCmdSuggestions(input string) {
 	}
 }
 
-func (t *TUI) acceptCommandSuggestion() {
+func (t *TUI) acceptCommandSuggestion() tea.Cmd {
 	if len(t.cmdSuggestions) == 0 || t.cmdSuggestionIdx >= len(t.cmdSuggestions) {
-		return
+		return nil
 	}
-	t.ta.SetValue(t.cmdSuggestions[t.cmdSuggestionIdx].cmd + " ")
-	t.ta.CursorEnd()
+	cmdText := t.cmdSuggestions[t.cmdSuggestionIdx].cmd
+	t.ta.Reset()
 	t.cmdSuggestions = nil
 	t.cmdSuggestionIdx = 0
+	cmd := t.handleCommand(cmdText)
+	t.syncContent()
+	return cmd
 }
 
 func (t *TUI) handleSend() tea.Cmd {
@@ -420,167 +488,51 @@ func (t *TUI) handleSend() tea.Cmd {
 	if t.pendingAskID != "" {
 		askID := t.pendingAskID
 		t.pendingAskID = ""
-		t.ipcCli.AskReply(askID, input)
+		options := t.pendingAskOptions
+		t.pendingAskOptions = nil
+		answer := input
+		if len(options) > 0 {
+			if idx, ok := parseOptionIndex(input, len(options)); ok {
+				answer = options[idx]
+			}
+		}
+		t.ipcCli.AskReply(askID, answer)
 		return t.ta.Focus()
 	}
 
 	if strings.HasPrefix(input, "/") {
-		t.handleCommand(input)
+		cmd := t.handleCommand(input)
 		t.syncContent()
+		if cmd != nil {
+			return cmd
+		}
 		return t.ta.Focus()
 	}
 	return t.runAgent(input)
 }
 
-func (t *TUI) layoutChat() {
-	if t.width == 0 || t.height == 0 {
+func (t *TUI) setInputValue(input string) {
+	if t.mode == "chat" && t.ta.Placeholder != "" {
+		t.ta.SetValue(input)
+		t.ta.CursorEnd()
+		t.layoutChat()
 		return
 	}
-	inputH := t.ta.Height()
-	if inputH < 1 {
-		inputH = 1
-	}
-	suggestionH := 0
-	if len(t.cmdSuggestions) > 0 {
-		suggestionH = min(4, len(t.cmdSuggestions)) + 2
-	}
-	fixedH := 4 + inputH + suggestionH
-	vpHeight := t.height - fixedH
-	if vpHeight < 3 {
-		vpHeight = 3
-	}
-	t.vp.SetWidth(t.width)
-	t.vp.SetHeight(vpHeight)
-	t.ta.SetWidth(t.width - 2)
+	t.pendingInput = input
 }
 
-func (t *TUI) viewChat() string {
-	if t.width == 0 {
-		return ""
+func (t *TUI) resetConversationStats() {
+	t.sessionInputTok = 0
+	t.sessionOutputTok = 0
+	t.sessionCachedTok = 0
+	t.lastInputTok = 0
+	t.lastOutputTok = 0
+	t.lastCachedTok = 0
+	t.lastDuration = 0
+	t.lastTokensPerSec = 0
+	t.hasUsage = false
+	t.contextTokens = 0
+	if t.daemonStatus.ContextTokens != 0 {
+		t.daemonStatus.ContextTokens = 0
 	}
-
-	t.layoutChat()
-
-	var sb strings.Builder
-
-	petState := petIdle
-	if t.loading {
-		if t.phase == phaseThinking {
-			petState = petThinking
-		} else {
-			petState = petWorking
-		}
-	}
-	miniPet := renderMiniPet(petState)
-	topLeft := miniPet + " " + styleBrand.Render("suna")
-
-	provider := t.providerName
-	model := t.modelName
-	if provider == "" {
-		provider = "..."
-	}
-	if model == "" {
-		model = "..."
-	}
-	conn := styleDim.Render("○")
-	if t.ipcCli != nil && t.ipcCli.Connected() {
-		conn = styleAgent.Render("●")
-	}
-	topRight := styleDim.Render(provider+"/"+model) + "  " + conn
-	padW := t.width - lipgloss.Width(topLeft) - lipgloss.Width(topRight) - 1
-	if padW < 1 {
-		padW = 1
-	}
-	sb.WriteString(topLeft + strings.Repeat(" ", padW) + topRight)
-	sb.WriteString("\n")
-	sb.WriteString(styleDim.Render(strings.Repeat("─", t.width)))
-	sb.WriteString("\n")
-
-	content := t.vp.View()
-	if t.showHelp {
-		overlay := t.renderHelpOverlay(t.width)
-		content = overlay + "\n" + content
-	}
-	sb.WriteString(content)
-
-	sb.WriteString(styleDim.Render(strings.Repeat("─", t.width)))
-	sb.WriteString("\n")
-
-	sb.WriteString(t.ta.View())
-
-	if len(t.cmdSuggestions) > 0 {
-		sb.WriteString("\n")
-		sb.WriteString(t.renderCommandSuggestions())
-	}
-
-	sb.WriteString("\n")
-	sb.WriteString(t.renderChatStatusBar())
-	sb.WriteString("\n")
-
-	return sb.String()
-}
-
-func (t *TUI) renderChatStatusBar() string {
-	var parts []string
-
-	if t.sessionInputTok > 0 || t.sessionOutputTok > 0 {
-		tokParts := []string{styleUser.Render("↑" + fmtTok(t.sessionInputTok))}
-		if t.sessionCachedTok > 0 {
-			tokParts = append(tokParts, styleDim.Render("⟳"+fmtTok(t.sessionCachedTok)))
-		}
-		tokParts = append(tokParts, styleAgent.Render("↓"+fmtTok(t.sessionOutputTok)))
-		parts = append(parts, joinNonEmpty(tokParts, " "))
-	}
-	if t.lastOutputTok > 0 && t.lastDuration.Seconds() > 0 {
-		speed := float64(t.lastOutputTok) / t.lastDuration.Seconds()
-		parts = append(parts, fmt.Sprintf("%.0ft/s", speed))
-	}
-	if t.ipcCli != nil && t.ipcCli.Connected() {
-		parts = append(parts, styleAgent.Render("●"))
-	} else {
-		parts = append(parts, styleDim.Render("○"))
-	}
-
-	if len(parts) == 0 {
-		return styleDim.Render(" ○")
-	}
-	return styleDim.Render(" " + joinNonEmpty(parts, " · "))
-}
-
-func (t *TUI) renderCommandSuggestions() string {
-	width := max(24, t.width-4)
-	var lines []string
-	for i, c := range t.cmdSuggestions {
-		prefix := "  "
-		style := lipgloss.NewStyle()
-		if i == t.cmdSuggestionIdx {
-			prefix = styleCursor.Render("▶ ")
-			style = styleHL
-		}
-		line := prefix + style.Render(fmt.Sprintf("%-16s", c.cmd)) + styleDim.Render(t.tr(c.descKey))
-		lines = append(lines, line)
-	}
-	return boxStyle.Width(width).Render(strings.Join(lines, "\n"))
-}
-
-func indentLines(s, prefix string) string {
-	if s == "" {
-		return ""
-	}
-	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
-	for i, line := range lines {
-		lines[i] = prefix + line
-	}
-	return strings.Join(lines, "\n")
-}
-
-func truncateRunes(s string, maxWidth int) string {
-	if lipgloss.Width(s) <= maxWidth {
-		return s
-	}
-	runes := []rune(s)
-	for len(runes) > 0 && lipgloss.Width(string(runes))+3 > maxWidth {
-		runes = runes[:len(runes)-1]
-	}
-	return string(runes) + "..."
 }

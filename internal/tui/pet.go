@@ -18,8 +18,6 @@ var bodyFill = lipgloss.NewStyle().Background(lipgloss.Color("14")).Foreground(l
 
 func renderPet(state petState, width int) string {
 	var eyeRow, mouthRow string
-	ant := "╶──╴"
-
 	switch state {
 	case petIdle:
 		eyeRow, mouthRow = "  ◠  ◠  ", "   ω    "
@@ -27,14 +25,12 @@ func renderPet(state petState, width int) string {
 		eyeRow, mouthRow = "  ▶  ◀  ", "   ω    "
 	case petThinking:
 		eyeRow, mouthRow = "  ○  ○  ", "   △    "
-		ant = "╶─⊙╴"
 	}
 
-	row0 := "  " + ant
-	row1 := "╭────────╮"
-	row2 := "│" + bodyFill.Render(padCell(eyeRow, 8)) + "│"
-	row3 := "│" + bodyFill.Render(padCell(mouthRow, 8)) + "│"
-	row4 := "╰────────╯"
+	row0 := "╭────────╮"
+	row1 := "│" + fillPetCell(eyeRow, 8) + "│"
+	row2 := "│" + fillPetCell(mouthRow, 8) + "│"
+	row3 := "╰────────╯"
 
 	var sb strings.Builder
 	sb.WriteString(row0)
@@ -44,8 +40,6 @@ func renderPet(state petState, width int) string {
 	sb.WriteString(row2)
 	sb.WriteString("\n")
 	sb.WriteString(row3)
-	sb.WriteString("\n")
-	sb.WriteString(row4)
 
 	return sb.String()
 }
@@ -57,15 +51,26 @@ func padCell(s string, width int) string {
 	return s
 }
 
+func fillPetCell(s string, width int) string {
+	// lipgloss 的背景色只覆盖实际渲染宽度；这里统一补齐宽度后再设置 Width，
+	// 避免中文终端/不同字体下小 logo 出现蓝色填充断裂。
+	return bodyFill.Width(width).Render(padCell(s, width))
+}
+
 func renderMiniPet(state petState) string {
-	var eyes string
+	var eyeRow, base string
 	switch state {
 	case petIdle:
-		eyes = "◠◠"
+		eyeRow, base = " ◠  ◠ ", "╰──────╯"
 	case petWorking:
-		eyes = "▶◀"
+		eyeRow, base = " ▶  ◀ ", "╰──⚡──╯"
 	case petThinking:
-		eyes = "○○"
+		eyeRow, base = " ○  ○ ", "╰──△──╯"
 	}
-	return bodyFill.Render(" " + eyes + " ")
+
+	return strings.Join([]string{
+		"╭──────╮",
+		"│" + fillPetCell(eyeRow, 6) + "│",
+		base,
+	}, "\n")
 }

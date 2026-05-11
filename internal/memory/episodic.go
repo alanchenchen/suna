@@ -79,7 +79,7 @@ func (s *EpisodicStore) SearchFTS(ctx context.Context, query string, limit int) 
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT m.id, m.content, m.type, m.source, m.entities, m.ts, m.session_id, m.metadata
 		FROM episodic_fts f
-		JOIN episodic_memories m ON m.id = f.rowid
+		JOIN episodic_memories m ON m.rowid = f.rowid
 		WHERE episodic_fts MATCH ?
 		ORDER BY rank
 		LIMIT ?`,

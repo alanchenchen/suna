@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/list"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/textinput"
@@ -32,16 +33,18 @@ type TUI struct {
 
 	mode     string // "welcome" | "chat" | "config" | "help"
 	prevMode string
-	setup    *setupState
 	width    int
 	height   int
 	ready    bool
 	loading  bool
 
-	messages      []chatMsg
-	pendingInput  string
-	pendingAskID  string
-	cmdSuggestion string
+	messages          []chatMsg
+	pendingInput      string
+	pendingAskID      string
+	pendingAskOptions []string
+	pendingAskCursor  int
+	cmdSuggestion     string
+	theme             string
 
 	providerName string
 	modelName    string
@@ -50,29 +53,39 @@ type TUI struct {
 	helpVP viewport.Model
 	ta     textarea.Model
 	sp     spinner.Model
+	menu   list.Model
 
-	showToolDetail    bool
-	phase             phase
-	phaseStart        time.Time
-	activeTools       map[string]*toolEntry
-	toolStartTimes    map[string]time.Time
-	lastAssistantText string
-	welcomeCursor     int
-	configCursor      int
-	configSetupMode   bool
-	configFormOpen    bool
-	configFormTitle   string
-	configInputs      []textinput.Model
-	configInputFocus  int
-	configError       string
-	configFromMode    string
-	configModels      []string
-	configEditingName string
-	showHelp          bool
-	cmdSuggestions    []commandSpec
-	cmdSuggestionIdx  int
-	daemonStatus      ipc.DaemonStatusParams
-	configState       ipc.ConfigParams
+	showToolDetail      bool
+	phase               phase
+	phaseStart          time.Time
+	activeTools         map[string]*toolEntry
+	toolStartTimes      map[string]time.Time
+	lastAssistantText   string
+	welcomeCursor       int
+	configCursor        int
+	configSetupMode     bool
+	configFormOpen      bool
+	configKindOpen      bool
+	configKindCursor    int
+	configProviderKind  string
+	configPage          string
+	configDeleteConfirm string
+	configLastCheck     string
+	configDetailRef     string
+	configFormTitle     string
+	configInputs        []textinput.Model
+	configInputFocus    int
+	configError         string
+	configFromMode      string
+	configModels        []string
+	configEditingName   string
+	showHelp            bool
+	cmdSuggestions      []commandSpec
+	cmdSuggestionIdx    int
+	modelPickerOpen     bool
+	modelPickerCursor   int
+	daemonStatus        ipc.DaemonStatusParams
+	configState         ipc.ConfigParams
 
 	streamStart      time.Time
 	sessionInputTok  int
@@ -82,6 +95,9 @@ type TUI struct {
 	lastOutputTok    int
 	lastCachedTok    int
 	lastDuration     time.Duration
+	lastTokensPerSec float64
+	hasUsage         bool
+	contextTokens    int
 	contextWindow    int
 }
 
@@ -90,34 +106,14 @@ type chatMsg struct {
 	content any
 }
 
-type setupState struct {
-	step      int
-	cursor    int
-	provider  string
-	baseURL   string
-	modelName string
-	apiKeyEnv string
-	apiKey    string
-	error     string
-	input     string
-}
-
 func New(cfgPath string, locale LocaleID) *TUI {
 	t := &TUI{
 		i18n:    newTranslator(locale),
 		cfgPath: cfgPath,
 		mode:    "welcome",
-		setup:   &setupState{step: 0, cursor: 0},
+		theme:   ThemeAuto,
 	}
-	if cfgPath != "" {
-		if _, err := loadConfigFile(cfgPath); err != nil {
-			t.mode = "config"
-			t.configSetupMode = true
-			t.configFormOpen = true
-			t.configFormTitle = "tui.config.setup_title"
-			t.initProviderForm(nil)
-		}
-	}
+	t.setTheme(ThemeAuto)
 	return t
 }
 
@@ -134,11 +130,6 @@ func (t *TUI) Connect(client *ipcClient) {
 			t.program.Send(ipcNotification{method: method, params: params})
 		}
 	})
-
-	go func() {
-		t.ipcCli.DaemonStatus()
-		t.ipcCli.ConfigGet()
-	}()
 }
 
 func (t *TUI) Run() error {
@@ -155,9 +146,27 @@ func (t *TUI) doQuit() {
 	}
 }
 
-func (t *TUI) Init() tea.Cmd { return nil }
+func (t *TUI) Init() tea.Cmd {
+	return func() tea.Msg {
+		if t.ipcCli != nil {
+			t.ipcCli.DaemonStatus()
+			t.ipcCli.ConfigGet()
+		}
+		return nil
+	}
+}
 
 func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if notif, ok := msg.(ipcNotification); ok {
+		t.handleIPCNotification(notif)
+		if t.mode == "welcome" && t.ready {
+			t.initWelcomeList()
+		}
+		if t.mode == "chat" {
+			t.syncContent()
+		}
+		return t, nil
+	}
 	if !t.ready {
 		if ws, ok := msg.(tea.WindowSizeMsg); ok {
 			t.width = ws.Width
@@ -244,30 +253,15 @@ func extractLastSentence(text string) string {
 	return ""
 }
 
-func truncateParams(params map[string]any) string {
+func formatToolParams(params map[string]any) string {
 	if len(params) == 0 {
 		return ""
 	}
-	var parts []string
-	for k, v := range params {
-		s := fmt.Sprintf("%v", v)
-		if len(s) > 50 {
-			s = s[:50] + "..."
-		}
-		parts = append(parts, k+"="+s)
+	b, err := json.MarshalIndent(params, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("%v", params)
 	}
-	r := strings.Join(parts, ", ")
-	if len(r) > 100 {
-		r = r[:100] + "..."
-	}
-	return r
-}
-
-func truncateContent(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "..."
+	return string(b)
 }
 
 func toolDisplayName(name string) string {
@@ -295,67 +289,40 @@ func toolDisplayName(name string) string {
 	}
 }
 
-func toolIntent(name string, params map[string]any) string {
-	switch name {
-	case "readfile":
-		if p, ok := params["path"].(string); ok {
-			return truncateContent(p, 60)
-		}
-	case "listdir":
-		if p, ok := params["path"].(string); ok {
-			return truncateContent(p, 60)
-		}
-	case "exec":
-		if c, ok := params["command"].(string); ok {
-			return truncateContent(c, 60)
-		}
-	case "writefile":
-		if p, ok := params["path"].(string); ok {
-			return truncateContent(p, 60)
-		}
-	case "editfile":
-		if p, ok := params["path"].(string); ok {
-			return truncateContent(p, 60)
-		}
-	case "readhttp":
-		if u, ok := params["url"].(string); ok {
-			return truncateContent(u, 60)
-		}
-	case "writehttp":
-		if u, ok := params["url"].(string); ok {
-			return truncateContent(u, 60)
-		}
-	case "spawn":
-		if task, ok := params["task"].(string); ok {
-			return truncateContent(task, 60)
-		}
-	case "askuser":
-		if q, ok := params["question"].(string); ok {
-			return truncateContent(q, 60)
-		}
-	}
-	return ""
-}
-
 func (t *TUI) handleIPCNotification(notif ipcNotification) {
 	switch notif.method {
 	case ipc.NotifyStream:
 		var p ipc.StreamParams
 		json.Unmarshal(notif.params, &p)
 		if p.Done {
+			if strings.HasPrefix(p.Chunk, "error:") || p.Chunk == "cancelled" {
+				t.messages = append(t.messages, chatMsg{role: "error", content: p.Chunk})
+			}
 			t.resetPhase()
-			if p.InputTokens > 0 || p.OutputTokens > 0 {
+			t.hasUsage = p.HasUsage
+			t.lastDuration = time.Since(t.streamStart)
+			if p.HasUsage {
 				t.lastInputTok = p.InputTokens
 				t.lastOutputTok = p.OutputTokens
 				t.lastCachedTok = p.CachedTokens
-				t.lastDuration = time.Since(t.streamStart)
+				t.lastTokensPerSec = p.TokensPerSec
 				t.sessionInputTok += p.InputTokens
 				t.sessionOutputTok += p.OutputTokens
 				t.sessionCachedTok += p.CachedTokens
+				t.contextTokens = p.ContextTokens
+			} else {
+				t.lastInputTok = 0
+				t.lastOutputTok = 0
+				t.lastCachedTok = 0
+				t.lastTokensPerSec = 0
+				t.contextTokens = 0
+			}
+			if p.ContextWindow > 0 {
+				t.contextWindow = p.ContextWindow
 			}
 			return
 		}
-		if t.phase == phaseFirstLLM {
+		if t.phase == phaseFirstLLM || t.phase == phaseThinking {
 			t.phase = phaseLLM
 			t.phaseStart = time.Now()
 		}
@@ -392,13 +359,20 @@ func (t *TUI) handleIPCNotification(notif ipcNotification) {
 			id = fmt.Sprintf("%s_%d", p.Tool, time.Now().UnixNano())
 		}
 		displayName := toolDisplayName(p.Tool)
-		intent := toolIntent(p.Tool, p.Params)
+		intent := p.Intent
+		params := ""
+		if len(p.Params) > 0 {
+			params = formatToolParams(p.Params)
+		}
 		t.lastAssistantText = ""
 		te := &toolEntry{
-			id:     id,
-			name:   displayName,
-			intent: intent,
-			status: toolRunning,
+			id:      id,
+			rawName: p.Tool,
+			name:    displayName,
+			intent:  intent,
+			params:  params,
+			summary: toolParamSummary(p.Tool, p.Params),
+			status:  toolRunning,
 		}
 		t.activeTools[id] = te
 		t.toolStartTimes[id] = time.Now()
@@ -417,10 +391,10 @@ func (t *TUI) handleIPCNotification(notif ipcNotification) {
 			}
 			if p.Error {
 				te.status = toolError
-				te.result = truncateContent(p.Result, 200)
+				te.result = p.Result
 			} else {
 				te.status = toolDone
-				te.result = truncateContent(p.Result, 200)
+				te.result = p.Result
 			}
 			t.messages = append(t.messages, chatMsg{role: "tool", content: te})
 			delete(t.activeTools, id)
@@ -434,6 +408,8 @@ func (t *TUI) handleIPCNotification(notif ipcNotification) {
 		var p ipc.AskUserParams
 		json.Unmarshal(notif.params, &p)
 		t.pendingAskID = p.ID
+		t.pendingAskOptions = p.Options
+		t.pendingAskCursor = 0
 		t.messages = append(t.messages, chatMsg{role: "system", content: "❓ " + p.Question})
 		t.resetPhase()
 	case ipc.NotifyDaemonState:
@@ -452,6 +428,12 @@ func (t *TUI) handleIPCNotification(notif ipcNotification) {
 		var p ipc.CompactResult
 		json.Unmarshal(notif.params, &p)
 		t.messages = append(t.messages, chatMsg{role: "system", content: t.renderCompactPanel(p)})
+	case "compact.error":
+		var p struct {
+			Message string `json:"message"`
+		}
+		json.Unmarshal(notif.params, &p)
+		t.messages = append(t.messages, chatMsg{role: "error", content: p.Message})
 	case ipc.NotifyMemorySearchResult:
 		var p ipc.MemorySearchResult
 		json.Unmarshal(notif.params, &p)
@@ -464,7 +446,7 @@ func (t *TUI) handleIPCNotification(notif ipcNotification) {
 			}
 			t.messages = append(t.messages, chatMsg{role: "system", content: strings.Join(lines, "\n")})
 		}
-	case "session.restore_message":
+	case ipc.NotifySessionRestoreMsg:
 		var p struct {
 			Role    string `json:"role"`
 			Content string `json:"content"`
@@ -472,6 +454,14 @@ func (t *TUI) handleIPCNotification(notif ipcNotification) {
 		json.Unmarshal(notif.params, &p)
 		if p.Content != "" {
 			t.messages = append(t.messages, chatMsg{role: p.Role, content: p.Content})
+		}
+	case ipc.NotifySessionRestoreInput:
+		var p struct {
+			Content string `json:"content"`
+		}
+		json.Unmarshal(notif.params, &p)
+		if p.Content != "" {
+			t.setInputValue(p.Content)
 		}
 	case "daemon.full_status":
 		json.Unmarshal(notif.params, &t.daemonStatus)
@@ -481,7 +471,61 @@ func (t *TUI) handleIPCNotification(notif ipcNotification) {
 		if t.daemonStatus.Model != "" {
 			t.modelName = t.daemonStatus.Model
 		}
+		if t.providerName != "" && t.modelName != "" {
+			t.configState.ActiveModel = t.providerName + "/" + t.modelName
+		}
+		if t.daemonStatus.ContextWindow > 0 {
+			t.contextWindow = t.daemonStatus.ContextWindow
+		}
+		if t.daemonStatus.ContextTokens > 0 {
+			t.contextTokens = t.daemonStatus.ContextTokens
+		}
 	case "config.state":
 		json.Unmarshal(notif.params, &t.configState)
+		t.configError = ""
+		if t.configState.Locale != "" {
+			t.i18n.SetLocale(LocaleID(t.configState.Locale))
+		}
+		if t.configState.Theme != "" {
+			t.setTheme(t.configState.Theme)
+		}
+		if t.configDeleteConfirm != "" {
+			t.configDeleteConfirm = ""
+		}
+		if t.configState.ActiveModel != "" {
+			if mc, ok := t.activeConfigModel(); ok {
+				t.providerName = mc.Provider
+				t.modelName = mc.Model
+				t.contextWindow = defaultContextWindow(mc)
+			}
+		}
+		if t.configSetupMode && len(t.configState.Models) > 0 {
+			t.configSetupMode = false
+			t.configFormOpen = false
+			t.configPage = "home"
+			t.mode = "welcome"
+			return
+		}
+		if t.configFormOpen {
+			t.configFormOpen = false
+			if t.configEditingName != "" {
+				t.configDetailRef = t.configEditingName
+				t.configPage = "detail"
+			} else {
+				t.configPage = "models"
+			}
+		}
+		if t.mode == "welcome" && len(t.configState.Models) == 0 && !t.hasConfiguredModel() {
+			t.mode = "config"
+			t.configFromMode = "welcome"
+			t.configSetupMode = true
+			t.openProviderForm("", nil)
+		}
+	case "config.error":
+		var p struct {
+			Message string `json:"message"`
+		}
+		json.Unmarshal(notif.params, &p)
+		t.configError = p.Message
 	}
 }

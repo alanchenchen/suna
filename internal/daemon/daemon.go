@@ -31,12 +31,10 @@ Daemon 是 sunad 守护进程的核心结构。
  3. 退出 → 无客户端 + 无感知源 → 等 30 分钟 → 退出
 */
 type Daemon struct {
-	cfg          *config.Config
-	agent        *core.Agent
-	server       *ipc.Server
-	transport    ipc.Transport
-	providerName string
-	modelName    string
+	cfg       *config.Config
+	agent     *core.Agent
+	server    *ipc.Server
+	transport ipc.Transport
 
 	startTime time.Time
 	mu        sync.Mutex
@@ -56,19 +54,11 @@ func New(cfg *config.Config) (*Daemon, error) {
 
 	transport := ipc.NewPlatformTransport(socketPath)
 
-	var providerName, modelName string
-	if mc, ok := cfg.ActiveModelConfig(); ok {
-		modelName = mc.Model
-		providerName = mc.Provider
-	}
-
 	return &Daemon{
-		cfg:          cfg,
-		agent:        agent,
-		transport:    transport,
-		conns:        make(map[string]ipc.Conn),
-		providerName: providerName,
-		modelName:    modelName,
+		cfg:       cfg,
+		agent:     agent,
+		transport: transport,
+		conns:     make(map[string]ipc.Conn),
 	}, nil
 }
 
@@ -188,11 +178,17 @@ func (d *Daemon) Uptime() time.Duration {
 }
 
 func (d *Daemon) ProviderName() string {
-	return d.providerName
+	if mc, ok := d.agent.Config().ActiveModelConfig(); ok {
+		return mc.Provider
+	}
+	return ""
 }
 
 func (d *Daemon) ModelName() string {
-	return d.modelName
+	if mc, ok := d.agent.Config().ActiveModelConfig(); ok {
+		return mc.Model
+	}
+	return ""
 }
 
 func (d *Daemon) writePID() error {

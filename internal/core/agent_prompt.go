@@ -80,27 +80,27 @@ func (a *Agent) buildToolDefs() []model.ToolDef {
 		defs = append(defs, model.ToolDef{
 			Name:        t.Name(),
 			Description: t.Description(),
-			Parameters:  t.Parameters(),
+			Parameters:  withIntentParameter(t.Parameters()),
 		})
 	}
 
 	defs = append(defs, model.ToolDef{
 		Name:        "askuser",
 		Description: "Ask the user a question and wait for their reply",
-		Parameters: map[string]any{
+		Parameters: withIntentParameter(map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"question": map[string]any{"type": "string", "description": "Question to ask"},
 				"options":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Options"},
 			},
 			"required": []string{"question"},
-		},
+		}),
 	})
 
 	defs = append(defs, model.ToolDef{
 		Name:        "spawn",
 		Description: "Create a sub agent to execute a sub-task",
-		Parameters: map[string]any{
+		Parameters: withIntentParameter(map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"task":    map[string]any{"type": "string", "description": "Sub-task description"},
@@ -111,10 +111,23 @@ func (a *Agent) buildToolDefs() []model.ToolDef {
 				"context": map[string]any{"type": "string", "description": "Extra context"},
 			},
 			"required": []string{"task"},
-		},
+		}),
 	})
 
 	return defs
+}
+
+func withIntentParameter(params map[string]any) map[string]any {
+	props, ok := params["properties"].(map[string]any)
+	if !ok {
+		props = map[string]any{}
+		params["properties"] = props
+	}
+	props["intent"] = map[string]any{
+		"type":        "string",
+		"description": "Natural-language reason for this tool call. Explain what you are trying to accomplish for the user. Do not put file contents, secrets, or raw parameters here.",
+	}
+	return params
 }
 
 func getEnvInfo() map[string]string {

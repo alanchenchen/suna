@@ -68,29 +68,44 @@ const (
 	MethodUsage          = "session.usage"
 )
 
+const (
+	ConfigActionUpsertModel   = "upsert_model"
+	ConfigActionDeleteModel   = "delete_model"
+	ConfigActionActivateModel = "activate_model"
+	ConfigActionUpdateGeneral = "update_general"
+)
+
 // === Daemon → TUI 通知 ===
 
 const (
-	NotifyStream             = "agent.stream"
-	NotifyReasoning          = "agent.reasoning"
-	NotifyToolStart          = "agent.tool_start"
-	NotifyToolEnd            = "agent.tool_end"
-	NotifyAskUser            = "agent.ask_user"
-	NotifyDaemonState        = "daemon.state"
-	NotifyPerception         = "perception.event"
-	NotifyMemoryUpdated      = "memory.updated"
-	NotifyCompactResult      = "session.compact_result"
-	NotifyMemorySearchResult = "memory.search_result"
+	NotifyStream              = "agent.stream"
+	NotifyReasoning           = "agent.reasoning"
+	NotifyToolStart           = "agent.tool_start"
+	NotifyToolEnd             = "agent.tool_end"
+	NotifyAskUser             = "agent.ask_user"
+	NotifyDaemonState         = "daemon.state"
+	NotifyPerception          = "perception.event"
+	NotifyMemoryUpdated       = "memory.updated"
+	NotifyCompactResult       = "session.compact_result"
+	NotifyMemorySearchResult  = "memory.search_result"
+	NotifySessionRestoreMsg   = "session.restore_message"
+	NotifySessionRestoreInput = "session.restore_input"
 )
 
-// StreamParams 流式输出参数
+// StreamParams 是 daemon 向 TUI 推送单轮对话进度的统一载荷。
+// token/cache/context/speed 必须来自 LLM usage；服务不返回 usage 时 HasUsage=false，TUI 展示未知，
+// 不在 daemon 或 TUI 本地估算，避免把近似值伪装成接口真实用量。
 type StreamParams struct {
-	Chunk        string `json:"chunk"`
-	ID           string `json:"id"`
-	Done         bool   `json:"done,omitempty"`
-	InputTokens  int    `json:"input_tokens,omitempty"`
-	OutputTokens int    `json:"output_tokens,omitempty"`
-	CachedTokens int    `json:"cached_tokens,omitempty"`
+	Chunk         string  `json:"chunk"`
+	ID            string  `json:"id"`
+	Done          bool    `json:"done,omitempty"`
+	InputTokens   int     `json:"input_tokens,omitempty"`
+	OutputTokens  int     `json:"output_tokens,omitempty"`
+	CachedTokens  int     `json:"cached_tokens,omitempty"`
+	HasUsage      bool    `json:"has_usage,omitempty"`
+	ContextTokens int     `json:"context_tokens,omitempty"`
+	ContextWindow int     `json:"context_window,omitempty"`
+	TokensPerSec  float64 `json:"tokens_per_sec,omitempty"`
 }
 
 // ToolStartParams 工具开始执行通知
@@ -98,6 +113,7 @@ type ToolStartParams struct {
 	ID     string         `json:"id"`
 	Tool   string         `json:"tool"`
 	Params map[string]any `json:"params"`
+	Intent string         `json:"intent,omitempty"`
 }
 
 type ToolEndParams struct {
@@ -127,16 +143,18 @@ type DaemonStateParams struct {
 }
 
 type DaemonStatusParams struct {
-	PID         int           `json:"pid"`
-	Uptime      string        `json:"uptime"`
-	Connections int           `json:"connections"`
-	Triggers    int           `json:"triggers"`
-	AgentStatus string        `json:"agent_status"`
-	Provider    string        `json:"provider,omitempty"`
-	Model       string        `json:"model,omitempty"`
-	Memory      *MemoryStats  `json:"memory,omitempty"`
-	Sessions    *SessionStats `json:"sessions,omitempty"`
-	UsageToday  *UsagePeriod  `json:"usage_today,omitempty"`
+	PID           int           `json:"pid"`
+	Uptime        string        `json:"uptime"`
+	Connections   int           `json:"connections"`
+	Triggers      int           `json:"triggers"`
+	AgentStatus   string        `json:"agent_status"`
+	Provider      string        `json:"provider,omitempty"`
+	Model         string        `json:"model,omitempty"`
+	ContextTokens int           `json:"context_tokens,omitempty"`
+	ContextWindow int           `json:"context_window,omitempty"`
+	Memory        *MemoryStats  `json:"memory,omitempty"`
+	Sessions      *SessionStats `json:"sessions,omitempty"`
+	UsageToday    *UsagePeriod  `json:"usage_today,omitempty"`
 }
 
 type ConfigParams struct {
@@ -147,11 +165,22 @@ type ConfigParams struct {
 }
 
 type ConfigModel struct {
-	Provider  string   `json:"provider"`
-	Model     string   `json:"model"`
-	BaseURL   string   `json:"base_url,omitempty"`
-	Strengths []string `json:"strengths,omitempty"`
-	HasAPIKey bool     `json:"has_api_key,omitempty"`
+	Provider      string   `json:"provider"`
+	Model         string   `json:"model"`
+	BaseURL       string   `json:"base_url,omitempty"`
+	ContextWindow int      `json:"context_window,omitempty"`
+	Strengths     []string `json:"strengths,omitempty"`
+	HasAPIKey     bool     `json:"has_api_key,omitempty"`
+}
+
+type ConfigSetParams struct {
+	Action      string      `json:"action"`
+	Model       ConfigModel `json:"model,omitempty"`
+	ModelRef    string      `json:"model_ref,omitempty"`
+	ActiveModel string      `json:"active_model,omitempty"`
+	APIKey      string      `json:"api_key,omitempty"`
+	Locale      string      `json:"locale,omitempty"`
+	Theme       string      `json:"theme,omitempty"`
 }
 
 type MemoryStats struct {

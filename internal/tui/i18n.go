@@ -36,10 +36,15 @@ func (t *translator) T(key string) string {
 
 func (t *translator) Tf(key string, args ...any) string {
 	text := t.T(key)
-	if len(args) == 0 {
-		return text
+	for _, arg := range args {
+		idx := strings.Index(text, "{}")
+		if idx < 0 {
+			break
+		}
+		repl := anyToString(arg)
+		text = text[:idx] + repl + text[idx+2:]
 	}
-	return strings.ReplaceAll(text, "{}", strings.Trim(strings.Join(strings.Fields(fmtSprintf(args...)), " "), "[]"))
+	return text
 }
 
 func (t *translator) SetLocale(locale LocaleID) {

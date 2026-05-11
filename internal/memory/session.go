@@ -102,6 +102,18 @@ func (s *SessionStore) LoadMessages(ctx context.Context, sessionID string) ([]Se
 	return msgs, nil
 }
 
+func (s *SessionStore) DeleteLastMessage(ctx context.Context, sessionID string, turn int, role, content string) error {
+	_, err := s.db.ExecContext(ctx, `
+		DELETE FROM session_messages
+		WHERE rowid = (
+			SELECT rowid FROM session_messages
+			WHERE session_id = ? AND turn = ? AND role = ? AND content = ?
+			ORDER BY created_at DESC
+			LIMIT 1
+		)`, sessionID, turn, role, content)
+	return err
+}
+
 // LastActiveSession 查找最近的 active 会话
 func (s *SessionStore) LastActiveSession(ctx context.Context) (*SessionInfo, error) {
 	row := s.db.QueryRowContext(ctx, `

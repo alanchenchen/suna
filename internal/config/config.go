@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,14 +11,38 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// Config 表示 Suna 的持久化配置，对应设计文档中的“单二进制 + daemon/TUI 共享配置”。
+// 这里不保存运行态字段；纯界面设置统一放在 UI，模型密钥统一放在 credentials.toml。
 type Config struct {
 	ActiveModel string        `toml:"active_model"`
 	Models      []ModelConfig `toml:"models"`
 	Guard       GuardConfig   `toml:"guard"`
-	TUI         TUIConfig     `toml:"tui"`
+	UI          UIConfig      `toml:"ui"`
 	Hooks       []HookConfig  `toml:"hooks"`
-	Locale      string        `toml:"locale"`
+	MaxModelRPS int           `toml:"max_model_rps,omitempty"`
 	DataDir     string        `toml:"-"`
+}
+
+func (c *Config) Clone() *Config {
+	if c == nil {
+		return nil
+	}
+	cp := *c
+	cp.Models = append([]ModelConfig(nil), c.Models...)
+	cp.Guard.Blocked = append([]GuardRule(nil), c.Guard.Blocked...)
+	cp.Guard.Allowed = append([]GuardAllowRule(nil), c.Guard.Allowed...)
+	cp.Hooks = append([]HookConfig(nil), c.Hooks...)
+	return &cp
+}
+
+// DefaultMaxModelRPS 是每个模型 ref 的默认请求限速，避免 sub-agent 并发打爆供应商。
+const DefaultMaxModelRPS = 5
+
+func (c *Config) GetMaxModelRPS() int {
+	if c.MaxModelRPS <= 0 {
+		return DefaultMaxModelRPS
+	}
+	return c.MaxModelRPS
 }
 
 type ModelConfig struct {
@@ -30,28 +55,41 @@ type ModelConfig struct {
 	APIKey        string   `toml:"-"`
 }
 
+// GuardConfig 保存本地安全规则和可选 LLM 审查模型配置，对应 plans/04-guard.md。
 type GuardConfig struct {
-	Enabled     bool             `toml:"enabled"`
+	Enabled     *bool            `toml:"enabled,omitempty"`
 	ReviewModel string           `toml:"review_model"`
 	Blocked     []GuardRule      `toml:"blocked"`
 	Allowed     []GuardAllowRule `toml:"allowed"`
 }
 
+func (g GuardConfig) IsEnabled() bool {
+	if g.Enabled == nil {
+		return true
+	}
+	return *g.Enabled
+}
+
+// GuardRule 定义被阻止的文件/命令模式及原因。
 type GuardRule struct {
 	Pattern string `toml:"pattern"`
 	Reason  string `toml:"reason"`
 }
 
+// GuardAllowRule 定义特定工具在特定模式下的允许规则。
 type GuardAllowRule struct {
 	Pattern string `toml:"pattern"`
 	Tool    string `toml:"tool"`
 	Reason  string `toml:"reason"`
 }
 
-type TUIConfig struct {
-	Theme string `toml:"theme"`
+// UIConfig 保存纯界面配置；核心 daemon 逻辑不得依赖这里的值。
+type UIConfig struct {
+	Theme  string `toml:"theme"`
+	Locale string `toml:"locale"`
 }
 
+// HookConfig 描述生命周期 hook，供后续自动化扩展使用。
 type HookConfig struct {
 	Event   string `toml:"event"`
 	Tool    string `toml:"tool"`
@@ -62,8 +100,9 @@ type credentialsFile map[string]struct {
 	APIKey string `toml:"api_key"`
 }
 
+// Load 从 TOML 加载配置并校验模型引用；缺失或非法字段直接返回错误，不做旧格式兼容。
 func Load(path string) (*Config, error) {
-	cfg := &Config{TUI: TUIConfig{Theme: "dark"}, Locale: "en"}
+	cfg := &Config{UI: UIConfig{Theme: "auto", Locale: "en"}}
 	homeDir, _ := os.UserHomeDir()
 	cfg.DataDir = filepath.Join(homeDir, ".suna")
 
@@ -73,6 +112,7 @@ func Load(path string) (*Config, error) {
 	if _, err := toml.DecodeFile(path, cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
+	cfg.NormalizeUI()
 	if len(cfg.Models) == 0 {
 		return nil, fmt.Errorf("config has no [[models]] entries")
 	}
@@ -88,6 +128,17 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
+func (c *Config) NormalizeUI() {
+	// ui 仅包含纯界面配置，避免与模型、守护进程等核心配置混在一起。
+	if c.UI.Locale == "" {
+		c.UI.Locale = "en"
+	}
+	if c.UI.Theme == "" {
+		c.UI.Theme = "auto"
+	}
+}
+
+// NeedsSetup 判断当前配置是否足以启动 daemon；首次启动时 TUI 会进入配置向导。
 func NeedsSetup(path string) bool {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return true
@@ -96,47 +147,34 @@ func NeedsSetup(path string) bool {
 	return err != nil || len(cfg.Models) == 0
 }
 
+// LoadTOML 是少量启动期探测配置的轻量入口，不执行 Config 的业务校验。
+func LoadTOML(path string, v any) error {
+	_, err := toml.DecodeFile(path, v)
+	return err
+}
+
+// Save 完整写回当前配置结构，避免 TUI 局部更新时丢失 guard/hooks 等模块配置。
 func (c *Config) Save(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
-	var buf strings.Builder
-	if c.ActiveModel != "" {
-		buf.WriteString(fmt.Sprintf("active_model = %q\n\n", c.ActiveModel))
+	c.NormalizeUI()
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(c); err != nil {
+		return fmt.Errorf("encode config: %w", err)
 	}
-	if c.Locale != "" && c.Locale != "en" {
-		buf.WriteString(fmt.Sprintf("locale = %q\n\n", c.Locale))
-	}
-	for _, mc := range c.Models {
-		buf.WriteString("[[models]]\n")
-		buf.WriteString(fmt.Sprintf("provider = %q\n", mc.Provider))
-		buf.WriteString(fmt.Sprintf("model = %q\n", mc.Model))
-		if mc.BaseURL != "" {
-			buf.WriteString(fmt.Sprintf("base_url = %q\n", mc.BaseURL))
-		}
-		if mc.ContextWindow > 0 {
-			buf.WriteString(fmt.Sprintf("context_window = %d\n", mc.ContextWindow))
-		}
-		if len(mc.Strengths) > 0 {
-			buf.WriteString("strengths = [")
-			for i, s := range mc.Strengths {
-				if i > 0 {
-					buf.WriteString(", ")
-				}
-				buf.WriteString(fmt.Sprintf("%q", s))
-			}
-			buf.WriteString("]\n")
-		}
-		buf.WriteString("\n")
-	}
-	return os.WriteFile(path, []byte(buf.String()), 0644)
+	return os.WriteFile(path, buf.Bytes(), 0644)
 }
 
+// SaveCredential 按 provider 保存密钥；同一 provider 下的多模型共享同一个 API key。
 func SaveCredential(dataDir, provider, apiKey string) error {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return err
 	}
-	creds, _ := readCredentials(dataDir)
+	creds, err := readCredentials(dataDir)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
 	if creds == nil {
 		creds = credentialsFile{}
 	}
@@ -146,10 +184,14 @@ func SaveCredential(dataDir, provider, apiKey string) error {
 	return writeCredentials(dataDir, creds)
 }
 
+// LoadCredentials 将 credentials.toml 中的密钥注入到对应 ModelConfig；解析错误会直接返回。
 func LoadCredentials(cfg *Config) error {
 	creds, err := readCredentials(cfg.DataDir)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 	for i := range cfg.Models {
 		if c, ok := creds[cfg.Models[i].Provider]; ok {
@@ -175,9 +217,9 @@ func writeCredentials(dataDir string, creds credentialsFile) error {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	for _, provider := range keys {
-		buf.WriteString(fmt.Sprintf("[%s]\n", provider))
-		buf.WriteString(fmt.Sprintf("api_key = %q\n\n", creds[provider].APIKey))
+	for _, ref := range keys {
+		buf.WriteString(fmt.Sprintf("[%q]\n", ref))
+		buf.WriteString(fmt.Sprintf("api_key = %q\n\n", creds[ref].APIKey))
 	}
 	return os.WriteFile(filepath.Join(dataDir, "credentials.toml"), []byte(buf.String()), 0600)
 }
@@ -208,6 +250,19 @@ func (c *Config) EnsureDataDir() error {
 
 func (c *Config) DBPath() string     { return filepath.Join(c.DataDir, "memory.db") }
 func (c *Config) ConfigPath() string { return filepath.Join(c.DataDir, "config.toml") }
+
+func (c *Config) EnsureDataDirs() error {
+	for _, d := range []string{
+		c.DataDir,
+		filepath.Join(c.DataDir, "logs"),
+		filepath.Join(c.DataDir, "capabilities"),
+	} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func (c *Config) ModelByRef(ref string) (ModelConfig, bool) {
 	for _, mc := range c.Models {

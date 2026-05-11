@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/sashabaranov/go-openai"
@@ -31,11 +32,7 @@ func NewOpenAIProvider(apiKey, baseURL, model string, contextWindow int) *OpenAI
 	}
 
 	httpClient := &http.Client{}
-	if baseURL != "" && !strings.Contains(baseURL, "api.openai.com") {
-		httpClient.Transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
-	}
+	httpClient.Transport = &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
 	cfg.HTTPClient = httpClient
 
 	client := openai.NewClientWithConfig(cfg)
@@ -59,21 +56,23 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req *CompletionRequest) (
 		defer close(ch)
 
 		stream, err := p.client.CreateChatCompletionStream(ctx, openai.ChatCompletionRequest{
-			Model:       p.resolveModel(req.Model),
-			Messages:    messages,
-			Tools:       tools,
-			MaxTokens:   p.resolveMaxTokens(req.MaxTokens),
-			Temperature: float32(p.resolveTemperature(req.Temperature)),
-			Stream:      true,
+			Model:         p.resolveModel(req.Model),
+			Messages:      messages,
+			Tools:         tools,
+			MaxTokens:     p.resolveMaxTokens(req.MaxTokens),
+			Temperature:   float32(p.resolveTemperature(req.Temperature)),
+			Stream:        true,
+			StreamOptions: &openai.StreamOptions{IncludeUsage: true},
 		})
 		if err != nil {
-			ch <- Chunk{Done: true, Content: fmt.Sprintf("error: %v", err)}
+			ch <- Chunk{Done: true, Error: err.Error()}
 			return
 		}
 		defer stream.Close()
 
 		var toolCallsAcc map[int]*openai.ToolCall
 		var usage Usage
+		var sawStop bool
 
 		for {
 			resp, err := stream.Recv()
@@ -92,19 +91,24 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req *CompletionRequest) (
 				return
 			}
 			if err != nil {
-				ch <- Chunk{Done: true, Content: fmt.Sprintf("stream error: %v", err)}
+				ch <- Chunk{Done: true, Error: fmt.Sprintf("stream error: %v", err)}
 				return
 			}
 
 			if resp.Usage != nil {
 				usage.InputTokens = resp.Usage.PromptTokens
 				usage.OutputTokens = resp.Usage.CompletionTokens
+				usage.TotalTokens = resp.Usage.TotalTokens
 				if resp.Usage.PromptTokensDetails != nil {
 					usage.CachedTokens = resp.Usage.PromptTokensDetails.CachedTokens
 				}
 			}
 
 			if len(resp.Choices) == 0 {
+				if sawStop && (usage.InputTokens > 0 || usage.OutputTokens > 0 || usage.TotalTokens > 0) {
+					ch <- Chunk{Done: true, Usage: &usage}
+					return
+				}
 				continue
 			}
 			choice := resp.Choices[0]
@@ -157,8 +161,11 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req *CompletionRequest) (
 					toolCallsAcc = nil
 				}
 				if choice.FinishReason == "stop" {
-					ch <- Chunk{Done: true, Usage: &usage}
-					return
+					sawStop = true
+					if usage.InputTokens > 0 || usage.OutputTokens > 0 || usage.TotalTokens > 0 {
+						ch <- Chunk{Done: true, Usage: &usage}
+						return
+					}
 				}
 			}
 		}
@@ -360,8 +367,14 @@ func (p *OpenAIProvider) buildTools(tools []ToolDef) []openai.Tool {
 }
 
 func (p *OpenAIProvider) accumulateToolCalls(acc map[int]*openai.ToolCall) []ToolCall {
+	indexes := make([]int, 0, len(acc))
+	for idx := range acc {
+		indexes = append(indexes, idx)
+	}
+	sort.Ints(indexes)
 	result := make([]ToolCall, 0, len(acc))
-	for _, tc := range acc {
+	for _, idx := range indexes {
+		tc := acc[idx]
 		result = append(result, ToolCall{
 			ID:        tc.ID,
 			Name:      tc.Function.Name,

@@ -11,6 +11,7 @@ import (
 	"database/sql"
 
 	"github.com/alanchenchen/suna/internal/model"
+	"github.com/alanchenchen/suna/internal/prompt"
 )
 
 /*
@@ -36,6 +37,7 @@ type Worker struct {
 	sessions *SessionStore
 	db       *sql.DB
 	provider model.Provider
+	prompts  *prompt.Loader
 	closed   chan struct{}
 }
 
@@ -61,6 +63,10 @@ func NewWorker(
 		provider: provider,
 		closed:   make(chan struct{}),
 	}
+}
+
+func (w *Worker) SetPrompts(p *prompt.Loader) {
+	w.prompts = p
 }
 
 /*
@@ -138,9 +144,12 @@ func (w *Worker) processBatch(items []ExtractItem) {
 		w.storeEpisodicSummary(item)
 	}
 
-	// 2. LLM 提取事实和实体
+	// 2. LLM 提取事实和实体。失败时保留 memory_extracted=0，交给后续恢复/重试处理。
 	if w.provider != nil {
-		w.extractBatch(items)
+		if err := w.extractBatch(items); err != nil {
+			log.Printf("[memory] extract batch error: %v", err)
+			return
+		}
 	}
 
 	// 3. 标记为已提取
@@ -189,45 +198,52 @@ type extractFact struct {
 	Source string `json:"source"`
 }
 
-func (w *Worker) extractBatch(items []ExtractItem) {
-	var sb strings.Builder
-	sb.WriteString("从以下交互中提取:\n")
-	sb.WriteString("1. 所有值得记住的事实片段 (episodes)\n")
-	sb.WriteString("2. 结构化的用户偏好/约束/习惯 (facts)\n")
-	sb.WriteString("3. 关键实体名称\n\n")
-
-	for i, item := range items {
-		sb.WriteString(fmt.Sprintf("--- 交互 %d ---\n", i+1))
-		sb.WriteString(fmt.Sprintf("用户: %s\n", truncateStr(item.UserInput, 300)))
-		sb.WriteString(fmt.Sprintf("助手: %s\n", truncateStr(item.AgentOutput, 300)))
-		sb.WriteString("\n")
+func (w *Worker) extractBatch(items []ExtractItem) error {
+	var systemPrompt string
+	if w.prompts != nil {
+		interactions := make([]prompt.ExtractInteraction, len(items))
+		for i, item := range items {
+			interactions[i] = prompt.ExtractInteraction{
+				Index:       i + 1,
+				UserInput:   truncateStr(item.UserInput, 300),
+				AgentOutput: truncateStr(item.AgentOutput, 300),
+			}
+		}
+		rendered, err := w.prompts.RenderExtractBatch(interactions)
+		if err == nil && rendered != "" {
+			systemPrompt = rendered
+		}
 	}
-
-	sb.WriteString(`输出 JSON:
-{
-  "episodes": [{"content": "...", "type": "preference|action|fact|decision", "entities": ["..."]}],
-  "facts": [{"key": "...", "value": "...", "type": "preference|habit|constraint|fact", "source": "user_stated|observed"}]
-}`)
-
-	prompt := sb.String()
+	if systemPrompt == "" {
+		var sb strings.Builder
+		sb.WriteString("Extract from these interactions:\n1. Memorable fact fragments (episodes)\n2. Structured user preferences/constraints/habits (facts)\n3. Key entity names\n\n")
+		for i, item := range items {
+			sb.WriteString(fmt.Sprintf("--- Interaction %d ---\nUser: %s\nAssistant: %s\n\n", i+1,
+				truncateStr(item.UserInput, 300), truncateStr(item.AgentOutput, 300)))
+		}
+		sb.WriteString(`Output JSON:{"episodes":[{"content":"...","type":"preference|action|fact|decision","entities":["..."]}],"facts":[{"key":"...","value":"...","type":"preference|habit|constraint|fact","source":"user_stated|observed"}]}`)
+		systemPrompt = sb.String()
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	ch, err := w.provider.Complete(ctx, &model.CompletionRequest{
-		System:    prompt,
+		System:    systemPrompt,
 		Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "Extract facts now.")},
 		MaxTokens: 2048,
 	})
 	if err != nil {
-		log.Printf("[memory] extract batch error: %v", err)
-		return
+		return err
 	}
 
 	var full string
 	for chunk := range ch {
-		if chunk.Content != "" && !strings.HasPrefix(chunk.Content, "error:") {
+		if chunk.Content != "" {
 			full += chunk.Content
+		}
+		if chunk.Error != "" {
+			return fmt.Errorf("provider stream: %s", chunk.Error)
 		}
 		if chunk.Done {
 			break
@@ -235,14 +251,12 @@ func (w *Worker) extractBatch(items []ExtractItem) {
 	}
 
 	if full == "" {
-		log.Printf("[memory] empty extract response")
-		return
+		return fmt.Errorf("empty extract response")
 	}
 
 	result := parseExtractResult(full)
 	if result == nil {
-		log.Printf("[memory] failed to parse extract result: %s", truncateStr(full, 200))
-		return
+		return fmt.Errorf("failed to parse extract result: %s", truncateStr(full, 200))
 	}
 
 	ctx2 := context.Background()
@@ -277,6 +291,7 @@ func (w *Worker) extractBatch(items []ExtractItem) {
 
 	log.Printf("[memory] extracted %d episodes, %d facts from %d items",
 		len(result.Episodes), len(result.Facts), len(items))
+	return nil
 }
 
 func parseExtractResult(raw string) *extractResult {
@@ -305,8 +320,13 @@ func parseExtractResult(raw string) *extractResult {
 }
 
 func truncateStr(s string, max int) string {
-	if len(s) <= max {
+	if max <= 0 || len(s) <= max {
 		return s
 	}
-	return s[:max] + "..."
+	for i := range s {
+		if i > max {
+			return s[:i] + "..."
+		}
+	}
+	return s
 }

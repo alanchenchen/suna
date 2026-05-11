@@ -28,6 +28,7 @@ type ipcClient struct {
 	mu        sync.Mutex
 	connected bool
 	reqID     int
+	pending   map[int]string
 
 	onNotify func(method string, params json.RawMessage)
 }
@@ -80,10 +81,15 @@ func (c *ipcClient) SendRequestNotify(method string, params any) error {
 	if !c.connected || c.conn == nil {
 		return fmt.Errorf("not connected")
 	}
+	if c.pending == nil {
+		c.pending = make(map[int]string)
+	}
+	id := c.nextReqIDLocked()
+	c.pending[id] = method
 
 	req := ipc.Request{
 		JSONRPC: "2.0",
-		ID:      c.nextReqIDLocked(),
+		ID:      id,
 		Method:  method,
 		Params:  params,
 	}
@@ -144,6 +150,10 @@ func (c *ipcClient) ConfigGet() error {
 	return c.SendRequestNotify(ipc.MethodConfigGet, nil)
 }
 
+func (c *ipcClient) ConfigSet(params ipc.ConfigSetParams) error {
+	return c.SendRequestNotify(ipc.MethodConfigSet, params)
+}
+
 func (c *ipcClient) receiveLoop() {
 	var buf [4096]byte
 	var lineBuf []byte
@@ -171,24 +181,46 @@ func (c *ipcClient) receiveLoop() {
 }
 
 func (c *ipcClient) handleMessage(raw []byte) {
-	var notif ipc.Notification
-	if err := json.Unmarshal(raw, &notif); err != nil {
+	var meta struct {
+		Method string `json:"method"`
+		ID     int    `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
 		return
 	}
 
-	if notif.Method != "" && c.onNotify != nil {
+	if meta.Method != "" && meta.ID == 0 && c.onNotify != nil {
 		var rawParams json.RawMessage
 		var rawMsg map[string]json.RawMessage
 		json.Unmarshal(raw, &rawMsg)
 		if p, ok := rawMsg["params"]; ok {
 			rawParams = p
 		}
-		c.onNotify(notif.Method, rawParams)
+		c.onNotify(meta.Method, rawParams)
 		return
 	}
 
 	var resp ipc.Response
-	if err := json.Unmarshal(raw, &resp); err != nil || resp.Result == nil || c.onNotify == nil {
+	if err := json.Unmarshal(raw, &resp); err != nil || c.onNotify == nil {
+		return
+	}
+	method := ""
+	c.mu.Lock()
+	if c.pending != nil {
+		method = c.pending[resp.ID]
+		delete(c.pending, resp.ID)
+	}
+	c.mu.Unlock()
+	if resp.Error != nil {
+		data, _ := json.Marshal(map[string]string{"message": resp.Error.Message})
+		if method == ipc.MethodCompact {
+			c.onNotify("compact.error", data)
+		} else {
+			c.onNotify("config.error", data)
+		}
+		return
+	}
+	if resp.Result == nil {
 		return
 	}
 	var rawResult json.RawMessage
@@ -224,6 +256,5 @@ func looksLikeConfig(raw json.RawMessage) bool {
 		return false
 	}
 	_, hasModels := m["models"]
-	_, hasDefault := m["default"]
-	return hasModels && hasDefault
+	return hasModels
 }

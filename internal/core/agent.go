@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -38,26 +39,31 @@ API 表面：
 	Close()                         释放资源
 */
 type Agent struct {
-	cfg        *config.Config
-	router     *model.Router
-	registry   *tool.Registry
-	guard      *guard.Guard
-	working    *memory.WorkingMemory
-	episodic   *memory.EpisodicStore
-	semantic   *memory.SemanticStore
-	sessions   *memory.SessionStore
-	entities   *memory.EntityStore
-	compressor *memory.Compressor
-	prompts    *prompt.Loader
-	store      *memory.Store
-	caps       *capability.Loader
-	sessionID  string
-	turnCount  int
+	cfg         *config.Config
+	router      *model.Router
+	registry    *tool.Registry
+	guard       *guard.Guard
+	working     *memory.WorkingMemory
+	episodic    *memory.EpisodicStore
+	semantic    *memory.SemanticStore
+	sessions    *memory.SessionStore
+	entities    *memory.EntityStore
+	compressor  *memory.Compressor
+	prompts     *prompt.Loader
+	store       *memory.Store
+	caps        *capability.Loader
+	sessionID   string
+	turnCount   int
+	modelRef    string
+	resumeInput string
 
 	extractQueue  *memory.ExtractQueue
 	extractWorker *memory.Worker
 	closeOnce     sync.Once
 	closed        bool
+	configMu      sync.RWMutex
+	configModTime time.Time
+	runMu         sync.Mutex
 
 	// cancelRun 用于中断当前正在执行的 Run
 	cancelMu sync.Mutex
@@ -71,9 +77,13 @@ NewAgent 创建并初始化 Agent。
 所有组件在此完成初始化，外部无需关心内部依赖。
 */
 func NewAgent(cfg *config.Config) (*Agent, error) {
-	router, err := model.NewRouter(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("init router: %w", err)
+	var router *model.Router
+	if len(cfg.Models) > 0 && cfg.ActiveModel != "" {
+		var err error
+		router, err = model.NewRouter(cfg)
+		if err != nil {
+			return nil, fmt.Errorf("init router: %w", err)
+		}
 	}
 
 	store, err := memory.NewStore(cfg.DBPath())
@@ -122,16 +132,17 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 	sessions := memory.NewSessionStore(store.DB())
 	entities := memory.NewEntityStore(store.DB())
 
-	// 过期超过 7 天的 active 会话
 	sessions.ExpireOldSessions(context.Background(), 7*24*time.Hour)
 
 	var extractProvider model.Provider
-	if p, _ := router.EmbeddingProvider(); p != nil {
-		extractProvider = p
-	} else if p, err := router.Provider("fast"); err == nil {
-		extractProvider = p
-	} else if p := router.DefaultProvider(); p != nil {
-		extractProvider = p
+	if router != nil {
+		if p, _ := router.EmbeddingProvider(); p != nil {
+			extractProvider = p
+		} else if p, err := router.Provider("fast"); err == nil {
+			extractProvider = p
+		} else if p := router.DefaultProvider(); p != nil {
+			extractProvider = p
+		}
 	}
 
 	extractQueue := memory.NewExtractQueue(store.DB())
@@ -162,6 +173,18 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 		extractQueue:  extractQueue,
 		extractWorker: extractWorker,
 	}
+	if info, err := os.Stat(cfg.ConfigPath()); err == nil {
+		agent.configModTime = info.ModTime()
+	}
+
+	if router != nil {
+		if cfg.Guard.IsEnabled() {
+			g.SetLLMReviewer(agent.guardLLMReview)
+		}
+		router.SetPrompts(prompts)
+	}
+	agent.compressor.SetPrompts(prompts)
+	agent.extractWorker.SetPrompts(prompts)
 
 	go extractWorker.Run()
 
@@ -194,6 +217,7 @@ type Event struct {
 	ToolName   string
 	ToolCallID string
 	ToolParams map[string]any
+	ToolIntent string
 
 	// EventToolResult
 	ToolResult string
@@ -205,9 +229,12 @@ type Event struct {
 	Reply    chan string
 
 	// EventDone（EventStatus with Content=="done"）携带的 token 用量
-	InputTokens  int
-	OutputTokens int
-	CachedTokens int
+	InputTokens   int
+	OutputTokens  int
+	CachedTokens  int
+	ContextTokens int
+	ContextWindow int
+	HasUsage      bool
 }
 
 // === 核心 API ===
@@ -217,7 +244,7 @@ Run 接收一条输入，执行 agent loop，返回事件流。
 
 Agent loop 流程：
  1. 路由：选择模型
- 2. 构建 system prompt（模板 + 环境信息 + SOUL.md + SUNA.md + 用户偏好）
+ 2. 构建 system prompt（模板 + 环境信息 + SUNA.md + 用户偏好）
  3. 调用 LLM（streaming）
  4. 处理输出：
     - 纯文本 → EventStream
@@ -231,6 +258,11 @@ Agent loop 流程：
 */
 func (a *Agent) Run(ctx context.Context, input string) <-chan Event {
 	events := make(chan Event, 64)
+	if !a.runMu.TryLock() {
+		events <- Event{Type: EventStatus, Content: "error: agent is already running"}
+		close(events)
+		return events
+	}
 
 	// 创建可取消的 context
 	runCtx, cancel := context.WithCancel(ctx)
@@ -239,8 +271,19 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan Event {
 	a.cancelMu.Unlock()
 
 	go func() {
+		defer a.runMu.Unlock()
 		defer close(events)
 		defer cancel()
+
+		if a.router == nil {
+			events <- Event{Type: EventStatus, Content: "error: no model configured, please add a model in config"}
+			return
+		}
+		defer func() {
+			a.cancelMu.Lock()
+			a.cancelFn = nil
+			a.cancelMu.Unlock()
+		}()
 
 		a.working.AddMessage(model.NewTextMessage(model.RoleUser, input))
 
@@ -253,6 +296,7 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan Event {
 		}
 
 		var hadToolCall bool
+		var hadToolFailure bool
 
 		for {
 			// 检查是否被取消
@@ -261,18 +305,25 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan Event {
 				return
 			}
 
-			// 路由：选择模型
-			provider, modelName, err := a.router.Route(runCtx, input)
-			if err != nil {
-				events <- Event{Type: EventStatus, Content: "error: " + err.Error()}
-				return
+			// 路由：选择模型（sub-agent 使用指定的 modelRef）
+			var modelRef string
+			isSubAgent := a.modelRef != ""
+			if isSubAgent {
+				modelRef = a.modelRef
+			} else {
+				_, ref, err := a.router.Route(runCtx, input)
+				if err != nil {
+					events <- Event{Type: EventStatus, Content: "error: " + err.Error()}
+					return
+				}
+				modelRef = ref
 			}
 
 			// 构建请求
 			systemPrompt, _ := a.buildSystemPrompt(runCtx)
 			messages := a.working.Messages()
 			tools := a.buildToolDefs()
-			modelID := resolveModelID(a.cfg, modelName)
+			modelID := resolveModelID(a.cfg, modelRef)
 
 			req := &model.CompletionRequest{
 				Model:     modelID,
@@ -282,11 +333,22 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan Event {
 				MaxTokens: 4096,
 			}
 
-			// 调用 LLM
+			// sub-agent 走 rate limiter，main agent 直接调用
 			events <- Event{Type: EventStatus, Content: "waiting_llm"}
-			ch, err := provider.Complete(runCtx, req)
-			if err != nil {
-				events <- Event{Type: EventStatus, Content: "error: " + err.Error()}
+			var ch <-chan model.Chunk
+			var llmErr error
+			if isSubAgent {
+				ch, llmErr = a.router.Complete(runCtx, modelRef, req)
+			} else {
+				p, _ := a.router.Provider(modelRef)
+				if p == nil {
+					events <- Event{Type: EventStatus, Content: "error: provider not found"}
+					return
+				}
+				ch, llmErr = p.Complete(runCtx, req)
+			}
+			if llmErr != nil {
+				events <- Event{Type: EventStatus, Content: "error: " + llmErr.Error()}
 				return
 			}
 
@@ -308,6 +370,10 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan Event {
 					streamTimeout.Reset(120 * time.Second)
 					if runCtx.Err() != nil {
 						events <- Event{Type: EventStatus, Content: "cancelled"}
+						return
+					}
+					if chunk.Error != "" {
+						events <- Event{Type: EventStatus, Content: "error: " + chunk.Error}
 						return
 					}
 					if chunk.ReasoningContent != "" {
@@ -356,18 +422,26 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan Event {
 			if len(toolCalls) == 0 {
 				doneEvt := Event{Type: EventStatus, Content: "done"}
 				if lastUsage != nil {
+					doneEvt.HasUsage = true
 					doneEvt.InputTokens = lastUsage.InputTokens
 					doneEvt.OutputTokens = lastUsage.OutputTokens
 					doneEvt.CachedTokens = lastUsage.CachedTokens
+					doneEvt.ContextTokens = lastUsage.TotalTokens
 					if a.sessions != nil {
 						go a.sessions.SaveUsage(runCtx, a.sessionID, modelID, lastUsage.InputTokens, lastUsage.OutputTokens, 0)
 					}
+				}
+				if p, err := a.router.Provider(modelRef); err == nil && p != nil {
+					doneEvt.ContextWindow = p.ContextWindow()
+				}
+				if doneEvt.HasUsage && doneEvt.ContextTokens <= 0 {
+					doneEvt.ContextTokens = doneEvt.InputTokens + doneEvt.OutputTokens
 				}
 				if a.sessions != nil && fullContent != "" {
 					a.sessions.SaveMessage(runCtx, a.sessionID, a.turnCount, "assistant", fullContent)
 				}
 				events <- doneEvt
-				go a.extractMemories(runCtx, input, fullContent, hadToolCall, false, false, false)
+				go a.extractMemories(runCtx, input, fullContent, hadToolCall, hadToolFailure, false, false)
 				return
 			}
 
@@ -380,25 +454,33 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan Event {
 			}
 			a.working.AddMessage(assistantMsg)
 
+			toolIntent := extractToolIntent(fullContent)
 			for _, tc := range toolCalls {
 				hadToolCall = true
 				params := model.ParseToolCallArguments(tc.Arguments)
-				events <- Event{Type: EventToolCall, ToolCallID: tc.ID, ToolName: tc.Name, ToolParams: params}
+				intent := consumeToolIntent(params)
+				if intent == "" {
+					intent = toolIntent
+				}
+				events <- Event{Type: EventToolCall, ToolCallID: tc.ID, ToolName: tc.Name, ToolParams: params, ToolIntent: intent}
 			}
 
 			type toolExecResult struct {
+				index  int
 				tc     model.ToolCall
 				result tool.Result
 			}
 			resultCh := make(chan toolExecResult, len(toolCalls))
-			for _, tc := range toolCalls {
-				go func(tc model.ToolCall) {
+			for i, tc := range toolCalls {
+				go func(index int, tc model.ToolCall) {
 					params := model.ParseToolCallArguments(tc.Arguments)
 					result := a.executeTool(runCtx, tc.Name, params, events)
-					resultCh <- toolExecResult{tc: tc, result: result}
-				}(tc)
+					resultCh <- toolExecResult{index: index, tc: tc, result: result}
+				}(i, tc)
 			}
 
+			results := make([]toolExecResult, len(toolCalls))
+			toolFailed := false
 			for i := 0; i < len(toolCalls); i++ {
 				if runCtx.Err() != nil {
 					events <- Event{Type: EventStatus, Content: "cancelled"}
@@ -406,6 +488,13 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan Event {
 				}
 				r := <-resultCh
 				events <- Event{Type: EventToolResult, ToolCallID: r.tc.ID, ToolName: r.tc.Name, ToolResult: r.result.Content, ToolError: r.result.IsError}
+				if r.result.IsError {
+					toolFailed = true
+				}
+				results[r.index] = r
+			}
+			// LLM 上下文中的 tool_result 顺序保持与 assistant tool_calls 一致，避免兼容 API 拒绝请求。
+			for _, r := range results {
 				a.working.AddMessage(model.Message{
 					Role:        model.RoleTool,
 					ToolCallID:  r.tc.ID,
@@ -420,7 +509,11 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan Event {
 			}
 
 			// 上下文压缩检查
-			contextWindow := provider.ContextWindow()
+			p, _ := a.router.Provider(modelRef)
+			contextWindow := 128000
+			if p != nil {
+				contextWindow = p.ContextWindow()
+			}
 			msgs := a.working.Messages()
 			shouldCompress := a.compressor.ShouldCompress(msgs, contextWindow) ||
 				(len(msgs) > memory.AutoCompactMinTurns && a.compressor.EstimateTokens(msgs) > contextWindow/2)
@@ -430,6 +523,9 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan Event {
 					a.working.SetMessages(compressed)
 				}
 			}
+			if toolFailed {
+				hadToolFailure = true
+			}
 			// 回到循环顶部，继续调 LLM
 		}
 	}()
@@ -437,263 +533,40 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan Event {
 	return events
 }
 
-// === 管理 API ===
-
-// NewSession 重置会话状态，创建新的 session ID 和 Guard
-func (a *Agent) NewSession() {
-	pendingCtx := ""
-	if a.sessions != nil && a.sessionID != "" {
-		msgs := a.working.Messages()
-		hasContent := false
-		for _, m := range msgs {
-			if m.Role == model.RoleUser || m.Role == model.RoleAssistant {
-				if m.Text() != "" {
-					hasContent = true
-					break
-				}
-			}
-		}
-		if hasContent {
-			a.sessions.CompleteSession(context.Background(), a.sessionID)
-			unextracted, _ := a.sessions.LoadUnextractedMessages(context.Background(), a.sessionID, 5)
-			if len(unextracted) > 0 {
-				var parts []string
-				for _, m := range unextracted {
-					parts = append(parts, fmt.Sprintf("- [%s] %s (source: previous session)", m.Role, truncateStr(m.Content, 200)))
-				}
-				pendingCtx = strings.Join(parts, "\n")
-			}
-			a.extractQueue.EnqueueSession(context.Background(), a.sessionID)
-		}
+func consumeToolIntent(params map[string]any) string {
+	if params == nil {
+		return ""
 	}
-	a.sessionID = uuid.New().String()
-	a.turnCount = 0
-	if len(a.cfg.Guard.Blocked) > 0 || len(a.cfg.Guard.Allowed) > 0 {
-		var blockedPats, blockedReasons []string
-		for _, b := range a.cfg.Guard.Blocked {
-			blockedPats = append(blockedPats, b.Pattern)
-			blockedReasons = append(blockedReasons, b.Reason)
-		}
-		var allowedPats, allowedTools []string
-		for _, al := range a.cfg.Guard.Allowed {
-			allowedPats = append(allowedPats, al.Pattern)
-			allowedTools = append(allowedTools, al.Tool)
-		}
-		a.guard = guard.NewGuardWithConfig(a.store.DB(), a.sessionID, blockedPats, blockedReasons, allowedPats, allowedTools)
-	} else {
-		a.guard = guard.NewGuard(a.store.DB(), a.sessionID)
-	}
-	a.working.Clear()
-	if pendingCtx != "" {
-		a.working.AddMessage(model.NewTextMessage(model.RoleSystem,
-			"## Relevant memory from previous session\n"+pendingCtx))
-	}
+	intent, _ := params["intent"].(string)
+	delete(params, "intent")
+	return strings.TrimSpace(intent)
 }
 
 func truncateStr(s string, max int) string {
-	if len(s) <= max {
+	if max <= 0 || len(s) <= max {
 		return s
 	}
-	return s[:max] + "..."
-}
-
-func (a *Agent) RestoreSession(ctx context.Context) int {
-	if a.sessions == nil {
-		return 0
-	}
-
-	info, err := a.sessions.LastActiveSession(ctx)
-	if err != nil || info == nil {
-		a.sessions.CreateSession(ctx, a.sessionID)
-		return 0
-	}
-
-	// 其他 active sessions 全部标记 completed
-	a.sessions.CompleteOtherSessions(ctx, info.ID)
-
-	msgs, err := a.sessions.LoadMessages(ctx, info.ID)
-	if err != nil || len(msgs) == 0 {
-		a.sessionID = info.ID
-		a.guard = guard.NewGuard(a.store.DB(), a.sessionID)
-		return 0
-	}
-
-	a.sessionID = info.ID
-	a.turnCount = msgs[len(msgs)-1].Turn
-	a.guard = guard.NewGuard(a.store.DB(), a.sessionID)
-
-	a.working.Clear()
-	for _, m := range msgs {
-		a.working.AddMessage(model.NewTextMessage(model.Role(m.Role), m.Content))
-	}
-
-	return len(msgs)
-}
-
-func (a *Agent) WorkingMessages() []model.Message {
-	if a.working == nil {
-		return nil
-	}
-	return a.working.Messages()
-}
-
-func (a *Agent) MemoryStats(ctx context.Context) (episodes, entities, facts int) {
-	if a.episodic != nil {
-		episodes, _ = a.episodic.Count(ctx)
-	}
-	if a.semantic != nil {
-		facts, _ = a.semantic.Count(ctx)
-	}
-	if a.entities != nil {
-		entities, _ = a.entities.Count(ctx)
-	}
-	return
-}
-
-func (a *Agent) SessionStats(ctx context.Context) (active, completed int, lastID string) {
-	if a.sessions == nil {
-		return
-	}
-	active, _ = a.sessions.CountByStatus(ctx, "active")
-	completed, _ = a.sessions.CountByStatus(ctx, "completed")
-	info, _ := a.sessions.LastActiveSession(ctx)
-	if info != nil {
-		lastID = info.ID
-	}
-	return
-}
-
-// UsageSummary 返回指定时间段的用量统计
-func (a *Agent) UsageSummary(ctx context.Context, since time.Time) (*memory.UsageSummary, error) {
-	if a.sessions == nil {
-		return nil, fmt.Errorf("session store not initialized")
-	}
-	return a.sessions.UsageSummary(ctx, since)
-}
-
-// ListModels 返回所有已配置的模型名称
-func (a *Agent) ListModels() []string {
-	return a.router.ListProviders()
-}
-
-func (a *Agent) Config() *config.Config {
-	return a.cfg
-}
-
-func (a *Agent) PopLastUserMessage() {
-	if a.working == nil {
-		return
-	}
-	msgs := a.working.Messages()
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == model.RoleUser {
-			a.working.SetMessages(append(msgs[:i], msgs[i+1:]...))
-			return
+	for i := range s {
+		if i > max {
+			return s[:i] + "..."
 		}
 	}
+	return s
 }
 
-// WorkingTokens 返回当前上下文的估算 token 数
-func (a *Agent) WorkingTokens() int {
-	return a.working.EstimatedTokens()
-}
-
-// SearchMemory 搜索情景记忆
-func (a *Agent) SearchMemory(ctx context.Context, query string, limit int) ([]*memory.EpisodicMemory, error) {
-	return a.episodic.SearchFTS(ctx, query, limit)
-}
-
-// ListCapabilities 列出所有已加载的能力
-func (a *Agent) ListCapabilities() []capability.Info {
-	if a.caps == nil {
-		return nil
+func extractToolIntent(fullContent string) string {
+	text := strings.TrimSpace(fullContent)
+	if text == "" {
+		return ""
 	}
-	return a.caps.List()
-}
-
-// SemanticSummary 返回用户语义记忆摘要
-func (a *Agent) SemanticSummary(ctx context.Context) (string, error) {
-	if a.semantic == nil {
-		return "", nil
-	}
-	return a.semantic.Summary(ctx)
-}
-
-// ReloadCapabilities 重新加载能力目录
-func (a *Agent) ReloadCapabilities() error {
-	if a.caps == nil {
-		a.caps = capability.NewLoader()
-	}
-	capDir := filepath.Join(a.cfg.DataDir, "capabilities")
-	return a.caps.Reload(context.Background(), capDir)
-}
-
-// Compact 手动触发上下文压缩
-func (a *Agent) Compact(ctx context.Context) (int, int, int, int, int, error) {
-	msgs := a.working.Messages()
-	if len(msgs) <= 10 {
-		return 0, 0, 0, 0, 0, fmt.Errorf("too few messages to compress (%d)", len(msgs))
-	}
-	before := a.working.EstimatedTokens()
-	compressed, summary, compErr := a.compressor.CompressHistory(ctx, msgs)
-	if compErr != nil {
-		return 0, 0, 0, 0, 0, compErr
-	}
-	if summary == "" {
-		return 0, 0, 0, 0, 0, fmt.Errorf("compression produced no summary")
-	}
-	turnsCompressed := len(msgs) - len(compressed)
-	if turnsCompressed < 0 {
-		turnsCompressed = 0
-	}
-	_ = len(summary) / 4
-	a.working.SetMessages(compressed)
-	after := a.working.EstimatedTokens()
-
-	truncated := 0
-	for _, m := range msgs {
-		if m.Role == model.RoleTool {
-			txt := m.Text()
-			if len(txt) > 50*1024 {
-				truncated++
-			}
-		}
-	}
-
-	contextWindow := 128000
-	if provider, _, err := a.router.Route(ctx, ""); err == nil {
-		contextWindow = provider.ContextWindow()
-	}
-
-	return before, after, contextWindow, turnsCompressed, truncated, nil
-}
-
-// Close 释放所有资源。幂等，可安全多次调用。
-// 等待后台记忆提取完成后再关闭数据库。
-func (a *Agent) Close() {
-	a.closeOnce.Do(func() {
-		a.closed = true
-
-		if a.extractQueue != nil {
-			a.extractQueue.Close()
-		}
-		if a.extractWorker != nil {
-			a.extractWorker.Wait()
-		}
-
-		if a.store != nil {
-			a.store.Close()
-		}
+	sentences := strings.FieldsFunc(text, func(r rune) bool {
+		return r == '.' || r == '。' || r == '\n'
 	})
-}
-
-// CancelCurrentRun 中断当前正在执行的 Run（LLM 请求或 tool 调用）。
-// 不会关闭 Agent，只是停止当前操作。幂等。
-func (a *Agent) CancelCurrentRun() {
-	a.cancelMu.Lock()
-	defer a.cancelMu.Unlock()
-	if a.cancelFn != nil {
-		a.cancelFn()
-		a.cancelFn = nil
+	for i := len(sentences) - 1; i >= 0; i-- {
+		s := strings.TrimSpace(sentences[i])
+		if s != "" {
+			return s
+		}
 	}
+	return ""
 }

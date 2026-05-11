@@ -32,6 +32,21 @@ type ExtractQueue struct {
 	db *sql.DB
 }
 
+// extractTurnPair 用于把同一 session+turn 的 user/assistant 消息聚合成一次提取单元。
+type extractTurnPair struct {
+	sessionID    string
+	turn         int
+	userInput    string
+	agentOutput  string
+	significance Significance
+}
+
+// extractTurnKey 是提取恢复阶段的稳定键，必须包含 sessionID 以避免跨会话串数据。
+type extractTurnKey struct {
+	sessionID string
+	turn      int
+}
+
 const extractQueueSize = 64
 
 func NewExtractQueue(db *sql.DB) *ExtractQueue {
@@ -72,14 +87,7 @@ func (q *ExtractQueue) EnqueueSession(ctx context.Context, sessionID string) {
 	}
 	defer rows.Close()
 
-	type turnPair struct {
-		sessionID    string
-		turn         int
-		userInput    string
-		agentOutput  string
-		significance Significance
-	}
-	pairs := make(map[int]*turnPair)
+	pairs := make(map[extractTurnKey]*extractTurnPair)
 
 	for rows.Next() {
 		var sid, role, content string
@@ -88,10 +96,11 @@ func (q *ExtractQueue) EnqueueSession(ctx context.Context, sessionID string) {
 		if err := rows.Scan(&sid, &turn, &role, &content, &sig); err != nil {
 			continue
 		}
-		p, ok := pairs[turn]
+		key := extractTurnKey{sessionID: sid, turn: turn}
+		p, ok := pairs[key]
 		if !ok {
-			p = &turnPair{sessionID: sid, turn: turn}
-			pairs[turn] = p
+			p = &extractTurnPair{sessionID: sid, turn: turn}
+			pairs[key] = p
 		}
 		if sig.Valid {
 			p.significance = Significance(sig.String)
@@ -140,14 +149,7 @@ func (q *ExtractQueue) RecoverUnextracted(ctx context.Context) (int, error) {
 	}
 	defer rows.Close()
 
-	type turnPair struct {
-		sessionID    string
-		turn         int
-		userInput    string
-		agentOutput  string
-		significance Significance
-	}
-	pairs := make(map[int]*turnPair)
+	pairs := make(map[extractTurnKey]*extractTurnPair)
 
 	for rows.Next() {
 		var sessionID, role, content string
@@ -157,10 +159,11 @@ func (q *ExtractQueue) RecoverUnextracted(ctx context.Context) (int, error) {
 			continue
 		}
 
-		p, ok := pairs[turn]
+		key := extractTurnKey{sessionID: sessionID, turn: turn}
+		p, ok := pairs[key]
 		if !ok {
-			p = &turnPair{sessionID: sessionID, turn: turn}
-			pairs[turn] = p
+			p = &extractTurnPair{sessionID: sessionID, turn: turn}
+			pairs[key] = p
 		}
 		if sig.Valid {
 			p.significance = Significance(sig.String)

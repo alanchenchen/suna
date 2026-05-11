@@ -9,19 +9,18 @@ import (
 //go:embed templates/*.md
 var templatesFS embed.FS
 
-// Loader 提示词模板加载器。
-// 模板通过 go:embed 编译进二进制，用户不可覆盖。
-// 系统提示词是内核行为规范，改坏会失控；用户有 SUNA.md / 语义记忆 / capability 三层定制入口。
 type Loader struct {
 	templates map[string]*template.Template
 }
 
-// New 创建 Loader 并预解析所有内嵌模板
 func New() (*Loader, error) {
 	l := &Loader{
 		templates: make(map[string]*template.Template),
 	}
-	files := []string{"system", "guard", "compress", "extract"}
+	files := []string{
+		"system", "guard", "guard_review", "compress", "extract",
+		"extract_batch", "spawn_system", "route",
+	}
 	for _, name := range files {
 		data, err := templatesFS.ReadFile("templates/" + name + ".md")
 		if err != nil {
@@ -36,7 +35,6 @@ func New() (*Loader, error) {
 	return l, nil
 }
 
-// Render 渲染指定模板，data 为模板变量
 func (l *Loader) Render(name string, data map[string]any) (string, error) {
 	tmpl, ok := l.templates[name]
 	if !ok {
@@ -49,7 +47,6 @@ func (l *Loader) Render(name string, data map[string]any) (string, error) {
 	return buf.String(), nil
 }
 
-// RenderSystem 渲染系统提示词
 func (l *Loader) RenderSystem(data SystemPromptData) (string, error) {
 	return l.Render("system", map[string]any{
 		"OS":               data.OS,
@@ -64,19 +61,12 @@ func (l *Loader) RenderSystem(data SystemPromptData) (string, error) {
 	})
 }
 
-// RenderGuard 渲染 Guard 审查提示词
-func (l *Loader) RenderGuard(data map[string]any) (string, error) {
-	return l.Render("guard", data)
-}
-
-// RenderCompress 渲染压缩摘要提示词
 func (l *Loader) RenderCompress(content string) (string, error) {
 	return l.Render("compress", map[string]any{
 		"Content": content,
 	})
 }
 
-// RenderExtract 渲染记忆提取提示词
 func (l *Loader) RenderExtract(userInput, agentOutput string) (string, error) {
 	return l.Render("extract", map[string]any{
 		"UserInput":   userInput,
@@ -84,7 +74,38 @@ func (l *Loader) RenderExtract(userInput, agentOutput string) (string, error) {
 	})
 }
 
-// SystemPromptData 系统提示词模板变量
+func (l *Loader) RenderRoute(models string, task string) (string, error) {
+	return l.Render("route", map[string]any{
+		"Models": models,
+		"Task":   task,
+	})
+}
+
+func (l *Loader) RenderGuardReview(data GuardReviewData) (string, error) {
+	return l.Render("guard_review", map[string]any{
+		"ToolName":     data.ToolName,
+		"ToolParams":   data.ToolParams,
+		"Target":       data.Target,
+		"RecentContext": data.RecentContext,
+	})
+}
+
+func (l *Loader) RenderExtractBatch(interactions []ExtractInteraction) (string, error) {
+	return l.Render("extract_batch", map[string]any{
+		"Interactions": interactions,
+	})
+}
+
+func (l *Loader) RenderSpawnSystem(data SpawnPromptData) (string, error) {
+	return l.Render("spawn_system", map[string]any{
+		"Task":      data.Task,
+		"Tools":     data.Tools,
+		"Context":   data.Context,
+		"ModelInfo": data.ModelInfo,
+		"ParentTask": data.ParentTask,
+	})
+}
+
 type SystemPromptData struct {
 	OS               string
 	Arch             string
@@ -95,4 +116,25 @@ type SystemPromptData struct {
 	UserPreferences  string
 	RecalledMemories string
 	Capabilities     string
+}
+
+type GuardReviewData struct {
+	ToolName     string
+	ToolParams   string
+	Target       string
+	RecentContext string
+}
+
+type SpawnPromptData struct {
+	Task       string
+	Tools      string
+	Context    string
+	ModelInfo  string
+	ParentTask string
+}
+
+type ExtractInteraction struct {
+	Index       int
+	UserInput   string
+	AgentOutput string
 }

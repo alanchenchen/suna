@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -127,11 +128,48 @@ func (s *Server) route(ctx context.Context, conn Conn, req Request) {
 }
 
 func (s *Server) handleConfigGet(ctx context.Context, conn Conn, req Request) {
+	s.ensureConfigLoaded()
 	s.sendResult(conn, req.ID, configToParams(s.agent.Config()))
 }
 
 func (s *Server) handleConfigSet(ctx context.Context, conn Conn, req Request) {
-	s.sendError(conn, req.ID, ErrInternal, "config.set is persisted by TUI and takes effect after daemon restart")
+	var params ConfigSetParams
+	if err := decodeParams(req.Params, &params); err != nil {
+		s.sendError(conn, req.ID, ErrInvalidParams, err.Error())
+		return
+	}
+	updated, err := s.agent.UpdateConfig(core.ConfigSetParams{
+		Action:      configActionToCore(params.Action),
+		ModelRef:    params.ModelRef,
+		ActiveModel: params.ActiveModel,
+		APIKey:      params.APIKey,
+		Locale:      params.Locale,
+		Theme:       params.Theme,
+		Model: core.ConfigModel{
+			Provider:      params.Model.Provider,
+			Model:         params.Model.Model,
+			BaseURL:       params.Model.BaseURL,
+			ContextWindow: params.Model.ContextWindow,
+			Strengths:     params.Model.Strengths,
+		},
+	})
+	if err != nil {
+		s.sendError(conn, req.ID, ErrInvalidParams, err.Error())
+		return
+	}
+	result := configToParams(updated)
+	s.sendResult(conn, req.ID, result)
+	s.Send(ctx, conn, "config.state", result)
+	s.Send(ctx, conn, "daemon.full_status", s.buildDaemonStatus(ctx))
+}
+
+func configActionToCore(action string) string {
+	switch action {
+	case ConfigActionUpsertModel, ConfigActionDeleteModel, ConfigActionActivateModel, ConfigActionUpdateGeneral:
+		return action
+	default:
+		return action
+	}
 }
 
 // handleSendMessage 核心方法：启动 Agent Loop 并流式推送事件
@@ -154,7 +192,10 @@ func (s *Server) handleSendMessage(ctx context.Context, conn Conn, req Request) 
 	// 立即响应：请求已接收
 	s.sendResult(conn, req.ID, map[string]string{"status": "processing"})
 
+	// 对话执行完全在 daemon/core 内完成。TUI 只收到流式 token、工具事件和最终统计，
+	// 不自行推断 token、速率或上下文窗口，保证不同 UI 客户端看到一致状态。
 	go func() {
+		started := time.Now()
 		events := s.agent.Run(ctx, content)
 		for evt := range events {
 			switch evt.Type {
@@ -164,7 +205,7 @@ func (s *Server) handleSendMessage(ctx context.Context, conn Conn, req Request) 
 				s.Send(ctx, conn, NotifyReasoning, StreamParams{Chunk: evt.Content})
 			case core.EventToolCall:
 				s.Send(ctx, conn, NotifyToolStart, ToolStartParams{
-					ID: evt.ToolCallID, Tool: evt.ToolName, Params: evt.ToolParams,
+					ID: evt.ToolCallID, Tool: evt.ToolName, Params: evt.ToolParams, Intent: evt.ToolIntent,
 				})
 			case core.EventToolResult:
 				s.Send(ctx, conn, NotifyToolEnd, ToolEndParams{
@@ -182,12 +223,24 @@ func (s *Server) handleSendMessage(ctx context.Context, conn Conn, req Request) 
 					ID:       askID,
 				})
 			case core.EventStatus:
-				if evt.Content == "done" {
+				if strings.HasPrefix(evt.Content, "error:") || evt.Content == "cancelled" {
+					s.Send(ctx, conn, NotifyStream, StreamParams{Chunk: evt.Content, Done: true})
+				} else if evt.Content == "done" {
+					speed := 0.0
+					if evt.HasUsage && evt.OutputTokens > 0 {
+						if elapsed := time.Since(started).Seconds(); elapsed > 0 {
+							speed = float64(evt.OutputTokens) / elapsed
+						}
+					}
 					s.Send(ctx, conn, NotifyStream, StreamParams{
-						Done:         true,
-						InputTokens:  evt.InputTokens,
-						OutputTokens: evt.OutputTokens,
-						CachedTokens: evt.CachedTokens,
+						Done:          true,
+						InputTokens:   evt.InputTokens,
+						OutputTokens:  evt.OutputTokens,
+						CachedTokens:  evt.CachedTokens,
+						HasUsage:      evt.HasUsage,
+						ContextTokens: evt.ContextTokens,
+						ContextWindow: evt.ContextWindow,
+						TokensPerSec:  speed,
 					})
 				}
 			}
@@ -271,6 +324,7 @@ func (s *Server) handleSkillList(ctx context.Context, conn Conn, req Request) {
 func (s *Server) handleSessionNew(ctx context.Context, conn Conn, req Request) {
 	s.agent.NewSession()
 	s.sendResult(conn, req.ID, map[string]string{"status": "ok"})
+	s.Send(ctx, conn, "daemon.full_status", s.buildDaemonStatus(ctx))
 }
 
 func (s *Server) handleSessionRestore(ctx context.Context, conn Conn, req Request) {
@@ -284,11 +338,14 @@ func (s *Server) handleSessionRestore(ctx context.Context, conn Conn, req Reques
 			}
 			switch m.Role {
 			case "user":
-				s.Send(ctx, conn, "session.restore_message", map[string]string{"role": "user", "content": content})
+				s.Send(ctx, conn, NotifySessionRestoreMsg, map[string]string{"role": "user", "content": content})
 			case "assistant":
-				s.Send(ctx, conn, "session.restore_message", map[string]string{"role": "assistant", "content": content})
+				s.Send(ctx, conn, NotifySessionRestoreMsg, map[string]string{"role": "assistant", "content": content})
 			}
 		}
+	}
+	if input := s.agent.ConsumeResumeInput(); input != "" {
+		s.Send(ctx, conn, NotifySessionRestoreInput, map[string]string{"content": input})
 	}
 	s.sendResult(conn, req.ID, map[string]int{"messages": count})
 }
@@ -331,6 +388,7 @@ func (s *Server) handleUsage(ctx context.Context, conn Conn, req Request) {
 }
 
 func (s *Server) handleDaemonStatus(ctx context.Context, conn Conn, req Request) {
+	s.ensureConfigLoaded()
 	params := s.buildDaemonStatus(ctx)
 	s.sendResult(conn, req.ID, params)
 	s.Send(ctx, conn, "daemon.full_status", params)
@@ -347,6 +405,7 @@ func (s *Server) handleDaemonStop(ctx context.Context, conn Conn, req Request) {
 
 // SendDaemonState 向新连接推送 daemon 初始状态
 func (s *Server) SendDaemonState(ctx context.Context, conn Conn) {
+	s.ensureConfigLoaded()
 	params := DaemonStateParams{
 		AgentStatus: "idle",
 	}
@@ -363,6 +422,7 @@ func (s *Server) SendDaemonState(ctx context.Context, conn Conn) {
 }
 
 func (s *Server) buildDaemonStatus(ctx context.Context) DaemonStatusParams {
+	s.ensureConfigLoaded()
 	params := DaemonStatusParams{
 		PID:         os.Getpid(),
 		AgentStatus: "idle",
@@ -381,13 +441,35 @@ func (s *Server) buildDaemonStatus(ctx context.Context) DaemonStatusParams {
 			params.UsageToday = &usage
 		}
 	}
-	if params.Provider == "" || params.Model == "" {
-		if mc, ok := s.agent.Config().ActiveModelConfig(); ok {
+	if mc, ok := s.agent.Config().ActiveModelConfig(); ok {
+		if params.Provider == "" {
 			params.Provider = mc.Provider
+		}
+		if params.Model == "" {
 			params.Model = mc.Model
+		}
+		params.ContextWindow = mc.ContextWindow
+	}
+	if params.ContextWindow <= 0 && s.agent != nil {
+		if mc, ok := s.agent.Config().ActiveModelConfig(); ok {
+			switch mc.Provider {
+			case "anthropic":
+				params.ContextWindow = 200000
+			default:
+				params.ContextWindow = 128000
+			}
 		}
 	}
 	return params
+}
+
+func (s *Server) ensureConfigLoaded() {
+	if s == nil || s.agent == nil {
+		return
+	}
+	if _, err := s.agent.ReloadConfigFromDiskIfNeeded(); err != nil {
+		log.Printf("[config] reload skipped: %v", err)
+	}
 }
 
 // Send 向单个连接发送 JSON-RPC 通知
@@ -439,6 +521,17 @@ func (s *Server) sendError(conn Conn, id int, code int, message string) {
 	conn.Send(ctx, data)
 }
 
+func decodeParams(src any, dst any) error {
+	data, err := json.Marshal(src)
+	if err != nil {
+		return err
+	}
+	if len(data) == 0 || string(data) == "null" {
+		return fmt.Errorf("missing params")
+	}
+	return json.Unmarshal(data, dst)
+}
+
 func periodFromSummary(sum *memory.UsageSummary) UsagePeriod {
 	return UsagePeriod{
 		InputTokens:  sum.InputTokens,
@@ -449,9 +542,9 @@ func periodFromSummary(sum *memory.UsageSummary) UsagePeriod {
 }
 
 func configToParams(cfg *config.Config) ConfigParams {
-	out := ConfigParams{ActiveModel: cfg.ActiveModel, Locale: cfg.Locale, Theme: cfg.TUI.Theme}
+	out := ConfigParams{ActiveModel: cfg.ActiveModel, Locale: cfg.UI.Locale, Theme: cfg.UI.Theme}
 	for _, mc := range cfg.Models {
-		out.Models = append(out.Models, ConfigModel{Provider: mc.Provider, Model: mc.Model, BaseURL: mc.BaseURL, Strengths: mc.Strengths, HasAPIKey: mc.APIKey != ""})
+		out.Models = append(out.Models, ConfigModel{Provider: mc.Provider, Model: mc.Model, BaseURL: mc.BaseURL, ContextWindow: mc.ContextWindow, Strengths: mc.Strengths, HasAPIKey: mc.APIKey != ""})
 	}
 	return out
 }

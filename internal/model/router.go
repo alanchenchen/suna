@@ -2,11 +2,13 @@ package model
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
 
 	"github.com/alanchenchen/suna/internal/config"
+	"github.com/alanchenchen/suna/internal/prompt"
 )
 
 type Router struct {
@@ -14,10 +16,17 @@ type Router struct {
 	models    map[string]config.ModelConfig
 	activeRef string
 	mu        sync.RWMutex
+	prompts   *prompt.Loader
+	rateLimit *RateLimiter
 }
 
 func NewRouter(cfg *config.Config) (*Router, error) {
-	r := &Router{providers: map[string]Provider{}, models: map[string]config.ModelConfig{}, activeRef: cfg.ActiveModel}
+	r := &Router{
+		providers: map[string]Provider{},
+		models:    map[string]config.ModelConfig{},
+		activeRef: cfg.ActiveModel,
+		rateLimit: NewRateLimiter(cfg.GetMaxModelRPS()),
+	}
 	for _, mc := range cfg.Models {
 		ref := mc.Ref()
 		p, err := createProvider(mc)
@@ -31,6 +40,10 @@ func NewRouter(cfg *config.Config) (*Router, error) {
 		return nil, fmt.Errorf("active model %q not found", r.activeRef)
 	}
 	return r, nil
+}
+
+func (r *Router) SetPrompts(p *prompt.Loader) {
+	r.prompts = p
 }
 
 func (r *Router) Provider(ref string) (Provider, error) {
@@ -55,6 +68,20 @@ func (r *Router) ActiveRef() string {
 	return r.activeRef
 }
 
+// Complete 调用指定 provider 的 Complete，自动执行 per-model 速率限制
+func (r *Router) Complete(ctx context.Context, ref string, req *CompletionRequest) (<-chan Chunk, error) {
+	r.mu.RLock()
+	p, ok := r.providers[ref]
+	r.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("model %q not found", ref)
+	}
+	if err := r.rateLimit.Wait(ctx, ref); err != nil {
+		return nil, err
+	}
+	return p.Complete(ctx, req)
+}
+
 func (r *Router) Route(ctx context.Context, task string) (Provider, string, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -64,33 +91,46 @@ func (r *Router) Route(ctx context.Context, task string) (Provider, string, erro
 	return nil, "", fmt.Errorf("active provider not found")
 }
 
-func (r *Router) RouteWithLLM(ctx context.Context, task string, explicitRef string) (Provider, string, error) {
+type RouteResult struct {
+	ModelRef string
+	Tools    []string
+}
+
+func (r *Router) RouteWithLLM(ctx context.Context, task string, explicitRef string) (*RouteResult, error) {
 	if explicitRef != "" {
-		if p, err := r.Provider(explicitRef); err == nil {
-			return p, explicitRef, nil
+		if _, err := r.Provider(explicitRef); err == nil {
+			return &RouteResult{ModelRef: explicitRef}, nil
 		}
 	}
 	activeProvider := r.DefaultProvider()
 	active := r.ActiveRef()
 	if activeProvider == nil {
-		return nil, "", fmt.Errorf("active provider not found")
+		return nil, fmt.Errorf("active provider not found")
 	}
 	if strings.TrimSpace(task) == "" || len(r.ListProviders()) <= 1 {
-		return activeProvider, active, nil
+		return &RouteResult{ModelRef: active}, nil
 	}
-	if ref := r.routeByLLM(ctx, task, activeProvider); ref != "" {
-		if p, err := r.Provider(ref); err == nil {
-			return p, ref, nil
-		}
+	if result := r.routeByLLM(ctx, task, activeProvider); result != nil {
+		return result, nil
 	}
-	return activeProvider, active, nil
+	return &RouteResult{ModelRef: active}, nil
 }
 
-func (r *Router) routeByLLM(ctx context.Context, task string, activeProvider Provider) string {
-	prompt := fmt.Sprintf("根据以下任务描述，选择最合适的模型。\n\n可用模型:\n%s\n\n任务: %s\n\n只回复 provider/model，不要解释。", r.modelStrengths(), task)
-	ch, err := activeProvider.Complete(ctx, &CompletionRequest{System: "你是模型路由器，根据任务选择最合适的模型。", Messages: []Message{NewTextMessage(RoleUser, prompt)}, MaxTokens: 30})
+func (r *Router) routeByLLM(ctx context.Context, task string, activeProvider Provider) *RouteResult {
+	strengths := r.modelStrengths()
+	var userPrompt string
+	if r.prompts != nil {
+		rendered, err := r.prompts.RenderRoute(strengths, task)
+		if err == nil && rendered != "" {
+			userPrompt = rendered
+		}
+	}
+	if userPrompt == "" {
+		userPrompt = fmt.Sprintf("Select the best model.\n\nAvailable:\n%s\n\nTask: %s\n\nReply JSON: {\"model\":\"provider/model\",\"tools\":[...]}", strengths, task)
+	}
+	ch, err := activeProvider.Complete(ctx, &CompletionRequest{System: "Reply with JSON only.", Messages: []Message{NewTextMessage(RoleUser, userPrompt)}, MaxTokens: 100})
 	if err != nil {
-		return ""
+		return nil
 	}
 	var resp string
 	for chunk := range ch {
@@ -100,10 +140,31 @@ func (r *Router) routeByLLM(ctx context.Context, task string, activeProvider Pro
 		}
 	}
 	resp = strings.Trim(strings.TrimSpace(resp), "\"'`")
-	if _, err := r.Provider(resp); err == nil {
-		return resp
+	var decision struct {
+		Model string   `json:"model"`
+		Tools []string `json:"tools"`
 	}
-	return ""
+	if err := json.Unmarshal([]byte(extractRouteJSON(resp)), &decision); err != nil {
+		if _, perr := r.Provider(resp); perr == nil {
+			return &RouteResult{ModelRef: resp}
+		}
+		return nil
+	}
+	if _, perr := r.Provider(decision.Model); perr != nil {
+		return nil
+	}
+	result := &RouteResult{ModelRef: decision.Model, Tools: decision.Tools}
+	return result
+}
+
+func extractRouteJSON(s string) string {
+	s = strings.TrimSpace(s)
+	start := strings.Index(s, "{")
+	end := strings.LastIndex(s, "}")
+	if start >= 0 && end > start {
+		return s[start : end+1]
+	}
+	return s
 }
 
 func (r *Router) modelStrengths() string {

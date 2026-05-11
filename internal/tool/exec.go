@@ -128,6 +128,7 @@ func (Exec) Execute(ctx context.Context, params map[string]any) Result {
 	}
 	if exitCode != 0 {
 		sb.WriteString(fmt.Sprintf("\n[exit code: %d]", exitCode))
+		return Result{Content: sb.String(), Error: fmt.Sprintf("command exited with code %d", exitCode), IsError: true, Truncated: truncated}
 	}
 
 	return Result{Content: sb.String(), Truncated: truncated}

@@ -1,18 +1,87 @@
 # Suna 开发进度清单
 
-> 最后更新: 2026-05-08
-> 对应设计文档: plans/01~11
-> 当前阶段: **Phase 1 收尾**
+> 最后更新: 2026-05-09
+> 对应设计文档: plans/01~12
+> 当前阶段: **Phase 1 收尾 + Phase 2 启动**
 
 ## Phase 状态总览
 
 | Phase | 内容 | 状态 | 完成度 |
 |---|---|---|---|
-| Phase 1 | Daemon + 记忆 + 9工具 + Guard stub | 收尾中 | ~85% |
-| Phase 2 | Guard LLM review + 感知源 + 渐进信任 | 未开始 | 0% |
+| Phase 1 | Daemon + 记忆 + 9工具 + Guard stub + TUI 重构 | 收尾中 | ~90% |
+| Phase 2 | Guard LLM review + sub-agent 智能路由 + 并发控制 + 提示词优化 | 进行中 | ~10% |
 | Phase 3 | QuickJS + MCP + Skill 学习 | 未开始 | 0% |
 | Phase 4 | 模型表现追踪 + 完善 | 未开始 | 0% |
 | Phase 5 | 意图层 + WebSocket + Docker | 未开始 | 0% |
+
+---
+
+## 4 个核心点 — 当前状态
+
+### 1. 多模型 + 子任务智能调度
+
+| 子功能 | 状态 | 说明 |
+|---|---|---|
+| 多模型配置 (active_model + [[models]]) | ✅ 完成 | `config.toml` 新版结构 |
+| Provider 统一接口 | ✅ 完成 | OpenAI + Anthropic + 兼容 API |
+| LLM 路由 `RouteWithLLM` | ⚠️ 实现未接入 | `router.go` 已实现，但 spawn 不调用 |
+| Spawn 子 agent | ✅ 基础完成 | 串行执行，工具集受限，不嵌套 |
+| **Spawn 自动选择模型** | ❌ 缺失 | `executeSpawn` 始终用 active model |
+| **Spawn 提示词模板** | ❌ 缺失 | 无独立的 sub-agent system prompt 模板 |
+| **Sub-agent 智能描述和权限** | ❌ 缺失 | main 不自动生成 sub 的描述/权限 |
+
+### 2. 并行 + 并发限制
+
+| 子功能 | 状态 | 说明 |
+|---|---|---|
+| Tool 并行执行 | ✅ 完成 | 多 tool call 同时 goroutine |
+| **Tool 并发上限** | ❌ 缺失 | config 无 `max_parallel_tools`，无上限 |
+| **Sub-agent 并行** | ❌ 缺失 | spawn 是串行的，不能同时跑多个 |
+| **Sub-agent 并发上限** | ❌ 缺失 | config 无 `max_parallel_subagents` |
+
+### 3. Guard 权限系统
+
+| 子功能 | 状态 | 说明 |
+|---|---|---|
+| Stage 1 硬规则 | ✅ 完成 | 跨平台 blocked rules |
+| Stage 2 风险评估 | ✅ 完成 | Low/Medium/High |
+| 敏感文件保护 | ✅ 完成 | `IsSensitivePath` + `MaskSensitiveContent` |
+| 审计日志 | ✅ 完成 | SQLite audit_log |
+| 用户自定义规则 | ✅ 完成 | blocked/allowed in config.toml |
+| **Stage 3 LLM 审核** | ❌ 缺失 | `guard.md` 模板存在但未接入 |
+| **confirm/modify 决策** | ❌ 缺失 | 只支持 approve/reject |
+| 渐进信任 | ❌ 缺失 | trust_rules 表存在但无逻辑 |
+
+### 4. 自主学习能力
+
+| 子功能 | 状态 | 说明 |
+|---|---|---|
+| 记忆提取 (extract) | ✅ 完成 | 异步 Worker + 4 层存储 |
+| 语义记忆 (semantic facts) | ✅ 完成 | preference/action/decision/error/fact |
+| 情景记忆 (episodic) | ✅ 完成 | FTS5 + 向量搜索 + 时间衰减 |
+| 实体关联 | ✅ 基础 | entity store 存在，图谱关系浅 |
+| **主动学习循环** | ❌ 缺失 | 没有从记忆中主动学习和调整行为 |
+| **习惯学习** | ❌ 缺失 | 不检测用户模式 |
+
+---
+
+## 缺失点详情
+
+### AskUser 选项选择
+
+- **现状**: `options` 参数从 LLM → IPC → TUI 全链路传递，TUI 收到 `AskUserParams.Options`
+- **问题**: TUI 只把 options 当文本展示（`"❓ " + p.Question`），不渲染为可选列表
+- **需要**: TUI 渲染为数字标记的可选项，用户输入数字或选择后回传，agent 侧验证
+
+### Spawn 提示词模板
+
+- **现状**: spawn 的 system prompt 由 LLM 在 `params["system"]` 中传入，无独立模板
+- **需要**: 新增 `spawn_system.md` 模板，自动注入任务上下文、可用工具说明、约束条件
+
+### Project Config
+
+- **不是问题**: `SUNA.md` 或 `.suna/AGENTS.md` 的内容注入 system prompt，是用户自定义项目指令的机制
+- 设计文档中定义的 `[Project Configuration]` section 就是这个用途
 
 ---
 
@@ -25,8 +94,8 @@
 - [x] 30 分钟空闲自动退出 (`lifecycle.go`)
 - [x] 信号处理 (SIGTERM/SIGINT)
 - [x] 单二进制多模式: `suna`, `suna daemon`, `suna stop`, `suna status` (`main.go`)
-- [x] Setup Wizard (provider/model/apikey 引导) (`tui/app.go`)
 - [x] TUI 纯前端，无业务逻辑
+- [x] TUI 页面模型: Welcome / Chat / Config / Help
 
 ### IPC 通信 (01-architecture)
 
@@ -38,6 +107,7 @@
 - [x] 流式通知: stream, reasoning, tool_start, tool_end, ask_user
 - [x] 通知式结果: compact_result, memory_search_result
 - [x] AskUser 跨请求协调 (pending asks map)
+- [x] Config CRUD IPC (config.get / config.set)
 
 ### Agent Loop (01-architecture)
 
@@ -50,7 +120,6 @@
 - [x] 上下文压缩 (80% 阈值, 10 轮保留, LLM 摘要)
 - [x] 流式超时保护 (120s)
 - [x] 可取消 Run (CancelCurrentRun)
-- [x] SOUL.md 已移除 (人格统一到 capability)
 
 ### 多模型路由 (02-model-router)
 
@@ -62,8 +131,8 @@
 - [x] LLM 路由 (RouteWithLLM, 基于 strengths 偏好标签选择模型)
 - [x] Embedding 自动发现 (HTTP probe `/v1/embeddings`)
 - [x] 已知 Provider embedding model 映射 (Zhipu/OpenAI/DashScope)
-- [x] Router.EmbeddingProvider() 方法
 - [x] Token 估算 (CJK 支持)
+- [x] 新版配置: active_model + [[models]] + credentials.toml
 
 ### 9 工具 (03-tools)
 
@@ -74,7 +143,7 @@
 - [x] WriteFile
 - [x] EditFile
 - [x] WriteHTTP
-- [x] AskUser (动态追加, 不在 registry)
+- [x] AskUser (动态追加, options 参数全链路传递)
 - [x] Spawn (动态追加, 子 agent 有超时/工具集限制)
 - [x] 工具分类: Perceive (无 Guard) / Act (过 Guard) / Communicate
 - [x] API Key 脱敏 (`sensitive.go:MaskSensitiveContent`)
@@ -102,87 +171,94 @@
 - [x] 向量搜索 (brute-force cosine similarity) (`episodic.go:SearchByEmbedding`)
 - [x] 时间衰减评分 (7d=1.0, 30d=0.8, 90d=0.5, >90d=0.3)
 - [x] 4K token budget (`episodic.go:Recall`)
-- [x] Query Rewrite 基础设施 (`episodic.go:SearchWithRewrite`, <3 结果时触发)
 - [x] 上下文压缩 (compress.go, 80%阈值 + 10轮保留 + LLM摘要)
 - [x] 工具输出截断 (50KB / 500 行)
 - [x] 会话持久化 + 恢复 (session.go)
 - [x] 会话切换零延迟 handoff (NewSession 注入未提取上下文)
-- [x] ExtractQueue.EnqueueSession (旧会话推入 Worker)
-- [x] 冷恢复 (RecoverUnextracted, daemon 重启后补处理)
 - [x] 实体关联 (entity.go: Store, StoreBatch, Search, TopEntities)
 - [x] Embedding auto-discovery (probe /v1/embeddings)
-- [x] SQLite schema 全部表: sessions, session_messages, episodic_memories, episodic_fts, semantic_facts, entities, usage_log, audit_log, failure_records, trust_rules, triggers
-- [x] /compact 反馈面板 (bordered panel, before/after tokens, context window %)
 
 ### Capability (05-capability)
 
 - [x] 声明式 SKILL.md 解析 (frontmatter + footer meta + H1)
 - [x] 两层注入: summary list (常驻) + full content ([LOAD_SKILL] 触发)
 - [x] 能力目录扫描 (`~/.suna/capabilities/`)
-- [x] 类型检测 (declarative/script/mcp 基于文件存在)
 - [x] 热重载 (Reload)
 
-### TUI (01-architecture, 06-memory)
+### TUI (12-tui-design)
 
+- [x] 页面模型: Welcome / Chat / Config / Help
+- [x] Welcome: pet logo + 状态概览 + 菜单导航
+- [x] Chat: viewport + textarea + spinner 底栏 + 命令联想 + help overlay
+- [x] Config: 纯 IPC 交互，provider 表单
+- [x] Markdown 渲染 (glamour v2)
+- [x] i18n (中/英, 40+ keys, 收敛到 internal/tui)
 - [x] 5 个命令: /new, /model, /memory search, /compact, /help
 - [x] 键盘快捷键: Ctrl+N, Ctrl+K, Ctrl+T, Ctrl+U/D, Esc, Enter, Alt+Enter
-- [x] 命令自动补全建议
 - [x] 状态栏: provider/model + token 用量 + 速度
-- [x] i18n 完整覆盖 (中/英, 40+ keys)
-- [x] /compact 反馈面板 (bordered panel)
-- [x] Memory search 结果渲染
+- [x] /compact 反馈面板
 
 ### 技术栈 (08-tech-stack)
 
 - [x] Go + pure Go SQLite (modernc.org/sqlite)
 - [x] 跨平台 build tags (`_unix.go` / `_windows.go`)
-- [x] Bubble Tea v2 + Bubbles v2 + Lipgloss v2
+- [x] Bubble Tea v2 + Bubbles v2 + Lipgloss v2 + Glamour v2
 - [x] go-openai + anthropic-sdk-go
 - [x] go:embed 模板
 - [x] 数据目录 `~/.suna/` 完整布局
 
 ---
 
-## Phase 1 遗留问题 (需修复)
+## Phase 1 遗留问题
 
 ### 关键 (影响核心功能)
 
-| # | 问题 | 文件 | 设计文档依据 | 说明 |
-|---|---|---|---|---|
-| 1 | **Anthropic 非流式** | `model/anthropic.go:59` | 01-architecture | 使用 `Messages.New()` 阻塞调用，应改为 streaming API。用户等很久才看到一次性全部输出 |
-| 2 | **FTS rowid 映射错误** | `memory/episodic.go:57` | 06-memory | `episodic_memories` 用 TEXT 主键 (`time.Now().UnixNano()`)，FTS insert 用 `LastInsertId()`，两者不匹配导致 FTS JOIN 失败 |
-| 3 | **Embedding 未接入 Worker** | `memory/worker.go:154-171` | 06-memory | `generateEmbedding()` 存在但 Worker `storeEpisodicSummary()` 不调用，向量搜索永远空 |
-| 4 | **Worker 提取 prompt 中文** | `memory/worker.go:194-210` | 06-memory | "从以下交互中提取"、"用户"、"助手" 等中文 prompt 应改为英文 |
-| 5 | **Query Rewrite 未接入** | `core/agent.go:643` | 06-memory | `buildSystemPrompt` 调用 `SearchFTS` 而非 `SearchWithRewrite`，改写逻辑永远不会触发 |
-| 6 | **LLM 路由未激活** | `core/agent.go:261` | 02-model-router | `Route()` 不调用 `RouteWithLLM()`，多模型场景下 LLM 路由不生效 |
+| # | 问题 | 文件 | 说明 |
+|---|---|---|---|
+| 1 | **AskUser 不渲染选项** | `tui/app.go:428` | TUI 只展示问题文本，不渲染可选项 |
+| 2 | **Spawn 不走路由** | `core/agent_tools.go:119` | sub-agent 始终用 active model，不调 RouteWithLLM |
+| 3 | **无 Spawn 提示词模板** | `core/agent_tools.go:131-135` | system prompt 全靠 LLM 传入，无结构化模板 |
+| 4 | **无并发限制** | `core/agent.go:394-401` | tool 并行无上限，config 无限制字段 |
+| 5 | **Guard LLM 未接入** | `guard/guard.go:110` | guard.md 模板存在但 Check() 不调用 LLM |
+| 6 | **FTS rowid 映射错误** | `memory/episodic.go:57` | TEXT 主键 vs FTS LastInsertId() 不匹配 |
+| 7 | **Embedding 未接入 Worker** | `memory/worker.go:154-171` | storeEpisodicSummary 不调用 generateEmbedding |
+| 8 | **Query Rewrite 未接入** | `core/agent_prompt.go:45` | 调 SearchFTS 而非 SearchWithRewrite |
 
 ### 中等优先
 
 | # | 问题 | 文件 | 说明 |
 |---|---|---|---|
-| 7 | Sub agent Guard 无规则 | `core/agent.go` Spawn | 子 agent Guard 用 `NewGuard(nil, sessionID)` 传入 nil DB，不共享用户规则 |
-| 8 | Context window 预算未分配 | `core/agent.go` | 设计要求 ~4K system + ~100K memory + ~20K tools + ~4K output，实际无预算控制 |
-| 9 | 自动压缩中 summaryTokens 被丢弃 | `core/agent.go:599` | `Compact()` 中 `len(summary)/4` 被赋值给 `_`，未返回给调用方 |
+| 9 | Sub agent Guard 无规则 | `core/agent_tools.go:123` | NewGuard(nil, sessionID) 不共享用户规则 |
+| 10 | Context window 预算未分配 | `core/agent.go` | 无 ~4K system + ~100K memory + ~20K tools 预算 |
+| 11 | Anthropic 非流式 | `model/anthropic.go:59` | 阻塞 API 调用 |
 
-### 低优先 (可延后到 Phase 2)
+### 低优先 (可延后到 Phase 2+)
 
-| # | 问题 | 文件 | 说明 |
-|---|---|---|---|
-| 10 | Self-reflection 未实现 | — | 工具执行后的自检 (exit code + LLM deep check) |
-| 11 | Retry 策略未实现 | — | 失败后最多 3 次重试 |
-| 12 | Hooks 系统未实现 | `config/config.go` | HookConfig 存在但无执行逻辑 |
-| 13 | `suna "单命令"` 模式 | `main.go` | 非交互单次执行 |
-| 14 | 渐进信任未实现 | — | trust_rules 表存在但无读写逻辑 |
-| 15 | Guard confirm/modify 决策 | — | 只支持 approve/reject |
-| 16 | 语义记忆定期合并 | — | facts 只追加不合并，可能膨胀 |
+| # | 问题 | 说明 |
+|---|---|---|
+| 12 | Self-reflection 未实现 | 工具执行后的自检 |
+| 13 | Retry 策略未实现 | 失败后最多 3 次重试 |
+| 14 | Hooks 系统未实现 | HookConfig 存在但无执行逻辑 |
+| 15 | `suna "单命令"` 模式 | 非交互单次执行 |
+| 16 | 渐进信任未实现 | trust_rules 表存在但无读写逻辑 |
+| 17 | Guard confirm/modify 决策 | 只支持 approve/reject |
+| 18 | 语义记忆定期合并 | facts 只追加不合并 |
 
 ---
 
-## Phase 2 待实现
+## Phase 2 进行中
+
+### 当前任务
+
+- [ ] **AskUser 选项选择**: TUI 渲染为可选列表，支持数字/点击选择
+- [ ] **并发限制 config**: 新增 `max_parallel_tools` (默认 5) + `max_parallel_subagents` (默认 4)
+- [ ] **Spawn 提示词模板**: 新增 `spawn_system.md`，自动注入任务/工具/约束
+- [ ] **Spawn 接入路由**: executeSpawn 调用 RouteWithLLM 选择最佳模型
+- [ ] **提示词优化**: 优化 system.md (sub-agent 分配指导) + guard.md + extract.md
 
 ### Guard 完善 (04-guard)
 
-- [ ] Stage 3: LLM review (用 review_model 判断高风险操作)
+- [ ] Stage 3: LLM review (用 active_model 判断高风险操作)
 - [ ] `confirm` 决策 (路由到用户确认)
 - [ ] `modify` 决策 (建议参数修改)
 - [ ] 渐进信任 (trust_rules 读写, 行为学习)
@@ -192,13 +268,8 @@
 
 - [ ] `PerceptionSource` 接口 (ID, Type, Start, Stop)
 - [ ] `SenseManager` (注册/信号处理)
-- [ ] Timer (cron, `robfig/cron/v3`)
-- [ ] Watcher (fsnotify 文件变化监听)
-- [ ] Webhook (HTTP server)
-- [ ] Stream (file/ws/exec 数据流)
+- [ ] Timer / Watcher / Webhook / Stream
 - [ ] 信号过滤 + 防抖
-- [ ] `perception.event` IPC 广播
-- [ ] 自然语言创建/管理感知源
 - [ ] 持久化到 triggers 表
 
 ---
@@ -209,15 +280,14 @@
 
 - [ ] Script 类型 (main.js, QuickJS runtime)
 - [ ] MCP 类型 (mcp.json, MCP client)
-- [ ] Lifecycle hooks (OnSignal, PreLLM, PreToolUse, PostToolUse)
-- [ ] JS Host functions (file, exec, storage, context, interaction)
-- [ ] Skill 验证 (ValidateSkill)
-- [ ] 能力学习流 (detect → generate → validate → confirm)
+- [ ] Lifecycle hooks
+- [ ] Skill 验证
+- [ ] 能力学习流
 
 ### 记忆深化 (06-memory)
 
 - [ ] 实体关联完整实现 (实体图谱)
-- [ ] 时间推理注入 (时间相关查询的 timeline context)
+- [ ] 时间推理注入
 - [ ] 语义记忆定期合并
 - [ ] `/memory status` 命令
 
@@ -238,13 +308,16 @@
 
 ---
 
-## 已知 Bug / 技术债
+## 提示词模板清单
 
-1. **FTS rowid 映射**: episodic_memories TEXT 主键 vs FTS LastInsertId() 不匹配，可能导致 FTS 搜索无结果
-2. **Anthropic 非流式**: 阻塞 API 调用，影响用户体验
-3. **Embedding 空转**: Worker 不生成 embedding，向量搜索形同虚设
-4. **extract prompt 中文**: Worker 提取 prompt 应统一英文
-5. **Compact summaryTokens 丢弃**: `Compact()` 返回值 `_ = len(summary)/4` 被忽略
+| 模板 | 文件 | 用途 | 状态 |
+|---|---|---|---|
+| system | `templates/system.md` | 主 agent 系统提示词 | ✅ 需优化 |
+| guard | `templates/guard.md` | LLM 安全审查 | ⚠️ 模板存在未接入 |
+| compress | `templates/compress.md` | 上下文压缩 | ✅ 完成 |
+| extract | `templates/extract.md` | 记忆提取 | ✅ 需优化 |
+| **spawn_system** | `templates/spawn_system.md` | 子 agent 系统提示词 | ❌ 缺失 |
+| **route** | 路由提示词 (router.go 内联) | 模型路由选择 | ✅ 完成 |
 
 ---
 
@@ -260,3 +333,7 @@
 | Embedding 发现 | HTTP probe | 不消耗 token，检测 endpoint 是否存在 |
 | 记忆提取 | 异步批量 | 不阻塞 Agent Loop，Worker 独立 goroutine |
 | 会话切换 | 零延迟 handoff | 注入未提取原文 + 后台推送 Worker |
+| 配置热重载 | 未实现 | 激活/新增模型需重启 daemon |
+| Project Config | SUNA.md / .suna/AGENTS.md | 用户自定义项目指令，注入 system prompt |
+| 并发限制 | 待实现 | config 无上限，默认应限制 4-5 |
+| Sub-agent 路由 | 待接入 | RouteWithLLM 已实现但未调用 |

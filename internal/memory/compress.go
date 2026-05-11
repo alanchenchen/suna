@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/alanchenchen/suna/internal/model"
+	"github.com/alanchenchen/suna/internal/prompt"
 )
 
 const (
@@ -18,10 +19,15 @@ const (
 
 type Compressor struct {
 	fastProvider model.Provider
+	prompts      *prompt.Loader
 }
 
 func NewCompressor(fastProvider model.Provider) *Compressor {
 	return &Compressor{fastProvider: fastProvider}
+}
+
+func (c *Compressor) SetPrompts(p *prompt.Loader) {
+	c.prompts = p
 }
 
 func (c *Compressor) ShouldCompress(messages []model.Message, contextWindow int) bool {
@@ -40,14 +46,26 @@ func (c *Compressor) TruncateToolOutput(content string) string {
 	}
 	lines := strings.Split(content, "\n")
 	if len(lines) <= maxToolOutputLines {
-		return content[:maxToolOutputBytes] + "\n... (truncated)"
+		return truncateUTF8(content, maxToolOutputBytes) + "\n... (truncated)"
 	}
 	kept := lines[:maxToolOutputLines]
 	result := strings.Join(kept, "\n")
 	if len(result) > maxToolOutputBytes {
-		result = result[:maxToolOutputBytes]
+		result = truncateUTF8(result, maxToolOutputBytes)
 	}
-	return result + "\n... (truncated, %d lines total)"
+	return fmt.Sprintf("%s\n... (truncated, %d lines total)", result, len(lines))
+}
+
+func truncateUTF8(s string, maxBytes int) string {
+	if maxBytes <= 0 || len(s) <= maxBytes {
+		return s
+	}
+	for i := range s {
+		if i > maxBytes {
+			return s[:i]
+		}
+	}
+	return s
 }
 
 func (c *Compressor) CompressHistory(ctx context.Context, messages []model.Message) ([]model.Message, string, error) {
@@ -73,13 +91,23 @@ func (c *Compressor) CompressHistory(ctx context.Context, messages []model.Messa
 
 	summary := sb.String()
 	if c.fastProvider != nil && len(summary) > 500 {
-		ch, err := c.fastProvider.Complete(ctx, &model.CompletionRequest{
-			System: "Compress the following conversation history into a concise summary. Keep: user intent, completed operations, key decisions, current progress. Ignore: specific code details, tool output details, intermediate debugging steps.",
+		systemPrompt := "Compress the following conversation history into a concise summary. Keep: user intent, completed operations, key decisions, current progress. Ignore: specific code details, tool output details, intermediate debugging steps."
+		if c.prompts != nil {
+			if rendered, err := c.prompts.RenderCompress(summary); err == nil && rendered != "" {
+				systemPrompt = ""
+				summary = rendered
+			}
+		}
+		req := &model.CompletionRequest{
 			Messages: []model.Message{
 				model.NewTextMessage(model.RoleUser, summary),
 			},
 			MaxTokens: 1000,
-		})
+		}
+		if systemPrompt != "" {
+			req.System = systemPrompt
+		}
+		ch, err := c.fastProvider.Complete(ctx, req)
 		if err == nil {
 			var full string
 			for chunk := range ch {
