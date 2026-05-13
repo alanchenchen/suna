@@ -225,6 +225,7 @@ func (s *Server) handleSendMessage(ctx context.Context, conn Conn, req Request) 
 			case core.EventStatus:
 				if strings.HasPrefix(evt.Content, "error:") || evt.Content == "cancelled" {
 					s.Send(ctx, conn, NotifyStream, StreamParams{Chunk: evt.Content, Done: true})
+					s.Send(ctx, conn, "daemon.full_status", s.buildDaemonStatus(ctx))
 				} else if evt.Content == "done" {
 					speed := 0.0
 					if evt.HasUsage && evt.OutputTokens > 0 {
@@ -242,6 +243,7 @@ func (s *Server) handleSendMessage(ctx context.Context, conn Conn, req Request) 
 						ContextWindow: evt.ContextWindow,
 						TokensPerSec:  speed,
 					})
+					s.Send(ctx, conn, "daemon.full_status", s.buildDaemonStatus(ctx))
 				}
 			}
 		}

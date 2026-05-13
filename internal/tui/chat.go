@@ -100,8 +100,17 @@ func (t *TUI) initChatComponents() tea.Cmd {
 
 func (t *TUI) syncContent() {
 	var sb strings.Builder
+	runningReasoningIdx := -1
+	if t.loading && t.phase == phaseThinking && t.phaseStart.After(time.Time{}) {
+		for i := len(t.messages) - 1; i >= 0; i-- {
+			if t.messages[i].role == "reasoning" {
+				runningReasoningIdx = i
+				break
+			}
+		}
+	}
 
-	for _, msg := range t.messages {
+	for i, msg := range t.messages {
 		switch msg.role {
 		case "user":
 			content, _ := msg.content.(string)
@@ -112,7 +121,7 @@ func (t *TUI) syncContent() {
 			sb.WriteString(indentLines(RenderMarkdown(content, t.width-6), "  ") + "\n")
 		case "reasoning":
 			content, _ := msg.content.(string)
-			sb.WriteString(t.renderThinkingBox(content, false))
+			sb.WriteString(t.renderThinkingBox(content, i == runningReasoningIdx))
 		case "tool":
 			if te, ok := msg.content.(*toolEntry); ok {
 				sb.WriteString(t.renderToolEntry(te))
@@ -152,9 +161,8 @@ func (t *TUI) syncContent() {
 		sb.WriteString(t.renderPhaseLine())
 	}
 
-	if t.loading && t.phaseStart.After(time.Time{}) && t.phase == phaseThinking {
-		elapsed := time.Since(t.phaseStart)
-		sb.WriteString(t.renderThinkingBox(fmt.Sprintf("%s %.1fs", t.i18n.T("status.thinking"), elapsed.Seconds()), true))
+	if t.loading && t.phaseStart.After(time.Time{}) && t.phase == phaseThinking && runningReasoningIdx < 0 {
+		sb.WriteString(t.renderThinkingBox("", true))
 	}
 
 	for _, te := range t.activeTools {
@@ -176,7 +184,17 @@ func (t *TUI) renderThinkingBox(content string, running bool) string {
 	width := max(24, min(t.width-6, 62))
 	inner := width - 4
 	title := " ◎ " + t.tr("tui.chat.thinking") + " "
+	if running {
+		elapsed := 0.0
+		if !t.phaseStart.IsZero() {
+			elapsed = time.Since(t.phaseStart).Seconds()
+		}
+		title = fmt.Sprintf(" ◎ %s %s %.1fs ", t.tr("tui.chat.thinking"), t.sp.View(), elapsed)
+	}
 	display := strings.TrimSpace(content)
+	if running && display == "" {
+		display = t.tr("status.thinking")
+	}
 	if !t.showToolDetail && !running {
 		display = extractLastSentence(display)
 		if display == "" {
@@ -188,8 +206,15 @@ func (t *TUI) renderThinkingBox(content string, running bool) string {
 		display = RenderMarkdown(strings.TrimSpace(content), inner)
 	}
 	lines := strings.Split(strings.TrimRight(display, "\n"), "\n")
+	if running && !t.showToolDetail && len(lines) > 8 {
+		lines = append([]string{"..."}, lines[len(lines)-8:]...)
+	}
 	if t.showToolDetail && len(lines) > 15 {
-		lines = append(lines[:15], "...")
+		if running {
+			lines = append([]string{"..."}, lines[len(lines)-15:]...)
+		} else {
+			lines = append(lines[:15], "...")
+		}
 	}
 	var sb strings.Builder
 	sb.WriteString("  " + styleDim.Render("┌─"+title+strings.Repeat("─", max(0, width-lipgloss.Width(title)-3))+"┐") + "\n")
@@ -306,10 +331,11 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 					askID := t.pendingAskID
 					t.pendingAskID = ""
 					t.pendingAskOptions = nil
-					t.ipcCli.AskReply(askID, answer)
 					t.messages = append(t.messages, chatMsg{role: "user", content: answer})
+					t.startLLMWait()
+					t.ipcCli.AskReply(askID, answer)
 					t.syncContent()
-					return t, t.ta.Focus()
+					return t, t.sp.Tick
 				}
 			}
 			if !t.loading {
@@ -334,6 +360,8 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if t.ta.Value() == "" {
 				t.mode = "welcome"
+				t.refreshDaemonStatus()
+				t.initWelcomeList()
 				return t, nil
 			}
 			t.ta.Reset()
@@ -496,8 +524,9 @@ func (t *TUI) handleSend() tea.Cmd {
 				answer = options[idx]
 			}
 		}
+		t.startLLMWait()
 		t.ipcCli.AskReply(askID, answer)
-		return t.ta.Focus()
+		return t.sp.Tick
 	}
 
 	if strings.HasPrefix(input, "/") {

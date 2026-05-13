@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/BurntSushi/toml"
-
 	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/daemon"
 	"github.com/alanchenchen/suna/internal/tui"
@@ -38,7 +36,7 @@ func main() {
 		}
 	}
 
-	runTUI(configPath)
+	runTUI()
 }
 
 func runDaemon(configPath string) {
@@ -83,20 +81,8 @@ func stopDaemonCommand() {
 	fmt.Println("sunad stopped")
 }
 
-func runTUI(configPath string) {
-	locale := tui.LocaleEN
-	var lp struct {
-		UI struct {
-			Locale string `toml:"locale"`
-		} `toml:"ui"`
-	}
-	if _, err := toml.DecodeFile(configPath, &lp); err == nil {
-		if lp.UI.Locale == "zh" || lp.UI.Locale == "zh-CN" {
-			locale = tui.LocaleZH
-		}
-	}
-
-	app := tui.New(configPath, locale)
+func runTUI() {
+	app := tui.New(tui.LocaleEN)
 
 	ensureDaemonRunning()
 

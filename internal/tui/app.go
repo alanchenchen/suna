@@ -28,7 +28,6 @@ TUI 纯前端，无业务逻辑。
 type TUI struct {
 	ipcCli  *ipcClient
 	i18n    *translator
-	cfgPath string
 	program *tea.Program
 
 	mode     string // "welcome" | "chat" | "config" | "help"
@@ -106,12 +105,11 @@ type chatMsg struct {
 	content any
 }
 
-func New(cfgPath string, locale LocaleID) *TUI {
+func New(locale LocaleID) *TUI {
 	t := &TUI{
-		i18n:    newTranslator(locale),
-		cfgPath: cfgPath,
-		mode:    "welcome",
-		theme:   ThemeAuto,
+		i18n:  newTranslator(locale),
+		mode:  "welcome",
+		theme: ThemeAuto,
 	}
 	t.setTheme(ThemeAuto)
 	return t
@@ -148,11 +146,17 @@ func (t *TUI) doQuit() {
 
 func (t *TUI) Init() tea.Cmd {
 	return func() tea.Msg {
+		t.refreshDaemonStatus()
 		if t.ipcCli != nil {
-			t.ipcCli.DaemonStatus()
 			t.ipcCli.ConfigGet()
 		}
 		return nil
+	}
+}
+
+func (t *TUI) refreshDaemonStatus() {
+	if t.ipcCli != nil {
+		t.ipcCli.DaemonStatus()
 	}
 }
 
@@ -219,10 +223,7 @@ type ipcNotification struct {
 }
 
 func (t *TUI) runAgent(input string) tea.Cmd {
-	t.loading = true
-	t.phase = phaseFirstLLM
-	t.phaseStart = time.Now()
-	t.streamStart = time.Now()
+	t.startLLMWait()
 	t.activeTools = make(map[string]*toolEntry)
 	t.toolStartTimes = make(map[string]time.Time)
 	go func() {
@@ -231,6 +232,13 @@ func (t *TUI) runAgent(input string) tea.Cmd {
 		}
 	}()
 	return t.sp.Tick
+}
+
+func (t *TUI) startLLMWait() {
+	t.loading = true
+	t.phase = phaseFirstLLM
+	t.phaseStart = time.Now()
+	t.streamStart = time.Now()
 }
 
 func extractLastSentence(text string) string {
