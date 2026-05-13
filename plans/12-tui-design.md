@@ -1,77 +1,116 @@
 # 12 — TUI 交互设计
 
-> 本文档只涉及 TUI 前端的视觉、布局、交互设计。不涉及 daemon/IPC/业务逻辑。
-> 技术栈：Bubble Tea v2 + bubbles v2 + lipgloss v2 + glamour v2
+> 最后更新: 2026-05-12
+> 本文档以当前 `internal/tui` 实现为准，描述已经可用的 TUI 行为、仍需保留的设计约束，以及尚未实现的功能。
+> 范围只包含 TUI 前端视觉、布局、交互和 IPC 展示数据，不定义 daemon/core 业务逻辑。
 
-## 设计目标
+---
 
-1. **接近 GUI 行为**：终端里也要有首页、主界面、弹层、焦点、状态和渐进披露。
-2. **Chat 优先**：Chat 是 suna 的核心使用场景，首页和配置页都服务于快速进入 Chat。
-3. **信息不重复**：同一类状态只出现一次，避免顶栏、底栏重复显示模型/token。
-4. **默认干净**：常用信息常驻；低频信息通过 `?`、`Ctrl+T`、`/` 等方式展开。
-5. **用成熟组件**：Markdown 用 glamour，导航/帮助/输入使用 bubbles，不继续维护自写 Markdown 解析器。
-6. **全程 i18n**：TUI 中所有用户可见文本必须来自 i18n，不允许在 Go 代码里硬编码英文/中文文案。
+## 当前结论
+
+TUI 现在已经能跑通基本使用流：启动后进入 Welcome，进入 Chat 后可以发消息、看流式回复、看工具执行、处理 AskUser 选项、切换模型、手动 compact、搜索记忆，并能通过 Config 管理模型连接、语言和主题。
+
+当前实现不是完整 GUI 化配置中心，设计重点应收敛到“能稳定对话 + 能完成模型配置 + 能清楚展示 agent 运行状态”。复杂配置和远期多渠道能力不要塞进 TUI MVP。
+
+当前页面只有四个 mode：
+
+| Mode | 文件 | 状态 | 说明 |
+|---|---|---|---|
+| Welcome | `internal/tui/welcome.go` | 已实现 | 宠物 logo、模型/daemon 概览、菜单入口 |
+| Chat | `internal/tui/chat.go`, `chat_render.go` | 已实现 | 对话、流式输出、工具事件、AskUser、命令、状态栏 |
+| Config | `internal/tui/config.go`, `config_model.go` | 可用但不完整 | 模型连接、凭证、context window、语言、主题 |
+| Help | `internal/tui/help.go` | 已实现基础版 | Chat 通用快捷键和命令说明，Config/Welcome 特有快捷键待补齐 |
+
+---
+
+## 实现状态矩阵
+
+| 功能 | 当前状态 | 关键文件 | 备注 |
+|---|---|---|---|
+| Bubble Tea 主状态机 | 已实现 | `app.go` | mode 分发、AltScreen、IPC notification 分发 |
+| Welcome 菜单 | 已实现 | `welcome.go` | `New`、`Resume`、`Config`、`Help` |
+| Chat 布局 | 已实现 | `chat_render.go` | mini pet 顶栏、viewport、textarea、命令建议、底栏 |
+| 流式回答 | 已实现 | `app.go`, `chat.go` | `agent.stream` 追加 assistant 内容 |
+| Reasoning/Thinking | 已实现 | `app.go`, `chat.go` | 默认折叠，`Ctrl+T` 展开 |
+| Tool 展示 | 已实现 | `app.go`, `chat.go`, `chat_render.go` | running/done/error，详情最多展示 10 行结果 |
+| AskUser 选项 | 已实现 | `app.go`, `chat.go` | options 为 `[]string`，支持上下选择、Enter、数字输入、自定义答案 |
+| Slash command | 已实现 | `commands.go` | `/new`, `/model`, `/memory search`, `/compact`, `/config`, `/help` |
+| Model picker | 已实现 | `commands.go`, `chat_render.go` | `/model` 无参数时打开列表 |
+| Markdown 渲染 | 已实现 | `markdown.go` | Glamour v2，assistant 和 expanded thinking 使用 |
+| Compact 面板 | 已实现 | `ui.go`, `commands.go` | 展示 before/after、context window 百分比、压缩轮数 |
+| Config 模型管理 | 已实现基础版 | `config.go`, `config_model.go` | add/edit/delete/activate model |
+| Provider kind 选择 | 已实现 | `config.go` | openai-compatible / openai / anthropic |
+| Context Window | 已打通 | `config.go`, `message.go`, `chat_render.go` | config/IPc/顶栏/compact 均可使用 |
+| Credentials | 已实现基础版 | `config.go`, daemon config IPC | API Key 通过 IPC 保存到 credentials，不在 TUI 明文展示 |
+| 语言切换 | 已实现 | `i18n.go`, `i18n_keys.go`, `config_model.go` | 中文/英文内置翻译，Config 可切换 |
+| 主题切换 | 已实现 | `theme.go`, `config_model.go` | auto/dark/light |
+| Provider Test | 未实现真实 ping | `config.go` | `T` 只显示 `local config only; API ping not implemented` |
+| 外部 i18n 文件加载 | 未接入主流程 | `i18n.go` | 有 `LoadLocale`，但当前主要用内置翻译表 |
+| Config 高级项 | 未实现 | `config.go` | 未编辑 guard/hooks/max_model_rps/cost_per_1k |
+
+---
+
+## 设计原则
+
+1. **当前实现优先**：文档描述必须和 `internal/tui` 当前行为一致，未实现功能放入“未实现清单”，不能混在主流程里。
+2. **Chat 优先**：Chat 是核心页面，常驻信息只保留身份、模型、context、输入和运行状态。
+3. **TUI 纯前端**：TUI 不持有业务逻辑、数据库连接或模型执行逻辑，只渲染 UI 并通过 IPC 与 daemon 通信。
+4. **配置足够可用**：MVP 只要求能配置模型连接、凭证、context window、语言和主题；高级配置后续分组补齐。
+5. **信息不重复**：Chat 顶栏显示 provider/model/context/连接状态；底栏只显示 token 和速度；快捷键通过 help 查看。
+6. **全程 i18n**：用户可见文本必须走 `internal/tui/i18n_keys.go` 或 translator，不在页面代码里散落硬编码文案。
+7. **不伪造 usage**：token/cache/context/speed 只能来自 provider usage 或 daemon 状态；没有 usage 时显示未知。
 
 ---
 
 ## 页面模型
 
-```
+当前实现流程：
+
+```text
 suna 启动
   │
-  ├─ 无 config → Config(setup mode) → Welcome
-  │
-  └─ 有 config → 连接 daemon → Welcome
-                            │
-                            ├─ New / Resume → Chat
-                            ├─ Config       → Config
-                            └─ Help         → Help
+  └─ 连接 daemon → Welcome
+                  │
+                  ├─ New
+                  │   ├─ 无模型配置 → Config setup form → Welcome
+                  │   └─ 有模型配置 → Chat
+                  ├─ Resume → Chat
+                  ├─ Config → Config
+                  └─ Help → Help
 ```
 
-| 页面 | 定位 | 入口 | 组件 |
-|---|---|---|---|
-| Setup | 首次配置流程，不是独立实现 | 自动进入 Config setup mode | Config form |
-| Welcome | 首页入口 | 启动后 | list |
-| Chat | 核心对话 | Welcome / Resume | viewport + textarea + spinner |
-| Config | 配置管理 | Welcome / `Ctrl+O` | list + textinput overlay |
-| Help | 快捷键和命令速查 | `?` / `F1` / `/help` | viewport + help |
+说明：
 
-Setup 和 Config 是同一条配置链路：
-
-- 首次启动无 config 时，不实现第二套 setup UI，而是打开 `Config` 的 `setup mode`。
-- `setup mode` 强制完成最小配置：Provider type (openai/anthropic/openai-compatible) + Model + API Key + Endpoint (如需)。
-- setup 保存成功后进入 Welcome；取消 setup 时返回空状态首页。
-- 普通 Config 模式复用同一套 provider 列表、provider 表单、校验和保存逻辑（凭证存 credentials.toml）。
-- 这样可以避免 Setup 和 Config 两套表单字段、校验规则、i18n 文案不一致。
+- 当前没有独立 `Setup` mode。首次配置复用 Config 的 provider form，并通过 `configSetupMode` 标记。
+- 当前没有独立 `Compact` 页面。compact 是 Chat 命令和结果面板。
+- 当前没有全局 footer。Chat 有 token 底栏，Welcome 有状态概览，Config/Help 只显示页面内 help 文案。
+- `Ctrl+C` 是唯一全局退出快捷键。`Esc` 用于取消、关闭浮层、返回上一层或回 Welcome。
 
 ---
 
-## i18n 约束
+## i18n
 
-TUI 的所有用户可见文本都必须走 `internal/i18n`，包括页面标题、菜单项、按钮、表单 label、placeholder、help 文案、错误提示、命令说明和状态文案。
+TUI 用户可见文本必须集中在 `internal/tui/i18n_keys.go` 或 translator 中。
 
-示例图中的英文只是视觉占位，不能作为实现时的硬编码文本。
+已实现：
 
-必须走 i18n 的文本类型：
+- 内置中文和英文翻译表。
+- Config 中可切换语言，并通过 `config.set update_general` 持久化。
+- translator 支持 fallback 到英文。
+- key.Binding 的 help 文案来自 i18n。
 
-| 类型 | 示例 key |
-|---|---|
-| 页面标题 | `tui.welcome.title`, `tui.config.title`, `tui.help.title` |
-| Welcome 菜单 | `tui.welcome.new`, `tui.welcome.resume`, `tui.welcome.config` |
-| Chat 角色名 | `tui.chat.you`, `tui.chat.suna`, `tui.chat.thinking` |
-| 状态字段 | `tui.status.model`, `tui.status.uptime`, `tui.status.memory` |
-| 快捷键说明 | `tui.key.send`, `tui.key.back`, `tui.key.new_session` |
-| 命令说明 | `tui.command.new.desc`, `tui.command.compact.desc` |
-| Config 表单 | `tui.config.provider.name`, `tui.config.provider.endpoint` |
-| 校验错误 | `tui.error.required`, `tui.error.invalid_endpoint` |
+当前限制：
 
-实现规则：
+- `translator.LoadLocale(path)` 存在，但主启动流程未接入外部 locale 文件加载。
+- 部分动态状态仍需要继续检查，避免在新代码中新增硬编码英文/中文提示。
 
-- Go 代码里只能硬编码 i18n key、图标、快捷键、Provider/Model 动态值。
-- `Suna` 作为产品名不翻译；`Provider`、`Model` 等 UI label 需要翻译。
-- slash command 名称（如 `/new`、`/compact`）不翻译，命令描述必须翻译。
-- `key.Binding` 的 help 描述使用 i18n 文案生成，不直接写 `send/back/new`。
-- 测试和 snapshot 要允许中英文切换，不能依赖固定英文 UI 文案。
+允许硬编码的内容：
+
+- i18n key。
+- 图标和状态符号，例如 `●`, `○`, `✓`, `✗`, `⋯`。
+- 快捷键字面量，例如 `Ctrl+N`, `Esc`。
+- slash command 名称，例如 `/new`, `/compact`。
+- Provider/Model/API 返回的动态值。
 
 ---
 
@@ -79,852 +118,570 @@ TUI 的所有用户可见文本都必须走 `internal/i18n`，包括页面标题
 
 ### 宠物 Logo
 
-Logo 采用圆角小机器人。它不是空心字符画，而是 **边框内部用 lipgloss Background 填充的暖黄色色块**。
-
-```
-idle (待机):              working (工作中):         thinking (思考中):
-    ╭────────╮               ╭────────╮               ╭────────╮
-    │  ◠  ◠  │               │  ▶  ◀  │               │  ○  ○  │
-    │   ω    │               │   ω    │               │   △    │
-    ╰────────╯               ╰───⚡────╯               ╰────────╯
-```
+宠物 logo 已落地在 `pet.go`，分为 Welcome 完整版和 Chat mini 版。
 
 规则：
 
-- 不显示天线，避免占用垂直空间；状态只通过眼睛、嘴巴和底边符号表达。
-- 边框字符 `╭╮╰╯│─` 不着色，保持干净轮廓。
-- 边框内部每一行整体用 `Background(ColorBrand)` 渲染，空格也被填色。
-- 眼睛和嘴巴用深色前景色叠加在填充色上。
-- Welcome 使用完整 4 行版本，Chat 使用 3 行小 logo 版本。不使用 1 行 mini，因为它无法保留宠物识别度。
+- Welcome 使用完整 pet，主要做品牌入口。
+- Chat 顶栏使用 3 行 mini pet，承担运行时状态。
+- Chat mini pet 状态：idle / working / thinking。
+- 不使用 1 行 mini fallback，避免失去宠物识别度。
 
-实现约束：
+状态映射：
 
-```go
-bodyFill := lipgloss.NewStyle().
-    Background(ColorBrand).
-    Foreground(lipgloss.Color("0"))
-
-eyeRow := "│" + bodyFill.Render("  ◠  ◠  ") + "│"
-mouthRow := "│" + bodyFill.Render("   ω    ") + "│"
-```
-
-Chat 小 logo 必须保留 idle / working / thinking 三种状态，但压缩成 3 行，以便在 Chat 顶部常驻显示。Welcome 仍展示完整 4 行 logo，但完整 logo 主要是品牌展示，不适合承载运行时状态；运行时状态主要通过 Chat 小 logo 表达。
-
-```go
-idleSmall := strings.Join([]string{
-    "╭──────╮",
-    "│" + bodyFill.Render(" ◠  ◠ ") + "│",
-    "╰──────╯",
-}, "\n")
-
-workingSmall := strings.Join([]string{
-    "╭──────╮",
-    "│" + bodyFill.Render(" ▶  ◀ ") + "│",
-    "╰──⚡──╯",
-}, "\n")
-
-thinkingSmall := strings.Join([]string{
-    "╭──────╮",
-    "│" + bodyFill.Render(" ○  ○ ") + "│",
-    "╰──△──╯",
-}, "\n")
-```
-
-三态规则：
-
-| 状态 | 触发条件 | 小 logo |
+| 状态 | 触发条件 | 表现 |
 |---|---|---|
-| idle | 无请求进行中 | 眼睛 `◠  ◠`，普通底边 |
-| working | tool 调用或 daemon 操作进行中 | 眼睛 `▶  ◀`，底边 `⚡` |
-| thinking | LLM reasoning / 首包等待 | 眼睛 `○  ○`，底边 `△` |
-
-小 logo 仍然使用完整 logo 的 `bodyFill`，通过背景色保留宠物识别感；不要退化成纯文本图标或 1 行 badge。
-
-完整 logo 与小 logo 的职责：
-
-| 位置 | 尺寸 | 作用 | 状态 |
-|---|---|---|---|
-| Welcome | 4 行 | 品牌展示和入口氛围 | 默认 idle，可根据 daemon 初始状态短暂显示 working/thinking，但不作为主要状态入口 |
-| Chat 顶部 | 3 行 | 常驻身份和运行状态 | 必须支持 idle / working / thinking 三态 |
-
-不要为了在 Welcome 展示三态而增加首页复杂度；三态价值应该体现在 Chat 使用过程中。Chat 不提供 1 行 mini fallback，窗口高度不足时也保持 3 行小 logo，优先保证品牌识别度。
+| idle | `loading=false` | 普通眼睛 |
+| working | LLM 响应或 tool 执行 | working pet + 彩色连接点 |
+| thinking | reasoning 阶段 | thinking pet + brand 色连接点 |
 
 ### 配色
 
-```go
-var (
-    ColorBrand = lipgloss.Color("14") // logo, spinner, selected
-    ColorDim   = lipgloss.Color("8")  // secondary text, borders
-    ColorUser  = lipgloss.Color("12") // user role, input tokens
-    ColorAgent = lipgloss.Color("10") // agent role, output tokens, connected
-    ColorTool  = lipgloss.Color("11") // tool pill
-    ColorError = lipgloss.Color("9")  // errors
-    ColorHL    = lipgloss.Color("15") // highlight text
-)
-```
+当前基础色集中在 `ui.go`：
 
-| 语义 | 颜色 | 用途 |
+| 语义 | 变量 | 用途 |
 |---|---|---|
-| Brand | `14` | 宠物、选中态、spinner |
-| User | `12` | `▶ You`、输入 token `↑` |
-| Agent | `10` | `● Suna`、输出 token `↓`、连接 `●` |
-| Tool | `11` | tool pill、进行中状态 |
-| Error | `9` | tool 失败、错误提示 |
-| Dim | `8` | 辅助文字、边框、cache token `⟳` |
+| Brand | `ColorBrand` | logo、spinner、cursor、selected |
+| Dim | `ColorDim` | 辅助文字、边框、未知状态 |
+| User | `ColorUser` | 用户消息、input token |
+| Agent | `ColorAgent` | assistant、output token、connected |
+| Tool | `ColorTool` | tool pill、working 状态 |
+| Error | `ColorError` | 错误、失败状态 |
+| Highlight | `ColorHL` | 标题、高亮文本 |
+
+主题系统已支持 `auto` / `dark` / `light`，位于 `theme.go`。
 
 ---
 
-## Welcome 页面
+## Welcome
 
-Welcome 是入口页，只做三件事：展示 suna、展示 daemon 概况、进入 Chat/Config/Help。
+定位：入口页，只负责展示状态摘要和进入 Chat/Config/Help。
 
-下方示例使用英文占位，实际渲染必须通过 i18n 输出当前语言文案。
+当前实现：
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                                                              │
-│     ╭────────╮        Suna                                   │
-│     │  ◠  ◠  │        your stateful AI companion             │
-│     │   ω    │                                               │
-│     ╰────────╯        Model    glm/glm-4                       │
-│                       Uptime   2h 34m                        │
-│                       Memory   1,247 ep · 389 ent            │
-│                       Session  3 active · 12 done            │
-│                                                              │
-│   ┌─────────────────────────────────────────────────────┐    │
-│   │  ▶ New Conversation                                 │    │
-│   │    Resume Last Session                              │    │
-│   │    Switch Model                                     │    │
-│   │    Config                                           │    │
-│   │    Help                                             │    │
-│   └─────────────────────────────────────────────────────┘    │
-│                                                              │
-│   ↑↓ navigate · enter select · esc back · ctrl+c quit        │
-└──────────────────────────────────────────────────────────────┘
-```
+- 使用 `bubbles/list` 渲染菜单。
+- 菜单隐藏 title/status/pagination/filter help，只保留入口项。
+- 展示 pet、产品名、subtitle、setup hint。
+- 展示模型、今日 usage、uptime、memory、sessions。
+- 未配置模型时仍允许进入 Config/Help，New 会引导到 Config setup form。
+- Resume 仅在 daemon status 有 `Sessions.LastID` 时显示。
 
-实现：
+菜单项：
 
-- 菜单使用 `bubbles/list`。
-- `list.New(items, delegate, width, height)` 参数顺序必须是 `items, delegate, width, height`。
-- 列表隐藏 title/status/pagination，只保留菜单本身。
-- `Resume Last Session` 仅在存在历史会话时显示或启用。
-- `n` 进入 New Conversation，`r` 进入 Resume Last Session。退出只使用 `Ctrl+C`。
+| 条目 | 条件 | 行为 |
+|---|---|---|
+| New | 总是显示 | 无模型时进入 setup form，有模型时新建会话并进入 Chat |
+| Resume | 有 last session 时显示 | 调 `session.restore` 并进入 Chat |
+| Config | 总是显示 | 进入 Config home |
+| Help | 总是显示 | 进入 Help 页面 |
+
+快捷键：
+
+| Key | 行为 |
+|---|---|
+| `↑↓` / `j k` | 菜单移动 |
+| `Enter` | 选择 |
+| `n` | New |
+| `r` | Resume |
+| `Ctrl+O` | Config |
+| `?` / `F1` | Help |
+| `Ctrl+C` | Quit |
+
+当前不足：Welcome 底部 help 文案没有完整列出 `n/r/Ctrl+O/?/j/k`。
 
 ---
 
-## Chat 页面
+## Chat
 
-Chat 是主界面，常驻区域必须少而稳定。
+Chat 是当前 TUI 的主界面，代码入口在 `chat.go` 和 `chat_render.go`。
 
-下方示例中的角色名、thinking 标题、命令描述都必须通过 i18n 渲染；Provider/Model、token 数值和用户/模型内容是动态值。
+### 布局
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  ╭──────╮                                                     │
-│  │ ◠  ◠ │  glm/glm-4    ctx 12k/128k                      ●  │
-│  ╰──────╯                                                     │
-│──────────────────────────────────────────────────────────────│
-│                                                              │
-│  ▶ You                                                       │
-│  帮我重构认证模块，现在代码太乱了                              │
-│                                                              │
-│  ● Suna                                                      │
-│  我先看一下当前的代码结构。                                    │
-│                                                              │
-│    ⋯ Read(auth.go) 3.2s                                      │
-│    ✓ Read(session.go) 0.2s                                   │
-│                                                              │
-│  ┌─ ◎ Thinking ────────────────────────────────────────┐    │
-│  │ 考虑了 3 种方案 → 选择方案 B（Ctrl+T 展开）           │    │
-│  └──────────────────────────────────────────────────────┘    │
-│                                                              │
-│  ● Suna                                                      │
-│  当前有 3 个问题需要处理：                                    │
-│                                                              │
-│  ┌──────────┬──────────┬──────────┐                         │
-│  │ 文件     │ 问题     │ 优先级   │                         │
-│  ├──────────┼──────────┼──────────┤                         │
-│  │ auth     │ 硬编码   │ P0       │                         │
-│  │ session  │ 竞态     │ P1       │                         │
-│  └──────────┴──────────┴──────────┘                         │
-│                                                              │
-│──────────────────────────────────────────────────────────────│
-│  > 好的，先处理 P0 的问题_                                   │
-│  ↑3.2k ↓1.8k ⟳0.8k · 45t/s                                  │
-└──────────────────────────────────────────────────────────────┘
+当前布局：
+
+```text
+mini pet + provider/model + ctx used/window + connection dot
+────────────────────────────────────────────
+viewport: messages / reasoning / tools / ask user / model picker
+────────────────────────────────────────────
+textarea
+command suggestions, only when typing slash command
+token status bar
 ```
 
-### 区域划分
+高度计算由 `layoutChat()` 处理：
 
-| 区域 | 高度 | 内容 |
-|---|---|---|
-| 顶部身份区 | 3 行 | 左侧小 logo + 右侧模型/context/连接状态信息块 |
-| 对话区 | 动态 | viewport，消息、thinking、tools、loading 都在这里 |
-| 输入区 | 1~6 行 | textarea，动态高度 |
-| 命令联想 | 0~4 行 | 输入 `/` 时显示，平时不占高度 |
-| 底栏 | 1 行 | token + speed |
+- viewport 使用剩余高度。
+- textarea 动态高度，最大 6 行。
+- 命令建议最多 4 项。
+- viewport `SoftWrap=false`，Markdown 由 Glamour 按宽度 wrap。
 
-高度计算：
+### 顶栏
 
-```
-viewportHeight = totalHeight - identityHeader(3) - separators(2) - textareaHeight - suggestionHeight - bottombar(1)
-```
+顶栏展示：
 
-### 顶部身份区
+- 3 行 mini pet。
+- 当前 `provider/model`。
+- `ctx used/window`。
+- IPC 连接点。
 
-```
-╭──────╮
-│ ◠  ◠ │  glm/glm-4    ctx 12k/128k                      ●
-╰──────╯
-```
+规则：
 
-- 顶部身份区采用 flex 布局：左侧固定 3 行小 logo，中间信息和右侧状态点垂直居中。
-- 小 logo 已经承担产品身份，不再重复显示 `suna` 文本。
-- 第 1 行只渲染 logo 顶边，不放额外文本。
-- 第 2 行是主信息行：logo 中线、Provider/Model、context、最右状态图标都在同一行。
-- 第 3 行只保留 logo 的底边，不放额外文本。
-- 顶部身份区只说明身份、模型和当前上下文：不放 token，不放快捷键。
-- `●` 表示 connected，`○` 表示 disconnected；颜色表达 idle / working / thinking，不额外显示状态文本。
-- 小 logo 使用宠物色块的 3 行版本，必须保留外框和双眼。
-- 不提供 1 行 mini fallback，避免看不出宠物形象。
-- 顶部身份区需要同时显示当前会话上下文和模型最大上下文，例如 `ctx 12k/128k`。
-
-布局规则：
-
-- logo 宽度固定为 8 列外框；信息和状态点垂直居中到 logo 的第 2 行。
-- Provider/Model 和 context 之间保留至少 4 个空格，状态点靠最右。
-- 第 1、3 行严格只渲染 logo，本身不附加状态或说明文本。
-- 如果宽度不足，优先保留 Provider/Model，再保留 context，最后保留状态点。
+- `context_window` 优先来自 active model 配置或 daemon stream/status。
+- `context_tokens` 只在 daemon/provider 提供 usage 时更新；未知时显示 `ctx ?/128.0k` 这类形式。
+- 顶栏不显示快捷键，不显示 token 输入输出。
 
 ### 底栏
 
-```
+底栏展示最近一轮 usage：
+
+```text
 ↑3.2k ↓1.8k ⟳0.8k · 45t/s
 ```
 
-| 字段 | 含义 |
+规则：
+
+- 有 provider usage 时显示 input/output/cache/speed。
+- 没有 usage 时显示 `↑? ↓? ⟳? · ?t/s`。
+- 不在 TUI 本地估算 token，避免把近似值伪装成真实值。
+
+### 消息渲染
+
+| 类型 | 当前行为 |
 |---|---|
-| `↑3.2k` | input tokens |
-| `↓1.8k` | output tokens |
-| `⟳0.8k` | cache tokens |
-| `45t/s` | output speed |
-底栏不显示快捷键，也不重复显示 daemon 状态。快捷键通过 `?` 浮层查看，daemon 状态只在顶部身份区显示。
+| user | inline 用户消息，原样文本，不走 Markdown |
+| assistant | 标题 `Suna` + Glamour Markdown |
+| reasoning | Thinking box，默认折叠，`Ctrl+T` 展开，展开时走 Markdown |
+| tool | running/done/error 行，`Ctrl+T` 展示参数和最多 10 行结果 |
+| system | dim 色系统消息 |
+| error | error 色错误消息 |
 
-### Help 浮层
+### Loading 和阶段
 
-在 Chat 中按 `?` 或 `F1` 弹出帮助浮层，再次按 `?` 或 `Esc` 关闭。
+当前 phase：
 
-```
-┌─ Shortcuts ────────────────────────────────────┐
-│  enter send · esc back · ctrl+n new            │
-│  ctrl+t detail · ctrl+o config · ctrl+u/d scroll│
-│                                                │
-│  Commands                                      │
-│  /new · /model <name> · /compact               │
-│  /memory search <q> · /help                    │
-└────────────────────────────────────────────────┘
-```
+| Phase | 含义 |
+|---|---|
+| `phaseIdle` | 无运行中请求 |
+| `phaseFirstLLM` | 用户消息已发，等待首包 |
+| `phaseLLM` | 正在接收普通回答 |
+| `phaseThinking` | 正在接收 reasoning |
+| `phaseTool` | 正在执行工具 |
 
-实现：
+Chat pet 和 spinner 根据 phase 切换。tool 完成后回到 LLM phase；stream done 后 reset 到 idle。
 
-- 浮层是渲染 overlay，不改变 Chat 区域高度。
-- 快捷键部分用 `bubbles/help` 的 `ShortHelpView`。
-- 命令列表手动渲染。
-- `showHelp` 为 true 时 overlay 盖在 viewport 上方。
+### AskUser Options
 
-### 输入区
+AskUser 已实现，不再是缺失项。
 
-- 使用 `bubbles/textarea`。
-- `Enter` 发送，`Shift+Enter` 换行。
-- 最大高度 6 行，超过后 textarea 内部滚动。
-- Resume 会话时，如果 daemon 返回 `unsent_input`，自动填入 textarea 并把光标放到末尾。
-
-### 命令联想
-
-输入以 `/` 开头且第一个空格前仍在命令位置时显示建议。
-
-```
-> /com_
-┌──────────────────────────────────────────────────────┐
-│  /compact  Compact context                           │
-│  /config   Open configuration                        │
-└──────────────────────────────────────────────────────┘
-```
-
-规则：
-
-- `↑↓` 选择，`Enter` 填充。
-- `Tab` 不用于联想，保留给 textarea 缩进行为。
-- 最多显示 4 项。
-- 输入不再匹配命令时自动隐藏。
-
----
-
-## Chat 内容渲染
-
-### 用户消息
-
-```
-  ▶ You
-  帮我看一下这个文件的权限问题
-```
-
-- `▶ You` 使用 `ColorUser` 粗体。
-- 用户内容原样显示，不渲染 Markdown。
-
-### Agent 消息
-
-```
-  ● Suna
-  当前有 **3 个问题** 需要处理：
-```
-
-- `● Suna` 使用 `ColorAgent` 粗体。
-- Agent 内容使用 glamour 渲染 Markdown。
-
-### Tool 调用
-
-```
-  ⋯ Read(auth.go) 3.2s
-  ✓ Read(auth.go) 0.3s
-  ✓ Read(session.go) 0.2s
-  ✗ Exec(go test ./...) 2.1s
-```
-
-规则：
-
-- tool 开始时显示 `⋯ Tool(args) elapsed`。
-- tool 完成后替换为 `✓` 或 `✗`，固定耗时。
-- 展开详情由 `Ctrl+T` 控制，缩进显示完整参数和最多 10 行返回值。
-- 不使用 LLM 最后一段自然语言推断意图，直接展示函数名和参数摘要。
-
-### Thinking / Reasoning
-
-Thinking 是 LLM 的推理过程，不应打断回答主线，默认折叠。
-
-进行中：
-
-```
-  ┌─ ◎ Thinking ──────────────────────────────┐
-  │  分析代码结构，寻找重构切入点...  3.2s      │
-  └────────────────────────────────────────────┘
-```
-
-完成后折叠：
-
-```
-  ┌─ ◎ Thinking ───────────────────────────────────────┐
-  │  考虑了 3 种方案 → 选择方案 B    [Ctrl+T 展开]      │
-  └─────────────────────────────────────────────────────┘
-```
-
-展开：
-
-```
-  ┌─ ◎ Thinking ──────────────────────────────────────┐
-  │  首先，我分析了当前的代码结构，发现有 3 个问题：    │
-  │  1. auth 模块有硬编码密钥                           │
-  │  2. session 管理存在竞态条件                        │
-  │  3. 缺少统一错误处理                                │
-  │                                                    │
-  │  综合考虑，选择渐进重构。                            │
-  │                                                    │
-  │  [Ctrl+T 收起]                                     │
-  └────────────────────────────────────────────────────┘
-```
-
-规则：
-
-- 进行中只显示最新摘要行 + 计时。
-- 完成后提取最后一句或前 80 字符作为摘要；无法提取时显示 `已思考 Xs`。
-- 展开内容用 glamour 渲染，最多显示 15 行，超出显示 `...`。
-- Thinking 和紧随其后的 Agent 回答属于同一轮，中间不额外空行。
-
-### Loading
-
-| 类型 | 位置 | 结束条件 |
-|---|---|---|
-| LLM 首包等待 | 用户消息后独立一行 spinner | 收到首个 stream/reasoning chunk |
-| Thinking | Thinking box 内 | reasoning done |
-| Tool | 每个 tool 行内 | tool end |
-
----
-
-## Markdown 渲染
-
-使用 `charm.land/glamour/v2` 替换自写 Markdown 解析器。
-
-原因：
-
-- 自写解析器很难正确处理表格、代码块、列表、链接、嵌套格式。
-- LLM 输出的 Markdown 经常不完全规范，需要成熟解析器兜底。
-- glamour 是 Charm 官方库，与 Bubble Tea/lipgloss 生态兼容。
-
-实现约束：
+IPC 数据结构：
 
 ```go
-renderer, err := glamour.NewTermRenderer(
-    glamour.WithStylesFromJSONBytes([]byte(sunaStyleJSON)),
-    glamour.WithWordWrap(width),
-)
-if err != nil {
-    renderer, _ = glamour.NewTermRenderer(
-        glamour.WithStandardStyle("dark"),
-        glamour.WithWordWrap(width),
-    )
+type AskUserParams struct {
+    Question string   `json:"question"`
+    Options  []string `json:"options,omitempty"`
+    ID       string   `json:"id"`
 }
 ```
 
-注意：
+当前行为：
 
-- glamour v2 没有 `WithStylesFromString`，内嵌样式使用 `WithStylesFromJSONBytes`。
-- glamour 已经通过 `WithWordWrap(width)` 换行，viewport 应设置 `SoftWrap = false`，避免双重换行。
-- renderer 按宽度缓存，窗口宽度变化时重新创建。
+- 收到 `agent.ask_user` 后追加系统问题。
+- 如果有 options，在 viewport 中渲染选项列表。
+- `↑↓` 移动选项光标。
+- 输入为空时按 `Enter` 直接选择当前选项。
+- 输入 `1`、`2` 等数字时映射到对应选项。
+- 也允许输入自定义答案。
+- 回复通过 `agent.askReply` 回传 daemon。
 
-流式渲染策略：
+限制：
 
-- raw markdown 始终完整保存在消息对象里。
-- chunk 到达时标记 dirty，不立即每 chunk 渲染。
-- 用 50ms debounce 批量调用 glamour 渲染。
-- stream done 后做一次最终渲染。
+- options 当前只是 `[]string`，没有 `{label,value}`、默认值、禁用态或多选。
+- 当前不支持鼠标点击选择。
+
+### 命令
+
+当前 TUI 有 6 个 slash command 入口：
+
+| 命令 | 行为 |
+|---|---|
+| `/new` | 新建 session，清空当前 Chat 状态 |
+| `/model [ref]` | 无参数时打开模型选择器；带 ref 时切换模型；没有 provider 前缀时使用当前 provider |
+| `/memory search <q>` | 调 `memory.search`，显示结果 |
+| `/compact` | 调 `session.compact`，显示 compact 结果面板 |
+| `/config` | 进入 Config home |
+| `/help` | 进入 Help 页面 |
+
+说明：`/model` 的无参/带参是同一个命令入口。
+
+命令建议：
+
+- 输入以 `/` 开头且第一个空格前仍在命令位置时显示。
+- 最多显示 4 项。
+- `↑↓` 选择，`Enter` 接受。
+- `Tab` 不用于命令建议。
+
+当前未暴露的 IPC 能力：
+
+- `/daemon status|stop|restart`
+- `/trigger ...`
+- `/skill ...`
+- `/usage`
+- `/memory facts/status`
+
+这些不属于当前 TUI MVP。
+
+### Chat 快捷键
+
+| Key | 行为 |
+|---|---|
+| `Enter` | 发送；有命令建议时接受建议；有 AskUser options 且输入为空时确认当前选项 |
+| `Shift+Enter` / `Alt+Enter` | 换行 |
+| `Esc` | 关闭 help；运行中则 cancel；输入为空则回 Welcome；输入非空则清空输入 |
+| `Ctrl+N` | 新会话 |
+| `Ctrl+O` | Config |
+| `Ctrl+T` | 展开/收起 tool 和 thinking 详情 |
+| `Ctrl+U` / `PgUp` | viewport 上滚 |
+| `Ctrl+D` / `PgDown` | viewport 下滚 |
+| `↑↓` | 命令建议或 AskUser options 移动 |
+| `?` / `F1` | Chat help overlay |
+| `Ctrl+C` | Quit |
 
 ---
 
-## Config 页面
+## Markdown
 
-Config 管理模型连接和少量全局设置，不承担 Chat 状态展示。
-
-Config 的设计目标不是暴露底层配置文件，而是帮助用户完成三件事：
-
-1. 看清当前正在使用哪个模型连接。
-2. 添加、修复或切换 provider/model。
-3. 修改少量不会打断 Chat 的全局偏好。
-
-Provider 配置采用“列表 → 详情 → 编辑”的渐进披露，不在 Config 首页直接堆完整表单。首次 setup 仍复用相同字段定义、校验和保存逻辑，但使用更短的 Quick Setup 流程。
-
-Config 有两种模式：
-
-| 模式 | 入口 | 行为 |
-|---|---|---|
-| setup mode | 首次启动无 config | 打开 Quick Setup，强制完成首个可用模型连接；保存后进入 Welcome；Esc 取消并返回空状态首页 |
-| manage mode | Welcome / Chat `Ctrl+O` | 打开 Config 首页，管理 provider/model/general；Esc 只返回上一页面 |
-
-两种模式复用同一套字段 schema、校验逻辑、凭证保存逻辑和 i18n 文案。区别只在信息披露层级：setup mode 只展示最小字段；manage mode 允许进入详情页编辑高级字段。
-
-全局退出规则：
-
-- `Ctrl+C` 是唯一退出 TUI 的全局快捷键。
-- `Esc` 只做取消、关闭 overlay、返回上一层或返回首页，不退出程序。
-- `q` 不作为退出快捷键，也不在页面提示里出现。
-
-下方示例使用英文占位，实际 label/button/help/error 必须通过 i18n 渲染。
-
-### Config 首页
-
-Config 首页只做导航和状态概览，不直接编辑敏感字段。
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│  Config                                         [Esc] Back   │
-│──────────────────────────────────────────────────────────────│
-│                                                              │
-│  ▸ Model Connections                                         │
-│    Active    GLM / glm-4                                     │
-│    Providers 2 configured · 1 needs attention                │
-│                                                              │
-│  ▸ General                                                   │
-│    Language   中文 / English                                 │
-│    Theme      Default                                        │
-│                                                              │
-│──────────────────────────────────────────────────────────────│
-│  ↑↓ Navigate · Enter Open · Ctrl+E Edit General              │
-└──────────────────────────────────────────────────────────────┘
-```
-
-首页条目：
-
-| 条目 | 进入后 | 说明 |
-|---|---|---|
-| Model Connections | Provider 列表 | 管理 provider、model、active model |
-| General | General 设置 | 语言、主题等轻量全局偏好 |
-
-首页快捷键：
-
-| 操作 | 按键 |
-|---|---|
-| 进入选中条目 | `Enter` |
-| 返回来源页面 | `Esc` |
-| 编辑 General | `Ctrl+E` |
-
-`A` / `E` / `D` 不在首页生效，避免用户误以为可以在概览层直接做 provider CRUD。
-
-### Provider 列表
-
-Provider 列表负责查看、选择、激活和进入详情。列表里的信息必须短，只显示识别 provider 所需的状态，不显示完整 API Key 或长 endpoint。
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│  Model Connections                              [Esc] Back   │
-│──────────────────────────────────────────────────────────────│
-│                                                              │
-│  ◉ GLM                                                       │
-│    active · openai-compatible · glm-4 · endpoint configured  │
-│                                                              │
-│  ○ Anthropic                                                 │
-│    inactive · anthropic · claude-sonnet-4-20250514           │
-│                                                              │
-│  ! Local OpenAI                                              │
-│    missing API key · openai-compatible · llama3              │
-│                                                              │
-│──────────────────────────────────────────────────────────────│
-│  ↑↓ Navigate · Enter Details · A Add · Space Activate · D Delete │
-└──────────────────────────────────────────────────────────────┘
-```
-
-Provider 状态：
-
-| 标记 | 含义 |
-|---|---|
-| `◉` | 当前 active provider/model |
-| `○` | 已配置但未激活 |
-| `!` | 配置不完整或校验失败 |
-
-Provider 列表操作：
-
-| 操作 | 按键 |
-|---|---|
-| 新增 | `A` |
-| 删除 | `D` |
-| 查看详情 | `Enter` |
-| 激活 | `Space` |
+当前使用 `charm.land/glamour/v2`，代码在 `markdown.go`。
 
 规则：
 
-- `Enter` 进入 Provider 详情，不直接激活，避免误操作。
-- `Space` 激活当前 provider 的默认 model；如果 provider 配置不完整，显示错误并进入详情。
-- 删除 active provider 前必须二次确认；删除后如果没有可用 provider，进入 Quick Setup 或停留在列表并提示必须配置一个 provider。
-- API Key 只显示是否存在，不显示明文或掩码后的完整值。
-- Endpoint 超长时只显示 `endpoint configured` 或域名摘要，完整值放到详情页。
+- assistant 内容使用 Glamour 渲染。
+- expanded thinking 使用 Glamour 渲染。
+- user 内容不渲染 Markdown，按普通文本展示。
+- renderer 按宽度和主题缓存。
+- Chat viewport `SoftWrap=false`，避免 Glamour wrap 后再次 wrap。
 
-### Provider 详情
+注意：当前实现没有 50ms debounce 渲染队列。流式 chunk 到达后直接更新消息，最终渲染策略应以后续性能优化为准，不再把 debounce 写成已实现要求。
 
-详情页用于解释一个 provider 当前为什么可用或不可用，并提供进入编辑表单的入口。详情页默认只展示和测试，不承担列表级操作。
+---
 
+## Compact 面板
+
+`/compact` 当前通过 IPC 调 `session.compact`，结果由 `session.compact_result` 推回 TUI。
+
+面板展示：
+
+- compact 完成提示。
+- before tokens 和 context window 百分比。
+- after tokens 和 context window 百分比。
+- 保留最近轮数说明。
+- 被压缩轮数和 summary token。
+- 被截断工具输出数量。
+
+限制：
+
+- `SummaryTokens` 当前可能是 daemon 侧估算值，不应在 UI 文案里暗示来自真实 provider usage。
+- TUI 没有 auto-compact 开关。
+- Compact 不是独立页面。
+
+---
+
+## Config
+
+Config 当前是可用的模型连接管理，不是完整配置中心。
+
+入口：
+
+- Welcome 菜单 `Config`。
+- Chat `Ctrl+O`。
+- Chat `/config`。
+- 无模型配置时，Welcome `New` 进入 setup form。
+
+当前页面层级：
+
+```text
+Config home
+  ├─ Model Connections → models list
+  │    ├─ Enter → detail
+  │    ├─ A → provider kind overlay → provider form
+  │    ├─ E → provider form
+  │    ├─ D → delete confirm
+  │    └─ Space → activate
+  ├─ Language → toggle zh/en
+  └─ Theme → toggle auto/dark/light
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  Provider: GLM                                  [Esc] Back   │
-│──────────────────────────────────────────────────────────────│
-│                                                              │
-│  Status     Active                                           │
-│  Type       openai-compatible                                │
-│  Endpoint   https://open.bigmodel.cn/api/paas/v4             │
-│  API Key    configured                                       │
-│                                                              │
-│  Models                                                      │
-│  ◉ glm-4                                                     │
-│  ○ glm-4-plus                                                │
-│                                                              │
-│  Last check  connected                                       │
-│                                                              │
-│──────────────────────────────────────────────────────────────│
-│  E Edit · T Test · Esc Back                                   │
-└──────────────────────────────────────────────────────────────┘
-```
 
-详情页操作：
+### Config Home
 
-| 操作 | 按键 |
+当前展示：
+
+- Model Connections section。
+- Active model。
+- Providers summary。
+- Language。
+- Theme。
+
+当前没有单独 General 子页。Language 和 Theme 在 home 直接切换。
+
+### Models List
+
+当前展示：
+
+- 每个 model 以 `provider/model` 为 ref。
+- 标记：`◉` active，`○` inactive，`!` incomplete。
+- 摘要：active、missing api key、provider、model、context window、endpoint configured、strengths。
+- 列表按 ref 排序。
+
+操作：
+
+| Key | 行为 |
 |---|---|
-| 编辑 provider | `E` |
-| 测试连接 | `T` |
-| 返回列表 | `Esc` |
+| `A` | 新增 model，先选择 provider kind |
+| `E` | 编辑当前 model |
+| `D` | 删除当前 model，进入确认状态 |
+| `Space` | 激活当前 model |
+| `Enter` | 进入 detail |
+| `Esc` | 返回 home |
+
+### Detail
+
+当前展示：
+
+- Status。
+- Provider type。
+- Endpoint。
+- API Key 是否 configured。
+- Model。
+- Context Window。
+- Last check。
+
+操作：
+
+| Key | 行为 |
+|---|---|
+| `E` | 编辑当前 model |
+| `T` | 显示未实现提示 |
+| `Esc` | 返回 models list |
+
+Provider Test 当前未实现真实 API ping。文档和 UI 都应把它视为占位功能。
+
+### Provider Kind Overlay
+
+新增 model 时先选择 provider kind：
+
+- openai-compatible
+- openai
+- anthropic
+
+选择后进入 provider form。`openai` 和 `anthropic` 会填入默认 endpoint 提示，`anthropic` context window placeholder 为 `200000`。
+
+### Provider Form
+
+当前表单字段：
+
+| 字段 | 状态 | 说明 |
+|---|---|---|
+| Provider | 必填 | 当前兼作 provider id/type/name，后续可拆分展示名和 provider kind |
+| Model | 必填 | 实际模型 ID |
+| API Key | setup 必填，编辑可留空 | 密码回显；留空表示不修改已有凭证 |
+| Endpoint | openai/anthropic 可空，openai-compatible 必填 | 非空时校验 URL |
+| Context Window | 可空 | 非空必须为正整数；保存到 `context_window` |
+| Strengths | 可空 | 逗号分隔，保存为 `[]string`，用于路由偏好 |
+
+保存行为：
+
+- 通过 `config.set` 发送 `upsert_model`。
+- API Key 独立传给 daemon，由 daemon 写 credentials。
+- setup mode 保存时设置 `ActiveModel`。
+- 保存后等待 daemon 推送 `config.get`/status 更新 TUI 状态。
+
+当前和理想设计的差异：
+
+- 没有拆成 Provider 表单和 Model 表单，当前是一张 model connection 表单。
+- 没有独立 Provider ID 派生规则和展示名字段。
+- 当前 `Provider` 字段同时承担 provider 标识，后续如要支持一个 provider 下多个 model，需要重新设计数据结构或表单层级。
+
+### Setup Mode
+
+当前 setup mode 是 Config form 的一个标记，不是独立页面。
 
 规则：
 
-- Provider 和 Model 在详情页分开表达：Provider 是连接来源，Model 是该来源下的可选模型。
-- 一个 provider 至少要有一个 model 才能激活。
-- 激活、删除和新增 provider/model 都是列表级操作，不在详情页执行。
-- `T` 只做轻量连通性检查，错误展示在详情页，不弹出长日志。
-- 详情页可以显示完整 endpoint，但仍不能显示 API Key 明文。
+- 无模型配置时，Welcome 选择 New 会打开 Config provider form。
+- setup mode 下 API Key 必填。
+- `Esc` 取消 form 后返回 Welcome，不退出 TUI。
+- 保存成功后设置 active model。
 
-### Provider 编辑表单
+### General
 
-Provider 编辑表单使用 overlay，只编辑 provider 级字段。新增 provider 后继续进入 Model 编辑表单，或在同一 overlay 的下一步填写首个 model。
+当前 General 只有两个轻量偏好：
 
-```
-┌─ Add Provider ─────────────────────────┐
-│  Type:     [openai ▾               ]   │
-│  Name:     [GLM                    ]   │
-│  API Key:  [sk-****                   ]│
-│  Endpoint: [https://open.bigmodel...  ]│
-│                                        │
-│  Enter Next · Esc Cancel               │
-└────────────────────────────────────────┘
-```
+- Language: zh/en。
+- Theme: auto/dark/light。
 
-Provider 字段：
+未实现：
 
-| 字段 | 说明 | setup mode | manage mode |
-|---|---|---|---|
-| Type | 必填，下拉选择: openai / anthropic / openai-compatible | 必填 | 必填 |
-| Name | 展示名，同时作为默认 provider id 的来源；保存时必须归一化成稳定 id | 必填 | 必填 |
-| API Key | 存入 credentials.toml，不写入 config.toml | 必填 | 编辑时可留空表示不修改 |
-| Endpoint | Type=openai/anthropic 时有默认值，可覆盖；Type=openai-compatible 时必填 | 可选/必填 | 可选/必填 |
-
-Provider id 规则：
-
-- 用户看到的是 `Name`，内部保存使用稳定 `provider_id`。
-- 新增时由 `Name` 派生 `provider_id`，例如 `GLM` → `glm`。
-- 如果 id 冲突，追加短后缀，例如 `glm-2`。
-- 编辑 `Name` 不应改变已有 `provider_id`，避免 credentials 失效。
-
-### Model 编辑表单
-
-Model 编辑表单只编辑 model 级字段。
-
-```
-┌─ Add Model ────────────────────────────┐
-│  Model ID: [glm-4                  ]   │
-│  Label:    [GLM 4                  ]   │
-│  Default:  [yes ▾                  ]   │
-│                                        │
-│  Enter Save · Esc Back                 │
-└────────────────────────────────────────┘
-```
-
-Model 字段：
-
-| 字段 | 说明 | setup mode | manage mode |
-|---|---|---|---|
-| Model ID | 实际模型 ID，用于请求模型 | 必填 | 必填 |
-| Label | 展示名；为空时使用 Model ID | 可选 | 可选 |
-| Context Window | 模型最大上下文 token 数；写入 `context_window` | 可选，默认按 provider | 可选 |
-| Default | 是否作为该 provider 默认 model | 默认 yes | 可选 |
-
-`context_window` 当前已经是底层配置能力：`internal/config.ModelConfig.ContextWindow` 会保存到 `config.toml` 的 `[[models]].context_window`，provider 构造时会传入模型实现；OpenAI 兼容默认 `128000`，Anthropic 默认 `200000`。TUI 设计必须把它作为模型级字段暴露出来。
-
-实现要求：
-
-- `ipc.ConfigModel` 需要补充 `context_window` 字段，`config.get` / `config.set` 必须透传。
-- `internal/tui/config.go` 的表单需要增加 Context Window 输入项。
-- 空值表示使用 provider 默认，不写入 TOML。
-- 非空必须校验为正整数。
-- Provider 列表和详情页应显示上下文摘要，例如 `ctx 128k`。
-- Chat 顶栏的最大上下文来自 active model 的 `context_window`，没有配置时使用 provider 默认值。
-
-### General 设置
-
-General 设置复杂度低，可以在 Config 首页就地编辑，不需要进入独立详情页。
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│  Config                                         [Esc] Back   │
-│──────────────────────────────────────────────────────────────│
-│                                                              │
-│  ▸ Model Connections                                         │
-│    Active    GLM / glm-4                                     │
-│    Providers 2 configured · 1 needs attention                │
-│                                                              │
-│  ▸ General                                                   │
-│    Language   [中文 ▾]                                       │
-│    Theme      [Default ▾]                                    │
-│                                                              │
-│──────────────────────────────────────────────────────────────│
-│  ↑↓ Navigate · Enter Change · Esc Done                       │
-└──────────────────────────────────────────────────────────────┘
-```
-
-General 编辑规则：
-
-- 选中 General 行后，`Ctrl+E` 进入就地编辑状态。
-- 编辑状态下 `↑↓` 在 General 字段之间移动，`Enter` 切换或打开候选值。
-- `Esc` 退出 General 编辑状态并回到 Config 首页，不退出 TUI。
-- General 只放低风险偏好项，例如 Language、Theme；复杂或敏感配置不放这里。
-
-### Quick Setup
-
-首次启动无 config 时进入 Quick Setup。它不是完整管理页，也不展示 General 设置。
-
-```
-┌─ Setup Model Connection ───────────────┐
-│  Type:     [openai-compatible ▾    ]   │
-│  Name:     [GLM                    ]   │
-│  Model:    [glm-4                  ]   │
-│  API Key:  [sk-****                ]   │
-│  Endpoint: [https://open.bigmodel... ] │
-│                                        │
-│  Enter Save · Esc Back                 │
-└────────────────────────────────────────┘
-```
-
-Quick Setup 规则：
-
-- Quick Setup 可以把 provider 和首个 model 放在同一个短表单里，减少首次启动步骤。
-- 保存时仍按 provider/model/credentials 三类数据落盘。
-- 保存成功后设为 active model，连接 daemon，进入 Welcome。
-- 取消 setup 时返回空状态首页，不进入 Chat，也不退出 TUI。
-- 失败时错误显示在表单内，不跳转页面。
-
-保存成功后：
-
-- setup mode：写入 config.toml (provider/models/active_model) + credentials.toml (api_key)，连接 daemon，进入 Welcome。
-- manage mode：写入 config.toml (provider/models/active_model 如有变化) + credentials.toml (api_key)，返回 Provider 详情或 Provider 列表，保留来源页面。
+- 单独 General 页面。
+- Guard rules 编辑。
+- Hooks 编辑。
+- max_model_rps。
+- cost_per_1k。
+- model pricing / usage budget。
 
 ---
 
-## Help 页面
+## Help
 
-Help 页面是完整快捷键和命令说明。Chat 内的 `?` 是浮层，`/help` 或 Welcome 中选择 Help 进入完整页面。
+Help 有两个形态：
 
-Help 页面所有说明文本通过 i18n 渲染；快捷键本身不翻译。
+- Chat/Config overlay：`?` / `F1` 打开。
+- 独立 Help 页面：Welcome 中选择 Help 或 Chat 输入 `/help`。
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  Help                                           [Esc] Back   │
-│──────────────────────────────────────────────────────────────│
-│                                                              │
-│  Shortcuts                                                   │
-│  Enter        Send message                                   │
-│  Shift+Enter  New line                                       │
-│  Esc          Cancel / Back                                  │
-│  Ctrl+N       New session                                    │
-│  Ctrl+T       Toggle tool/thinking detail                    │
-│  Ctrl+O       Open config                                    │
-│  Ctrl+U/D     Scroll viewport                                │
-│  ? / F1       Toggle help                                    │
-│                                                              │
-│  Commands                                                    │
-│  /new              Start a new session                       │
-│  /model <name>     Switch model                              │
-│  /compact          Compact context                           │
-│  /memory search Q  Search memory                             │
-│  /help             Open help page                            │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-```
+当前内容：
 
-实现：
+- 使用 `bubbles/help` 渲染 key.Binding。
+- 展示 Chat 通用快捷键。
+- 展示当前 6 个 slash command。
+- Help 页面使用 viewport，可滚动。
 
-- 快捷键区用 `bubbles/help` 的 `FullHelpView`。
-- 命令区手动渲染。
-- 内容放入 viewport，支持滚动。
+当前不足：
+
+- Config 的 `A/E/D/T/Space/j/k` 未在完整 Help 中集中展示。
+- Welcome 的 `n/r/Ctrl+O/?/j/k` 未在完整 Help 中集中展示。
+- Help 内容仍偏 Chat，需要按页面分组补齐。
 
 ---
 
-## 快捷键
+## 快捷键总表
 
-| 快捷键 | Chat | Welcome | Config | Help |
+| Key | Welcome | Chat | Config | Help |
 |---|---|---|---|---|
-| `Enter` | send / accept suggestion | select | select/save | - |
-| `Shift+Enter` | newline | - | - | - |
-| `Esc` | cancel/back/close overlay | back/home | back/cancel | back |
-| `Ctrl+N` | new session | new session | - | - |
-| `Ctrl+T` | toggle tool/thinking detail | - | - | - |
-| `Ctrl+O` | config | config | - | - |
-| `Ctrl+U/D` | scroll viewport | - | - | scroll |
-| `?` / `F1` | toggle help overlay | help page | help overlay | - |
-| `Ctrl+C` | quit | quit | quit | quit |
+| `Enter` | 选择 | 发送/接受建议/确认 AskUser option | 打开/保存/切换 | - |
+| `Shift+Enter` / `Alt+Enter` | - | 换行 | - | - |
+| `Esc` | 无操作 | 关闭 overlay/cancel/清空输入/回 Welcome | 返回/取消 | 返回来源页 |
+| `Ctrl+C` | 退出 | 退出 | 退出 | 退出 |
+| `↑↓` | 移动菜单 | 命令建议或 AskUser options | 移动列表/表单焦点 | - |
+| `j/k` | 移动菜单 | model picker 中可用 | 移动列表 | - |
+| `n` | New | - | - | - |
+| `r` | Resume | - | - | - |
+| `Ctrl+N` | - | 新会话 | - | - |
+| `Ctrl+O` | Config | Config | - | - |
+| `Ctrl+T` | - | 展开/收起 tool/thinking | - | - |
+| `Ctrl+U/D` | - | viewport 半页滚动 | - | Help viewport 半页滚动 |
+| `PgUp/PgDown` | - | viewport 半页滚动 | - | Help viewport 半页滚动 |
+| `?` / `F1` | Help 页面 | help overlay | help overlay | - |
+| `A` | - | - | models list 新增 | - |
+| `E` | - | - | models/detail 编辑 | - |
+| `D` | - | - | models list 删除 | - |
+| `Space` | - | - | models list 激活 | - |
+| `T` | - | - | detail check，占位 | - |
 
-`keys.go` 统一定义 `key.Binding`，Help 浮层和 Help 页面复用同一份 keymap。
+---
+
+## IPC 展示数据
+
+TUI 需要 daemon 提供的展示数据：
+
+| 数据 | 当前用途 |
+|---|---|
+| `daemon.status` | Welcome 状态、active provider/model、context window、usage、memory、sessions |
+| `daemon.state` | 连接时 provider/model/PID 等轻量状态 |
+| `config.get` | Config models、active_model、locale、theme |
+| `config.set` | upsert/delete/activate model，update general |
+| `agent.stream` | assistant chunk、usage、context tokens/window、done |
+| `agent.reasoning` | thinking 内容 |
+| `agent.tool_start` | tool running 行 |
+| `agent.tool_end` | tool done/error 行 |
+| `agent.ask_user` | 用户确认或补充信息 |
+| `agent.askReply` | TUI 回传用户答案 |
+| `session.compact_result` | compact 面板 |
+| `memory.search_result` | Chat 中显示记忆搜索结果 |
+| `session.restore_message` | Resume 恢复历史消息 |
+| `session.restore_input` | Resume 恢复未发送输入 |
+
+已打通的关键结构：
+
+```go
+type ConfigModel struct {
+    Provider      string   `json:"provider"`
+    Model         string   `json:"model"`
+    BaseURL       string   `json:"base_url,omitempty"`
+    ContextWindow int      `json:"context_window,omitempty"`
+    Strengths     []string `json:"strengths,omitempty"`
+    HasAPIKey     bool     `json:"has_api_key,omitempty"`
+}
+```
+
+`context_window` 当前已经不再是文档缺口：
+
+- `internal/config.ModelConfig.ContextWindow` 可持久化到 TOML。
+- `internal/ipc.ConfigModel.ContextWindow` 已存在。
+- Config form 可编辑 Context Window。
+- Chat 顶栏显示 `ctx used/window`。
+- Compact 面板按 Context Window 计算百分比。
 
 ---
 
 ## 文件结构
 
-```
+当前实际结构：
+
+```text
 internal/tui/
-├── app.go              # TUI struct, Init/Update/View, mode 切换、IPC notification 分发
-├── i18n.go             # TUI i18n helper，封装 key lookup 和 fallback
-├── i18n_keys.go        # TUI 文案 key 注册表；所有用户可见文本必须来自这里或 internal/i18n
-├── keys.go             # key.Binding 定义，Help 浮层和 Help 页面复用
-├── styles.go           # lipgloss 样式和配色
-├── pet.go              # 完整宠物 logo + Chat 3 行小 logo 三态
-├── welcome.go          # Welcome 页面、入口菜单、daemon 概况
-├── chat.go             # Chat 状态、Update、textarea、viewport、tool/thinking 运行态
-├── chat_render.go      # Chat 视图布局、消息/tool/thinking 渲染拆分；若保留空文件需删除或补齐职责
-├── compact_panel.go    # /compact 结果面板，展示压缩前后 token 和 context window 占比
-├── config.go           # Config 首页、Provider 列表/详情、setup/manage mode、provider/model 表单 overlay
-├── help.go             # Help 页面和 Chat help overlay
-├── markdown.go         # glamour renderer
-├── commands.go         # slash commands 和命令联想数据
-├── statusbar.go        # token/context 格式化、topbar/bottombar 辅助函数
-├── ipc_client.go       # TUI IPC client 接口和跨平台公共逻辑
-├── ipc_client_unix.go  # Unix socket IPC client
-└── ipc_client_windows.go # Windows named pipe IPC client
+├── app.go                # TUI struct, Init/Update/View, mode 切换、IPC notification 分发
+├── chat.go               # Chat 状态、输入、AskUser、tool/thinking 渲染核心
+├── chat_render.go        # Chat 布局、顶栏/底栏、命令建议、model picker、渲染辅助
+├── commands.go           # slash commands
+├── config.go             # Config 表单、provider kind、表单校验和保存
+├── config_model.go       # Config 页面行模型、导航、渲染
+├── help.go               # Help 页面、Chat/Config help overlay、key bindings
+├── i18n.go               # translator 和 fallback
+├── i18n_keys.go          # 内置中文/英文文案
+├── ipc_client.go         # TUI IPC client 接口和公共逻辑
+├── ipc_client_unix.go    # Unix socket IPC client
+├── ipc_client_windows.go # Windows named pipe IPC client
+├── markdown.go           # Glamour renderer
+├── pet.go                # Welcome pet 和 Chat mini pet
+├── theme.go              # auto/dark/light 主题
+└── ui.go                 # 通用样式、布局 helper、compact 面板
 ```
 
-文件结构规则：
+结构规则：
 
-- 不新增独立 `setup.go`，除非只是一个很薄的 mode alias。首次配置走 `config.go` 的 setup mode，避免重复表单和重复 i18n key。
-- 当前实现里 `chat.go` 同时承担 Update 和部分渲染，后续如果继续增长，可以把纯渲染函数迁移到 `chat_render.go`，但不要让同一类渲染逻辑散落在两个文件里。
-- `statusbar.go` 不只负责底栏，也应承载 context/token 格式化辅助函数，避免 Chat 顶栏和 compact 面板各自实现格式化。
-- `compact_panel.go` 已经存在，文档必须保留，因为它依赖 context window 信息。
-
----
-
-## Bubbles / Glamour 使用清单
-
-| 包 | 用途 |
-|---|---|
-| `viewport` | Chat 对话区、Help 页面滚动 |
-| `textarea` | Chat 输入 |
-| `spinner` | LLM 首包等待、tool 进行中 |
-| `stopwatch` | thinking/tool 计时 |
-| `help` | Chat help overlay、Help 页面快捷键区域 |
-| `list` | Welcome 菜单、Config provider 列表 |
-| `textinput` | Provider 表单 |
-| `key` | 快捷键绑定和匹配 |
-| `glamour` | Agent/Thinking Markdown 渲染 |
-
-不使用 `table` 渲染 Chat 中的 Markdown 表格，因为 glamour 已经处理静态 Markdown 表格；`table` 更适合交互式数据表。
+- 不新增独立 `setup.go`，首次配置继续复用 Config setup mode。
+- 不新增独立 `compact` mode，compact 继续作为 Chat 命令和结果面板。
+- Chat 继续保持 `chat.go` 负责状态和 Update，`chat_render.go` 负责布局和辅助渲染。
+- Config 如果继续增长，可以按功能拆文件，但不要把同一层级的表单逻辑散落到多个文件里。
+- `ui.go` 只放跨页面小工具和小面板，不承载页面状态机。
 
 ---
 
-## IPC 需要的数据
+## 未实现清单
 
-TUI 需要 daemon 提供以下前端展示数据：
+这些是文档中以前容易被误认为已经实现、但当前仍未完成的项。
 
-| 数据 | 用途 |
-|---|---|
-| active_model (provider/model) | Welcome、Chat 顶部身份区 |
-| model list | Config provider 列表；每个模型需要包含 `context_window` |
-| active model context_window | Chat 顶部身份区最大上下文、compact 面板百分比 |
-| session current context tokens | Chat 顶部身份区当前上下文，例如 `ctx 12k/128k` |
-| daemon connected/status | Welcome、Chat 顶部身份区 |
-| session token input/output/cache | Chat 底栏 |
-| token speed | Chat 底栏 |
-| memory/session stats | Welcome 状态面板 |
-| last session id/summary | Resume Last Session |
-| unsent_input | Resume 后填充 textarea |
-
-如果 `daemon.status` 已包含这些字段，优先扩展现有方法，不新增多余 IPC 方法。
-
-Config setup/manage 复用相同配置 IPC：
-
-| 方法 | 用途 |
-|---|---|
-| `config.get` | 读取 models/credentials/general 配置；`models[]` 必须包含 `context_window` |
-| `config.set` | 保存 models/credentials/general 配置；upsert model 必须支持 `context_window` |
-| `daemon.status` | 保存后刷新 active_model 状态 |
-
-当前实现注意事项：
-
-- `internal/config.ModelConfig` 已支持 `ContextWindow int` 和 TOML 字段 `context_window`。
-- `internal/model.Provider.ContextWindow()` 已用于压缩和 provider 默认上下文。
-- `internal/ipc.ConfigModel` 当前还缺少 `context_window`，需要补齐，否则 TUI 无法读写该配置。
-- `internal/tui/config.go` 当前 provider 表单只有 Provider、Model、API Key、Endpoint、Strengths，也需要增加 Context Window。
+| 项目 | 当前状态 | 建议优先级 |
+|---|---|---|
+| Provider API ping | `T` 只有占位提示 | 中 |
+| Help 按页面分组 | 只覆盖 Chat 通用快捷键 | 中 |
+| Config 高级配置 | 未覆盖 guard/hooks/rate/cost | 低到中 |
+| Provider/Model 分离表单 | 当前是一张 model connection 表单 | 中 |
+| 结构化 AskUser options | 当前只有 `[]string` | 低 |
+| AskUser 鼠标点击选择 | 未实现 | 低 |
+| 外部 locale 文件加载 | 有函数，未接入启动流程 | 低 |
+| `/daemon` 命令 | IPC 有方法，TUI 未暴露 | 低 |
+| `/trigger` 命令 | IPC 有方法，TUI 未暴露 | Phase 3 |
+| `/skill` 命令 | IPC 有方法，TUI 未暴露 | Phase 3 |
+| `/usage` 命令 | IPC 有方法，TUI 未暴露 | 低 |
+| auto compact UI 开关 | 未实现 | 低 |
+| 全局状态栏 | 未实现，当前也不建议 MVP 做 | 低 |
 
 ---
 
-## 实现优先级
+## 后续收尾建议
 
-1. **TUI i18n 基础**：封装 `tui.tr(key, args...)`，替换所有硬编码用户可见文案。
-2. **Config/setup 统一链路**：Config 支持 setup/manage mode，Provider 表单只实现一套。
-3. **Markdown 渲染**：用 glamour v2 替换自写解析器，解决表格和代码块问题。
-4. **Chat 布局**：顶部身份区、对话区、输入区、命令联想、底栏五区域布局。
-5. **消息渲染**：用户/Agent/Tool/Thinking 四类内容统一样式。
-6. **Help 浮层**：Chat 内 `?` overlay，移除常驻帮助栏。
-7. **命令联想**：`/` 前缀建议，`↑↓` 选择，`Enter` 填充。
-8. **Welcome**：宠物 logo、状态面板、list 菜单。
-9. **Resume**：恢复历史并填充 `unsent_input`。
+按当前可用状态，TUI 近期只建议做三类收尾：
+
+1. **补齐真实可见缺口**：Provider Test、Help 页面分组、Welcome/Config help 文案。
+2. **降低配置歧义**：把当前 `Provider` 字段在 UI 中解释清楚，或拆成 provider kind/name/model 的更明确表单。
+3. **保持 Chat 稳定**：不要继续往 Chat 常驻区域堆信息；新增能力优先通过命令、overlay 或 Config 子页渐进披露。

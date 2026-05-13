@@ -1,339 +1,449 @@
-# Suna 开发进度清单
+# Suna 当前状态与阶段路线图
 
-> 最后更新: 2026-05-09
-> 对应设计文档: plans/01~12
-> 当前阶段: **Phase 1 收尾 + Phase 2 启动**
+> 最后更新: 2026-05-13
+> 目标：这份文档是 Suna 当前真实状态和下一步路线图的唯一入口。
+> 原则：只把“可稳定依赖的闭环”视为完成；有代码但不闭环的模块统一标为 Prototype；只有表、模板、接口或设计的模块标为 Stub。
 
-## Phase 状态总览
+---
 
-| Phase | 内容 | 状态 | 完成度 |
+## 当前结论
+
+Suna 目前已经跑通了最小 Agent 产品形态：daemon 启动、TUI chat、agent loop、tool calling、基础模型配置、IPC streaming、AskUser 和基本 session 流程都能工作。
+
+但 Suna 还不是完整自主 Agent 平台。当前比较完整的只有四块：
+
+1. **Agent Loop 主链路**：用户输入、模型流式输出、tool call、tool result 回填、继续对话。
+2. **基础 Tools**：读文件、列目录、HTTP 读取、执行命令、写文件、编辑文件、HTTP 写请求、AskUser、Spawn 的入口已经存在。
+3. **Chat / TUI MVP**：TUI 已经能完成基本对话、配置模型、展示工具调用、处理 AskUser options、显示 compact 结果。
+4. **Daemon / IPC 基础设施**：TUI 与 daemon 分离，IPC 消息、stream、session、config 基础链路可用。
+
+其余模块大多处于 Prototype 或 Stub：
+
+- 智能路由只服务 spawn，且工具权限推荐没有闭环。
+- Guard 有规则和 LLM review 骨架，但没有安全闭环。
+- Memory 有表、worker、提取和 recall 的局部实现，但长期记忆不可靠。
+- Context compact 有实现，但预算、摘要质量、window 使用和展示仍不完整。
+- Capability 主要是 declarative SKILL.md 注入，script/MCP/runtime 没有完成。
+- Trigger、QuickJS、MCP、hooks、trust、reflection、sandbox、marketplace 基本是预留或设计。
+
+接下来不应继续扩张新能力，而应先把核心 MVP 收敛成可靠产品，再逐步闭环 Prototype 模块。
+
+---
+
+## 状态分级
+
+| 状态 | 含义 | 文档规则 |
+|---|---|---|
+| Stable | 可作为长期基础依赖，行为明确，边界清楚 | 可以写入“已完成” |
+| Usable MVP | 主链路可用，但体验、错误处理或边界仍粗糙 | 只能写“可用”，不能写“完整” |
+| Prototype | 有代码，有局部链路，但不闭环或不可靠 | 必须列出缺口，不得写成完成 |
+| Stub | 只有接口、表、模板、常量或设计，没有主链路 | 只能写“预留/未实现” |
+
+---
+
+## 模块状态仪表盘
+
+| 模块 | 当前状态 | 真实结论 | 下一步方向 |
 |---|---|---|---|
-| Phase 1 | Daemon + 记忆 + 9工具 + Guard stub + TUI 重构 | 收尾中 | ~90% |
-| Phase 2 | Guard LLM review + sub-agent 智能路由 + 并发控制 + 提示词优化 | 进行中 | ~10% |
-| Phase 3 | QuickJS + MCP + Skill 学习 | 未开始 | 0% |
-| Phase 4 | 模型表现追踪 + 完善 | 未开始 | 0% |
-| Phase 5 | 意图层 + WebSocket + Docker | 未开始 | 0% |
+| Daemon / IPC | Usable MVP | 单 daemon + TUI IPC 可用，stream/config/session 基础链路通 | 稳定错误处理和多客户端边界 |
+| TUI Chat | Usable MVP | chat、tool 展示、AskUser、compact 展示可跑通 | 补诚实状态展示和关键 help |
+| Model Config | Usable MVP | TUI 可配置模型、API key、endpoint、context window、theme/locale | 补高级配置入口和 provider test |
+| Agent Loop | Usable MVP | 主对话、stream、tool loop、usage event、cancel 可用 | 稳定 context、usage、错误处理 |
+| Tools | Usable MVP | 基础工具可调用，Act 工具会进入 Guard | 补并发限制、权限边界、危险操作 UX |
+| Spawn | Prototype | 子 agent 能跑，模型路由可用，但权限、guard、usage、memory 不闭环 | 优先收敛工具权限和最终 model/tools 展示 |
+| Smart Routing | Prototype | `RouteWithLLM` 只用于 spawn，main agent 固定 active model | 明确只服务 spawn，并让 tools 推荐生效 |
+| Guard | Prototype | 本地规则、敏感保护、审计、LLM review 骨架存在 | 做最低安全闭环，拒绝假 approve/modify |
+| Memory | Prototype | session、episodic、semantic、entity、worker 都有局部实现 | 先保证 session/tool persistence，再谈长期记忆 |
+| Context / Compact | Prototype | 自动/手动 compact 存在，但预算和摘要链路不稳 | 明确 token/window 口径和压缩策略 |
+| Usage / Cost | Prototype | token usage 局部可见，cost 基本没闭环 | 先统一 usage，再接 cost |
+| Capability | Prototype / Stub | SKILL.md declarative 注入可用，script/MCP 只识别不执行 | 暂缓 runtime，先保持 declarative 清楚 |
+| Trigger / Perception | Stub | 有表和 IPC 常量预留，没有主链路 | 暂缓 |
+| Hooks / Trust / Reflection | Stub | 配置/表预留，没有执行闭环 | 暂缓 |
+| QuickJS / MCP | Stub | capability 能识别类型，但无 runtime/client | 暂缓 |
+| Sandbox / Marketplace | Stub | 设计层面，无实现 | 暂缓 |
 
 ---
 
-## 4 个核心点 — 当前状态
+## 关键设计边界
 
-### 1. 多模型 + 子任务智能调度
+### Main Agent 与模型路由
 
-| 子功能 | 状态 | 说明 |
+main agent **必须使用 active model**。它不做自动模型选择，这是当前设计，不是缺陷。
+
+智能路由只用于 spawn 子任务：
+
+- main agent 接收用户请求，用 active model 规划和执行。
+- main agent 决定是否调用 spawn。
+- spawn 内部在没有显式 model 时调用 `RouteWithLLM`。
+- `RouteWithLLM` 根据 task 和模型 strengths 选择 sub-agent model。
+
+因此后续不应把“main agent 未使用智能路由”列为问题。真正的问题是：spawn 的 router 返回 tools 后，当前权限分配没有完全生效。
+
+### Spawn 与权限边界
+
+当前 spawn 是 Prototype，不是完整 delegation runtime。
+
+当前事实：
+
+- sub-agent 可以运行。
+- sub-agent 禁止嵌套 spawn。
+- sub-agent 可使用 route 选出的 model。
+- sub-agent 的工具集来自 main agent 传入的 `tools` 或默认工具集。
+- route 返回的 tools 目前没有可靠接入实际 sub-agent registry。
+- sub-agent 不保存独立 session/usage/memory。
+- sub-agent 不继承主 Guard 的 LLM review、用户规则和审计 DB。
+
+短期设计边界：
+
+- sub-agent 的安全边界应主要来自“启动前授予的工具集”。
+- 不急着给 sub-agent 做完整 LLM guard review。
+- 默认工具应保守，尽量只读。
+- 高危工具必须显式授予。
+- TUI/日志应展示 sub-agent 最终使用的 model 和 tools。
+
+### Guard 安全边界
+
+当前 Guard 不是完整权限系统。
+
+当前事实：
+
+- Act 工具会进入 Guard。
+- Low risk 自动 approve。
+- blocked rule 命中会 reject。
+- Medium/High risk 在有 LLM reviewer 时会调用 LLM review。
+- LLM review 失败或 JSON parse 失败时当前可能 auto approve。
+- `confirm` 当前不是真实用户确认。
+- `modify` 当前不是真实参数修改。
+- sub-agent 没有 LLM guard review。
+
+短期设计边界：
+
+- Guard 不能假装完成确认或修改。
+- review 失败不能默认放行高风险操作。
+- 没有实现用户确认前，`confirm` 应保守处理。
+- 没有实现参数改写前，`modify` 应保守处理。
+- sub-agent 安全先靠工具集隔离，而不是完整 Guard 嵌套。
+
+### Memory 与 Context
+
+当前 Memory 不能被描述为完整长期记忆。
+
+当前事实：
+
+- session persistence 可用，但 tool call/result persistence 不完整。
+- episodic/semantic/entity 表和 store 存在。
+- extraction worker 存在。
+- FTS recall 存在。
+- embedding 接口和部分存储存在，但主链路没闭环。
+- entity recall 没接入主 prompt。
+- session summary 没有完整写入链路。
+- cost 没接入 usage 闭环。
+- compact 有实现，但 context budget 和 token 口径仍不稳定。
+
+短期设计边界：
+
+- 先把 session 和 tool persistence 做可靠。
+- 再做 memory recall 质量。
+- 最后再做 embedding/entity/semantic 合并。
+- 文档中不要再把 memory 写成完整四层记忆系统已完成。
+
+---
+
+## Phase 路线图
+
+### Phase 0：文档止血与边界冻结
+
+目标：让文档不再误导开发判断。
+
+状态：当前应立即完成。
+
+需要做：
+
+- 将 `00-progress.md` 作为唯一真实状态入口。
+- 所有设计文档顶部增加当前状态块。
+- 区分 Current Implementation 和 Target Design。
+- 明确哪些模块是 Usable MVP、Prototype、Stub。
+- 明确 main agent 固定 active model。
+- 明确 spawn/guard/memory/capability 都不是完整闭环。
+
+完成标准：
+
+- 任何人看 `00-progress.md` 能知道当前可依赖什么。
+- 任何人看模块设计文档，能分清目标设计和当前实现。
+- 不再因为“有代码/有表/有模板”把模块误判为完成。
+
+不做：
+
+- 不重写全部业务逻辑设计。
+- 不追求文档漂亮。
+- 不继续扩展新功能。
+
+---
+
+### Phase 1：核心 MVP 稳定化
+
+目标：把已经能跑的 Agent Loop + TUI + Tool 基础链路变成可信 MVP。
+
+需要做：
+
+- 稳定 daemon / IPC / TUI 基础体验。
+- 稳定 main agent loop。
+- 稳定 tool call 和 tool result 顺序。
+- 稳定 cancel、error、timeout 展示。
+- 保证基础模型配置流程顺畅。
+- 保证 AskUser options 可用。
+- 保证 session restore 不破坏对话状态。
+- TUI 明确展示真实状态，不隐藏失败或占位能力。
+
+完成标准：
+
+- 用户可以完成连续多轮对话。
+- 用户可以配置模型并切换 active model。
+- 用户可以看到 stream、tool、error、AskUser、compact 的真实状态。
+- 基础读写/执行工具行为可预测。
+- 没有明显“看起来成功但实际没生效”的 UI。
+
+不做：
+
+- 不做完整 Memory。
+- 不做 Trigger。
+- 不做 MCP/QuickJS。
+- 不做完整权限系统。
+- 不做能力市场。
+
+---
+
+### Phase 2：Spawn 与权限收敛
+
+目标：让 sub-agent 成为边界清楚、权限可控的辅助执行单元。
+
+需要做：
+
+- 明确 spawn 的工具授权规则。
+- 区分显式 tools、router 推荐 tools、fallback 默认 tools。
+- 让 router 返回的 tools 真正影响 sub-agent registry。
+- 默认工具集改为保守策略。
+- 高危工具必须显式授予或通过明确策略授予。
+- 校验 model ref 和 tool name。
+- TUI/日志展示 sub-agent 最终 model 和 tools。
+- 保持 main agent 固定 active model。
+- 保持 sub-agent 禁止嵌套 spawn。
+
+完成标准：
+
+- spawn 没传 tools 时，系统仍能给出可解释的最小工具集。
+- spawn 传 tools 时，sub-agent 只能使用授予工具。
+- route 选择的 model 生效且可观察。
+- route 推荐的 tools 生效且可观察。
+- sub-agent 默认不会拿到不必要的高危能力。
+
+不做：
+
+- 不做 sub-agent 完整 LLM guard review。
+- 不做 sub-agent 独立长期记忆。
+- 不做多层嵌套 agent。
+- 不做复杂权限 UI。
+
+---
+
+### Phase 3：Guard 最低安全闭环
+
+目标：让安全系统不再“看起来审查了但实际放行”。
+
+需要做：
+
+- 明确哪些工具进入 Guard。
+- 明确 low/medium/high 风险行为。
+- 修正 LLM review 失败后的保守策略。
+- 修正 `confirm` 不真实确认的问题。
+- 修正 `modify` 不真实修改的问题。
+- 保证 Guard reviewer 在 new/restore session 后不丢失。
+- 保证 reject reason 能传到 TUI。
+- 保证占位能力不会被文档写成完成。
+
+完成标准：
+
+- 高风险操作不会因为 review 失败而静默放行。
+- confirm/modify 不会假装已经处理。
+- 用户能看到 Guard 拒绝原因。
+- 主 agent 的 Act 工具安全行为可预测。
+- sub-agent 的安全边界由 tools 授权控制，并在文档中明确。
+
+不做：
+
+- 不做完整渐进信任。
+- 不做复杂策略语言。
+- 不做完整 sub-agent guard 嵌套。
+- 不做 sandbox。
+
+---
+
+### Phase 4：Session、Context 与 Usage 收敛
+
+目标：让对话状态、上下文压缩和用量展示可信。
+
+需要做：
+
+- 保存完整 session 对话结构。
+- 明确 tool call/result 是否持久化以及如何恢复。
+- 修正 compact 的 context window 来源和 token 口径。
+- 区分真实 provider usage 和估算值。
+- 统一 TUI 中 token、context、compact 展示语义。
+- 明确 usage cost 当前是否可用。
+- 让 session restore 后的上下文可预测。
+
+完成标准：
+
+- restore 后用户能理解恢复了什么、没恢复什么。
+- compact 后用户能看到真实或明确标注的估算状态。
+- token/context 展示不伪造来源。
+- tool call/result 不再导致 session 历史断裂。
+
+不做：
+
+- 不做完整长期记忆。
+- 不做复杂 cost analytics。
+- 不做模型表现评分。
+
+---
+
+### Phase 5：Memory 最小闭环
+
+目标：把 Memory 从“有很多存储和 worker”收敛为一个可解释、可验证的记忆能力。
+
+需要做：
+
+- 明确 memory 当前要解决的问题。
+- 明确哪些内容会被保存。
+- 明确哪些内容会被 recall。
+- 保证 extraction 不重复、不串 session、不误标完成。
+- 决定先做 FTS 还是 embedding，不同时扩张。
+- 如果启用 embedding，必须保证写入和 recall 都闭环。
+- 如果启用 entity，必须保证 entity recall 接入 prompt 或明确只是存储。
+- 明确 semantic facts 的追加、合并和展示策略。
+
+完成标准：
+
+- 用户能解释“为什么这条记忆被用到了”。
+- recall 来源可观察。
+- extraction 失败不会产生误导性完成状态。
+- memory 不会被文档描述为超过实际能力。
+
+不做：
+
+- 不做主动习惯学习。
+- 不做复杂知识图谱。
+- 不做长期人格系统。
+- 不做自动策略调整。
+
+---
+
+### Phase 6：Capability 收敛
+
+目标：先把 declarative capability 做清楚，再决定是否进入 runtime。
+
+需要做：
+
+- 明确 SKILL.md declarative capability 的加载、展示、注入规则。
+- 明确 `[LOAD_SKILL]` 的触发和生效时机。
+- 明确 script 和 MCP 当前只是识别，不执行。
+- 如果后续实现 script，先定义 runtime 边界。
+- 如果后续实现 MCP，先定义 tool 注册和安全边界。
+
+完成标准：
+
+- declarative capability 行为可预测。
+- 文档不再暗示 script/MCP 已可用。
+- runtime 能力在实现前保持 Stub 状态。
+
+不做：
+
+- 不直接上 marketplace。
+- 不直接上 MCP 全量生态。
+- 不直接上 QuickJS 自动执行。
+
+---
+
+### Phase 7：扩展能力
+
+目标：在核心 MVP、Spawn、Guard、Memory 都稳定后，再考虑平台扩展。
+
+候选方向：
+
+- Trigger / Perception。
+- Hooks。
+- Trust rules。
+- Reflection / retry。
+- QuickJS runtime。
+- MCP client。
+- WebSocket 多 I/O。
+- Docker sandbox。
+- Capability marketplace。
+
+进入条件：
+
+- Core MVP 已稳定。
+- Spawn 权限边界明确。
+- Guard 最低安全闭环完成。
+- Session/context/usage 可信。
+- Memory 不再误导。
+
+当前建议：全部暂缓。
+
+---
+
+## 当前最高优先级缺口
+
+### P0：必须先澄清或修正
+
+| 问题 | 当前影响 | 期望状态 |
 |---|---|---|
-| 多模型配置 (active_model + [[models]]) | ✅ 完成 | `config.toml` 新版结构 |
-| Provider 统一接口 | ✅ 完成 | OpenAI + Anthropic + 兼容 API |
-| LLM 路由 `RouteWithLLM` | ⚠️ 实现未接入 | `router.go` 已实现，但 spawn 不调用 |
-| Spawn 子 agent | ✅ 基础完成 | 串行执行，工具集受限，不嵌套 |
-| **Spawn 自动选择模型** | ❌ 缺失 | `executeSpawn` 始终用 active model |
-| **Spawn 提示词模板** | ❌ 缺失 | 无独立的 sub-agent system prompt 模板 |
-| **Sub-agent 智能描述和权限** | ❌ 缺失 | main 不自动生成 sub 的描述/权限 |
+| 文档把 Prototype 写得像完成 | 开发判断混乱 | 设计目标和当前实现分离 |
+| spawn tools 推荐未闭环 | sub-agent 权限不可解释 | 显式 tools / router tools / fallback tools 边界清楚 |
+| sub-agent 默认权限偏大 | 没有 LLM guard review 时风险高 | 默认保守，高危工具显式授予 |
+| Guard review 失败可能放行 | 安全系统不可信 | 高风险失败保守处理 |
+| Guard confirm/modify 不真实 | 看起来审查了，实际没闭环 | 未实现前保守处理或明确拒绝 |
+| TUI 不展示最终 spawn model/tools | 调试困难 | 用户能看到最终执行边界 |
 
-### 2. 并行 + 并发限制
+### P1：核心体验稳定
 
-| 子功能 | 状态 | 说明 |
+| 问题 | 当前影响 | 期望状态 |
 |---|---|---|
-| Tool 并行执行 | ✅ 完成 | 多 tool call 同时 goroutine |
-| **Tool 并发上限** | ❌ 缺失 | config 无 `max_parallel_tools`，无上限 |
-| **Sub-agent 并行** | ❌ 缺失 | spawn 是串行的，不能同时跑多个 |
-| **Sub-agent 并发上限** | ❌ 缺失 | config 无 `max_parallel_subagents` |
+| session restore 不完整 | 历史和上下文可能断裂 | 恢复语义明确 |
+| tool call/result 未完整持久化 | restore 后 agent 上下文不完整 | tool 历史可恢复或明确不恢复 |
+| compact token/window 口径不稳 | 用户误解上下文状态 | 真实值和估算值分开 |
+| usage cost 不闭环 | cost 展示不可信 | 未完成前不暗示可用 |
+| provider test 是占位 | 配置体验误导 | 明确 not implemented 或实现真实测试 |
 
-### 3. Guard 权限系统
+### P2：暂缓但保留方向
 
-| 子功能 | 状态 | 说明 |
+| 问题 | 当前影响 | 期望状态 |
 |---|---|---|
-| Stage 1 硬规则 | ✅ 完成 | 跨平台 blocked rules |
-| Stage 2 风险评估 | ✅ 完成 | Low/Medium/High |
-| 敏感文件保护 | ✅ 完成 | `IsSensitivePath` + `MaskSensitiveContent` |
-| 审计日志 | ✅ 完成 | SQLite audit_log |
-| 用户自定义规则 | ✅ 完成 | blocked/allowed in config.toml |
-| **Stage 3 LLM 审核** | ❌ 缺失 | `guard.md` 模板存在但未接入 |
-| **confirm/modify 决策** | ❌ 缺失 | 只支持 approve/reject |
-| 渐进信任 | ❌ 缺失 | trust_rules 表存在但无逻辑 |
-
-### 4. 自主学习能力
-
-| 子功能 | 状态 | 说明 |
-|---|---|---|
-| 记忆提取 (extract) | ✅ 完成 | 异步 Worker + 4 层存储 |
-| 语义记忆 (semantic facts) | ✅ 完成 | preference/action/decision/error/fact |
-| 情景记忆 (episodic) | ✅ 完成 | FTS5 + 向量搜索 + 时间衰减 |
-| 实体关联 | ✅ 基础 | entity store 存在，图谱关系浅 |
-| **主动学习循环** | ❌ 缺失 | 没有从记忆中主动学习和调整行为 |
-| **习惯学习** | ❌ 缺失 | 不检测用户模式 |
+| embedding 未闭环 | 向量记忆不可依赖 | 写入和 recall 同时闭环 |
+| entity recall 未接入 | entity store 只是存储 | 接入 prompt 或明确降级 |
+| capability script/MCP 未执行 | 能力系统容易被误解 | 保持 Stub 标记 |
+| trigger/hooks/trust 只有预留 | 容易扩大范围 | 暂缓到 Phase 7 |
 
 ---
 
-## 缺失点详情
+## 文档维护规则
 
-### AskUser 选项选择
-
-- **现状**: `options` 参数从 LLM → IPC → TUI 全链路传递，TUI 收到 `AskUserParams.Options`
-- **问题**: TUI 只把 options 当文本展示（`"❓ " + p.Question`），不渲染为可选列表
-- **需要**: TUI 渲染为数字标记的可选项，用户输入数字或选择后回传，agent 侧验证
-
-### Spawn 提示词模板
-
-- **现状**: spawn 的 system prompt 由 LLM 在 `params["system"]` 中传入，无独立模板
-- **需要**: 新增 `spawn_system.md` 模板，自动注入任务上下文、可用工具说明、约束条件
-
-### Project Config
-
-- **不是问题**: `SUNA.md` 或 `.suna/AGENTS.md` 的内容注入 system prompt，是用户自定义项目指令的机制
-- 设计文档中定义的 `[Project Configuration]` section 就是这个用途
+1. `00-progress.md` 是状态入口，只写真实状态和阶段方向。
+2. 模块设计文档可以保留目标设计，但顶部必须写当前实现状态。
+3. 有代码不等于完成；必须闭环、可观察、可解释才算完成。
+4. Prototype 模块必须列出缺口。
+5. Stub 模块不得写成已实现。
+6. 每完成一个 Phase，先更新 `00-progress.md`，再更新对应模块设计文档。
+7. 不在同一段落混写 Current Implementation 和 Target Design。
 
 ---
 
-## Phase 1 已实现清单
+## 近期建议执行顺序
 
-### Daemon + TUI 双进程 (01-architecture)
+1. 完成 Phase 0：文档止血与边界冻结。
+2. 执行 Phase 2：Spawn 与权限收敛。
+3. 执行 Phase 3：Guard 最低安全闭环。
+4. 执行 Phase 4：Session、Context 与 Usage 收敛。
+5. 之后再评估是否进入 Phase 5 Memory。
 
-- [x] Daemon 常驻进程 (`internal/daemon/daemon.go`)
-- [x] PID 文件 + Socket 文件管理
-- [x] 30 分钟空闲自动退出 (`lifecycle.go`)
-- [x] 信号处理 (SIGTERM/SIGINT)
-- [x] 单二进制多模式: `suna`, `suna daemon`, `suna stop`, `suna status` (`main.go`)
-- [x] TUI 纯前端，无业务逻辑
-- [x] TUI 页面模型: Welcome / Chat / Config / Help
-
-### IPC 通信 (01-architecture)
-
-- [x] JSON-RPC 2.0 over NDJSON (`internal/ipc/`)
-- [x] Transport 抽象接口 (Unix Socket / Named Pipe)
-- [x] 跨平台 Socket: `_unix.go` + `_windows.go`
-- [x] TUI IPC Client 在 `tui/` 包内 (包独立性)
-- [x] Daemon State 初始推送 (provider/model 名称)
-- [x] 流式通知: stream, reasoning, tool_start, tool_end, ask_user
-- [x] 通知式结果: compact_result, memory_search_result
-- [x] AskUser 跨请求协调 (pending asks map)
-- [x] Config CRUD IPC (config.get / config.set)
-
-### Agent Loop (01-architecture)
-
-- [x] 完整循环: route → system prompt → LLM → output → memory extraction
-- [x] Main/Sub agent (Spawn, 嵌套深度限制)
-- [x] System prompt 模板渲染 (`prompt/loader.go`, `templates/system.md`)
-- [x] 环境信息注入 (OS/Arch/WorkDir/User/Time)
-- [x] SUNA.md / .suna/AGENTS.md 项目配置加载
-- [x] Capability 注入 (summary list + [LOAD_SKILL] 动态加载)
-- [x] 上下文压缩 (80% 阈值, 10 轮保留, LLM 摘要)
-- [x] 流式超时保护 (120s)
-- [x] 可取消 Run (CancelCurrentRun)
-
-### 多模型路由 (02-model-router)
-
-- [x] Provider 接口: Complete, EstimateTokens, ContextWindow, SupportsEmbedding, Embed
-- [x] OpenAI Provider (覆盖所有 OpenAI 兼容 API)
-- [x] Anthropic Provider
-- [x] 统一消息格式: CompletionRequest, Chunk, Message, ToolCall
-- [x] Tool calling 跨 Provider 转换
-- [x] LLM 路由 (RouteWithLLM, 基于 strengths 偏好标签选择模型)
-- [x] Embedding 自动发现 (HTTP probe `/v1/embeddings`)
-- [x] 已知 Provider embedding model 映射 (Zhipu/OpenAI/DashScope)
-- [x] Token 估算 (CJK 支持)
-- [x] 新版配置: active_model + [[models]] + credentials.toml
-
-### 9 工具 (03-tools)
-
-- [x] ReadFile (敏感文件保护)
-- [x] ListDir
-- [x] ReadHTTP
-- [x] Exec (跨平台 shell: `_unix.go` / `_windows.go`)
-- [x] WriteFile
-- [x] EditFile
-- [x] WriteHTTP
-- [x] AskUser (动态追加, options 参数全链路传递)
-- [x] Spawn (动态追加, 子 agent 有超时/工具集限制)
-- [x] 工具分类: Perceive (无 Guard) / Act (过 Guard) / Communicate
-- [x] API Key 脱敏 (`sensitive.go:MaskSensitiveContent`)
-
-### Guard (04-guard)
-
-- [x] 四阶段 Stub: 硬规则 → 风险评估 → auto-approve → 审计日志
-- [x] 跨平台硬规则 (`rules_unix.go`, `rules_windows.go`)
-- [x] 通用规则 (curl|sh, wget|sh, eval$())
-- [x] 风险等级: Low / Medium / High
-- [x] isReadOnlyCommand 白名单 (ls, cat, grep, find, git read-only...)
-- [x] Pipe 检测 (所有子命令必须 read-only)
-- [x] 审计日志 (SQLite audit_log)
-- [x] 用户自定义 blocked/allowed 规则 (NewGuardWithConfig)
-- [x] 敏感文件保护 (`sensitive.go:IsSensitivePath`)
-
-### 记忆层 (06-memory)
-
-- [x] 4 层框架: Working / Episodic / Semantic / Procedural(filesystem)
-- [x] 仅添加式提取 (INSERT only, 无 UPDATE/DELETE)
-- [x] 显著性过滤 (rule-based, 零 LLM 成本) (`significance.go`)
-- [x] Memory Worker 独立 goroutine 批量处理 (`worker.go`)
-- [x] 单次 LLM 调用产出 episodes + facts + entities
-- [x] FTS5 全文搜索 + CJK LIKE 降级 (`episodic.go:SearchFTS`)
-- [x] 向量搜索 (brute-force cosine similarity) (`episodic.go:SearchByEmbedding`)
-- [x] 时间衰减评分 (7d=1.0, 30d=0.8, 90d=0.5, >90d=0.3)
-- [x] 4K token budget (`episodic.go:Recall`)
-- [x] 上下文压缩 (compress.go, 80%阈值 + 10轮保留 + LLM摘要)
-- [x] 工具输出截断 (50KB / 500 行)
-- [x] 会话持久化 + 恢复 (session.go)
-- [x] 会话切换零延迟 handoff (NewSession 注入未提取上下文)
-- [x] 实体关联 (entity.go: Store, StoreBatch, Search, TopEntities)
-- [x] Embedding auto-discovery (probe /v1/embeddings)
-
-### Capability (05-capability)
-
-- [x] 声明式 SKILL.md 解析 (frontmatter + footer meta + H1)
-- [x] 两层注入: summary list (常驻) + full content ([LOAD_SKILL] 触发)
-- [x] 能力目录扫描 (`~/.suna/capabilities/`)
-- [x] 热重载 (Reload)
-
-### TUI (12-tui-design)
-
-- [x] 页面模型: Welcome / Chat / Config / Help
-- [x] Welcome: pet logo + 状态概览 + 菜单导航
-- [x] Chat: viewport + textarea + spinner 底栏 + 命令联想 + help overlay
-- [x] Config: 纯 IPC 交互，provider 表单
-- [x] Markdown 渲染 (glamour v2)
-- [x] i18n (中/英, 40+ keys, 收敛到 internal/tui)
-- [x] 5 个命令: /new, /model, /memory search, /compact, /help
-- [x] 键盘快捷键: Ctrl+N, Ctrl+K, Ctrl+T, Ctrl+U/D, Esc, Enter, Alt+Enter
-- [x] 状态栏: provider/model + token 用量 + 速度
-- [x] /compact 反馈面板
-
-### 技术栈 (08-tech-stack)
-
-- [x] Go + pure Go SQLite (modernc.org/sqlite)
-- [x] 跨平台 build tags (`_unix.go` / `_windows.go`)
-- [x] Bubble Tea v2 + Bubbles v2 + Lipgloss v2 + Glamour v2
-- [x] go-openai + anthropic-sdk-go
-- [x] go:embed 模板
-- [x] 数据目录 `~/.suna/` 完整布局
-
----
-
-## Phase 1 遗留问题
-
-### 关键 (影响核心功能)
-
-| # | 问题 | 文件 | 说明 |
-|---|---|---|---|
-| 1 | **AskUser 不渲染选项** | `tui/app.go:428` | TUI 只展示问题文本，不渲染可选项 |
-| 2 | **Spawn 不走路由** | `core/agent_tools.go:119` | sub-agent 始终用 active model，不调 RouteWithLLM |
-| 3 | **无 Spawn 提示词模板** | `core/agent_tools.go:131-135` | system prompt 全靠 LLM 传入，无结构化模板 |
-| 4 | **无并发限制** | `core/agent.go:394-401` | tool 并行无上限，config 无限制字段 |
-| 5 | **Guard LLM 未接入** | `guard/guard.go:110` | guard.md 模板存在但 Check() 不调用 LLM |
-| 6 | **FTS rowid 映射错误** | `memory/episodic.go:57` | TEXT 主键 vs FTS LastInsertId() 不匹配 |
-| 7 | **Embedding 未接入 Worker** | `memory/worker.go:154-171` | storeEpisodicSummary 不调用 generateEmbedding |
-| 8 | **Query Rewrite 未接入** | `core/agent_prompt.go:45` | 调 SearchFTS 而非 SearchWithRewrite |
-
-### 中等优先
-
-| # | 问题 | 文件 | 说明 |
-|---|---|---|---|
-| 9 | Sub agent Guard 无规则 | `core/agent_tools.go:123` | NewGuard(nil, sessionID) 不共享用户规则 |
-| 10 | Context window 预算未分配 | `core/agent.go` | 无 ~4K system + ~100K memory + ~20K tools 预算 |
-| 11 | Anthropic 非流式 | `model/anthropic.go:59` | 阻塞 API 调用 |
-
-### 低优先 (可延后到 Phase 2+)
-
-| # | 问题 | 说明 |
-|---|---|---|
-| 12 | Self-reflection 未实现 | 工具执行后的自检 |
-| 13 | Retry 策略未实现 | 失败后最多 3 次重试 |
-| 14 | Hooks 系统未实现 | HookConfig 存在但无执行逻辑 |
-| 15 | `suna "单命令"` 模式 | 非交互单次执行 |
-| 16 | 渐进信任未实现 | trust_rules 表存在但无读写逻辑 |
-| 17 | Guard confirm/modify 决策 | 只支持 approve/reject |
-| 18 | 语义记忆定期合并 | facts 只追加不合并 |
-
----
-
-## Phase 2 进行中
-
-### 当前任务
-
-- [ ] **AskUser 选项选择**: TUI 渲染为可选列表，支持数字/点击选择
-- [ ] **并发限制 config**: 新增 `max_parallel_tools` (默认 5) + `max_parallel_subagents` (默认 4)
-- [ ] **Spawn 提示词模板**: 新增 `spawn_system.md`，自动注入任务/工具/约束
-- [ ] **Spawn 接入路由**: executeSpawn 调用 RouteWithLLM 选择最佳模型
-- [ ] **提示词优化**: 优化 system.md (sub-agent 分配指导) + guard.md + extract.md
-
-### Guard 完善 (04-guard)
-
-- [ ] Stage 3: LLM review (用 active_model 判断高风险操作)
-- [ ] `confirm` 决策 (路由到用户确认)
-- [ ] `modify` 决策 (建议参数修改)
-- [ ] 渐进信任 (trust_rules 读写, 行为学习)
-- [ ] Sub agent Guard 上下文注入
-
-### 感知源 (07-trigger)
-
-- [ ] `PerceptionSource` 接口 (ID, Type, Start, Stop)
-- [ ] `SenseManager` (注册/信号处理)
-- [ ] Timer / Watcher / Webhook / Stream
-- [ ] 信号过滤 + 防抖
-- [ ] 持久化到 triggers 表
-
----
-
-## Phase 3 待实现
-
-### 能力系统 (05-capability)
-
-- [ ] Script 类型 (main.js, QuickJS runtime)
-- [ ] MCP 类型 (mcp.json, MCP client)
-- [ ] Lifecycle hooks
-- [ ] Skill 验证
-- [ ] 能力学习流
-
-### 记忆深化 (06-memory)
-
-- [ ] 实体关联完整实现 (实体图谱)
-- [ ] 时间推理注入
-- [ ] 语义记忆定期合并
-- [ ] `/memory status` 命令
-
----
-
-## Phase 4 待实现
-
-- [ ] 模型表现追踪 (准确率/延迟/成本)
-- [ ] 项目配置完善 (SUNA.md 高级功能)
-- [ ] 会话持久化增强 (跨 daemon 重启)
-
-## Phase 5 待实现
-
-- [ ] 意图层 (主动预测、习惯学习)
-- [ ] WebSocket 多 I/O 渠道
-- [ ] 能力市场
-- [ ] Docker sandbox
-
----
-
-## 提示词模板清单
-
-| 模板 | 文件 | 用途 | 状态 |
-|---|---|---|---|
-| system | `templates/system.md` | 主 agent 系统提示词 | ✅ 需优化 |
-| guard | `templates/guard.md` | LLM 安全审查 | ⚠️ 模板存在未接入 |
-| compress | `templates/compress.md` | 上下文压缩 | ✅ 完成 |
-| extract | `templates/extract.md` | 记忆提取 | ✅ 需优化 |
-| **spawn_system** | `templates/spawn_system.md` | 子 agent 系统提示词 | ❌ 缺失 |
-| **route** | 路由提示词 (router.go 内联) | 模型路由选择 | ✅ 完成 |
-
----
-
-## 架构决策记录
-
-| 决策 | 选择 | 原因 |
-|---|---|---|
-| IPC Client 位置 | `tui/` 包 | 包独立性，TUI 不依赖 `ipc/` |
-| Config 归属 | Daemon 持有 | TUI 通过 IPC 获取 provider/model 名 |
-| Guard 构造器 | 双构造器 | NewGuard (子agent) / NewGuardWithConfig (主agent) |
-| 人格机制 | Capability | 移除 SOUL.md，统一到 persona/SKILL.md |
-| 向量搜索 | 暴力 cosine | 不引入向量数据库，SQLite BLOB |
-| Embedding 发现 | HTTP probe | 不消耗 token，检测 endpoint 是否存在 |
-| 记忆提取 | 异步批量 | 不阻塞 Agent Loop，Worker 独立 goroutine |
-| 会话切换 | 零延迟 handoff | 注入未提取原文 + 后台推送 Worker |
-| 配置热重载 | 未实现 | 激活/新增模型需重启 daemon |
-| Project Config | SUNA.md / .suna/AGENTS.md | 用户自定义项目指令，注入 system prompt |
-| 并发限制 | 待实现 | config 无上限，默认应限制 4-5 |
-| Sub-agent 路由 | 待接入 | RouteWithLLM 已实现但未调用 |
+当前不建议推进 Phase 6/7。
