@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/alanchenchen/suna/internal/capability"
-	"github.com/alanchenchen/suna/internal/guard"
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 )
@@ -159,21 +158,7 @@ func (a *Agent) NewSession() {
 	}
 	a.sessionID = uuid.New().String()
 	a.turnCount = 0
-	if len(a.cfg.Guard.Blocked) > 0 || len(a.cfg.Guard.Allowed) > 0 {
-		var blockedPats, blockedReasons []string
-		for _, b := range a.cfg.Guard.Blocked {
-			blockedPats = append(blockedPats, b.Pattern)
-			blockedReasons = append(blockedReasons, b.Reason)
-		}
-		var allowedPats, allowedTools []string
-		for _, al := range a.cfg.Guard.Allowed {
-			allowedPats = append(allowedPats, al.Pattern)
-			allowedTools = append(allowedTools, al.Tool)
-		}
-		a.guard = guard.NewGuardWithConfig(a.store.DB(), a.sessionID, blockedPats, blockedReasons, allowedPats, allowedTools)
-	} else {
-		a.guard = guard.NewGuard(a.store.DB(), a.sessionID)
-	}
+	a.guard = a.newGuardForSession(a.sessionID)
 	a.working.Clear()
 	if pendingCtx != "" {
 		a.working.AddMessage(model.NewTextMessage(model.RoleSystem,
@@ -197,13 +182,13 @@ func (a *Agent) RestoreSession(ctx context.Context) int {
 	msgs, err := a.sessions.LoadMessages(ctx, info.ID)
 	if err != nil || len(msgs) == 0 {
 		a.sessionID = info.ID
-		a.guard = guard.NewGuard(a.store.DB(), a.sessionID)
+		a.guard = a.newGuardForSession(a.sessionID)
 		return 0
 	}
 
 	a.sessionID = info.ID
 	a.turnCount = msgs[len(msgs)-1].Turn
-	a.guard = guard.NewGuard(a.store.DB(), a.sessionID)
+	a.guard = a.newGuardForSession(a.sessionID)
 
 	a.working.Clear()
 	a.resumeInput = ""

@@ -21,6 +21,15 @@ const (
 	Modify  Decision = "modify"
 )
 
+type Mode string
+
+const (
+	ModeReadonly Mode = "readonly"
+	ModeAsk      Mode = "ask"
+	ModeAuto     Mode = "auto"
+	ModeSmart    Mode = "smart"
+)
+
 // LLMReviewer 用于 Guard Stage 3 LLM 审查。
 // 接收操作上下文，返回 LLM 原始回复。
 type LLMReviewer func(ctx context.Context, toolName string, paramsJSON string, target string, recentCtx string) (string, error)
@@ -42,6 +51,7 @@ const (
 
 type Guard struct {
 	db           *sql.DB
+	mode         Mode
 	blockedRules []blockRule
 	userBlocked  []blockRule
 	userAllowed  []allowedRule
@@ -63,9 +73,14 @@ type allowedRule struct {
 }
 
 func NewGuard(db *sql.DB, sessionID string) *Guard {
+	return NewGuardWithMode(db, sessionID, ModeAsk)
+}
+
+func NewGuardWithMode(db *sql.DB, sessionID string, mode Mode) *Guard {
 	g := &Guard{
 		db:        db,
 		sessionID: sessionID,
+		mode:      NormalizeMode(string(mode)),
 	}
 	g.blockedRules = g.builtinBlockedRules()
 	g.allowedCmds = g.builtinAllowedCommands()
@@ -73,9 +88,14 @@ func NewGuard(db *sql.DB, sessionID string) *Guard {
 }
 
 func NewGuardWithConfig(db *sql.DB, sessionID string, blockedPatterns []string, blockedReasons []string, allowedPatterns []string, allowedTools []string) *Guard {
+	return NewGuardWithConfigAndMode(db, sessionID, ModeAsk, blockedPatterns, blockedReasons, allowedPatterns, allowedTools)
+}
+
+func NewGuardWithConfigAndMode(db *sql.DB, sessionID string, mode Mode, blockedPatterns []string, blockedReasons []string, allowedPatterns []string, allowedTools []string) *Guard {
 	g := &Guard{
 		db:        db,
 		sessionID: sessionID,
+		mode:      NormalizeMode(string(mode)),
 	}
 	g.blockedRules = g.builtinBlockedRules()
 	g.allowedCmds = g.builtinAllowedCommands()
@@ -104,6 +124,26 @@ func NewGuardWithConfig(db *sql.DB, sessionID string, blockedPatterns []string, 
 	return g
 }
 
+func NormalizeMode(mode string) Mode {
+	switch Mode(strings.ToLower(strings.TrimSpace(mode))) {
+	case ModeReadonly:
+		return ModeReadonly
+	case ModeAuto:
+		return ModeAuto
+	case ModeSmart:
+		return ModeSmart
+	default:
+		return ModeAsk
+	}
+}
+
+func (g *Guard) Mode() Mode {
+	if g == nil || g.mode == "" {
+		return ModeAsk
+	}
+	return g.mode
+}
+
 // SetLLMReviewer 注入 LLM 审查函数，由 Agent 在创建 Guard 后调用
 func (g *Guard) SetLLMReviewer(reviewer LLMReviewer) {
 	g.llmReviewer = reviewer
@@ -121,13 +161,39 @@ func (g *Guard) Check(ctx context.Context, tool string, params map[string]any) *
 		g.audit(ctx, tool, params, risk, "blocked", reason)
 		return &GuardResult{Decision: Reject, Reason: reason, Risk: risk}
 	}
+	if allowed, reason := g.checkAllowed(tool, params); allowed {
+		if reason == "" {
+			reason = "allowed rule"
+		}
+		g.audit(ctx, tool, params, risk, "allowed", reason)
+		return &GuardResult{Decision: Approve, Reason: reason, Risk: risk}
+	}
+
+	if g.Mode() == ModeReadonly {
+		if risk == RiskLow && isReadOnlyTool(tool) {
+			g.audit(ctx, tool, params, risk, "auto_approve", "readonly low risk")
+			return &GuardResult{Decision: Approve, Reason: "readonly low risk", Risk: risk}
+		}
+		g.audit(ctx, tool, params, risk, "readonly_reject", "readonly mode blocks this operation")
+		return &GuardResult{Decision: Reject, Reason: "readonly mode blocks this operation", Risk: risk}
+	}
 
 	if risk == RiskLow {
 		g.audit(ctx, tool, params, risk, "auto_approve", "low_risk")
 		return &GuardResult{Decision: Approve, Reason: "low risk", Risk: risk}
 	}
 
-	// Stage 3: LLM 审查（中高风险）
+	if g.Mode() == ModeAuto {
+		g.audit(ctx, tool, params, risk, "auto_approve", fmt.Sprintf("auto mode risk=%s", RiskString(risk)))
+		return &GuardResult{Decision: Approve, Reason: "auto mode", Risk: risk}
+	}
+
+	if g.Mode() == ModeAsk {
+		g.audit(ctx, tool, params, risk, "confirm", fmt.Sprintf("ask mode risk=%s", RiskString(risk)))
+		return &GuardResult{Decision: Confirm, Reason: "confirm risky operation", Risk: risk}
+	}
+
+	// smart mode: LLM 审查（中高风险），失败或不确定时转用户确认。
 	if g.llmReviewer != nil {
 		result := g.llmReview(ctx, tool, params, risk)
 		if result != nil {
@@ -135,9 +201,8 @@ func (g *Guard) Check(ctx context.Context, tool string, params map[string]any) *
 		}
 	}
 
-	// 无 LLM reviewer 或审查失败时，降级为 auto_approve
-	g.audit(ctx, tool, params, risk, "auto_approve", fmt.Sprintf("risk=%d phase1_stub", risk))
-	return &GuardResult{Decision: Approve, Reason: "phase 1 stub: auto approve", Risk: risk}
+	g.audit(ctx, tool, params, risk, "confirm", "smart review unavailable or inconclusive")
+	return &GuardResult{Decision: Confirm, Reason: "smart review unavailable or inconclusive", Risk: risk}
 }
 
 // llmReview 调用 LLM 进行安全审查
@@ -183,13 +248,16 @@ func (g *Guard) llmReview(ctx context.Context, toolName string, params map[strin
 		return &GuardResult{Decision: Reject, Reason: decision.Reason, Risk: risk}
 	case "confirm":
 		g.audit(ctx, toolName, params, risk, "llm_confirm", decision.Reason)
-		return &GuardResult{Decision: Approve, Reason: "llm confirmed: " + decision.Reason, Risk: risk}
+		return &GuardResult{Decision: Confirm, Reason: decision.Reason, Risk: risk}
 	case "modify":
 		g.audit(ctx, toolName, params, risk, "llm_modify", decision.Reason)
-		return &GuardResult{Decision: Approve, Reason: "llm modified: " + decision.Reason, Risk: risk, Suggestion: decision.Suggestion}
-	default:
+		return &GuardResult{Decision: Confirm, Reason: decision.Reason, Risk: risk, Suggestion: decision.Suggestion}
+	case "approve":
 		g.audit(ctx, toolName, params, risk, "llm_approve", decision.Reason)
 		return &GuardResult{Decision: Approve, Reason: decision.Reason, Risk: risk}
+	default:
+		g.audit(ctx, toolName, params, risk, "llm_uncertain", decision.Reason)
+		return &GuardResult{Decision: Confirm, Reason: decision.Reason, Risk: risk, Suggestion: decision.Suggestion}
 	}
 }
 
@@ -228,6 +296,38 @@ func (g *Guard) checkBlocked(tool string, params map[string]any) (bool, string) 
 		}
 	}
 	return false, ""
+}
+
+func (g *Guard) checkAllowed(tool string, params map[string]any) (bool, string) {
+	target := guardTarget(tool, params)
+	if target == "" {
+		return false, ""
+	}
+	for _, rule := range g.userAllowed {
+		if rule.tool != "" && rule.tool != tool {
+			continue
+		}
+		if rule.pattern.MatchString(target) {
+			return true, rule.reason
+		}
+	}
+	return false, ""
+}
+
+func guardTarget(tool string, params map[string]any) string {
+	switch tool {
+	case "exec":
+		target, _ := params["command"].(string)
+		return target
+	case "writefile", "editfile", "readfile":
+		target, _ := params["path"].(string)
+		return target
+	case "writehttp", "readhttp":
+		target, _ := params["url"].(string)
+		return target
+	default:
+		return ""
+	}
 }
 
 func (g *Guard) audit(ctx context.Context, tool string, params map[string]any, risk RiskLevel, decision, reason string) {
@@ -307,6 +407,28 @@ func (g *Guard) assessRisk(tool string, params map[string]any) RiskLevel {
 		return RiskMedium
 	default:
 		return RiskLow
+	}
+}
+
+func RiskString(risk RiskLevel) string {
+	switch risk {
+	case RiskMedium:
+		return "medium"
+	case RiskHigh:
+		return "high"
+	default:
+		return "low"
+	}
+}
+
+func isReadOnlyTool(tool string) bool {
+	switch tool {
+	case "readfile", "listdir", "readhttp":
+		return true
+	case "exec":
+		return true
+	default:
+		return false
 	}
 }
 

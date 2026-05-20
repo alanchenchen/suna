@@ -162,7 +162,9 @@ api_key = "sk-xxx..."
 
 ## 路由策略
 
-纯 LLM 驱动，无规则引擎。路由发生场景：sub agent 模型选择、用户在对话中指定模型。
+当前实现采用 **main-agent delegated routing**。main agent 始终使用用户手动选择的 `active_model`，不自动切换自身。智能路由只发生在 main agent 调用 `spawn` 时：main LLM 基于完整任务上下文、可用模型 strengths 和 `spawn` tool schema，显式选择 sub-agent 的 `model` 和 `tools`。
+
+daemon 不再为 spawn 额外调用路由 LLM。`RouteWithLLM` / `routeByLLM` / `route.md` 已从主实现移除。
 
 ```
 ┌───────────────────────────────────────────────┐
@@ -170,54 +172,61 @@ api_key = "sk-xxx..."
 │  用户说 "用 Claude 来做" → 直接用              │
 │  Spawn 参数中指定 model="anthropic/xxx"       │
 ├───────────────────────────────────────────────┤
-│  2. LLM 判断 (基于 strengths 偏好标签)        │
-│  active_model 根据任务描述 + strengths 选模型  │
-│  输入: 任务描述 + 各模型 strengths 标签        │
-│  输出: provider/model                         │
+│  2. Main LLM 判断 (基于完整上下文 + strengths) │
+│  main 在 spawn tool call 中显式填写 model/tools │
+│  输入: 对话上下文 + 可用模型 strengths + schema │
+│  输出: spawn.model + spawn.tools              │
 ├───────────────────────────────────────────────┤
-│  Fallback: active_model                      │
-│  以上都没命中 → 用主代理的 active_model       │
+│  校验失败: 返回 tool error                    │
+│  model/tools 缺失或非法 → main LLM 重新选择    │
 └───────────────────────────────────────────────┘
 ```
 
-### LLM 路由
+### Main-Agent Delegated Routing
 
-```go
-func (r *Router) routeByLLM(ctx context.Context, task string) string {
-    prompt := fmt.Sprintf(`
-根据以下任务描述，选择最合适的模型。
+main system prompt 中动态注入可用 sub-agent models：
 
-可用模型:
-%s
+```text
+Available sub-agent models:
+- glm/GLM-5.1: coding, reasoning; ctx 128k
+- anthropic/claude-sonnet-4: architecture, review; ctx 200k
+```
 
-任务: %s
+`spawn` tool schema 要求：
 
-只回复 provider/model，不要解释。
-`, r.modelStrengths(), task)
-
-    resp := r.activeModel.Complete(ctx, &CompletionRequest{
-        System:    "你是模型路由器，根据任务选择最合适的模型。",
-        Messages:  []Message{{Role: "user", Content: prompt}},
-        MaxTokens: 30,
-    })
-
-    return parseModelRef(resp)  // 解析 "provider/model"，找不到则 fallback 到 active_model
+```json
+{
+  "required": ["task", "model", "tools"],
+  "properties": {
+    "model": {"type": "string", "description": "Exact model ref"},
+    "tools": {"type": "array", "items": {"type": "string", "enum": ["readfile", "listdir", "exec"]}}
+  }
 }
 ```
 
+daemon 只做校验和执行：
+
+- `model` 为空或不是已配置 ref → tool error。
+- `tools` 为空或包含不存在工具 → tool error。
+- `spawn` 和 `askuser` 不能授予 sub-agent。
+- sub-agent 只看到授权 tools 的 tool schema。
+
 ### strengths 偏好标签
 
-每个模型可配置 strengths 列表，用于 LLM 路由判断：
+每个模型可配置 strengths 列表，用于 main LLM 在 spawn 时判断：
 
 ```
-模型路由的输入:
-  - 任务描述 (一句话)
+模型选择输入:
+  - 当前完整对话上下文
+  - 子任务目标
   - 各模型的 strengths 标签 (用户自定义，描述模型擅长领域)
+  - context window
+  - spawn.tools schema
 
 LLM 据此判断:
   - "写前端页面" → 匹配 strengths 含"前端"的模型
   - "复杂推理" → 匹配 strengths 含"复杂推理"的模型
-  - 未匹配到 → fallback 到 active_model
+  - 未匹配到 → main 应选择最小可用模型或直接不 spawn
 
 注意: strengths 是给 LLM 看的语义标签，不是程序逻辑
 用户可以在对话中动态修改 strengths，agent 会更新配置
@@ -225,35 +234,35 @@ LLM 据此判断:
 
 ### 路由上下文传递
 
-路由决策的上下文要尽量轻：
+不再有独立路由请求，因此不需要把任务摘要传给 router。main agent 已经拥有完整上下文，可以在同一个 LLM 回合中同时决定：
 
-```
-传入路由器的: 只有关键词或任务摘要 (几个词到一句话)
-不传入的: 完整对话历史、工具调用记录、大段代码
+- 是否需要 spawn。
+- sub-agent task。
+- sub-agent model。
+- sub-agent tools 权限。
+- 传给 sub-agent 的简短 context。
 
-原因:
-  - 路由是为了省钱和提速，本身不能花很多钱和时间
-  - 短输入 + active_model = 极低成本
-```
+这减少一次额外 LLM 请求，也避免 router 只看到 task 摘要而丢失用户意图。
 
 ## Sub Agent 的模型选择
 
-Main agent 使用 active_model 运行。Sub agent 的模型通过路由决定：
+Main agent 使用 active_model 运行。Sub agent 的模型由 main agent 在 `spawn.model` 中显式指定：
 
 ```
-场景 1: Main 显式指定子代理模型
-  → Spawn({ task: "写前端页面", model: "moonshot/moonshot-v1-auto" })
+场景 1: Main 根据任务选择子代理模型
+  → Spawn({ task: "写前端页面", model: "moonshot/moonshot-v1-auto", tools: ["readfile", "writefile"] })
 
-场景 2: Main 不指定模型，内核走路由
-  → Spawn({ task: "优化 SQL 查询" })  // 不指定 model
-  → 内核根据 strengths 标签路由到合适的模型
+场景 2: Main 缺少 model/tools
+  → Spawn({ task: "优化 SQL 查询" })
+  → daemon 返回 tool error: spawn requires explicit model/tools
+  → main LLM 重新选择
 
 场景 3: 用户在对话中指定
   用户: "用 Claude 来分析这段代码"
   → Main 理解意图，Spawn 时指定 model: "anthropic/claude-sonnet-4-20250514"
 
-关键: Main agent 始终使用 active_model，不参与路由
-      Sub agent 通过路由获得最合适的模型
+关键: Main agent 始终使用 active_model，不自动切换自身
+      Sub agent 只能使用 main 显式指定且 daemon 校验通过的模型
 ```
 
 ## 缓存策略
@@ -291,7 +300,6 @@ System prompt 的能力列表部分 → 标记为 cacheable
 
 ```
 相同输入 → 相同输出的场景:
-  - 模型路由决策 (相同关键词 → 相同路由)
   - Guard 审查 (相同操作模式 → 相同判断)
 
 实现: 内存 LRU cache, key = hash(input), value = response

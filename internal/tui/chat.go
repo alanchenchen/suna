@@ -149,7 +149,6 @@ func (t *TUI) syncContent() {
 		}
 		sb.WriteString(styleDim.Render("  "+t.tr("tui.ask.help")) + "\n\n")
 	}
-
 	if t.modelPickerOpen {
 		sb.WriteString(t.renderModelPicker())
 	}
@@ -306,6 +305,9 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		ks := m.String()
+		if t.pendingGuard != nil {
+			return t.updateGuardConfirm(ks)
+		}
 		if t.modelPickerOpen {
 			return t.updateModelPicker(ks)
 		}
@@ -455,6 +457,63 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	t.layoutChat()
 
 	return t, cmd
+}
+
+func (t *TUI) updateGuardConfirm(ks string) (tea.Model, tea.Cmd) {
+	switch ks {
+	case "ctrl+c":
+		t.doQuit()
+		return t, tea.Quit
+	case "left", "h", "up", "k", "tab", "shift+tab":
+		if t.guardCursor == 0 {
+			t.guardCursor = 1
+		} else {
+			t.guardCursor = 0
+		}
+		t.syncContent()
+		return t, nil
+	case "right", "l", "down", "j":
+		if t.guardCursor == 0 {
+			t.guardCursor = 1
+		} else {
+			t.guardCursor = 0
+		}
+		t.syncContent()
+		return t, nil
+	case "esc", "n", "N":
+		return t, t.submitGuardDecision("reject")
+	case "y", "Y":
+		return t, t.submitGuardDecision("approve")
+	case "enter":
+		if t.guardCursor == 0 {
+			return t, t.submitGuardDecision("approve")
+		}
+		return t, t.submitGuardDecision("reject")
+	}
+	return t, nil
+}
+
+func (t *TUI) submitGuardDecision(decision string) tea.Cmd {
+	if t.pendingGuard == nil {
+		return nil
+	}
+	id := t.pendingGuard.id
+	label := t.tr("tui.guard.rejected")
+	if decision == "approve" {
+		label = t.tr("tui.guard.approved")
+	}
+	t.messages = append(t.messages, chatMsg{role: "system", content: label})
+	t.pendingGuard = nil
+	t.guardCursor = 0
+	t.loading = true
+	t.phase = phaseTool
+	t.phaseStart = time.Now()
+	return func() tea.Msg {
+		if t.ipcCli != nil {
+			t.ipcCli.GuardReply(id, decision)
+		}
+		return nil
+	}
 }
 
 func (t *TUI) resetPhase() {

@@ -57,17 +57,19 @@ type ModelConfig struct {
 
 // GuardConfig 保存本地安全规则和可选 LLM 审查模型配置，对应 plans/04-guard.md。
 type GuardConfig struct {
-	Enabled     *bool            `toml:"enabled,omitempty"`
+	Mode        string           `toml:"mode,omitempty"`
 	ReviewModel string           `toml:"review_model"`
 	Blocked     []GuardRule      `toml:"blocked"`
 	Allowed     []GuardAllowRule `toml:"allowed"`
 }
 
-func (g GuardConfig) IsEnabled() bool {
-	if g.Enabled == nil {
-		return true
+func (g GuardConfig) ModeOrDefault() string {
+	switch strings.ToLower(strings.TrimSpace(g.Mode)) {
+	case "readonly", "ask", "auto", "smart":
+		return strings.ToLower(strings.TrimSpace(g.Mode))
+	default:
+		return "ask"
 	}
-	return *g.Enabled
 }
 
 // GuardRule 定义被阻止的文件/命令模式及原因。

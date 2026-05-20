@@ -217,12 +217,11 @@ options 参数:
 ```
 功能: 创建 sub agent 执行子任务 (仅 main agent)
 参数: {
-  task: string,
-  model?: string,
-  system?: string,
-  tools?: [string],
-  timeout?: int,
-  context?: string          // 传给 sub agent 的额外上下文
+  task: string,              // 必填
+  model: string,             // 必填: sub-agent 使用的模型 ref (provider/model)
+  tools: [string],           // 必填: sub-agent 可用工具列表
+  timeout?: int,             // 默认 300 秒
+  context?: string           // 传给 sub agent 的额外上下文
 }
 返回: { result: string, success: bool, error?: string }
 
@@ -231,10 +230,21 @@ options 参数:
   Spawn 本身只是创建了一个受限的执行环境
 
 工具权限:
-  tools 参数指定 sub agent 可用的工具列表
-  如果不指定 → 默认给 ReadFile, ListDir, ReadHTTP, Exec
+  tools 参数必填，指定 sub agent 可用的工具列表
+  没有"默认工具集" — 缺少 tools 会返回错误，让 main LLM 重选
   Exec 在 sub agent 中仍然经过 Guard 审查（含 isReadOnlyCommand 快速放行）
-  main 不能给 sub 授权 Spawn → 防止嵌套
+  sub-agent 禁止授予 askuser 和 spawn — 防止交互逃逸和嵌套
+  daemon 校验每个 tool name: 空/不存在/spawn/askuser 都返回 tool error
+
+模型选择:
+  model 必填，指定 sub-agent 使用的模型 ref
+  daemon 校验 model ref 是否为已配置模型
+  model 为空或非法 → 返回 tool error，main LLM 重新选择
+
+系统提示词:
+  sub-agent 使用独立 spawn_system.md，不继承 main system.md
+  spawn_system.md 只含 task/env/tools/context/rules
+  通过 systemPromptOverride 机制注入
 
 超时:
   默认 300 秒
@@ -244,6 +254,11 @@ options 参数:
   Main 可以同时发起多个 Spawn
   每个 sub agent 独立 goroutine 运行
   Main 等待所有 sub 完成后汇总
+
+Guard 策略:
+  sub-agent 继承主 Guard policy、blocked/allowed、audit DB
+  sub-agent 通过 newGuardForSession() 创建带 mode 的 Guard
+  smart mode 下可使用同一 LLM reviewer
 ```
 
 ## 工具定义的 JSON Schema

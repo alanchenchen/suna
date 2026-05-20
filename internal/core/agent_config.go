@@ -17,6 +17,7 @@ type ConfigSetParams struct {
 	APIKey      string
 	Locale      string
 	Theme       string
+	GuardMode   string
 }
 
 type ConfigModel struct {
@@ -53,6 +54,7 @@ func (a *Agent) ReloadConfigFromDiskIfNeeded() (*config.Config, error) {
 	if err := a.reloadRouterLocked(loaded); err != nil {
 		return nil, err
 	}
+	a.guard = a.newGuardForSession(a.sessionID)
 	return a.cfg.Clone(), nil
 }
 
@@ -124,6 +126,9 @@ func (a *Agent) UpdateConfig(params ConfigSetParams) (*config.Config, error) {
 		if params.Theme != "" {
 			cfg.UI.Theme = params.Theme
 		}
+		if params.GuardMode != "" {
+			cfg.Guard.Mode = config.GuardConfig{Mode: params.GuardMode}.ModeOrDefault()
+		}
 	default:
 		return nil, fmt.Errorf("unknown config action %q", params.Action)
 	}
@@ -136,6 +141,10 @@ func (a *Agent) UpdateConfig(params ConfigSetParams) (*config.Config, error) {
 	a.cfg = cfg
 	if err := a.reloadRouterLocked(cfg); err != nil {
 		return nil, err
+	}
+	a.guard = a.newGuardForSession(a.sessionID)
+	if info, err := os.Stat(cfg.ConfigPath()); err == nil {
+		a.configModTime = info.ModTime()
 	}
 	return cfg, nil
 }

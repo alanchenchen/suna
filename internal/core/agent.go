@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -39,23 +40,24 @@ API 表面：
 	Close()                         释放资源
 */
 type Agent struct {
-	cfg         *config.Config
-	router      *model.Router
-	registry    *tool.Registry
-	guard       *guard.Guard
-	working     *memory.WorkingMemory
-	episodic    *memory.EpisodicStore
-	semantic    *memory.SemanticStore
-	sessions    *memory.SessionStore
-	entities    *memory.EntityStore
-	compressor  *memory.Compressor
-	prompts     *prompt.Loader
-	store       *memory.Store
-	caps        *capability.Loader
-	sessionID   string
-	turnCount   int
-	modelRef    string
-	resumeInput string
+	cfg                  *config.Config
+	router               *model.Router
+	registry             *tool.Registry
+	guard                *guard.Guard
+	working              *memory.WorkingMemory
+	episodic             *memory.EpisodicStore
+	semantic             *memory.SemanticStore
+	sessions             *memory.SessionStore
+	entities             *memory.EntityStore
+	compressor           *memory.Compressor
+	prompts              *prompt.Loader
+	store                *memory.Store
+	caps                 *capability.Loader
+	sessionID            string
+	turnCount            int
+	modelRef             string
+	resumeInput          string
+	systemPromptOverride string
 
 	extractQueue  *memory.ExtractQueue
 	extractWorker *memory.Worker
@@ -92,23 +94,6 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 	}
 
 	sessionID := uuid.New().String()
-	var g *guard.Guard
-	if len(cfg.Guard.Blocked) > 0 || len(cfg.Guard.Allowed) > 0 {
-		var blockedPats, blockedReasons []string
-		for _, b := range cfg.Guard.Blocked {
-			blockedPats = append(blockedPats, b.Pattern)
-			blockedReasons = append(blockedReasons, b.Reason)
-		}
-		var allowedPats, allowedTools []string
-		for _, a := range cfg.Guard.Allowed {
-			allowedPats = append(allowedPats, a.Pattern)
-			allowedTools = append(allowedTools, a.Tool)
-		}
-		g = guard.NewGuardWithConfig(store.DB(), sessionID, blockedPats, blockedReasons, allowedPats, allowedTools)
-	} else {
-		g = guard.NewGuard(store.DB(), sessionID)
-	}
-
 	registry := tool.NewRegistry()
 	registry.Register(tool.ReadFile{})
 	registry.Register(tool.ListDir{})
@@ -159,7 +144,6 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 		cfg:           cfg,
 		router:        router,
 		registry:      registry,
-		guard:         g,
 		working:       memory.NewWorkingMemory(),
 		episodic:      episodic,
 		semantic:      semantic,
@@ -173,14 +157,12 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 		extractQueue:  extractQueue,
 		extractWorker: extractWorker,
 	}
+	agent.guard = agent.newGuardForSession(sessionID)
 	if info, err := os.Stat(cfg.ConfigPath()); err == nil {
 		agent.configModTime = info.ModTime()
 	}
 
 	if router != nil {
-		if cfg.Guard.IsEnabled() {
-			g.SetLLMReviewer(agent.guardLLMReview)
-		}
 		router.SetPrompts(prompts)
 	}
 	agent.compressor.SetPrompts(prompts)
@@ -204,6 +186,7 @@ const (
 	EventToolResult
 	EventStatus
 	EventAskUser
+	EventGuardConfirm
 )
 
 // Event agent 输出的原子事件。调用方根据 Type 决定如何处理。
@@ -227,6 +210,13 @@ type Event struct {
 	Question string
 	Options  []string
 	Reply    chan string
+
+	// EventGuardConfirm：调用方收到后，应展示安全确认并写入 approve/reject
+	GuardTool       string
+	GuardParams     map[string]any
+	GuardRisk       string
+	GuardReason     string
+	GuardSuggestion string
 
 	// EventDone（EventStatus with Content=="done"）携带的 token 用量
 	InputTokens   int
@@ -540,6 +530,32 @@ func consumeToolIntent(params map[string]any) string {
 	intent, _ := params["intent"].(string)
 	delete(params, "intent")
 	return strings.TrimSpace(intent)
+}
+
+func (a *Agent) newGuardForSession(sessionID string) *guard.Guard {
+	if a.cfg == nil {
+		return guard.NewGuard(nil, sessionID)
+	}
+	mode := guard.NormalizeMode(a.cfg.Guard.ModeOrDefault())
+	var blockedPats, blockedReasons []string
+	for _, b := range a.cfg.Guard.Blocked {
+		blockedPats = append(blockedPats, b.Pattern)
+		blockedReasons = append(blockedReasons, b.Reason)
+	}
+	var allowedPats, allowedTools []string
+	for _, al := range a.cfg.Guard.Allowed {
+		allowedPats = append(allowedPats, al.Pattern)
+		allowedTools = append(allowedTools, al.Tool)
+	}
+	var db *sql.DB
+	if a.store != nil {
+		db = a.store.DB()
+	}
+	g := guard.NewGuardWithConfigAndMode(db, sessionID, mode, blockedPats, blockedReasons, allowedPats, allowedTools)
+	if a.router != nil && mode == guard.ModeSmart {
+		g.SetLLMReviewer(a.guardLLMReview)
+	}
+	return g
 }
 
 func truncateStr(s string, max int) string {

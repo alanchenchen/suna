@@ -2,9 +2,7 @@ package model
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/alanchenchen/suna/internal/config"
@@ -89,96 +87,6 @@ func (r *Router) Route(ctx context.Context, task string) (Provider, string, erro
 		return p, r.activeRef, nil
 	}
 	return nil, "", fmt.Errorf("active provider not found")
-}
-
-type RouteResult struct {
-	ModelRef string
-	Tools    []string
-}
-
-func (r *Router) RouteWithLLM(ctx context.Context, task string, explicitRef string) (*RouteResult, error) {
-	if explicitRef != "" {
-		if _, err := r.Provider(explicitRef); err == nil {
-			return &RouteResult{ModelRef: explicitRef}, nil
-		}
-	}
-	activeProvider := r.DefaultProvider()
-	active := r.ActiveRef()
-	if activeProvider == nil {
-		return nil, fmt.Errorf("active provider not found")
-	}
-	if strings.TrimSpace(task) == "" || len(r.ListProviders()) <= 1 {
-		return &RouteResult{ModelRef: active}, nil
-	}
-	if result := r.routeByLLM(ctx, task, activeProvider); result != nil {
-		return result, nil
-	}
-	return &RouteResult{ModelRef: active}, nil
-}
-
-func (r *Router) routeByLLM(ctx context.Context, task string, activeProvider Provider) *RouteResult {
-	strengths := r.modelStrengths()
-	var userPrompt string
-	if r.prompts != nil {
-		rendered, err := r.prompts.RenderRoute(strengths, task)
-		if err == nil && rendered != "" {
-			userPrompt = rendered
-		}
-	}
-	if userPrompt == "" {
-		userPrompt = fmt.Sprintf("Select the best model.\n\nAvailable:\n%s\n\nTask: %s\n\nReply JSON: {\"model\":\"provider/model\",\"tools\":[...]}", strengths, task)
-	}
-	ch, err := activeProvider.Complete(ctx, &CompletionRequest{System: "Reply with JSON only.", Messages: []Message{NewTextMessage(RoleUser, userPrompt)}, MaxTokens: 100})
-	if err != nil {
-		return nil
-	}
-	var resp string
-	for chunk := range ch {
-		resp += chunk.Content
-		if chunk.Done {
-			break
-		}
-	}
-	resp = strings.Trim(strings.TrimSpace(resp), "\"'`")
-	var decision struct {
-		Model string   `json:"model"`
-		Tools []string `json:"tools"`
-	}
-	if err := json.Unmarshal([]byte(extractRouteJSON(resp)), &decision); err != nil {
-		if _, perr := r.Provider(resp); perr == nil {
-			return &RouteResult{ModelRef: resp}
-		}
-		return nil
-	}
-	if _, perr := r.Provider(decision.Model); perr != nil {
-		return nil
-	}
-	result := &RouteResult{ModelRef: decision.Model, Tools: decision.Tools}
-	return result
-}
-
-func extractRouteJSON(s string) string {
-	s = strings.TrimSpace(s)
-	start := strings.Index(s, "{")
-	end := strings.LastIndex(s, "}")
-	if start >= 0 && end > start {
-		return s[start : end+1]
-	}
-	return s
-}
-
-func (r *Router) modelStrengths() string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	var lines []string
-	for ref, mc := range r.models {
-		strengths := strings.Join(mc.Strengths, ", ")
-		if strengths == "" {
-			strengths = "通用"
-		}
-		lines = append(lines, fmt.Sprintf("- %s: %s", ref, strengths))
-	}
-	return strings.Join(lines, "\n")
 }
 
 func (r *Router) ModelConfig(ref string) (*config.ModelConfig, error) {

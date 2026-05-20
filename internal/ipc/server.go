@@ -40,7 +40,8 @@ type Server struct {
 
 	// pendingAsks 等待回复的 AskUser 请求
 	// key = askID, value = Reply channel
-	pendingAsks sync.Map
+	pendingAsks   sync.Map
+	pendingGuards sync.Map
 
 	mu sync.Mutex
 }
@@ -100,6 +101,8 @@ func (s *Server) route(ctx context.Context, conn Conn, req Request) {
 		s.handleCancel(ctx, conn, req)
 	case "agent.askReply":
 		s.handleAskReply(ctx, conn, req)
+	case MethodGuardReply:
+		s.handleGuardReply(ctx, conn, req)
 	case MethodMemorySearch:
 		s.handleMemorySearch(ctx, conn, req)
 	case MethodMemoryFacts:
@@ -145,6 +148,7 @@ func (s *Server) handleConfigSet(ctx context.Context, conn Conn, req Request) {
 		APIKey:      params.APIKey,
 		Locale:      params.Locale,
 		Theme:       params.Theme,
+		GuardMode:   params.GuardMode,
 		Model: core.ConfigModel{
 			Provider:      params.Model.Provider,
 			Model:         params.Model.Model,
@@ -222,6 +226,15 @@ func (s *Server) handleSendMessage(ctx context.Context, conn Conn, req Request) 
 					Options:  evt.Options,
 					ID:       askID,
 				})
+			case core.EventGuardConfirm:
+				guardID := conn.ID() + "_guard_" + fmt.Sprintf("%d", time.Now().UnixNano())
+				if evt.Reply != nil {
+					s.pendingGuards.Store(guardID, evt.Reply)
+				}
+				s.Send(ctx, conn, NotifyGuardConfirm, GuardConfirmParams{
+					ID: guardID, Tool: evt.GuardTool, Params: evt.GuardParams,
+					Risk: evt.GuardRisk, Reason: evt.GuardReason, Suggestion: evt.GuardSuggestion,
+				})
 			case core.EventStatus:
 				if strings.HasPrefix(evt.Content, "error:") || evt.Content == "cancelled" {
 					s.Send(ctx, conn, NotifyStream, StreamParams{Chunk: evt.Content, Done: true})
@@ -248,6 +261,23 @@ func (s *Server) handleSendMessage(ctx context.Context, conn Conn, req Request) 
 			}
 		}
 	}()
+}
+
+func (s *Server) handleGuardReply(ctx context.Context, conn Conn, req Request) {
+	var params GuardReplyParams
+	if err := decodeParams(req.Params, &params); err != nil {
+		s.sendError(conn, req.ID, ErrInvalidParams, err.Error())
+		return
+	}
+	val, ok := s.pendingGuards.LoadAndDelete(params.ID)
+	if !ok {
+		s.sendError(conn, req.ID, ErrNotFound, "guard confirmation not found or expired")
+		return
+	}
+	replyCh := val.(chan string)
+	replyCh <- params.Decision
+	close(replyCh)
+	s.sendResult(conn, req.ID, map[string]string{"status": "ok"})
 }
 
 // handleAskReply 处理 TUI 回传的 AskUser 答案
@@ -544,7 +574,7 @@ func periodFromSummary(sum *memory.UsageSummary) UsagePeriod {
 }
 
 func configToParams(cfg *config.Config) ConfigParams {
-	out := ConfigParams{ActiveModel: cfg.ActiveModel, Locale: cfg.UI.Locale, Theme: cfg.UI.Theme}
+	out := ConfigParams{ActiveModel: cfg.ActiveModel, Locale: cfg.UI.Locale, Theme: cfg.UI.Theme, GuardMode: cfg.Guard.ModeOrDefault()}
 	for _, mc := range cfg.Models {
 		out.Models = append(out.Models, ConfigModel{Provider: mc.Provider, Model: mc.Model, BaseURL: mc.BaseURL, ContextWindow: mc.ContextWindow, Strengths: mc.Strengths, HasAPIKey: mc.APIKey != ""})
 	}

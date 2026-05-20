@@ -42,6 +42,8 @@ type TUI struct {
 	pendingAskID      string
 	pendingAskOptions []string
 	pendingAskCursor  int
+	pendingGuard      *guardConfirmView
+	guardCursor       int
 	cmdSuggestion     string
 	theme             string
 
@@ -98,6 +100,15 @@ type TUI struct {
 	hasUsage         bool
 	contextTokens    int
 	contextWindow    int
+}
+
+type guardConfirmView struct {
+	id         string
+	tool       string
+	params     map[string]any
+	risk       string
+	reason     string
+	suggestion string
 }
 
 type chatMsg struct {
@@ -420,6 +431,14 @@ func (t *TUI) handleIPCNotification(notif ipcNotification) {
 		t.pendingAskCursor = 0
 		t.messages = append(t.messages, chatMsg{role: "system", content: "❓ " + p.Question})
 		t.resetPhase()
+	case ipc.NotifyGuardConfirm:
+		var p ipc.GuardConfirmParams
+		json.Unmarshal(notif.params, &p)
+		t.pendingGuard = &guardConfirmView{id: p.ID, tool: p.Tool, params: p.Params, risk: p.Risk, reason: p.Reason, suggestion: p.Suggestion}
+		t.guardCursor = 1
+		t.loading = false
+		t.phase = phaseIdle
+		t.phaseStart = time.Time{}
 	case ipc.NotifyDaemonState:
 		var p ipc.DaemonStateParams
 		json.Unmarshal(notif.params, &p)
@@ -496,6 +515,9 @@ func (t *TUI) handleIPCNotification(notif ipcNotification) {
 		}
 		if t.configState.Theme != "" {
 			t.setTheme(t.configState.Theme)
+		}
+		if t.configState.GuardMode == "" {
+			t.configState.GuardMode = "ask"
 		}
 		if t.configDeleteConfirm != "" {
 			t.configDeleteConfirm = ""

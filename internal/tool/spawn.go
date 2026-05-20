@@ -19,7 +19,7 @@ func NewSpawn(handler SpawnHandler) *Spawn {
 
 func (s *Spawn) Name() string { return "spawn" }
 func (s *Spawn) Description() string {
-	return "Create a sub agent to execute a sub-task. Only available to the main agent. Sub agents have independent context and restricted tool set."
+	return "Create a sub agent to execute a sub-task. Only available to the main agent. Model and tools must be explicitly selected; tools are permissions."
 }
 func (s *Spawn) Category() Category { return Communicate }
 func (s *Spawn) Parameters() map[string]any {
@@ -27,13 +27,13 @@ func (s *Spawn) Parameters() map[string]any {
 		"type": "object",
 		"properties": map[string]any{
 			"task":    map[string]any{"type": "string", "description": "Sub-task description"},
-			"model":   map[string]any{"type": "string", "description": "Model name to use"},
+			"model":   map[string]any{"type": "string", "description": "Exact model ref to use"},
 			"system":  map[string]any{"type": "string", "description": "System prompt for sub agent"},
-			"tools":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Available tools for sub agent"},
+			"tools":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Explicit tool permissions for sub agent"},
 			"timeout": map[string]any{"type": "integer", "description": "Timeout in seconds (default 300)"},
 			"context": map[string]any{"type": "string", "description": "Extra context for sub agent"},
 		},
-		"required": []string{"task"},
+		"required": []string{"task", "model", "tools"},
 	}
 }
 
@@ -41,6 +41,10 @@ func (s *Spawn) Execute(ctx context.Context, params map[string]any) Result {
 	task, _ := params["task"].(string)
 	if task == "" {
 		return ErrorResult("task is required")
+	}
+	model, _ := params["model"].(string)
+	if model == "" {
+		return ErrorResult("spawn requires explicit model")
 	}
 
 	timeout := 300
@@ -58,7 +62,7 @@ func (s *Spawn) Execute(ctx context.Context, params map[string]any) Result {
 	}
 
 	if len(tools) == 0 {
-		tools = []string{"readfile", "listdir", "readhttp", "exec"}
+		return ErrorResult("spawn requires explicit tools")
 	}
 
 	for _, t := range tools {

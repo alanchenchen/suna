@@ -31,6 +31,9 @@ func (t *TUI) viewChat() string {
 	sb.WriteString(styleDim.Render(strings.Repeat("─", t.width)) + "\n")
 
 	content := t.vp.View()
+	if t.pendingGuard != nil {
+		content = overlayBlock(content, t.renderGuardOverlay(t.width))
+	}
 	if t.showHelp {
 		content = overlayBlock(content, t.renderHelpOverlay(t.width))
 	}
@@ -42,6 +45,61 @@ func (t *TUI) viewChat() string {
 	}
 	sb.WriteString("\n" + t.renderChatStatusBar() + "\n")
 	return sb.String()
+}
+
+func (t *TUI) renderGuardOverlay(width int) string {
+	g := t.pendingGuard
+	if g == nil {
+		return ""
+	}
+	w := max(44, min(76, width-4))
+	inner := max(20, w-8)
+	var lines []string
+	lines = append(lines, styleError.Render("⚠ "+t.tr("tui.guard.title")))
+	lines = append(lines, "")
+	lines = append(lines, styleDim.Render(t.tr("tui.guard.tool"))+" "+styleTool.Render(g.tool))
+	lines = append(lines, styleDim.Render(t.tr("tui.guard.risk"))+" "+t.guardRiskStyle(g.risk).Render(g.risk))
+	if strings.TrimSpace(g.reason) != "" {
+		lines = append(lines, styleDim.Render(t.tr("tui.guard.reason"))+" "+g.reason)
+	}
+	if strings.TrimSpace(g.suggestion) != "" {
+		lines = append(lines, styleDim.Render(t.tr("tui.guard.suggestion"))+" "+g.suggestion)
+	}
+	params := formatToolParams(g.params)
+	if params != "" {
+		lines = append(lines, "", styleDim.Render(t.tr("tui.tool.params")))
+		for i, line := range strings.Split(params, "\n") {
+			if i >= 8 {
+				lines = append(lines, styleDim.Render("..."))
+				break
+			}
+			for _, wrapped := range wrapLine(line, inner) {
+				lines = append(lines, styleToolDim.Render(wrapped))
+			}
+		}
+	}
+	approve := t.guardButton(0, t.tr("tui.guard.approve"))
+	reject := t.guardButton(1, t.tr("tui.guard.reject"))
+	lines = append(lines, "", approve+"  "+reject, styleDim.Render(t.tr("tui.guard.help")))
+	return boxStyle.Width(w).Padding(1, 2).Render(strings.Join(lines, "\n"))
+}
+
+func (t *TUI) guardButton(idx int, label string) string {
+	if t.guardCursor == idx {
+		return styleCursor.Render("▶ ") + styleHL.Render(label)
+	}
+	return styleDim.Render("  " + label)
+}
+
+func (t *TUI) guardRiskStyle(risk string) lipgloss.Style {
+	switch strings.ToLower(risk) {
+	case "high":
+		return styleError
+	case "medium":
+		return styleTool
+	default:
+		return styleAgent
+	}
 }
 
 func (t *TUI) layoutChat() {

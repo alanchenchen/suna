@@ -83,11 +83,10 @@ internal/tool/
       grep → findstr, cat → type, ls → dir, ...
 
 internal/guard/
-  ├── rules.go              # 硬规则接口 (平台无关)
+  ├── guard.go              # Guard mode policy + risk/check rules
   ├── rules_unix.go         # Unix 硬规则: rm -rf /, mkfs, dd ... (//go:build !windows)
-  ├── rules_windows.go      # Windows 硬规则: rmdir /s /q, format, cipher ... (//go:build windows)
-  └── readonly_unix.go      # Unix 只读白名单: ls, grep, find, cat ...
-      readonly_windows.go   # Windows 只读白名单: dir, type, findstr, Get-ChildItem ...
+  ├── rules_windows.go      # Windows 硬规则: rmdir /s /q, format ... (//go:build windows)
+  └── sensitive.go          # 敏感信息检测
 ```
 
 #### IPC 确定性坑
@@ -160,17 +159,19 @@ suna/
 │   │   ├── client.go            # TUI 端 IPC Client
 │   │   ├── client_unix.go       # Client Unix Socket 连接
 │   │   ├── client_windows.go    # Client Named Pipe 连接
-│   │   ├── server.go            # Daemon 端 JSON-RPC Server (方法路由)
-│   │   └── message.go           # JSON-RPC 2.0 Message + Notification 定义
+│   │   ├── server.go            # Daemon 端 JSON-RPC Server + pendingGuards
+│   │   └── message.go           # JSON-RPC 2.0 Message + GuardConfirmParams/GuardReplyParams
 │   ├── core/                    # Agent 内核
-│   │   ├── agent.go             # Agent struct + Run loop + 管理 API
+│   │   ├── agent.go             # Agent struct + Run loop + 管理 API + Guard confirm
+│   │   ├── agent_management.go  # NewSession/RestoreSession/newGuardForSession
 │   │   ├── agent_memory.go      # 记忆提取逻辑
-│   │   ├── agent_tools.go       # 工具执行逻辑
+│   │   ├── agent_prompt.go      # System prompt 构建 + modelRoutingSummary
+│   │   ├── agent_tools.go       # 工具执行逻辑 + spawn 校验 + confirmGuard
 │   ├── model/                   # 多模型抽象 + 路由
 │   │   ├── provider.go          # Provider 接口 + 消息/工具定义
 │   │   ├── openai.go            # go-openai 适配
 │   │   ├── anthropic.go         # anthropic-sdk-go 适配
-│   │   ├── router.go            # LLM 路由 (strengths 偏好标签)
+│   │   ├── router.go            # 路由工具函数 (RouteWithLLM 已移除)
 │   │   └── token.go             # token 估算
 │   ├── tool/                    # 9 个核心工具
 │   │   ├── tool.go              # Tool 接口 + 注册
@@ -186,7 +187,7 @@ suna/
 │   │   ├── askuser.go
 │   │   └── spawn.go
 │   ├── guard/                   # LLM 权限守卫
-│   │   ├── guard.go             # 审查流程 (硬规则 + 风险评级)
+│   │   ├── guard.go             # Guard mode policy + Check() + checkAllowed/isReadOnlyTool
 │   │   ├── rules_unix.go        # Unix 硬规则 (//go:build !windows)
 │   │   ├── rules_windows.go     # Windows 硬规则 (//go:build windows)
 │   │   └── sensitive.go         # 敏感信息检测
@@ -206,7 +207,8 @@ suna/
 │   ├── prompt/                  # 提示词模板
 │   │   ├── loader.go            # go:embed 加载 + 模板渲染
 │   │   └── templates/           # Markdown 模板 (编译进二进制)
-│   │       ├── system.md        # 系统提示词模板
+│   │       ├── system.md        # 主 agent 系统提示词 (稳定前缀→动态内容排序)
+│   │       ├── spawn_system.md  # sub-agent 独立 prompt (task/env/tools/context/rules)
 │   │       ├── guard.md         # Guard 审查提示词
 │   │       ├── compress.md      # 压缩摘要提示词
 │   │       └── extract.md       # 记忆提取提示词
@@ -224,37 +226,6 @@ suna/
 │       └── SKILL.md
 └── plans/                       # 设计文档
     └── *.md
-```
-
-### 与文档设计的差异
-
-```
-实现 vs 设计的差异:
-
-1. 入口: main.go 在根目录，不在 cmd/suna/
-   → 单二进制直接 go build ./... 即可，不需要 cmd 子目录
-
-2. prompt/ 目录: 新增
-   → 模板通过 go:embed 编译进二进制，用户不可覆盖
-   → 系统提示词是内核行为规范，改坏会失控
-
-3. i18n/ 目录: 新增
-   → 内置 key-value 翻译表，支持中英文
-   → 从 config.toml [tui] locale 读取语言偏好
-
-4. core/ 目录: 拆分为 agent.go + agent_memory.go + agent_tools.go
-   → 按功能拆文件，单文件不过大
-
-5. guard/ 目录: 新增 sensitive.go
-   → 敏感信息检测（API Key 泄漏等）
-
-6. memory/ 目录: 新增 session.go
-   → 会话持久化 + 用量记录合并到 memory 包
-
-7. 不存在的目录 (远期):
-   runner/    → QuickJS WASM (Phase 3)
-   mcp/       → MCP Client (Phase 3)
-   trigger/   → 感知层 (Phase 2)
 ```
 
 ## 用户数据目录
@@ -282,17 +253,26 @@ suna/
     └── audit.log                # 审计日志
 ```
 
-## config.toml 完整示例
+## config.toml 当前支持参数
+
+Suna 当前只读取 `~/.suna/config.toml` 和 `~/.suna/credentials.toml`。`config.toml` 保存模型、UI、Guard 和预留 hooks 配置；API key 不写入 `config.toml`，而是按 provider 维度写入 `credentials.toml`，文件权限为 `0600`。
+
+### config.toml 完整示例
 
 ```toml
 # 主代理使用的模型 (必填，格式为 "provider/model")
 active_model = "glm/glm-4"
+
+# 每个模型 ref 的默认请求限速。<= 0 时使用默认值 5。
+max_model_rps = 5
 
 # 模型列表，每个模型平级
 [[models]]
 provider = "glm"
 model = "glm-4"
 base_url = "https://open.bigmodel.cn/api/paas/v4"
+context_window = 128000
+cost_per_1k = 0.0
 strengths = ["后端", "Go", "API 开发", "通用"]
 
 [[models]]
@@ -313,7 +293,8 @@ base_url = "https://api.moonshot.cn/v1"
 strengths = ["前端生成", "多模态", "图片理解"]
 
 [guard]
-enabled = true
+mode = "ask"                      # readonly | ask | auto | smart (默认 ask)
+review_model = ""                  # 预留；当前 LLM review 使用 active_model
 
 # 内置规则已覆盖危险操作 (rm -rf /, rmdir /s /q 等，按 OS 区分)
 # 以下为用户自定义规则，追加到内置规则之上
@@ -326,59 +307,74 @@ pattern = "ls|cat|head|tail|grep|find|wc|dir|type"
 tool = "exec"
 reason = "只读命令直接放行"
 
-[tui]
-theme = "dark"
+[ui]
+theme = "auto"                    # auto | dark | light
 locale = "en"                    # "en" | "zh" | "zh-CN"
+
+# Hooks 当前为预留配置，结构已支持持久化，但执行闭环尚未完成。
+[[hooks]]
+event = "before_tool"
+tool = "exec"
+command = "echo checking"
 ```
 
-## MVP 开发阶段
+### 字段说明
 
-与 index.md 保持一致。以下为详细拆解。
+| 字段 | 类型 | 必填 | 默认值 | 当前用途 |
+|---|---|---|---|---|
+| `active_model` | string | 否 | 第一个 `[[models]]` | 当前 daemon 默认模型，格式为 `provider/model`，必须能匹配某个模型配置。 |
+| `max_model_rps` | int | 否 | `5` | 每个模型 ref 的请求限速，用于避免 sub-agent 并发打爆供应商。 |
+| `[[models]]` | array | 是 | 无 | 至少需要一个模型，否则 daemon/TUI 进入配置向导。 |
+| `models.provider` | string | 是 | 无 | provider 名称，也是 `credentials.toml` 里 API key 的分组名。 |
+| `models.model` | string | 是 | 无 | 模型 ID。模型 ref 为 `provider/model`。 |
+| `models.base_url` | string | 否 | provider 默认 | OpenAI-compatible endpoint；OpenAI 官方 provider 可留空。 |
+| `models.context_window` | int | 否 | provider 默认或 TUI fallback | 上下文窗口，用于顶栏展示和 compact 判断。 |
+| `models.cost_per_1k` | float | 否 | `0` | 成本字段已持久化，当前 UI/计费统计未完整使用。 |
+| `models.strengths` | string[] | 否 | 空 | TUI 展示模型擅长项。 |
+| `[guard].mode` | string | 否 | `ask` | `readonly` / `ask` / `auto` / `smart`。具体决策见 `plans/04-guard.md`。 |
+| `[guard].review_model` | string | 否 | 空 | 预留字段；当前 LLM review 实际使用 active model。 |
+| `[[guard.blocked]]` | array | 否 | 空 | 用户自定义硬拦截规则，追加到内置 blocked rules 后。 |
+| `guard.blocked.pattern` | string | 是 | 无 | Go regexp，匹配命令、路径或 URL。 |
+| `guard.blocked.reason` | string | 否 | 空 | 拦截原因，显示在审计/错误信息中。 |
+| `[[guard.allowed]]` | array | 否 | 空 | 用户自定义允许规则，优先于 mode/risk，低于硬拦截。 |
+| `guard.allowed.pattern` | string | 是 | 无 | Go regexp，匹配命令、路径或 URL。 |
+| `guard.allowed.tool` | string | 否 | 空 | 限定 tool；为空表示匹配所有 guard target。 |
+| `guard.allowed.reason` | string | 否 | 空 | 放行原因，当前字段可持久化。 |
+| `[ui].theme` | string | 否 | `auto` | TUI 主题：`auto` / `dark` / `light`。 |
+| `[ui].locale` | string | 否 | `en` | TUI 语言；当前内置 `en` 和中文。 |
+| `[[hooks]]` | array | 否 | 空 | Hook 配置结构已支持保存；执行链路仍是后续项。 |
+| `hooks.event` | string | 否 | 空 | 预留 hook 事件名。 |
+| `hooks.tool` | string | 否 | 空 | 预留 hook 作用 tool。 |
+| `hooks.command` | string | 否 | 空 | 预留 hook shell command。 |
 
-| Phase | 内容 | 周期 (1人) |
-|---|---|---|
-| **1** | Daemon 基础 + 记忆层基础：sunad + IPC (Unix Socket + JSON-RPC) + 仅添加式记忆 + FTS5 + embedding 自动发现 + 9 工具 + Guard stub | 5 周 |
-| **2** | 行动层完善：Guard 完善 + 渐进信任 + 多模型路由 + 感知源 (Timer/Watcher/Webhook/Stream) | 4 周 |
-| **3** | 记忆深化 + 学习：实体关联 + 时间推理 + 程序记忆 (skill 学习) + 能力系统 (SKILL.md + JS + MCP) | 4 周 |
-| **4** | 完善 + 扩展：项目配置 (SUNA.md) + 模型表现追踪 + 会话持久化 | 4 周 |
-| **5** | 探索: 意图层、WebSocket Transport、多 I/O 渠道、能力市场、Docker sandbox | — |
+### credentials.toml
 
-### Phase 1 详细拆解
+`credentials.toml` 按 provider 保存 API key，同一 provider 下多个模型共享一个 key。该文件由 TUI 通过 IPC 写入，权限为 `0600`。
 
+```toml
+[glm]
+api_key = "..."
+
+[anthropic]
+api_key = "..."
+
+[moonshot]
+api_key = "..."
 ```
-Week 1: daemon/ + ipc/ + model/
-  - Daemon 主循环: 启动/停止/PID 文件/socket 残留清理
-  - Transport 接口 + Unix Socket 实现 (macOS/Linux)
-  - JSON-RPC 2.0 Message 定义 + Server 方法路由
-  - Provider 接口 + OpenAIProvider (go-openai)
-  - Windows Named Pipe (go-winio) 基础实现
 
-Week 2: core/ + tool/ + memory/
-  - Agent.Run loop + Agent struct 组装
-  - Tool 接口 + ReadFile, ListDir, Exec, WriteFile, EditFile
-  - ReadHTTP, WriteHTTP, AskUser, Spawn
-  - MemoryStore + SQLite 初始化 + FTS5
-  - 提取队列 (memory channel + session_messages.memory_extracted) + Memory Worker goroutine
-  - streaming completion + tool calling
-  - embedding 自动发现 (检测 /v1/embeddings)
+注意：`models.provider` 必须和 `credentials.toml` 的 table 名一致，否则 `ResolveAPIKey()` 会返回缺失 key。
 
-Week 3: guard/ + tui/
-  - Guard stub: 硬规则 + isReadOnlyCommand + 全部放行 + 审计日志
-  - 记忆检索: FTS5 (+ embedding 如果有)
-  - 显著性过滤 (规则判断，零 LLM)
-  - Bubble Tea TUI: IPC Client → 连接 daemon → 对话界面
-  - 流式输出渲染 (接收 JSON-RPC notification)
-  - TUI 命令解析 (/new, /model, /usage, /memory 等 → IPC)
+## 当前实现状态
 
-Week 4: memory/ + 集成
-  - 上下文压缩 (10 轮阈值)
-  - /compact 命令 + 反馈
-  - config/ TOML 加载
-  - Daemon 自动退出策略 (无客户端 + 无感知源)
+| 模块 | 状态 | 当前能力 | 主要缺口 |
+|---|---|---|---|
+| Daemon / IPC | Usable MVP | Unix Socket / Windows Named Pipe、JSON-RPC、stream/config/session/guard 通知 | 多客户端边界和错误恢复仍需加强 |
+| Model | Usable MVP | OpenAI-compatible 与 Anthropic provider、tool calling、usage/context 透传 | provider ping、成本统计和高级路由策略不完整 |
+| Core Agent | Usable MVP | agent loop、streaming、reasoning、tool call、AskUser、Spawn、session 管理 | 更细的取消/并发边界和长期任务恢复 |
+| Tools | Usable MVP | read/list/readhttp/exec/write/edit/writehttp/askuser/spawn | Windows 命令翻译层仍是后续项 |
+| Guard | Usable MVP | `readonly` / `ask` / `auto` / `smart`、硬拦截、风险分级、TUI confirm、LLM review | rules 编辑 UI、modify 参数改写、渐进信任未完成 |
+| Memory | Usable MVP | SQLite、session 持久化、FTS、异步提取、上下文压缩 | embedding 自动化和实体/语义查询体验需加强 |
+| TUI | Usable MVP | Welcome/Chat/Config/Help、模型配置、工具记录、AskUser、Guard overlay、compact、memory search | Provider test、Config 高级项和 Help 覆盖仍不完整 |
+| Capability | Basic | SKILL.md 加载和能力目录结构 | JS/WASM runner、MCP client、能力市场未完成 |
 
-Week 5: 跨平台 + 测试
-  - Windows Named Pipe 完整实现 + 测试
-  - Daemon 重启后提取队列恢复
-  - 端到端测试
-  - Bug fix
-```
+后续路线以 `plans/00-progress.md` 为准；本文件只记录当前技术选型、目录结构和配置字段。

@@ -50,6 +50,7 @@ const (
 const (
 	MethodSendMessage    = "agent.sendMessage"
 	MethodCancel         = "agent.cancel"
+	MethodGuardReply     = "agent.guardReply"
 	MethodMemorySearch   = "memory.search"
 	MethodMemoryFacts    = "memory.facts"
 	MethodTriggerList    = "trigger.list"
@@ -83,6 +84,7 @@ const (
 	NotifyToolStart           = "agent.tool_start"
 	NotifyToolEnd             = "agent.tool_end"
 	NotifyAskUser             = "agent.ask_user"
+	NotifyGuardConfirm        = "agent.guard_confirm"
 	NotifyDaemonState         = "daemon.state"
 	NotifyPerception          = "perception.event"
 	NotifyMemoryUpdated       = "memory.updated"
@@ -130,6 +132,20 @@ type AskUserParams struct {
 	ID       string   `json:"id"`
 }
 
+type GuardConfirmParams struct {
+	ID         string         `json:"id"`
+	Tool       string         `json:"tool"`
+	Params     map[string]any `json:"params"`
+	Risk       string         `json:"risk"`
+	Reason     string         `json:"reason"`
+	Suggestion string         `json:"suggestion,omitempty"`
+}
+
+type GuardReplyParams struct {
+	ID       string `json:"id"`
+	Decision string `json:"decision"`
+}
+
 // DaemonStateParams 连接时推送 daemon 状态
 type DaemonStateParams struct {
 	SessionID    string `json:"session_id"`
@@ -162,6 +178,7 @@ type ConfigParams struct {
 	ActiveModel string        `json:"active_model"`
 	Locale      string        `json:"locale,omitempty"`
 	Theme       string        `json:"theme,omitempty"`
+	GuardMode   string        `json:"guard_mode,omitempty"`
 }
 
 type ConfigModel struct {
@@ -181,6 +198,7 @@ type ConfigSetParams struct {
 	APIKey      string      `json:"api_key,omitempty"`
 	Locale      string      `json:"locale,omitempty"`
 	Theme       string      `json:"theme,omitempty"`
+	GuardMode   string      `json:"guard_mode,omitempty"`
 }
 
 type MemoryStats struct {

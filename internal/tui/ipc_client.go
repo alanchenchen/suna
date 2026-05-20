@@ -123,6 +123,10 @@ func (c *ipcClient) AskReply(askID, answer string) error {
 	})
 }
 
+func (c *ipcClient) GuardReply(guardID, decision string) error {
+	return c.SendRequestNotify(ipc.MethodGuardReply, ipc.GuardReplyParams{ID: guardID, Decision: decision})
+}
+
 func (c *ipcClient) NewSession() error {
 	return c.SendRequestNotify(ipc.MethodSessionNew, nil)
 }

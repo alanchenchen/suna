@@ -18,7 +18,7 @@ type configRow struct{ kind, name, label, value string }
 
 func (r configRow) selectable() bool {
 	switch r.kind {
-	case "section", "general_language", "general_theme", "add_model", "model", "empty":
+	case "section", "general_language", "general_theme", "general_guard", "add_model", "model", "empty":
 		return true
 	default:
 		return false
@@ -56,6 +56,7 @@ func (t *TUI) configHomeRows() []configRow {
 		{"info", "", "  " + t.tr("tui.config.providers"), t.i18n.Tf("tui.config.providers_summary", len(t.configState.Models), needs)},
 		{"general_language", "", "  " + t.tr("tui.config.language"), t.currentLangDisplay()},
 		{"general_theme", "", "  " + t.tr("tui.config.theme"), t.themeDisplay()},
+		{"general_guard", "", "  " + t.tr("tui.config.guard_mode"), t.guardModeDisplay()},
 	}
 	t.ensureConfigCursor(rows)
 	return rows
@@ -118,6 +119,8 @@ func (t *TUI) handleConfigAction(rows []configRow) tea.Cmd {
 		return t.toggleLanguage()
 	case "general_theme":
 		return t.toggleTheme()
+	case "general_guard":
+		return t.toggleGuardMode()
 	case "add_model":
 		t.openProviderKind()
 	case "model":
@@ -209,11 +212,52 @@ func (t *TUI) toggleTheme() tea.Cmd {
 	return t.sendConfigSet(ipc.ConfigSetParams{Action: ipc.ConfigActionUpdateGeneral, Locale: string(t.i18n.Locale()), Theme: theme})
 }
 
+func (t *TUI) toggleGuardMode() tea.Cmd {
+	mode := nextGuardMode(t.configState.GuardMode)
+	t.configState.GuardMode = mode
+	return t.sendConfigSet(ipc.ConfigSetParams{Action: ipc.ConfigActionUpdateGeneral, Locale: string(t.i18n.Locale()), Theme: t.theme, GuardMode: mode})
+}
+
 func (t *TUI) currentLangDisplay() string {
 	if t.i18n.Locale() == LocaleZH {
 		return t.tr("tui.lang.zh")
 	}
 	return t.tr("tui.lang.en")
+}
+
+func (t *TUI) guardModeDisplay() string {
+	switch normalizeGuardMode(t.configState.GuardMode) {
+	case "readonly":
+		return t.tr("tui.guard.mode.readonly") + " · " + t.tr("tui.guard.mode.readonly.desc")
+	case "auto":
+		return t.tr("tui.guard.mode.auto") + " · " + t.tr("tui.guard.mode.auto.desc")
+	case "smart":
+		return t.tr("tui.guard.mode.smart") + " · " + t.tr("tui.guard.mode.smart.desc")
+	default:
+		return t.tr("tui.guard.mode.ask") + " · " + t.tr("tui.guard.mode.ask.desc")
+	}
+}
+
+func normalizeGuardMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "readonly", "auto", "smart":
+		return strings.ToLower(strings.TrimSpace(mode))
+	default:
+		return "ask"
+	}
+}
+
+func nextGuardMode(mode string) string {
+	switch normalizeGuardMode(mode) {
+	case "ask":
+		return "smart"
+	case "smart":
+		return "auto"
+	case "auto":
+		return "readonly"
+	default:
+		return "ask"
+	}
 }
 
 func (t *TUI) ensureConfigCursor(rows []configRow) {

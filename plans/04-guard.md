@@ -1,6 +1,80 @@
 # 04 — LLM 权限守卫 (Guard)
 
-Suna 的核心创新：权限控制不是静态规则，而是 LLM 驱动的动态审查。
+> 当前实现状态: **Usable MVP**
+> 最后更新: 2026-05-20
+
+## 当前实现事实
+
+Guard 已有最低安全闭环，支持 4 种 mode，真实 confirm 和 LLM review：
+
+- **Guard Mode**: `readonly` / `ask` / `auto` / `smart`，默认 `ask`，可通过 TUI Config 切换。
+- **Mode 策略**:
+  - `readonly`: 只允许 low risk 且只读的操作；其他操作 reject，不弹窗。
+  - `ask`: Low risk auto approve，Medium/High risk 真实暂停等待用户确认。
+  - `auto`: Low/Medium/High risk auto approve；只保留硬规则 reject，不弹窗。
+  - `smart`: Low risk auto approve，Medium/High risk 调 LLM review；review 失败/不确定/confirm/modify 转用户确认。
+- **Confirm 机制**: `EventGuardConfirm` 独立事件类型，daemon 通过 `Reply chan string` 阻塞等待 TUI 回传 approve/reject。不复用 AskUser 事件。
+- **LLM Review 修复**: review 失败、JSON parse 失败、不确定、confirm、modify 都保守转用户确认，不再静默放行。
+- **Modify 处理**: 当前不做自动参数改写，作为带 suggestion 的 confirm 处理。
+- **Sub-agent**: 通过 `newGuardForSession()` 继承主 Guard policy、blocked/allowed、audit DB。
+- **TUI**: Guard confirm overlay 显示 tool/risk/reason/suggestion/params，支持键位操作；Config home 可切换 Guard Mode。
+- **IPC**: `MethodGuardReply` / `NotifyGuardConfirm` / `GuardConfirmParams` / `GuardReplyParams`；server 用 `pendingGuards sync.Map` 管理。
+
+未实现：
+- 参数改写（modify 时自动 patch 参数）。
+- Guard rules 的 TUI 编辑 UI。
+- 渐进信任（行为模式学习后自动调整风险级别）。
+
+## 当前决策表
+
+Guard 决策顺序固定如下：
+
+1. 命中内置或用户 blocked rule -> `reject`，不询问。
+2. 命中用户 allowed rule -> `approve`，不询问。
+3. 根据 tool 和参数计算 `low` / `medium` / `high`。
+4. 根据 guard mode 决定自动放行、拒绝、询问或 LLM review。
+
+### Mode 行为矩阵
+
+| Mode | Low Risk | Medium Risk | High Risk | 硬拦截规则 |
+|---|---|---|---|---|
+| `readonly` | 只读操作 approve；写操作 reject | reject | reject | reject |
+| `ask` | approve | confirm | confirm | reject |
+| `auto` | approve | approve | approve | reject |
+| `smart` | approve | LLM review | LLM review | reject |
+
+说明：
+- `confirm` 表示 TUI 显示 Guard confirmation overlay，由用户选择 approve/reject。
+- `LLM review` 表示先让 active model 审查，返回 approve/reject/confirm/modify；失败或不确定时转 confirm。
+- `auto` 不是“自动判断风险后询问”，而是“除硬拦截外全部自动放行”。
+- 用户 allowed rule 优先级高于 mode 和 risk，但低于硬拦截。
+
+### Risk 分级矩阵
+
+| Tool | Low Risk | Medium Risk | High Risk |
+|---|---|---|---|
+| `exec` | 只读命令，如 `ls`、`cat`、`rg`、`git status` | 不是只读命令，且不含删除关键词 | 命令字符串包含 `rm`、`rmdir`、`del` |
+| `writefile` | 写入当前不存在的新文件 | 覆盖当前已存在的文件 | 当前无 high 分支 |
+| `editfile` | 当前无 low 分支 | 所有 editfile | 当前无 high 分支 |
+| `writehttp` | 当前无 low 分支 | 非 DELETE 写请求 | method 为 `DELETE` |
+| 其他工具 | 默认 low | 当前无 medium 分支 | 当前无 high 分支 |
+
+只读命令白名单按平台区分。Unix/macOS 当前包括：
+
+```text
+ls, cat, head, tail, wc, stat, du,
+grep, rg, ag, ack,
+find, glob, locate,
+which, type, where, command,
+echo, printf, date, whoami,
+git status, git log, git diff,
+git branch, git show, git stash list,
+env, printenv, uname, hostname
+```
+
+管道命令只有在每个子命令都属于只读命令时，整体才算 low risk。
+
+---
 
 ## 设计哲学
 
@@ -36,25 +110,21 @@ Action 请求 (WriteFile / EditFile / Exec / WriteHTTP)
 │  基于操作类型和目标        │
 │                          │
 │  低风险:                  │
-│  - 写入用户目录下的新文件  │
-│  - 写入 /tmp              │
-│  - GET 请求               │
-│  - Exec: ls, cat, grep    │
+│  - 只读 Exec: ls, cat, rg │
+│  - 写入不存在的新文件      │
+│  - 其他未特殊分类的工具    │
 │                          │
 │  中风险:                  │
 │  - 覆盖已有文件            │
+│  - editfile 修改文件       │
 │  - Exec: npm install      │
-│  - POST 请求              │
+│  - writehttp 非 DELETE    │
 │                          │
 │  高风险:                  │
-│  - 删除文件                │
-│  - Exec: rm, git push     │
-│  - 写入配置文件            │
-│  - 修改环境变量            │
+│  - Exec 包含 rm/rmdir/del │
+│  - writehttp DELETE       │
 │                          │
-│  低风险 → 直接放行        │
-│  中风险 → Stage 3         │
-│  高风险 → Stage 3 (必审)  │
+│  后续动作由 Guard Mode 决定│
 └──────────┬───────────────┘
            │
            ▼
@@ -104,14 +174,12 @@ Windows:
   rmdir\s+/s\s+/q\s+[A-Z]:\\           → 禁止递归强制删除驱动器
   rd\s+/s\s+/q\s+[A-Z]:\\              → 同上
   del\s+/s\s+/q\s+[A-Z]:\\            → 禁止递归强制删除驱动器
-  Remove-Item\s+.*-Recurse.*-Force.*[A-Z]:\\  → 禁止 PowerShell 强制递归删除
   format\s+[A-Z]:                      → 禁止格式化驱动器
-  cipher\s+/w:[A-Z]:\\                 → 禁止数据擦除
   :\s*C:\\Windows|:\s*C:\\Program       → 禁止写入系统目录
-  :\s*C:\\Users\\[^\\]+\\ntuser         → 禁止写入用户注册表文件
 
 通用:
-  curl.*\|\s*sh|wget.*\|\s*sh           → 禁止远程脚本管道执行
+  curl.*\|\s*sh                         → 禁止远程脚本管道执行
+  wget.*\|\s*sh                         → 禁止远程脚本管道执行
   eval\s*\$\(                            → 禁止命令注入模式
 ```
 
@@ -119,7 +187,6 @@ Windows:
 
 ```toml
 [guard]
-enabled = true
 review_model = "fast"                    # 用哪个模型做 LLM 审查
 
 # 用户自定义拦截 (追加到内置规则之上)
@@ -127,7 +194,7 @@ review_model = "fast"                    # 用哪个模型做 LLM 审查
 pattern = "npm\\s+publish"
 reason = "禁止发布 npm 包"
 
-# 用户自定义放行 (独立于内置规则，只影响 Stage 2 风险评级)
+# 用户自定义放行 (优先于 mode/risk，低于硬拦截)
 [[guard.allowed]]
 pattern = "ls|cat|head|tail|grep|find|wc"
 tool = "exec"
@@ -191,24 +258,24 @@ reason = "读文件直接放行"
 
 ## 风险评级的实现
 
+以下代码片段描述当前实现语义，应与 `internal/guard/guard.go` 保持一致。
+
 ```go
 type RiskLevel int
 
 const (
-    RiskLow    RiskLevel = iota  // 直接放行
-    RiskMedium                   // LLM 审查
-    RiskHigh                     // LLM 审查 (更严格的 prompt)
+    RiskLow RiskLevel = iota
+    RiskMedium
+    RiskHigh
 )
 
 func assessRisk(tool string, params ToolParams) RiskLevel {
     switch tool {
     case "exec":
         cmd := params["command"]
-        // 只读命令直接放行，不经过 Stage 3 LLM 审查
-        // grep/glob/find/head/tail/wc/cat/ls/stat/du/which/type 等本质是 Perceive 操作
+        // 只读命令为 low risk；是否直接放行由 Guard Mode 决定。
         if isReadOnlyCommand(cmd) { return RiskLow }
         if containsAny(cmd, []string{"rm", "rmdir", "del"}) { return RiskHigh }
-        if containsAny(cmd, []string{"npm", "pip", "go"}) { return RiskMedium }
         return RiskMedium
     case "writefile":
         if fileExists(params["path"]) { return RiskMedium }  // 覆盖
@@ -219,7 +286,7 @@ func assessRisk(tool string, params ToolParams) RiskLevel {
         if params["method"] == "DELETE" { return RiskHigh }
         return RiskMedium
     }
-    return RiskMedium
+    return RiskLow
 }
 
 // 只读命令白名单: 不修改文件系统/网络/进程的命令
@@ -326,41 +393,99 @@ Guard 会学习用户的行为模式。
 远期: 意图信任 — 用户确认的意图下确定性操作直接执行 (见 10-stateful-entity.md)
 ```
 
-## Phase 1 Guard Stub
+## Guard Mode 实现
 
-Phase 1 不实现 LLM 审查（Stage 3）。Guard 以 stub 模式运行：
+当前 Guard 以 full mode 运行，不再是 stub：
 
 ```go
-type GuardStub struct {
-    db *sql.DB  // 审计日志
-}
+type Mode string
 
-func (g *GuardStub) Check(ctx context.Context, tool string, params map[string]any) error {
-    // Stage 1: 硬规则检查 (完整实现)
-    if isBlocked(tool, params) {
-        g.audit(ctx, tool, params, "blocked", "hard_rule")
-        return fmt.Errorf("blocked: %s", blockReason)
-    }
+const (
+    ModeReadOnly Mode = "readonly"
+    ModeAsk      Mode = "ask"
+    ModeAuto     Mode = "auto"
+    ModeSmart    Mode = "smart"
+)
 
-    // Stage 2: 风险评级 (完整实现)
+func (g *Guard) Check(ctx context.Context, tool string, params map[string]any) (GuardResult, error) {
     risk := assessRisk(tool, params)
 
-    // Phase 1: 跳过 Stage 3 LLM 审查，全部放行
-    // 记录审计日志，方便后续分析
-    g.audit(ctx, tool, params, "auto_approve", fmt.Sprintf("risk=%s phase1_stub", risk))
+    if hit, reason := g.checkBlocked(tool, params); hit {
+        return GuardResult{Decision: "reject", Reason: reason}, nil
+    }
+    if hit, reason := g.checkAllowed(tool, params); hit {
+        return GuardResult{Decision: "approve", Reason: reason}, nil
+    }
 
-    return nil
+    if g.Mode == ModeReadOnly {
+        if risk == RiskLow && isReadOnlyTool(tool) {
+            return GuardResult{Decision: "approve", Reason: "readonly low risk"}, nil
+        }
+        return GuardResult{Decision: "reject", Reason: "readonly mode blocks this operation"}, nil
+    }
+
+    if risk == RiskLow {
+        return GuardResult{Decision: "approve", Reason: "low risk"}, nil
+    }
+    if g.Mode == ModeAuto {
+        return GuardResult{Decision: "approve", Reason: "auto mode"}, nil
+    }
+    if g.Mode == ModeAsk {
+        return GuardResult{Decision: "confirm", Reason: "confirm risky operation"}, nil
+    }
+
+    // smart mode: run LLM review for medium/high risk.
+    return g.llmReviewOrConfirm(ctx, tool, params, risk)
 }
 ```
 
-```
-Phase 1 行为:
-  - 硬规则拦截: 正常工作 (rm -rf / 等仍然被拦截)
-  - 只读命令: isReadOnlyCommand 快速放行
-  - 其余所有操作: 自动放行 + 审计日志
-  - 无 LLM 审查成本
+### Mode 行为矩阵
 
-Phase 2 升级:
-  - GuardStub 替换为完整 Guard
-  - 审计日志中的 "auto_approve" 记录可用于校准初始信任规则
+| Mode | Low Risk | Medium Risk | High Risk | 硬拦截规则 |
+|---|---|---|---|---|
+| `readonly` | 只读操作 approve；写操作 reject | reject | reject | reject |
+| `ask` | approve | **confirm** | **confirm** | reject |
+| `auto` | approve | approve | approve | reject |
+| `smart` | approve | **LLM review** | **LLM review** | reject |
+
+LLM review 的输出处理：
+- `approve` → 放行
+- `reject` → 拒绝
+- `confirm` → 转用户确认
+- `modify` → 当前转用户确认（附带 suggestion），未实现参数改写
+- 解析失败 / LLM 调用失败 → 保守转用户确认
+
+### Guard Confirm 流程
+
 ```
+1. Guard.Check() 返回 "confirm"
+2. Core 通过 EventGuardConfirm 暂停 tool 执行
+3. IPC 发送 NotifyGuardConfirm 到 TUI
+4. TUI 渲染 Guard confirm overlay
+5. 用户选择 approve/reject
+6. TUI 通过 MethodGuardReply 回传决策
+7. Core 通过 Reply chan 收到决策
+8. 执行或拒绝 tool
+```
+
+### Sub-agent Guard
+
+```go
+// newGuardForSession() 是统一创建入口
+// main/sub/NewSession/RestoreSession 都通过它
+func (a *Agent) newGuardForSession() (*Guard, error) {
+    return &Guard{
+        Mode:     a.config.Guard.ModeOrDefault(),
+        // 共享 blocked/allowed/audit DB
+    }, nil
+}
+```
+
+### 配置
+
+```toml
+[guard]
+mode = "ask"  # readonly | ask | auto | smart
+```
+
+`ModeOrDefault()` 返回配置的 mode，默认 `ask`。

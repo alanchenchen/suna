@@ -19,7 +19,7 @@ func New() (*Loader, error) {
 	}
 	files := []string{
 		"system", "guard", "guard_review", "compress", "extract",
-		"extract_batch", "spawn_system", "route",
+		"extract_batch", "spawn_system",
 	}
 	for _, name := range files {
 		data, err := templatesFS.ReadFile("templates/" + name + ".md")
@@ -52,8 +52,8 @@ func (l *Loader) RenderSystem(data SystemPromptData) (string, error) {
 		"OS":               data.OS,
 		"Arch":             data.Arch,
 		"WorkDir":          data.WorkDir,
-		"User":             data.User,
-		"Time":             data.Time,
+		"ActiveModel":      data.ActiveModel,
+		"ModelRouting":     data.ModelRouting,
 		"ProjectConfig":    data.ProjectConfig,
 		"UserPreferences":  data.UserPreferences,
 		"RecalledMemories": data.RecalledMemories,
@@ -74,18 +74,11 @@ func (l *Loader) RenderExtract(userInput, agentOutput string) (string, error) {
 	})
 }
 
-func (l *Loader) RenderRoute(models string, task string) (string, error) {
-	return l.Render("route", map[string]any{
-		"Models": models,
-		"Task":   task,
-	})
-}
-
 func (l *Loader) RenderGuardReview(data GuardReviewData) (string, error) {
 	return l.Render("guard_review", map[string]any{
-		"ToolName":     data.ToolName,
-		"ToolParams":   data.ToolParams,
-		"Target":       data.Target,
+		"ToolName":      data.ToolName,
+		"ToolParams":    data.ToolParams,
+		"Target":        data.Target,
 		"RecentContext": data.RecentContext,
 	})
 }
@@ -98,11 +91,12 @@ func (l *Loader) RenderExtractBatch(interactions []ExtractInteraction) (string, 
 
 func (l *Loader) RenderSpawnSystem(data SpawnPromptData) (string, error) {
 	return l.Render("spawn_system", map[string]any{
-		"Task":      data.Task,
-		"Tools":     data.Tools,
-		"Context":   data.Context,
-		"ModelInfo": data.ModelInfo,
-		"ParentTask": data.ParentTask,
+		"Task":    data.Task,
+		"Tools":   data.Tools,
+		"Context": data.Context,
+		"OS":      data.OS,
+		"Arch":    data.Arch,
+		"WorkDir": data.WorkDir,
 	})
 }
 
@@ -110,8 +104,8 @@ type SystemPromptData struct {
 	OS               string
 	Arch             string
 	WorkDir          string
-	User             string
-	Time             string
+	ActiveModel      string
+	ModelRouting     string
 	ProjectConfig    string
 	UserPreferences  string
 	RecalledMemories string
@@ -119,18 +113,19 @@ type SystemPromptData struct {
 }
 
 type GuardReviewData struct {
-	ToolName     string
-	ToolParams   string
-	Target       string
+	ToolName      string
+	ToolParams    string
+	Target        string
 	RecentContext string
 }
 
 type SpawnPromptData struct {
-	Task       string
-	Tools      string
-	Context    string
-	ModelInfo  string
-	ParentTask string
+	Task    string
+	Tools   string
+	Context string
+	OS      string
+	Arch    string
+	WorkDir string
 }
 
 type ExtractInteraction struct {

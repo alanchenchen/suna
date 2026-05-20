@@ -252,3 +252,75 @@
 ### ✅ 10-stateful-entity.md 架构图修正
 - 移除图中"意图层"框，改为感知→记忆→行动三层
 - 与 index.md 和 01-architecture.md 保持一致
+
+## 第七轮审查修复 (2026-05-20) — 模型路由改造 + Guard mode + Spawn 收敛
+
+### ✅ 模型路由改造
+- 删除 `RouteWithLLM()` / `routeByLLM()` / `RouteResult` / `route.md`
+- spawn schema required=["task","model","tools"]
+- 执行层校验 model/tool 名称
+- spawn.tools 用 enum 限定可选工具
+- 02-model-router.md 已更新为 main-agent delegated routing
+
+### ✅ 系统提示词优化
+- 删除 Current Time 和 User 字段
+- 重排 system.md 为稳定策略→低频动态→高频动态
+- sub-agent 不继承 system.md，使用独立 spawn_system.md
+- spawn_system.md 只含 task/env/tools/context/rules
+
+### ✅ Sub-agent 隔离
+- 新增 `systemPromptOverride` 字段
+- sub-agent 不暴露 askuser/spawn tool schema
+- 删除 SpawnToolGuide/SpawnTools 模板变量
+
+### ✅ Guard mode 实现
+- 4 个 mode: readonly / ask / auto / smart，默认 ask
+- Check() 按 mode 分策略
+- confirm/modify/review-fail 不再假 approve
+- 新增 checkAllowed() / guardTarget() / isReadOnlyTool() / RiskString()
+
+### ✅ Core guard confirm
+- 独立 EventGuardConfirm 事件类型（不复用 AskUser）
+- confirmGuard() 暂停 tool 执行等待用户确认
+- newGuardForSession() 统一创建带 mode 的 Guard
+
+### ✅ IPC guard 协议
+- MethodGuardReply / NotifyGuardConfirm / GuardConfirmParams / GuardReplyParams
+- server 新增 pendingGuards sync.Map 和 handleGuardReply()
+
+### ✅ TUI guard confirm UI
+- 独立 overlay 面板显示 tool/risk/reason/suggestion/params
+- 支持 ←→/j/k/Enter/Esc/Y/N 键位，默认选 Reject
+- 所有文案走 i18n
+
+### ✅ TUI Guard Mode 配置
+- Config home 新增 Guard Mode 行
+- 可切换 ask→smart→auto→readonly→ask
+- 通过 IPC config.set 持久化
+
+### ✅ 04-guard.md 更新
+- 新增"当前实现事实"状态块
+- Phase 1 Guard Stub 替换为 Guard Mode 实现
+- 新增 Mode 行为矩阵和 Confirm 流程
+
+### ✅ 03-tools.md 更新
+- Spawn 参数 model 和 tools 改为必填
+- 删除"默认工具集"
+- 新增 daemon 校验说明和 sub-agent 限制
+
+### ✅ 12-tui-design.md 更新
+- 新增 Guard confirm overlay 章节
+- 新增 Guard Mode 配置
+- IPC 数据新增 guard_confirm / guardReply
+- 文件结构更新
+
+### ✅ 01-architecture.md 更新
+- Guard 描述更新为 4 mode
+- Sub Agent 属性更新（必填 model/tools、禁用 askuser、独立 spawn_system.md）
+
+### ✅ 08-tech-stack.md 更新
+- 项目结构新增 agent_management.go / agent_prompt.go
+- guard.go 描述更新
+- 新增 spawn_system.md 模板
+- IPC server/message 描述更新
+- config.toml 新增 guard.mode
