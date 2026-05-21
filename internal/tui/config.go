@@ -116,12 +116,26 @@ func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "ctrl+c":
 				t.doQuit()
 				return t, tea.Quit
-			case "y", "Y", "enter":
+			case "left", "h", "up", "k", "tab", "shift+tab", "right", "l", "down", "j":
+				if t.configDeleteCursor == 0 {
+					t.configDeleteCursor = 1
+				} else {
+					t.configDeleteCursor = 0
+				}
+				return t, nil
+			case "enter":
+				if t.configDeleteCursor == 0 {
+					t.configDeleteConfirm = ""
+					t.configDeleteCursor = 0
+					return t, nil
+				}
 				ref := t.configDeleteConfirm
 				t.configDeleteConfirm = ""
+				t.configDeleteCursor = 0
 				return t, t.sendConfigSet(ipc.ConfigSetParams{Action: ipc.ConfigActionDeleteModel, ModelRef: ref})
-			case "n", "N", "esc":
+			case "esc":
 				t.configDeleteConfirm = ""
+				t.configDeleteCursor = 0
 				return t, nil
 			}
 		}
@@ -142,38 +156,6 @@ func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, t.handleConfigAction(rows)
 		case " ", "space":
 			return t, t.activateSelectedConfigModel(rows)
-		case "a", "A":
-			if t.configPage == "models" {
-				t.openProviderKind()
-				return t, nil
-			}
-		case "e", "E":
-			if t.configPage == "detail" {
-				if mc, ok := t.modelByRef(t.configDetailRef); ok {
-					t.openProviderForm(t.configDetailRef, &mc)
-					return t, t.configInputs[t.configInputFocus].Focus()
-				}
-			} else if t.configPage == "models" {
-				if ref, ok := t.selectedConfigModel(rows); ok {
-					if mc, ok := t.modelByRef(ref); ok {
-						t.configDetailRef = ref
-						t.openProviderForm(ref, &mc)
-						return t, t.configInputs[t.configInputFocus].Focus()
-					}
-				}
-			}
-		case "d", "D":
-			if t.configPage == "models" {
-				if ref, ok := t.selectedConfigModel(rows); ok {
-					t.configDeleteConfirm = ref
-					return t, nil
-				}
-			}
-		case "t", "T":
-			if t.configPage == "detail" {
-				t.configLastCheck = t.tr("tui.config.check_not_implemented")
-				return t, nil
-			}
 		case "?", "f1":
 			t.showHelp = !t.showHelp
 			return t, nil

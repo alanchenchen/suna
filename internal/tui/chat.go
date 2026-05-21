@@ -99,39 +99,45 @@ func (t *TUI) initChatComponents() tea.Cmd {
 }
 
 func (t *TUI) syncContent() {
+	followBottom := t.vp.AtBottom()
 	var sb strings.Builder
-	runningReasoningIdx := -1
-	if t.loading && t.phase == phaseThinking && t.phaseStart.After(time.Time{}) {
-		for i := len(t.messages) - 1; i >= 0; i-- {
-			if t.messages[i].role == "reasoning" {
-				runningReasoningIdx = i
-				break
-			}
+	inSunaBlock := false
+	renderSunaHeader := func() {
+		if inSunaBlock {
+			return
 		}
+		// reasoning、tool 和最终回答归为同一个 Suna 回合，避免思考/工具块看起来像用户消息的一部分。
+		sb.WriteString("\n  " + styleAgentLine.Render("● "+t.tr("tui.chat.suna")) + "\n")
+		inSunaBlock = true
 	}
 
-	for i, msg := range t.messages {
+	for _, msg := range t.messages {
 		switch msg.role {
 		case "user":
 			content, _ := msg.content.(string)
 			sb.WriteString("\n" + renderInlineUserMessage(content, max(20, t.width-8)) + "\n")
+			inSunaBlock = false
 		case "assistant":
 			content, _ := msg.content.(string)
-			sb.WriteString("\n  " + styleAgentLine.Render("● "+t.tr("tui.chat.suna")) + "\n")
+			renderSunaHeader()
 			sb.WriteString(indentLines(RenderMarkdown(content, t.width-6), "  ") + "\n")
 		case "reasoning":
 			content, _ := msg.content.(string)
-			sb.WriteString(t.renderThinkingBox(content, i == runningReasoningIdx))
+			renderSunaHeader()
+			sb.WriteString(t.renderThinkingBox(content, false))
 		case "tool":
 			if te, ok := msg.content.(*toolEntry); ok {
+				renderSunaHeader()
 				sb.WriteString(t.renderToolEntry(te))
 			}
 		case "error":
 			content, _ := msg.content.(string)
 			sb.WriteString("\n" + styleErrLine.Render("  ✗ "+content) + "\n")
+			inSunaBlock = false
 		default:
 			content, _ := msg.content.(string)
 			sb.WriteString("\n" + styleSysLine.Render("  ◆ "+content) + "\n")
+			inSunaBlock = false
 		}
 	}
 
@@ -153,34 +159,19 @@ func (t *TUI) syncContent() {
 		sb.WriteString(t.renderModelPicker())
 	}
 
-	if t.loading && t.phase == phaseFirstLLM && t.phaseStart.After(time.Time{}) {
-		sb.WriteString(t.renderPhaseLine())
-	}
-	if t.loading && t.phase == phaseLLM && t.phaseStart.After(time.Time{}) {
-		sb.WriteString(t.renderPhaseLine())
-	}
-
-	if t.loading && t.phaseStart.After(time.Time{}) && t.phase == phaseThinking && runningReasoningIdx < 0 {
-		sb.WriteString(t.renderThinkingBox("", true))
-	}
-
-	for _, te := range t.activeTools {
-		if te.status == toolRunning {
-			start, ok := t.toolStartTimes[te.id]
-			if !ok {
-				start = time.Now()
-			}
-			elapsed := time.Since(start)
-			sb.WriteString(fmt.Sprintf("  %s %s %.1fs\n", styleToolRun.Render("⋯"), styleToolCallLabel(te), elapsed.Seconds()))
-		}
+	if t.loading && t.phaseStart.After(time.Time{}) {
+		renderSunaHeader()
+		sb.WriteString(t.renderCurrentStatusLine())
 	}
 
 	t.vp.SetContent(sb.String())
-	t.vp.GotoBottom()
+	if followBottom {
+		t.vp.GotoBottom()
+	}
 }
 
 func (t *TUI) renderThinkingBox(content string, running bool) string {
-	width := max(24, min(t.width-6, 62))
+	width := max(24, min(t.width-8, 62))
 	inner := width - 4
 	title := " ◎ " + t.tr("tui.chat.thinking") + " "
 	if running {
@@ -216,41 +207,64 @@ func (t *TUI) renderThinkingBox(content string, running bool) string {
 		}
 	}
 	var sb strings.Builder
-	sb.WriteString("  " + styleDim.Render("┌─"+title+strings.Repeat("─", max(0, width-lipgloss.Width(title)-3))+"┐") + "\n")
+	sb.WriteString("    " + styleDim.Render("┌─"+title+strings.Repeat("─", max(0, width-lipgloss.Width(title)-3))+"┐") + "\n")
 	for _, line := range lines {
 		for _, wrapped := range wrapLine(line, inner) {
-			sb.WriteString("  " + styleDim.Render("│ ") + wrapped + strings.Repeat(" ", max(0, inner-lipgloss.Width(wrapped))) + styleDim.Render(" │") + "\n")
+			sb.WriteString("    " + styleDim.Render("│ ") + wrapped + strings.Repeat(" ", max(0, inner-lipgloss.Width(wrapped))) + styleDim.Render(" │") + "\n")
 		}
 	}
-	sb.WriteString("  " + styleDim.Render("└"+strings.Repeat("─", width-2)+"┘") + "\n")
+	sb.WriteString("    " + styleDim.Render("└"+strings.Repeat("─", width-2)+"┘") + "\n")
 	return sb.String()
 }
 
-func (t *TUI) phaseLabel() string {
-	switch t.phase {
-	case phaseFirstLLM:
-		return ""
-	case phaseLLM:
-		return t.i18n.T("status.responding")
-	case phaseThinking:
-		return t.i18n.T("status.thinking")
-	case phaseTool:
-		return t.i18n.T("status.exec_tool")
-	default:
-		return ""
-	}
-}
-
-func (t *TUI) renderPhaseLine() string {
-	label := t.phaseLabel()
+func (t *TUI) renderCurrentStatusLine() string {
+	label := t.currentStatusLabel()
 	if label == "" {
-		return "  " + t.sp.View() + "\n"
+		label = t.tr("status.responding")
 	}
 	elapsed := 0.0
 	if !t.phaseStart.IsZero() {
 		elapsed = time.Since(t.phaseStart).Seconds()
 	}
-	return fmt.Sprintf("  %s %s %.1fs\n", t.sp.View(), styleDim.Render(label), elapsed)
+	cancel := styleDim.Render(" · Esc " + t.tr("tui.key.cancel"))
+	return fmt.Sprintf("    %s %s %s%s\n", t.sp.View(), styleDim.Render(label), styleDim.Render(fmt.Sprintf("%.1fs", elapsed)), cancel)
+}
+
+func (t *TUI) currentStatusLabel() string {
+	if te, ok := t.currentRunningTool(); ok {
+		return t.tr("status.exec_tool") + " " + plainToolCallLabel(te)
+	}
+	switch t.phase {
+	case phaseFirstLLM:
+		return t.tr("status.waiting_llm")
+	case phaseLLM:
+		return t.tr("status.responding")
+	case phaseThinking:
+		return t.tr("status.thinking")
+	case phaseTool:
+		return t.tr("status.exec_tool")
+	default:
+		return ""
+	}
+}
+
+func (t *TUI) currentRunningTool() (*toolEntry, bool) {
+	var selected *toolEntry
+	var selectedStart time.Time
+	for _, te := range t.activeTools {
+		if te.status != toolRunning {
+			continue
+		}
+		start := t.toolStartTimes[te.id]
+		if selected == nil || start.Before(selectedStart) || (start.Equal(selectedStart) && te.name < selected.name) {
+			selected = te
+			selectedStart = start
+		}
+	}
+	if selected == nil {
+		return nil, false
+	}
+	return selected, true
 }
 
 func (t *TUI) renderToolEntry(te *toolEntry) string {
@@ -267,31 +281,31 @@ func (t *TUI) renderToolEntry(te *toolEntry) string {
 	default:
 		statusIcon = styleToolDim.Render("·")
 	}
-	line := fmt.Sprintf("  %s %s%s", statusIcon, styleToolCallLabel(te), dur)
+	line := fmt.Sprintf("    %s %s%s", statusIcon, styleToolCallLabel(te), dur)
 	if t.showToolDetail {
 		if strings.TrimSpace(te.intent) != "" {
-			line += "\n    " + styleDim.Render(t.tr("tui.tool.intent"))
-			for _, wrapped := range wrapLine(te.intent, max(20, t.width-8)) {
-				line += "\n    " + styleToolDim.Render(wrapped)
+			line += "\n      " + styleDim.Render(t.tr("tui.tool.intent"))
+			for _, wrapped := range wrapLine(te.intent, max(20, t.width-10)) {
+				line += "\n      " + styleToolDim.Render(wrapped)
 			}
 		}
 		if te.params != "" {
-			line += "\n    " + styleDim.Render(t.tr("tui.tool.params"))
+			line += "\n      " + styleDim.Render(t.tr("tui.tool.params"))
 			for _, l := range strings.Split(te.params, "\n") {
-				for _, wrapped := range wrapLine(l, max(20, t.width-8)) {
-					line += "\n    " + styleToolDim.Render(wrapped)
+				for _, wrapped := range wrapLine(l, max(20, t.width-10)) {
+					line += "\n      " + styleToolDim.Render(wrapped)
 				}
 			}
 		}
 		if te.result != "" {
-			line += "\n    " + styleDim.Render(t.tr("tui.tool.result"))
+			line += "\n      " + styleDim.Render(t.tr("tui.tool.result"))
 			resultLines := strings.Split(te.result, "\n")
 			if len(resultLines) > 10 {
 				resultLines = append(resultLines[:10], "...")
 			}
 			for _, l := range resultLines {
-				for _, wrapped := range wrapLine(l, max(20, t.width-8)) {
-					line += "\n    " + styleToolDim.Render(wrapped)
+				for _, wrapped := range wrapLine(l, max(20, t.width-10)) {
+					line += "\n      " + styleToolDim.Render(wrapped)
 				}
 			}
 		}
@@ -341,9 +355,8 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 					t.pendingAskOptions = nil
 					t.messages = append(t.messages, chatMsg{role: "user", content: answer})
 					t.startLLMWait()
-					t.ipcCli.AskReply(askID, answer)
 					t.syncContent()
-					return t, t.sp.Tick
+					return t, tea.Batch(t.askReplyCmd(askID, answer), t.sp.Tick)
 				}
 			}
 			if !t.loading {
@@ -360,11 +373,10 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return t, nil
 			}
 			if t.loading {
-				t.ipcCli.Cancel()
 				t.resetPhase()
 				t.messages = append(t.messages, chatMsg{role: "system", content: t.i18n.T("status.cancelled")})
 				t.syncContent()
-				return t, t.ta.Focus()
+				return t, tea.Batch(t.cancelCmd(), t.ta.Focus())
 			}
 			if t.ta.Value() == "" {
 				t.mode = "welcome"
@@ -374,31 +386,14 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			t.ta.Reset()
 			return t, t.ta.Focus()
-		case ks == "ctrl+n":
-			if !t.loading {
-				t.ipcCli.NewSession()
-				t.messages = []chatMsg{}
-				t.resetConversationStats()
-				t.resetPhase()
-				t.lastAssistantText = ""
-				t.syncContent()
-			}
-			return t, nil
-		case ks == "ctrl+o":
-			t.mode = "config"
-			t.configFromMode = "chat"
-			t.configSetupMode = false
-			t.configFormOpen = false
-			t.configPage = "home"
-			return t, nil
 		case ks == "ctrl+t":
 			t.showToolDetail = !t.showToolDetail
 			t.syncContent()
 			return t, nil
-		case ks == "pgup", ks == "ctrl+u":
+		case ks == "pgup":
 			t.vp.HalfPageUp()
 			return t, nil
-		case ks == "pgdown", ks == "ctrl+d":
+		case ks == "pgdown":
 			t.vp.HalfPageDown()
 			return t, nil
 		case ks == "up":
@@ -486,10 +481,8 @@ func (t *TUI) updateGuardConfirm(ks string) (tea.Model, tea.Cmd) {
 		}
 		t.syncContent()
 		return t, nil
-	case "esc", "n", "N":
+	case "esc":
 		return t, t.submitGuardDecision("reject")
-	case "y", "Y":
-		return t, t.submitGuardDecision("approve")
 	case "enter":
 		if t.guardCursor == 0 {
 			return t, t.submitGuardDecision("approve")
@@ -504,22 +497,15 @@ func (t *TUI) submitGuardDecision(decision string) tea.Cmd {
 		return nil
 	}
 	id := t.pendingGuard.id
-	label := t.tr("tui.guard.rejected")
-	if decision == "approve" {
-		label = t.tr("tui.guard.approved")
+	if decision == "reject" {
+		t.messages = append(t.messages, chatMsg{role: "system", content: t.tr("tui.guard.rejected")})
 	}
-	t.messages = append(t.messages, chatMsg{role: "system", content: label})
 	t.pendingGuard = nil
 	t.guardCursor = 0
 	t.loading = true
 	t.phase = phaseTool
 	t.phaseStart = time.Now()
-	return func() tea.Msg {
-		if t.ipcCli != nil {
-			t.ipcCli.GuardReply(id, decision)
-		}
-		return nil
-	}
+	return t.guardReplyCmd(id, decision)
 }
 
 func (t *TUI) resetPhase() {
@@ -590,11 +576,10 @@ func (t *TUI) handleSend() tea.Cmd {
 			}
 		}
 		t.startLLMWait()
-		t.ipcCli.AskReply(askID, answer)
-		return t.sp.Tick
+		return tea.Batch(t.askReplyCmd(askID, answer), t.sp.Tick)
 	}
 
-	if strings.HasPrefix(input, "/") {
+	if strings.HasPrefix(input, "/") && t.isRegisteredSlashCommand(input) {
 		cmd := t.handleCommand(input)
 		t.syncContent()
 		if cmd != nil {

@@ -1,821 +1,428 @@
-# 06 — 层次化记忆
+# 06 — 轻量主动记忆
 
-记忆不是对话历史的附件，而是独立的层次化知识库。传统 agent 把所有信息塞进线性对话历史 → 越用越慢 → 压缩丢信息。Suna 的记忆是按需精准检索 → 越用越快。
+Suna 的记忆目标不是保存所有历史，也不是构建长期知识库，而是让 Suna 越用越懂用户。
+
+记忆只服务三个结果：
+
+- 更理解用户的沟通方式、习惯、偏好和性格。
+- 避免下次重复犯同样的错误。
+- 恢复上一轮会话时知道刚才发生了什么。
+
+Suna 只保留少量有效记忆。记忆会被刷新、合并、替换和删除。过期、不活跃、低价值的内容不应该长期存在。
 
 ## 设计原则
 
 ```
-原则 1: 记忆不是对话历史的附件，而是独立的层次化知识库
-原则 2: 新旧事实共存，不做覆盖/删除 (仅添加式提取)
-原则 3: Agent 生成的信息是第一类的 (不只是记住用户说的)
-原则 4: 检索是多信号的 (语义 + 关键词 + 实体)
-原则 5: 时间推理是内置的 (理解"之前"和"现在"的关系)
-原则 6: 不引入额外依赖，向量用 SQLite BLOB 存储
+原则 1: 不使用 embedding。记忆系统不能依赖不稳定服务。
+原则 2: 不永久保存完整会话。只保留最近恢复状态和待提取队列。
+原则 3: 不做 append-only。记忆是 active state，会被 compact 和刷新。
+原则 4: 不做项目/工作区记忆。Suna 只有一个当前会话，要么新建，要么恢复上一条。
+原则 5: 主链路只读记忆。记忆提取和整理由 daemon 异步批量处理。
+原则 6: 上下文必须短且缓存友好。固定提示词在前，动态记忆靠后。
 ```
 
-## 4 层记忆
+## 记忆模型
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ 工作记忆 (Working Memory)                                     │
-│ 存储: Daemon 进程内                                           │
-│ 生命周期: 当前任务                                              │
-│ 内容: 对话历史 + 任务状态 + 工具调用结果                        │
-│ 访问: 自动注入每轮对话                                         │
-│ 归档: 异步写入提取队列，daemon worker 后台处理                 │
+│ user_memory                                                  │
+│ 长期 active memory。只记录用户画像、偏好、习惯、纠错和约束。     │
+│ 数量很小，默认最多 30 条。                                    │
 ├─────────────────────────────────────────────────────────────┤
-│ 情景记忆 (Episodic Memory)                                    │
-│ 存储: SQLite + 向量 (BLOB)                                     │
-│ 生命周期: 永久 (30天未使用降低检索权重)                         │
-│ 内容: 每次交互的片段——谁说了什么、做了什么、结果如何             │
-│ 特点: 仅添加式提取；支持时间线回溯                              │
-│ 检索: 语义 + 关键词 + 实体 + 时间范围                          │
+│ conversation_state                                           │
+│ 最近会话恢复状态。只保留上一轮可恢复内容，不保存完整历史。        │
 ├─────────────────────────────────────────────────────────────┤
-│ 语义记忆 (Semantic Memory)                                     │
-│ 存储: SQLite (结构化) + 文件系统 (SKILL.md)                    │
-│ 生命周期: 永久                                                  │
-│ 内容: 从情景记忆中提取的结构化知识                              │
-│       - 用户偏好、习惯、约束                                    │
-│       - 技能定义 (SKILL.md + main.js + mcp.json)              │
-│       - 项目知识 (架构、技术栈、约定)                            │
-│       - 模型表现记录 (哪个模型在什么任务上表现如何)              │
-│ 特点: 仅添加式提取；新旧事实共存，用时间戳区分                  │
-├─────────────────────────────────────────────────────────────┤
-│ 程序记忆 (Procedural Memory)                                   │
-│ 存储: 文件系统 (capabilities/)                                  │
-│ 生命周期: 永久                                                  │
-│ 内容: agent 学会的"怎么做"——技能和操作模式                      │
-│       - SKILL.md (怎么做某类事)                                 │
-│       - main.js (确定性逻辑)                                   │
-│       - mcp.json (外部服务集成)                                │
-│ 特点: "知道什么" vs "知道怎么做"                               │
-│       由学习流程自动从情景记忆中提炼                            │
+│ memory_queue                                                 │
+│ 临时提取队列。主链路写入，daemon 批量处理后删除。                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## 各层详细设计
+## user_memory
 
-### Layer 1: 工作记忆
+`user_memory` 是 Suna 的核心长期记忆。它不是知识库，而是用户理解层。
 
-```
-存储结构 (daemon 进程内):
-  type WorkingMemory struct {
-      Messages []Message
-      TaskState map[string]any
-  }
+### 应该记住
 
-压缩策略 (见 01-architecture.md):
-  当 token 估算 > 上下文窗口 × 80% 时:
-    1. 先截断工具输出
-    2. 再压缩早期对话为摘要
-    3. 保留对话骨架
+- 用户沟通偏好：喜欢简洁、直接、详细、先给结论等。
+- 用户做事习惯：偏好简单方案、重视稳定性、讨厌过度设计等。
+- 用户长期约束：不要 embedding、不要复杂上下文、不要冗长解释等。
+- 用户纠错记录：Suna 上次哪里做错了，下次应该避免什么。
+- 用户性格/风格：效率优先、谨慎、产品直觉强、工程可控性优先等。
+- 用户明确要求长期记住的信息。
 
-关键: 压缩只影响对话历史展示，原始信息仍在情景记忆中
-  → 用户或 agent 可以通过 /memory search 精准回溯
-```
+### 不应该记住
 
-### Layer 2: 情景记忆
+- 所有会话内容。
+- 临时任务细节。
+- 大段历史摘要。
+- 一次性讨论。
+- 工具调用记录。
+- 低置信推测。
+- 已经过期或不再活跃的状态。
 
-这是和原设计差异最大的部分。不再是对话历史的简单存档，而是独立的知识库。
-
-#### 仅添加式提取 (Append-Only Extraction)
-
-Daemon 中的 Memory Worker 异步批量处理，不阻塞 Agent Loop，不受 TUI 生命周期影响。
+### 记忆类型
 
 ```
-提取流程:
-
-每轮对话结束 → 显著性判断 → 中/高 → 发送到 memory channel
-                ↓
-Memory Worker (独立 goroutine，常驻):
-  - 积攒到 N 轮或空闲 M 秒后批量提取
-  - 不阻塞 Agent Loop
-  - TUI 关闭后 worker 继续处理
-  - Daemon 重启后扫描 session_messages.memory_extracted=0 补处理
-
-触发条件 (满足任一即触发提取):
-  - 队列积攒 ≥ 5 轮未提取的交互
-  - 距上次提取 ≥ 60 秒
-  - 队列中存在高显著性交互 (见下方)
-
-提取方式: 单次 LLM 调用 (active_model)，同时输出情景记忆 + 语义记忆
-  prompt = "从以下交互中提取:
-    1. 所有值得记住的事实片段 (情景记忆)
-    2. 结构化的用户偏好/约束/习惯 (语义记忆)
-    3. 关键实体名称"
-
-  输出 JSON:
-  {
-    "episodes": [
-      {"content": "用户偏好 TOML 作为配置格式", "type": "preference",
-       "entities": ["TOML", "配置"]},
-      {"content": "Agent 确认配置格式改为 TOML", "type": "action",
-       "entities": ["TOML"]}
-    ],
-    "facts": [
-      {"key": "config_format", "value": "TOML", "type": "preference"},
-      {"key": "language", "value": "中文", "type": "preference"}
-    ]
-  }
-
-  一次调用 → 写入 episodic_memories + semantic_facts + entities
-  不需要分开两次 LLM 调用
-
-注意: agent 确认的信息也被记录 (agent-generated facts are first-class)
-
-不做的事情:
-  ❌ 不和旧记忆做 diff/reconcile (不做 UPDATE/DELETE)
-  ❌ 不覆盖旧事实
-  ❌ 新事实直接追加
-
-检索时:
-  查询 "用户喜欢什么配置格式"
-  → 命中两条: "YAML" (旧) 和 "TOML" (新)
-  → 按时间排序，取最新的
-  → 但旧的不删，因为可能需要 "之前为什么用 YAML"
+preference   用户偏好
+habit        用户习惯
+constraint   长期约束
+correction   用户纠错和反复错误规避
+personality  用户性格/沟通风格
+fact         少量长期事实
 ```
 
-#### 显著性过滤 (Significance Filtering)
-
-不是每轮交互都值得提取记忆。减少无用提取，降低 LLM 调用频率。
+### 数量限制
 
 ```
-Fast path (零 LLM 成本，在入队时判断):
-  高显著性 (立即触发提取):
-    - 用户说 "以后都这样" / "记住" / "不要" 等明确指令
-    - 工具执行失败 (exit_code != 0)
-    - Guard 拦截了操作
-    - 用户纠正了 agent 的输出
-
-  中显著性 (正常排队):
-    - 包含工具调用的交互
-    - 用户的非简单查询消息
-    - Agent 做出了决策
-
-  低显著性 (跳过提取):
-    - 纯闲聊 / 简单问候
-    - 用户只回复 "好" / "继续" / "OK"
-    - 单轮信息查询 (如 "今天天气" "几点了")
-
-Slow path (LLM 判断):
-  - 无法确定显著性 → 默认中显著性
-
-LLM 调用频率: 从每轮 1 次降到每 5 轮 ~0.3 次
+active user_memory: 30 条以内
+core memory:        5 条以内
+每轮注入:            5 条以内
+单条长度:            120-160 字符以内
+memory brief:        400 tokens 以内
 ```
 
-#### 为什么不做 UPDATE/DELETE
+`core memory` 是几乎每轮都应该注入的高优先级记忆，例如用户明确表达的长期偏好或反复纠正。
+
+## conversation_state
+
+Suna 的产品形态只有一个当前会话：用户要么新建，要么恢复上一条。因此不需要多会话管理，也不需要长期保存完整 session history。
+
+`conversation_state` 只用于 UI 展示和恢复上一轮上下文。
+
+### 保存内容
 
 ```
-传统记忆系统: 新事实覆盖旧事实
-  问题 1: 信息丢失——"用户住在北京" 被 "用户搬到上海" 覆盖
-  问题 2: 丢失时间线——无法知道"搬家"这个事件本身
-  问题 3: 覆盖时可能误删关键信息
-
-仅添加式:
-  "用户住在北京" (2025-05) + "用户搬到上海" (2026-03)
-  → agent 知道"旧住址是北京，现住址是上海"
-  → 知道搬家发生在 2026-03
-  → "你之前在北京时认识的人" 也能回答
-
-参考: Mem0 2026.4 的 token-efficient algorithm 证明了
-      仅添加式提取在 LoCoMo (+20.2) 和 LongMemEval (+25.6) 
-      上大幅优于覆盖式，尤其在时间推理 (+29.6) 上
+resume_summary       上一轮会话的简短恢复摘要
+last_messages        最近一轮完整消息，通常是 user + assistant
+memory_processed_at  最近一次队列处理时间
+updated_at           更新时间
 ```
 
-### Layer 3: 语义记忆
+`last_messages` 不是长期历史，只是恢复快照。默认保留最近 2 条消息；必要时可保留最近 4-6 条，但不能无限增长。
 
-#### 结构化知识
-
-```
-SQLite 表: semantic_facts
-| id | type | key | value | source | ts |
-|----|------|-----|-------|--------|----|
-| 1  | preference | config_format | TOML | user_stated | 2026-05-06 |
-| 2  | preference | config_format | YAML | user_stated | 2025-03-10 |
-| 3  | preference | language | 中文 | user_stated | 2026-05-01 |
-| 4  | fact | industry | 医疗 | learned | 2026-04-20 |
-| 5  | model_perf | glm-4 | coding:0.85 | observed | 2026-05-05 |
-
-写入时机:
-  - Memory Worker 每次提取时同时产出 (与情景记忆合并为一次 LLM 调用)
-  - 用户主动告知
-  - Agent 推断
-  - 模型表现追踪
-
-检索:
-  查询时按 type + key 过滤，按 ts 降序排列取最新
-  新旧共存，不删除旧的
-```
-
-#### 项目知识
+### 恢复行为
 
 ```
-从 SUNA.md / .suna/AGENTS.md 读取 (见 01-architecture.md)
-自动提取为语义记忆中的 type=project 条目
+恢复上一轮:
+  注入 user_memory + conversation_state.resume_summary + last_messages
+
+新建会话:
+  只注入 user_memory
+  不注入上一轮 last_messages
 ```
 
-### Layer 4: 程序记忆
+如果 memory_queue 尚未被 daemon 处理，恢复上一轮时 `last_messages` 是兜底上下文，保证 Suna 至少知道用户刚才说过什么。
 
-见 [05-capability.md](05-capability.md)，能力本身就是"怎么做"的记忆。
+## memory_queue
 
-#### 触发方式 (MVP)
+`memory_queue` 是临时队列。主链路只负责写入，daemon 负责批量消费。
 
-```
-路径 A: 规则判断 (零 LLM 成本)
-  failure_records 表中同一个 pattern 出现 ≥3 次
-  → agent 自省时看到 → AskUser "要不要我学习处理这个？"
-  例: 3 条 pattern="npm install 失败" → 建议学习 skill
+### 写入时机
 
-路径 B: 用户主动触发 (零 LLM 成本)
-  用户说 "以后都这样做" / "你能不能记住这个" / "记住"
-  → 直接触发学习流程
+每轮交互完成后写入：
 
-路径 C: LLM 判断 (远期，Phase 3)
-  daemon 空闲时回顾情景记忆，检测重复模式
-  MVP 不做
-```
+- 用户消息。
+- 助手最终回复。
+- 必要的失败摘要或用户纠错事件。
 
-## 实体关联 (Entity Linking)
+不写入 streaming chunk。
+
+### 处理时机
+
+daemon 满足任一条件时处理：
 
 ```
-每个记忆片段自动提取实体:
-
-  "用户在用 Vue3 + Vite 做前端项目"
-  → 实体: Vue3, Vite, 前端
-
-  "部署到 staging 时 npm build 失败了，因为缺少 ENV_VAR"
-  → 实体: staging, npm, ENV_VAR
-
-实体存储在独立索引:
-  SQLite 表: entities
-  | name | memory_ids JSON | embedding BLOB |
-  |------|----------------|----------------|
-  | Vue3 | [12, 45, 78]   | <vec>          |
-  | Vite | [12, 56]       | <vec>          |
-
-检索时: 实体匹配给相关记忆加权
-  查询 "前端用什么框架" → 命中实体 Vue3 → 提升相关记忆的排名
+队列积攒 >= 5 轮
+距离上次处理 >= 60 秒
+存在高显著性事件
+daemon 空闲
 ```
 
-## 多信号检索 (Multi-Signal Retrieval)
+高显著性事件包括：
 
-### 检索模式
+- 用户说“记住”“以后都这样”“不要再这样”。
+- 用户纠正 Suna。
+- Suna 重复犯错。
+- 工具失败且 agent 需要改变策略。
+- 用户明确表达长期偏好或边界。
 
-```
-有 embedding provider:
-  三路检索: 语义 + FTS5 + 实体 → 精度最高
+处理完成后，已处理队列可以删除，不需要长期保存。
 
-无 embedding provider (大多数用户的默认状态):
-  两路检索: FTS5 + 实体 → 覆盖 80-90% 场景
-  辅以按需查询改写弥补 FTS5 的语义弱点
-```
+## Daemon 记忆整理
 
-### 按需查询改写
+记忆提取使用 LLM，但不在主请求链路中执行。
 
-FTS5 不擅长语义匹配（"工作环境不好" 命中不了 "开发环境太吵"）。查询改写在 FTS5 命中不足时按需触发，不是每轮都调 LLM。
-
-```
-检索策略 (按需升级):
-
-Level 0: 直接用用户原文做 FTS5 (零额外 LLM)
-  "部署失败怎么处理" → FTS5 MATCH '部署 失败 处理'
-  命中 ≥3 条 → 直接用，不调 LLM
-  大部分场景 (~70%) 这个就够了
-
-Level 1: FTS5 命中不足 → 查询改写 (一次 fast 调用)
-  触发条件: FTS5 命中 < 3 条
-  用户说 "工作环境太吵" → FTS5 命中 0 条
-  → 调 active_model 改写: "工作环境 噪音 吵闹 办公"
-  → 用改写后的关键词重新 FTS5
-
-Level 2: 改写后仍命中不足 → 不注入记忆
-  宁可不放，不塞噪音
-
-LLM 调用频率: 仅 ~30% 的交互触发 Level 1
-  每天 200 轮 → ~60 次改写 → ¥0.06/天 → ¥1.8/月 (可忽略)
-```
-
-### 检索筛选流程
-
-记忆越来越多，筛选决定了注入 prompt 的质量。
+主链路：
 
 ```
-用户输入 + 当前对话上下文
-    │
-    ▼
-Step 1: 检索 (按上述 Level 0/1/2)
-  FTS5 + 实体 (+ 可选语义) → 合并去重 → ~80 条候选
-
-Step 2: 时间衰减排序
-  score = 基础分 × 时间衰减因子
-    7 天内:  × 1.0
-    30 天内: × 0.8
-    90 天内: × 0.5
-    更早:   × 0.3
-  优先返回最近的记忆，但不丢弃远的
-
-Step 3: Token 预算控制
-  System Prompt 分配给记忆的 token 预算: ~4K tokens
-  从排序后的候选中，从高到低取:
-    每条记忆 ~100-200 tokens
-    预算内能放 ~20-30 条
-
-  放不下的不注入，但 prompt 里提示:
-    "以上是相关度最高的记忆。如需更多信息，可使用 /memory search"
-
-  如果候选得分都很低:
-    → 不注入任何记忆 → 宁可不放，不塞噪音
+用户消息
+  -> 写 memory_queue
+  -> 读取 user_memory
+  -> 读取 conversation_state
+  -> 构建短上下文
+  -> 调用主 LLM
+  -> 更新 conversation_state
 ```
 
-### 向量检索实现 (可选，需要 embedding provider)
+daemon 链路：
 
 ```
-不引入向量数据库。单用户 agent 的记忆量级是几千到几万条，
-暴力余弦相似度计算足够快。
-
-存储:
-  每条情景记忆有一个 embedding BLOB 字段
-  SQLite 表: episodic_memories
-  | id | content | entities JSON | embedding BLOB | ts | source | type |
-
-  embedding 维度由 provider 自动决定（见下文），用户无需配置
-  每条 ~4-8KB (取决于维度)，1 万条约 40-80MB，完全可接受
-
-检索流程:
-  1. 调 embedding API 得到 query 向量 (~50ms)
-  2. 从 SQLite 读所有 embedding BLOB
-  3. Go 内存中暴力余弦相似度 (几万条 <10ms)
-  4. 取 top-k
-
-  总延迟: ~60ms，零新依赖
-
-如果以后记忆膨胀到十万级以上:
-  → 考虑 sqlite-vec 扩展 (纯 Go 编译进二进制)
-  → 但这是远期的事
+读取未处理 memory_queue
+读取当前 user_memory
+调用 LLM 做 full compaction
+得到新的 user_memory 列表
+代码 diff 后更新数据库
+删除已处理 queue
 ```
 
-### Embedding 在线检索
+## Full Compaction
 
-#### 自动发现
+Suna 不做复杂局部 patch，也不做 append-only。
 
-用户配置 provider 时，Suna 自动检测 embedding 端点：
-
-```
-用户配置新 provider:
-  → 检测 /v1/chat/completions → "模型连接成功"
-  → 检测 /v1/embeddings     → "已启用语义记忆检索"
-  → 或: "该服务不支持 embedding，记忆检索使用全文搜索模式"
-
-支持 embedding 的常见 provider:
-  智谱 (open.bigmodel.cn)       → embedding-3
-  OpenAI (api.openai.com)        → text-embedding-3-small
-  通义千问 (dashscope.aliyuncs.com) → text-embedding-v3
-  其他 OpenAI 兼容服务            → 尝试 /v1/embeddings，失败则跳过
-```
-
-#### 检索模式
+每次 daemon 处理队列时，把当前全部 active memory 和新事件一起交给 LLM：
 
 ```
-有 embedding provider:
-  三路检索: 语义 + FTS5 + 实体 → 精度最高
-
-无 embedding provider:
-  两路检索: FTS5 + 实体 → 覆盖 80% 场景
-  /memory status 提示: "检索模式: 全文搜索 (未检测到 embedding 服务)"
+old_user_memory + new_queue_events -> new_user_memory
 ```
 
-#### 用户反馈
+LLM 输出新的 active memory 列表，最多 30 条。系统代码再做 diff：
+
+- 内容相同或语义延续：保留原 id，刷新字段。
+- 内容变化：更新原 id。
+- 新的重要信息：新增。
+- 未返回的旧记忆：删除或标记 inactive。
+
+这样天然支持合并、替换、删除和纠错，不需要复杂的 update one 逻辑。
+
+### Compaction 规则
+
+LLM 必须遵守：
+
+- 优先更新已有记忆，而不是新增。
+- 删除临时、过期、低价值、不活跃的记忆。
+- 新记忆必须对未来交互有帮助。
+- 用户当前明确表达的偏好优先于旧记忆。
+- 冲突记忆只保留当前有效版本。
+- 不保存完整会话事实。
+- 不保存隐私推测。
+- 总数不得超过 30 条。
+
+## 召回策略
+
+主链路召回不使用 LLM，也不使用 embedding。
+
+因为 active memory 数量很小，规则足够可靠。
+
+### 两层召回
 
 ```
-/memory status:
-┌──────────────────────────────────────────┐
-│ 记忆状态                                  │
-│                                          │
-│ 检索模式: 语义检索 (智谱 embedding-3)      │
-│ 活跃记忆: 1,247 条                        │
-│ 实体索引: 389 个                          │
-│ 向量维度: 2048                            │
-│ 存储大小: 12.3 MB                         │
-└──────────────────────────────────────────┘
+1. Core memory
+   每轮固定注入 3-5 条高优先级记忆。
 
-或:
-┌──────────────────────────────────────────┐
-│ 记忆状态                                  │
-│                                          │
-│ 检索模式: 全文搜索                         │
-│ 活跃记忆: 1,247 条                        │
-│ 实体索引: 389 个                          │
-│                                          │
-│ 提示: 配置支持 embedding 的 provider       │
-│ 可启用语义检索，提升记忆检索精度            │
-└──────────────────────────────────────────┘
+2. Matched memory
+   根据当前用户消息做关键词/tag/kind 匹配，最多补充 0-2 条。
 ```
 
-#### 向量存储
+最终注入不超过 5 条。
+
+### 排序规则
 
 ```
-embedding 维度由 provider 返回决定，用户无需配置
-
-存储: SQLite BLOB 字段 (episodic_memories.embedding)
-  每条 ~4-8KB (取决于维度)
-  1 万条约 40-80MB
-  暴力余弦相似度 <10ms / 万条
-
-config.toml 不需要 [embedding] 段
-embedding provider = 从已配置的 provider 自动发现
+is_core desc
+priority desc
+last_used_at desc
+updated_at desc
+id asc
 ```
 
-#### 降级策略
+排序必须稳定，避免每轮 memory brief 无意义变化。
+
+## 上下文注入
+
+记忆必须短、稳定、靠后，避免破坏 prompt cache。
+
+推荐结构：
 
 ```
-运行时 embedding API 不可用 (网络故障/额度用尽):
-  → 自动降级到 FTS5 + 实体检索
-  → 日志记录降级事件
-  → API 恢复后自动恢复语义检索
-  → 降级期间新增的记忆不生成向量
-  → 下次 embedding 可用时补算
-
-不影响记忆写入，只影响检索精度
+Stable system prompt
+Stable memory policy
+Dynamic active memory brief
+Dynamic conversation resume state
+Current user message
 ```
 
-## 时间推理 (Temporal Reasoning)
+不要把动态记忆插入固定 system prompt 前部。
 
-这是现有记忆系统最弱的地方，但也是最有价值的。
+### Memory Policy
 
-```
-记忆库中有:
-  - "用户住在北京" (2025-05)
-  - "用户搬到上海" (2026-03)
-  - "用户说老邻居很吵" (2025-12)
-
-查询: "用户说邻居吵是什么时候的事？还住在北京吗？"
-
-时间推理:
-  "邻居吵" 发生在 2025-12
-  当时住在北京 (2025-05 的记录)
-  2026-03 搬到了上海
-  → 回答: "当时住在北京，现在已经搬到了上海"
-
-这不是简单的"取最新"，而是理解时间线的因果关系。
-```
-
-### 实现
+固定提示词中应该包含：
 
 ```
-检索时额外返回时间上下文:
-
-1. 命中的记忆条目及其 ts
-2. 同一 key 下更早/更晚的记忆 (时间线)
-3. 关联实体的时间线
-
-LLM 推理阶段:
-  将时间线信息一并注入 prompt:
-  "相关记忆 (按时间排列):
-   2025-05: 用户住在北京
-   2025-12: 用户说老邻居很吵
-   2026-03: 用户搬到上海"
-
-  LLM 自然能理解时间关系，不需要特殊算法
+Use active memory as lightweight background.
+Do not mention memory unless it directly affects the answer.
+Current user instructions override older memory.
+If memory conflicts with the current message, follow the current message.
+Do not infer private facts beyond the provided memory.
 ```
 
-## 记忆的注入策略
+### Memory Brief 格式
 
-不是全部塞进 system prompt，也不是分成多个独立区块。只有两部分：固定指令 + 相关记忆。
-
-```
-System Prompt:
-
-  ## 固定指令
-  身份 + 工作方式 + 工具原则 + 环境信息
-
-  ## 项目配置 (如有 SUNA.md)
-  {{ project_config }}
-
-  ## 相关记忆 (统一区块，所有动态内容都在这里)
-  {{ 用户偏好 (语义记忆摘要) }}
-  {{ 多信号检索 top-k (情景记忆) }}
-  {{ 压缩后的对话摘要 (如有，也以记忆片段形式呈现) }}
-
-  ## 当前能力
-  {{ capabilities_list }}
-```
-
-关键：对话历史不作为独立区块。压缩后的对话摘要归入"相关记忆"，格式与其他记忆片段一致。LLM 不需要知道哪些是检索到的记忆、哪些是压缩后的对话 — 对它来说都是"相关记忆"。
-
-这样做的优势：
-- 提示词结构最简，只有固定 + 动态两部分
-- Cache 命中率最高（固定部分不变）
-- LLM 不需要区分不同来源的信息
-
-## 上下文压缩
-
-### 何时压缩
+主链路不要调用 LLM 重新总结记忆，直接拼接已保存的 `content`。
 
 ```
-每次模型返回 usage 信息后:
-  if estimated_tokens(messages) > model.ContextWindow() * 80%:
-      compress(messages)
+<active_memory>
+- 用户偏好直接、简洁、先给结论的回复。
+- 用户讨厌过度设计，偏好简单可靠的方案。
+- 用户希望 Suna 不依赖 embedding。
+- 用户希望记忆短小、活跃、可刷新。
+</active_memory>
 ```
 
-### 压缩优先级
+格式固定，条数固定上限，排序稳定。
+
+## SQLite 设计
+
+数据库仍可使用 `~/.suna/memory.db`，但表结构收敛为最小集合。
+
+### user_memory
 
 ```
-优先压缩 (占空间大，信息密度低):
-  1. 工具输出 (Exec 返回的大段文本 → 截断或摘要)
-  2. 早期对话 (超过 10 轮的部分 → 摘要)
-
-不压缩:
-  - 最近 10 轮对话
-  - System Prompt
-  - 当前正在处理的文件内容
+id TEXT PRIMARY KEY
+user_id TEXT NOT NULL
+kind TEXT NOT NULL
+content TEXT NOT NULL
+tags TEXT NOT NULL DEFAULT '[]'
+priority INTEGER NOT NULL DEFAULT 50
+is_core INTEGER NOT NULL DEFAULT 0
+use_count INTEGER NOT NULL DEFAULT 0
+last_used_at DATETIME
+refreshed_at DATETIME NOT NULL
+expires_at DATETIME
+created_at DATETIME NOT NULL
+updated_at DATETIME NOT NULL
 ```
 
-### 压缩方式
-
-#### 工具输出截断 (第一道防线)
+索引：
 
 ```
-ReadFile:   超过 2000 行 → 保留前 100 行 + "...(truncated, N lines total)"
-Exec:       stdout/stderr 各超过 500 行 → 保留前 200 行
-ReadHTTP:   body 超过 50KB → 保留前 20KB
-
-截断时追加: "内容已截断。如需完整内容，使用 offset/limit 参数分页读取。"
+(user_id, is_core, priority)
+(user_id, kind)
+(user_id, updated_at)
 ```
 
-#### 历史消息摘要 (第二道防线)
+### conversation_state
 
 ```
-1. 将对话分为两部分:
-   - 保留区: 最近 10 轮，完整保留
-   - 压缩区: 更早的对话
-
-2. 调用 active_model 压缩压缩区:
-   prompt = `将以下对话历史压缩为简洁摘要。
-   保留: 用户意图、已完成操作、关键决策、当前进展
-   忽略: 具体代码细节、工具返回细节、中间调试过程`
-
-3. 替换:
-    压缩区的 N 条消息 → 从 working memory 移除
-    压缩摘要注入 System Prompt 的"相关记忆"区块
-    格式: "对话摘要: {{ summary }}"
-
-关键: 压缩后的原始消息已归档到情景记忆
-  → 不会丢失，可通过 /memory search 精准回溯
-  → 摘要只是 working memory 的瘦身，不新建独立区块
+user_id TEXT PRIMARY KEY
+resume_summary TEXT
+last_messages TEXT NOT NULL DEFAULT '[]'
+memory_processed_at DATETIME
+updated_at DATETIME NOT NULL
 ```
 
-### 缓存友好的压缩
+`last_messages` 为 JSON，最多保存最近 2-6 条消息。
+
+### memory_queue
 
 ```
-正确做法:
-  System Prompt (固定指令，不变) + 相关记忆 (统一区块，含偏好+检索+摘要)
-
-  相关记忆区块内部:
-    1. 用户偏好 (很少变)
-    2. 检索到的情景记忆 (每轮变化)
-    3. 压缩后的对话摘要 (偶尔追加)
-  
-  所有动态内容都在一个区块内，LLM 不区分来源。
-  System Prompt 部分保持不变，cache 命中率高。
+id TEXT PRIMARY KEY
+user_id TEXT NOT NULL
+role TEXT NOT NULL
+content TEXT NOT NULL
+significance TEXT
+created_at DATETIME NOT NULL
+processed_at DATETIME
 ```
 
-## 记忆提取的完整流程
-
-Daemon 中的异步处理管道。Agent Loop 不等待提取完成，直接进入下一轮。
+索引：
 
 ```
-Agent Loop 完成一轮交互
-    │
-    ▼
-  ┌──────────────────────────┐
-  │ 0. 显著性判断             │  零 LLM 成本，规则判断
-  │    高/中 → 入队           │  低 → 跳过
-  │    发送到 memory channel  │
-  └──────────┬───────────────┘
-             │
-             ▼  (异步，不阻塞 Agent Loop)
-  ┌──────────────────────────┐
-  │ 1. 合并提取              │  Memory Worker (独立 goroutine)
-  │    情景记忆 + 语义记忆    │  单次 LLM 调用 (fast)
-  │    + 实体关联             │  同时输出 episodes + facts
-  │    (仅添加式)             │  ~50ms, ~$0.0001
-  │    标记 session_messages  │
-  │    为 memory_extracted=1  │
-  └──────────┬───────────────┘
-             │
-             ▼
-  ┌──────────────────────────┐
-  │ 2. 实体 + Embedding       │  实体写入 entities 表
-  │    (可选)                  │  embedding 有 provider 时才生成
-  └──────────┬───────────────┘
-             │
-             ▼
-  ┌──────────────────────────┐
-  │ 3. 失败记忆记录           │  工具失败时自动记录
-  │    (独立子表)              │
-  └──────────────────────────┘
-
-热路径/冷路径:
-  热路径 (daemon 运行中):
-    Agent Loop → memory channel (内存) → Worker 消费 → 标记 memory_extracted
-  冷路径 (daemon 启动恢复):
-    扫描 session_messages WHERE memory_extracted=0 → 补处理
-    用于 daemon 崩溃后恢复未处理的交互
+(processed_at, created_at)
+(user_id, processed_at)
 ```
 
-### 会话切换时的记忆传递
-
-用户 `/new` 切换会话时，旧会话的记忆可能还没提取完。不做 flush 等待（LLM 响应慢），直接零延迟兜底。
-
-```
-用户 /new 切换会话
-  │
-  ▼
-Daemon 处理:
-  1. 从旧 session 的 session_messages 取最近 5 轮 memory_extracted=0 的原文
-  2. 注入新 session 的 System Prompt "相关记忆" 部分 (与正常检索格式一致):
-     "## 相关记忆
-      - 用户偏好: 配置格式用 TOML (来源: 上一个会话)
-      - Agent 确认: 配置格式改为 TOML (来源: 上一个会话)"
-  3. 同时把旧 session 积攒的轮次推给 Memory Worker (不等完成)
-  4. 立即创建新 session，零延迟
-
-格式一致性:
-  LLM 看到的 "相关记忆" 段落格式永远一致，不区分来源:
-    - 临时注入的原文 → 格式化为记忆片段
-    - 正常检索的 episodic_memories → 同样格式
-  Suna 内部处理替换，LLM 无感知
-
-临时上下文的自动清除:
-  daemon 维护 pendingContext map: map[sessionID]bool
-  注入时: pendingContext["session_abc"] = true
-  Worker 完成提取后: 删除 pendingContext["session_abc"]
-  后续构建 System Prompt 时:
-    - map 中存在的 session → 继续注入临时记忆
-    - map 中已删除 → 正常从 episodic_memories 检索
-  对 LLM 来说，"相关记忆" 段落始终存在，只是内容从临时变为正式
-```
-
-### LLM 调用成本预算
-
-```
-重度用户 (每天 200 轮，LLM 调用 ~¥0.001/次):
-
-1. Main LLM (生成回复):     200 次 × ¥0.05 = ¥10/天 = ¥300/月
-2. Memory 合并提取:          40 次 × ¥0.001 = ¥0.04/天 = ¥1.2/月
-3. 查询改写 (按需, ~30%):    60 次 × ¥0.001 = ¥0.06/天 = ¥1.8/月
-4. 上下文压缩 (偶尔):         5 次 × ¥0.001 = ¥0.005/天 = ¥0.15/月
-
-总计: ~¥303/月
-其中记忆相关的 LLM 调用: ~¥3/月 (< 1%)
-```
-
-## SQLite 存储设计
-
-```
-数据库: ~/.suna/memory.db
-
-表:
-  episodic_memories   — 情景记忆 (核心表)
-  entities            — 实体索引
-  semantic_facts      — 语义记忆 (结构化知识)
-  failure_records     — 失败记忆
-  sessions            — 会话元数据
-  session_messages    — 会话消息 (含提取状态)
-  usage_log           — 用量记录
-  audit_log           — 审计日志
-  trust_rules         — 渐进信任 (见 04-guard.md)
-  triggers            — 感知源 (见 07-trigger.md)
-
-核心表结构:
-
-episodic_memories:
-  | id | content TEXT | type TEXT | source TEXT |
-  | entities JSON | embedding BLOB | ts DATETIME |
-  | session_id TEXT | metadata JSON |
-
-entities:
-  | name TEXT | memory_ids JSON | embedding BLOB | updated_at DATETIME |
-
-semantic_facts:
-  | id | type TEXT | key TEXT | value TEXT |
-  | source TEXT | ts DATETIME |
-
-failure_records:
-  | id | pattern TEXT | operation TEXT | reason TEXT |
-  | context TEXT | created_at DATETIME |
-
-session_messages:
-  | session_id | turn | role | content | tool_call | tool_result |
-  | significance TEXT | memory_extracted BOOL DEFAULT 0 | created_at |
-
-  memory_extracted: 0=待提取, 1=已提取
-  significance: high/medium/low/null (null=未判断)
-
-索引:
-  session_messages: (memory_extracted), (session_id, turn)
-  episodic_memories: (ts), (type), (source)
-  entities: (name) UNIQUE
-  semantic_facts: (type, key, ts)
-  failure_records: (pattern), (created_at)
-```
+已处理队列可以立即删除。如果需要 debug，可保留短期日志，但必须有 TTL。
 
 ## 会话持久化与恢复
 
-### 持久化
+### 每轮结束
 
 ```
-每轮对话完成后自动保存到 SQLite:
-
-sessions:
-  | id | created_at | updated_at | summary | status |
-
-session_messages:
-  | session_id | turn | role | content | tool_call | tool_result |
-  | significance | memory_extracted | created_at |
-
-写入时机: 每次模型返回完整响应后 (不是每个 streaming chunk)
-WAL 模式保证写入性能
+1. 保存 user/assistant 到 memory_queue。
+2. 更新 conversation_state.last_messages。
+3. 更新 conversation_state.resume_summary。
+4. 返回用户，不等待记忆提取。
 ```
 
-### 恢复流程
+### TUI 启动
 
 ```
-TUI 连接 daemon 时:
-  1. Daemon 查询 sessions WHERE status='active' ORDER BY updated_at DESC
-  2. 如果有未完成会话:
-     TUI: "上次你在做「重构认证模块」，已完成 60%。要继续吗？"
-     [继续] [开始新会话]
-  3. 继续 → 从 session_messages 加载历史 + 从情景记忆检索相关上下文
-  4. 新会话 → 标记旧会话为 paused
-
-加载策略:
-  - 最近 10 轮: 完整加载到工作记忆
-  - 更早的: 只加载摘要
-  - 额外: 多信号检索和当前任务相关的情景记忆
+1. 读取 conversation_state。
+2. 如果存在 last_messages，展示“继续上一轮 / 新建会话”。
+3. 继续上一轮: 加载 last_messages + resume_summary。
+4. 新建会话: 清空 last_messages，但保留 user_memory。
 ```
 
-### 会话过期
+### Daemon 崩溃恢复
 
 ```
-- active 会话超过 7 天未更新 → 自动标记为 completed
-- completed 会话保留 30 天后删除 (只删消息，关键信息已在情景记忆中)
+1. 读取 memory_queue 中 processed_at IS NULL 的事件。
+2. 批量执行 full compaction。
+3. 更新 user_memory。
+4. 删除已处理 queue。
 ```
 
-### 异常中断处理
+## 与 Capability 的关系
+
+记忆记录“用户是什么样的人、Suna 应该避免什么”。
+
+Capability 记录“Suna 学会了怎么做某类事”。
+
+重复失败或稳定操作模式不应该无限塞进 user_memory：
 
 ```
-TUI 崩溃/关闭:
-  - Daemon 继续运行
-  - 提取队列中的任务继续处理
-  - Agent loop 如果正在执行，继续完成
-  - 结果存入 session_messages，下次 TUI 连接时可查看
-
-Daemon 崩溃:
-  - SQLite WAL 模式保证数据一致性
-  - 重启后 Memory Worker 扫描 session_messages WHERE memory_extracted=0 → 补处理
-  - 检查: 有 status=active 但 updated_at > 1分钟前的会话
-  - 有 → 下次 TUI 连接时提示用户恢复
-
-Sub agent 正在执行时 Daemon 重启:
-  - Sub agent 随 Daemon 进程销毁
-  - 恢复时 main agent 看到历史 → 自行决定是否重新 Spawn
+同类 correction/failure 出现多次
+  -> user_memory 记录简短偏好或禁忌
+  -> capability 系统判断是否需要学习新能力
 ```
 
-## 记忆的 TUI 命令
+例如：
 
 ```
-/memory search <query> — 多信号检索情景记忆
+user_memory:
+- 用户不希望 Suna 在不确认环境的情况下直接执行破坏性命令。
+
+capability:
+- 执行数据库迁移前先检查当前环境、备份状态和 dry-run 结果。
 ```
 
-注：/memory facts, /memory failures, /memory clear, /memory timeline 等命令已精简。
-- 用户可通过自然语言让 agent 查询记忆 (如"你还记得我之前用什么配置格式吗？")
-- 记忆管理（清除等）通过 agent 对话完成，不暴露为命令
-- 减少命令数量，降低学习成本
+## 不做的事情
 
-## /compact 命令反馈
+MVP 明确不做：
 
-```
-┌──────────────────────────────────────────┐
-│ 上下文压缩完成                             │
-│                                          │
-│ 压缩前: 98,400 tokens (77% 窗口)          │
-│ 压缩后: 41,200 tokens (32% 窗口)          │
-│                                          │
-│ 保留: 最近 10 轮完整对话                    │
-│ 摘要: 45 轮历史 → 1 段摘要 (~800 tokens)   │
-│ 截断: 3 个工具输出                         │
-│                                          │
-│ 原始消息仍可通过 /memory search 回溯        │
-└──────────────────────────────────────────┘
-```
+- embedding。
+- 向量检索。
+- 实体索引。
+- 长期情景记忆。
+- 完整会话历史检索。
+- append-only 事实库。
+- 多会话管理。
+- workspace/project 记忆层。
+- `/memory search` 精准历史回溯。
+- 20-30 条大记忆注入。
 
-## 与原 4 层记忆的关系
+## 成功标准
 
-```
-原 Layer 1: 工作记忆       → 新 Layer 1: 工作记忆 (基本不变)
-原 Layer 2: 用户认知       → 新 Layer 3: 语义记忆 (仅添加式 + 实体关联)
-原 Layer 3: 能力记忆       → 新 Layer 4: 程序记忆 (概念重新定位)
-原 Layer 4: 失败记忆       → 独立表 failure_records (不走向量检索，查询更高效)
-新增:      情景记忆        → 新 Layer 2 (核心创新: 仅添加式 + 多信号检索)
-```
+记忆系统成功不是因为存得多，而是因为 Suna 行为更贴合用户。
+
+验收标准：
+
+- 用户明确纠正后，Suna 下次不再重复同样错误。
+- 用户偏好简洁，Suna 后续回答明显更短更直接。
+- 用户偏好简单方案，Suna 后续不会默认过度设计。
+- 退出后恢复上一轮，Suna 能接上刚才的事情。
+- 新建会话后，Suna 不带入上一轮临时上下文，但仍保留用户长期偏好。
+- 数据库不会随使用时间持续膨胀。
+- prompt cache 命中率不会因为记忆大幅下降。
+
+最终目标：Suna 足够轻量，足够聪明，越用越懂用户。

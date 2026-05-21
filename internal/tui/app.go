@@ -26,9 +26,10 @@ TUI 纯前端，无业务逻辑。
   - daemon notification → 渲染到终端
 */
 type TUI struct {
-	ipcCli  *ipcClient
-	i18n    *translator
-	program *tea.Program
+	ipcCli   *ipcClient
+	i18n     *translator
+	program  *tea.Program
+	notifyCh chan ipcNotification
 
 	mode     string // "welcome" | "chat" | "config" | "help"
 	prevMode string
@@ -68,6 +69,7 @@ type TUI struct {
 	configFormOpen      bool
 	configKindOpen      bool
 	configKindCursor    int
+	configDeleteCursor  int
 	configProviderKind  string
 	configPage          string
 	configDeleteConfirm string
@@ -81,6 +83,7 @@ type TUI struct {
 	configModels        []string
 	configEditingName   string
 	showHelp            bool
+	copyMode            bool
 	cmdSuggestions      []commandSpec
 	cmdSuggestionIdx    int
 	modelPickerOpen     bool
@@ -126,21 +129,6 @@ func New(locale LocaleID) *TUI {
 	return t
 }
 
-func (t *TUI) Connect(client *ipcClient) {
-	t.ipcCli = client
-	t.mode = "welcome"
-	t.contextWindow = 128000
-	t.toolStartTimes = make(map[string]time.Time)
-	t.activeTools = make(map[string]*toolEntry)
-	t.phase = phaseIdle
-
-	client.OnNotify(func(method string, params json.RawMessage) {
-		if t.program != nil {
-			t.program.Send(ipcNotification{method: method, params: params})
-		}
-	})
-}
-
 func (t *TUI) Run() error {
 	p := tea.NewProgram(t)
 	t.program = p
@@ -157,17 +145,13 @@ func (t *TUI) doQuit() {
 
 func (t *TUI) Init() tea.Cmd {
 	return func() tea.Msg {
-		t.refreshDaemonStatus()
-		if t.ipcCli != nil {
-			t.ipcCli.ConfigGet()
-		}
-		return nil
+		return tea.Batch(t.daemonStatusCmd(), t.configGetCmd())()
 	}
 }
 
 func (t *TUI) refreshDaemonStatus() {
 	if t.ipcCli != nil {
-		t.ipcCli.DaemonStatus()
+		go t.ipcCli.DaemonStatus()
 	}
 }
 
@@ -194,6 +178,18 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return t, nil
 	}
+	if key, ok := msg.(tea.KeyPressMsg); ok {
+		switch key.String() {
+		case "ctrl+y":
+			t.copyMode = !t.copyMode
+			return t, nil
+		case "esc":
+			if t.copyMode {
+				t.copyMode = false
+				return t, nil
+			}
+		}
+	}
 
 	switch t.mode {
 	case "welcome":
@@ -211,6 +207,10 @@ func (t *TUI) View() tea.View {
 	v := tea.NewView("")
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
+	if t.copyMode {
+		// 复制模式临时关闭鼠标捕获，把拖拽选择权还给终端；退出后恢复滚轮事件。
+		v.MouseMode = tea.MouseModeNone
+	}
 	if !t.ready {
 		v.SetContent(t.viewWelcome())
 		return v
@@ -228,21 +228,11 @@ func (t *TUI) View() tea.View {
 	return v
 }
 
-type ipcNotification struct {
-	method string
-	params json.RawMessage
-}
-
 func (t *TUI) runAgent(input string) tea.Cmd {
 	t.startLLMWait()
 	t.activeTools = make(map[string]*toolEntry)
 	t.toolStartTimes = make(map[string]time.Time)
-	go func() {
-		if t.ipcCli != nil {
-			t.ipcCli.SendMessage(input)
-		}
-	}()
-	return t.sp.Tick
+	return tea.Batch(t.sendMessageCmd(input), t.sp.Tick)
 }
 
 func (t *TUI) startLLMWait() {
@@ -539,8 +529,7 @@ func (t *TUI) handleIPCNotification(notif ipcNotification) {
 		if t.configFormOpen {
 			t.configFormOpen = false
 			if t.configEditingName != "" {
-				t.configDetailRef = t.configEditingName
-				t.configPage = "detail"
+				t.openConfigDetail(t.configEditingName)
 			} else {
 				t.configPage = "models"
 			}

@@ -119,8 +119,12 @@ func (t *TUI) layoutChat() {
 }
 
 func (t *TUI) renderChatStatusBar() string {
+	copyHint := ""
+	if t.copyMode {
+		copyHint = styleDim.Render(" · ") + styleHL.Render(t.tr("tui.key.copy_mode")) + styleDim.Render(" [Ctrl+Y/Esc]")
+	}
 	if !t.hasUsage {
-		return "  " + styleDim.Render("↑? ↓? ⟳? · ?t/s")
+		return "  " + styleDim.Render("↑? ↓? ⟳? · ?t/s") + copyHint
 	}
 	tokParts := []string{
 		styleUser.Render("↑" + fmtTok(t.lastInputTok)),
@@ -135,7 +139,7 @@ func (t *TUI) renderChatStatusBar() string {
 	} else {
 		parts = append(parts, "0t/s")
 	}
-	return "  " + joinNonEmpty(parts, styleDim.Render(" · "))
+	return "  " + joinNonEmpty(parts, styleDim.Render(" · ")) + copyHint
 }
 
 func (t *TUI) renderCommandSuggestions() string {
@@ -231,14 +235,18 @@ func (t *TUI) chatTopMeta() string {
 }
 
 func styleToolCallLabel(te *toolEntry) string {
+	return styleToolPill.Render(plainToolCallLabel(te))
+}
+
+func plainToolCallLabel(te *toolEntry) string {
 	summary := strings.TrimSpace(te.intent)
 	if summary == "" {
 		summary = strings.TrimSpace(te.summary)
 	}
 	if summary != "" {
-		return styleToolPill.Render(te.name + "(" + truncateRunes(summary, 42) + ")")
+		return te.name + "(" + truncateRunes(summary, 42) + ")"
 	}
-	return styleToolPill.Render(te.name)
+	return te.name
 }
 
 func toolParamSummary(name string, params map[string]any) string {

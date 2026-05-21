@@ -69,8 +69,6 @@ func (t *TUI) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			t.doQuit()
 			return t, tea.Quit
-		case "q":
-			return t, nil
 		case "esc":
 			return t, nil
 		case "up", "k":
@@ -89,14 +87,6 @@ func (t *TUI) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if t.welcomeCursor >= 0 && t.welcomeCursor < len(items) && !items[t.welcomeCursor].disabled {
 				return t, t.handleWelcomeAction(items[t.welcomeCursor].action)
 			}
-		case "n":
-			return t, t.handleWelcomeAction(actionNew)
-		case "r":
-			return t, t.handleWelcomeAction(actionResume)
-		case "ctrl+o":
-			return t, t.handleWelcomeAction(actionConfig)
-		case "?", "f1":
-			return t, t.handleWelcomeAction(actionHelp)
 		}
 	}
 	return t, nil
@@ -207,17 +197,17 @@ func welcomeBoxStyle(width int) lipgloss.Style {
 
 func (t *TUI) welcomeMenuItems() []welcomeItem {
 	noModel := !t.hasConfiguredModel()
-	items := []welcomeItem{{"tui.welcome.new", "N", actionNew, false}}
+	items := []welcomeItem{{"tui.welcome.new", "", actionNew, false}}
 	if noModel {
-		items = append(items, welcomeItem{"tui.welcome.config", "C", actionConfig, false})
-		items = append(items, welcomeItem{"tui.welcome.help_menu", "?", actionHelp, false})
+		items = append(items, welcomeItem{"tui.welcome.config", "", actionConfig, false})
+		items = append(items, welcomeItem{"tui.welcome.help_menu", "", actionHelp, false})
 		return items
 	}
 	if !noModel && t.daemonStatus.Sessions != nil && t.daemonStatus.Sessions.LastID != "" {
-		items = append(items, welcomeItem{"tui.welcome.resume", "R", actionResume, false})
+		items = append(items, welcomeItem{"tui.welcome.resume", "", actionResume, false})
 	}
-	items = append(items, welcomeItem{"tui.welcome.config", "C", actionConfig, false})
-	items = append(items, welcomeItem{"tui.welcome.help_menu", "?", actionHelp, false})
+	items = append(items, welcomeItem{"tui.welcome.config", "", actionConfig, false})
+	items = append(items, welcomeItem{"tui.welcome.help_menu", "", actionHelp, false})
 	return items
 }
 
@@ -230,7 +220,10 @@ func (t *TUI) renderWelcomeInfo() string {
 	if model == "" {
 		model = "-"
 	}
-	rows := []string{fmt.Sprintf("%-8s %s", t.tr("tui.status.model"), styleHL.Render(provider+"/"+model))}
+	rows := []string{
+		fmt.Sprintf("%-8s %s", t.tr("tui.status.version"), styleHL.Render(appVersion)),
+		fmt.Sprintf("%-8s %s", t.tr("tui.status.model"), styleHL.Render(provider+"/"+model)),
+	}
 	if s.UsageToday != nil {
 		usage := fmt.Sprintf("↑%s ↓%s", fmtTok(s.UsageToday.InputTokens), fmtTok(s.UsageToday.OutputTokens))
 		rows = append(rows, fmt.Sprintf("%-8s %s", t.tr("tui.status.usage"), styleHL.Render(usage)))

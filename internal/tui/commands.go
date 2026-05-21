@@ -22,12 +22,11 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 
 	switch cmd {
 	case "/new":
-		t.ipcCli.NewSession()
 		t.messages = []chatMsg{}
 		t.resetConversationStats()
 		t.resetPhase()
 		t.lastAssistantText = ""
-		return nil
+		return t.newSessionCmd()
 	case "/model":
 		if len(parts) > 1 {
 			return t.switchModelRef(parts[1])
@@ -36,12 +35,10 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 		t.syncContent()
 		return nil
 	case "/memory":
-		t.handleMemory(parts)
-		return nil
+		return t.handleMemory(parts)
 	case "/compact":
 		t.messages = append(t.messages, chatMsg{role: "system", content: t.i18n.T("compact.running")})
-		t.ipcCli.Compact()
-		return nil
+		return t.compactCmd()
 	case "/config":
 		t.mode = "config"
 		t.configFromMode = "chat"
@@ -58,6 +55,26 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 		t.messages = append(t.messages, chatMsg{role: "error", content: t.i18n.Tf("cmd.unknown", cmd)})
 	}
 	return nil
+}
+
+func (t *TUI) isRegisteredSlashCommand(input string) bool {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return false
+	}
+	for _, spec := range t.allCommands() {
+		if input == spec.cmd || strings.HasPrefix(input, spec.cmd+" ") {
+			return true
+		}
+		if !strings.Contains(spec.cmd, " ") {
+			continue
+		}
+		parts := strings.Fields(input)
+		if len(parts) > 0 && parts[0] == strings.Fields(spec.cmd)[0] {
+			return strings.HasPrefix(spec.cmd, input)
+		}
+	}
+	return false
 }
 
 func (t *TUI) switchModelRef(ref string) tea.Cmd {
@@ -109,11 +126,12 @@ func (t *TUI) updateModelPicker(key string) (tea.Model, tea.Cmd) {
 	return t, nil
 }
 
-func (t *TUI) handleMemory(parts []string) {
+func (t *TUI) handleMemory(parts []string) tea.Cmd {
 	if len(parts) >= 2 && parts[1] == "search" {
 		query := strings.Join(parts[2:], " ")
-		t.ipcCli.SearchMemory(query, 5)
+		return t.searchMemoryCmd(query, 5)
 	} else {
 		t.messages = append(t.messages, chatMsg{role: "system", content: t.i18n.T("memory.search_hint")})
 	}
+	return nil
 }

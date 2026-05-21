@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,7 +20,7 @@ type configRow struct{ kind, name, label, value string }
 
 func (r configRow) selectable() bool {
 	switch r.kind {
-	case "section", "general_language", "general_theme", "general_guard", "add_model", "model", "empty":
+	case "section", "general_language", "general_theme", "general_guard", "open_config_dir", "add_model", "edit_model", "activate_model", "delete_model", "check_model", "model", "empty":
 		return true
 	default:
 		return false
@@ -54,9 +56,16 @@ func (t *TUI) configHomeRows() []configRow {
 		{"section", "models", "▸ " + t.tr("tui.config.model_connections"), ""},
 		{"info", "", "  " + t.tr("tui.config.active"), active},
 		{"info", "", "  " + t.tr("tui.config.providers"), t.i18n.Tf("tui.config.providers_summary", len(t.configState.Models), needs)},
+		{"info", "", "", ""},
+		{"label", "", t.tr("tui.config.general.section"), ""},
 		{"general_language", "", "  " + t.tr("tui.config.language"), t.currentLangDisplay()},
 		{"general_theme", "", "  " + t.tr("tui.config.theme"), t.themeDisplay()},
 		{"general_guard", "", "  " + t.tr("tui.config.guard_mode"), t.guardModeDisplay()},
+		{"info", "", "", ""},
+		{"label", "", t.tr("tui.config.local_files"), ""},
+		{"info", "", "  " + t.tr("tui.config.config_path"), configFilePath()},
+		{"info", "", "  " + t.tr("tui.config.credentials_path"), credentialsFilePath()},
+		{"open_config_dir", "", "  " + t.tr("tui.config.open_config_folder"), configDataDir()},
 	}
 	t.ensureConfigCursor(rows)
 	return rows
@@ -74,6 +83,9 @@ func (t *TUI) configModelRows() []configRow {
 		ref := mc.Ref()
 		t.configModels = append(t.configModels, ref)
 		rows = append(rows, configRow{"model", ref, modelStatusMark(mc, t.isActiveModelRef(ref)) + " " + ref, t.modelSummary(mc)})
+	}
+	if len(models) > 0 {
+		rows = append(rows, configRow{"add_model", "", "+ " + t.tr("tui.config.add_model"), ""})
 	}
 	t.ensureConfigCursor(rows)
 	return rows
@@ -96,7 +108,7 @@ func (t *TUI) configDetailRows() []configRow {
 	if lastCheck == "" {
 		lastCheck = t.tr("tui.config.not_checked")
 	}
-	return []configRow{
+	rows := []configRow{
 		{"info", "", t.tr("tui.config.status"), status},
 		{"info", "", t.tr("tui.config.provider.type"), mc.Provider},
 		{"info", "", t.tr("tui.config.provider.endpoint"), t.displayEndpoint(mc.BaseURL)},
@@ -104,7 +116,17 @@ func (t *TUI) configDetailRows() []configRow {
 		{"info", "", t.tr("tui.config.provider.model"), modelStatusMark(mc, t.isActiveModelRef(mc.Ref())) + " " + mc.Model},
 		{"info", "", t.tr("tui.config.provider.context_window"), contextDisplay(mc)},
 		{"info", "", t.tr("tui.config.last_check"), lastCheck},
+		{"info", "", "", ""},
+		{"edit_model", "", "  " + t.tr("tui.config.edit_model"), ""},
 	}
+	if !t.isActiveModelRef(mc.Ref()) {
+		rows = append(rows, configRow{"activate_model", mc.Ref(), "  " + t.tr("tui.config.activate_model"), ""})
+	}
+	rows = append(rows,
+		configRow{"check_model", "", "  " + t.tr("tui.config.check_model"), ""},
+		configRow{"delete_model", "", "  " + t.tr("tui.config.delete_model"), ""},
+	)
+	return rows
 }
 
 func (t *TUI) handleConfigAction(rows []configRow) tea.Cmd {
@@ -121,13 +143,75 @@ func (t *TUI) handleConfigAction(rows []configRow) tea.Cmd {
 		return t.toggleTheme()
 	case "general_guard":
 		return t.toggleGuardMode()
+	case "open_config_dir":
+		return t.openConfigDirCmd()
 	case "add_model":
 		t.openProviderKind()
+	case "edit_model":
+		if mc, ok := t.modelByRef(t.configDetailRef); ok {
+			t.openProviderForm(t.configDetailRef, &mc)
+			return t.configInputs[t.configInputFocus].Focus()
+		}
+	case "activate_model":
+		return t.activateModelRef(row.name)
+	case "check_model":
+		t.configLastCheck = t.tr("tui.config.check_not_implemented")
+	case "delete_model":
+		if t.configDetailRef != "" {
+			t.configDeleteConfirm = t.configDetailRef
+			t.configDeleteCursor = 0
+		}
 	case "model":
-		t.configDetailRef = row.name
-		t.configPage = "detail"
+		t.openConfigDetail(row.name)
 	}
 	return nil
+}
+
+func (t *TUI) openConfigDetail(ref string) {
+	t.configDetailRef = ref
+	t.configPage = "detail"
+	t.configCursor = t.configDetailDefaultCursor()
+}
+
+func (t *TUI) configDetailDefaultCursor() int {
+	preferred := "edit_model"
+	if mc, ok := t.modelByRef(t.configDetailRef); ok && !t.modelNeedsAttention(mc) && !t.isActiveModelRef(mc.Ref()) {
+		preferred = "activate_model"
+	}
+	for i, row := range t.configDetailRows() {
+		if row.kind == preferred {
+			return i
+		}
+	}
+	return 0
+}
+
+func configDataDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ".suna"
+	}
+	return filepath.Join(home, ".suna")
+}
+
+func configFilePath() string {
+	return filepath.Join(configDataDir(), "config.toml")
+}
+
+func credentialsFilePath() string {
+	return filepath.Join(configDataDir(), "credentials.toml")
+}
+
+func (t *TUI) openConfigDirCmd() tea.Cmd {
+	return func() tea.Msg {
+		if err := os.MkdirAll(configDataDir(), 0755); err != nil {
+			return ipcErrorNotification("config.error", err)
+		}
+		if err := openDirectory(configDataDir()); err != nil {
+			return ipcErrorNotification("config.error", err)
+		}
+		return nil
+	}
 }
 
 func (t *TUI) activateSelectedConfigModel(rows []configRow) tea.Cmd {
@@ -135,21 +219,24 @@ func (t *TUI) activateSelectedConfigModel(rows []configRow) tea.Cmd {
 		return nil
 	}
 	if ref, ok := t.selectedConfigModel(rows); ok {
-		if mc, ok := t.modelByRef(ref); ok && t.modelNeedsAttention(mc) {
-			t.configDetailRef = ref
-			t.configPage = "detail"
-			t.configError = t.tr("tui.error.provider_incomplete")
-			return nil
-		}
-		t.configState.ActiveModel = ref
-		if mc, ok := t.modelByRef(ref); ok {
-			t.providerName = mc.Provider
-			t.modelName = mc.Model
-			t.contextWindow = defaultContextWindow(mc)
-		}
-		return t.sendConfigSet(ipc.ConfigSetParams{Action: ipc.ConfigActionActivateModel, ActiveModel: ref})
+		return t.activateModelRef(ref)
 	}
 	return nil
+}
+
+func (t *TUI) activateModelRef(ref string) tea.Cmd {
+	if mc, ok := t.modelByRef(ref); ok && t.modelNeedsAttention(mc) {
+		t.openConfigDetail(ref)
+		t.configError = t.tr("tui.error.provider_incomplete")
+		return nil
+	}
+	t.configState.ActiveModel = ref
+	if mc, ok := t.modelByRef(ref); ok {
+		t.providerName = mc.Provider
+		t.modelName = mc.Model
+		t.contextWindow = defaultContextWindow(mc)
+	}
+	return t.sendConfigSet(ipc.ConfigSetParams{Action: ipc.ConfigActionActivateModel, ActiveModel: ref})
 }
 
 func (t *TUI) sendConfigSet(params ipc.ConfigSetParams) tea.Cmd {
@@ -317,8 +404,7 @@ func (t *TUI) viewConfig() string {
 		return overlayBlock(base, t.viewProviderKind())
 	}
 	if t.configFormOpen {
-		base := t.viewConfigPage()
-		return overlayBlock(base, t.viewProviderForm())
+		return t.viewProviderForm()
 	}
 	base := t.viewConfigPage()
 	if t.showHelp {
@@ -353,6 +439,10 @@ func (t *TUI) viewConfigPage() string {
 	sb.WriteString(renderHeader(title, "[Esc] "+t.tr("tui.key.back"), t.width))
 	sb.WriteString("\n\n")
 	for i, row := range rows {
+		if row.kind == "label" {
+			sb.WriteString("    " + styleDim.Render(row.label) + "\n")
+			continue
+		}
 		if row.kind == "info" {
 			t.renderConfigInfoRow(&sb, row.label, row.value)
 			continue
@@ -366,9 +456,11 @@ func (t *TUI) viewConfigPage() string {
 		sb.WriteString("\n" + styleError.Render("  ✗ "+t.configError) + "\n")
 	}
 	if t.configDeleteConfirm != "" {
-		sb.WriteString("\n" + styleError.Render("  "+t.i18n.Tf("tui.config.delete_confirm", t.configDeleteConfirm)) + "\n")
+		sb.WriteString("\n" + t.renderConfigDeleteConfirm() + "\n")
 	}
-	sb.WriteString("\n" + styleDim.Render("  "+t.configHelp()) + "\n")
+	if help := t.configHelp(); help != "" {
+		sb.WriteString("\n" + styleDim.Render("  "+help) + "\n")
+	}
 	return sb.String()
 }
 
@@ -386,7 +478,7 @@ func (t *TUI) configTitle() string {
 
 func (t *TUI) configHelp() string {
 	if t.configDeleteConfirm != "" {
-		return t.tr("tui.config.help_confirm_delete")
+		return ""
 	}
 	switch t.configPage {
 	case "models":
@@ -423,14 +515,47 @@ func (t *TUI) renderConfigRow(sb *strings.Builder, idx int, label, value string)
 		cursor = styleCursor.Render("  ▶ ")
 		st = styleHL
 	}
-	sb.WriteString(cursor + st.Render(label))
+	sb.WriteString(cursor + t.configRowLabelStyle(label, st))
 	if value != "" {
 		sb.WriteString(styleDim.Render("  ") + value)
 	}
 	sb.WriteString("\n")
 }
 
+func (t *TUI) configRowLabelStyle(label string, st lipgloss.Style) string {
+	trimmed := strings.TrimSpace(label)
+	if strings.HasPrefix(trimmed, "+") || strings.Contains(label, t.tr("tui.config.activate_model")) {
+		return styleAgent.Render(label)
+	}
+	if strings.HasPrefix(trimmed, "▸") || strings.Contains(label, t.tr("tui.config.open_config_folder")) {
+		return styleBrand.Render(label)
+	}
+	if strings.Contains(label, t.tr("tui.config.delete_model")) {
+		return styleError.Render(label)
+	}
+	return st.Render(label)
+}
+
+func (t *TUI) renderConfigDeleteConfirm() string {
+	message := styleError.Render("✗ " + t.i18n.Tf("tui.config.delete_confirm", t.configDeleteConfirm))
+	cancel := t.configConfirmButton(0, t.tr("tui.config.cancel"))
+	delete := t.configConfirmButton(1, t.tr("tui.config.delete_model"))
+	body := message + "\n\n" + cancel + "  " + delete + "\n" + styleDim.Render(t.tr("tui.config.delete_help"))
+	return boxStyle.Width(min(max(44, t.width-8), 72)).Padding(1, 2).Render(body)
+}
+
+func (t *TUI) configConfirmButton(idx int, label string) string {
+	if t.configDeleteCursor == idx {
+		return styleCursor.Render("▶ ") + styleHL.Render(label)
+	}
+	return styleDim.Render("  " + label)
+}
+
 func (t *TUI) renderConfigInfoRow(sb *strings.Builder, label, value string) {
+	if label == "" && value == "" {
+		sb.WriteString("\n")
+		return
+	}
 	sb.WriteString("    " + styleDim.Render(fmt.Sprintf("%-12s", label)) + " " + value + "\n")
 }
 
