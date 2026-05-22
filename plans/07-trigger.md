@@ -2,7 +2,7 @@
 
 > 当前实现状态: **预留 / 设计归档**
 >
-> 当前代码只保留了 SQLite `triggers` 表、IPC 方法常量/状态字段等预留结构；没有 `internal/trigger`、SenseManager、Timer/Watcher/Webhook/Stream runtime，也没有 server 路由 `trigger.*` 方法。以下内容描述目标设计，不代表当前 daemon 已经 24/7 运行感知源。
+> 当前代码只保留了 SQLite `triggers` 表、protocol 方法常量/状态字段等预留结构；没有 `internal/trigger`、SenseManager、Timer/Watcher/Webhook/Stream runtime，也没有 `trigger.*` 业务路由。以下内容描述目标设计，不代表当前 daemon 已经 24/7 运行感知源。
 
 感知层是 Suna 三层架构的第一层。传统 agent 的感知是被动的——只有当用户发消息时才"醒来"。Suna 的感知是主动的——持续监听环境变化，将信号直接传递给行动层。
 
@@ -115,7 +115,7 @@ enabled = true
   3. 到点触发 → handler(task)
   4. handler 调 agent.Run(ctx, task)
   5. agent 执行结果 → 更新 conversation_state / memory_queue
-     如果 TUI 在线 → 通过 IPC 推送结果
+     如果客户端在线 → 通过 protocol event 推送结果
      如果 TUI 离线 → 只保留最近恢复状态和必要 active memory
 
 感知源在 daemon 进程内运行，不依赖 TUI
@@ -295,6 +295,92 @@ cooldown 必要性:
 节流:
   - Debounce: 2秒内的同类信号合并
   - 优先级: 用户消息(3) > 时间事件(2) > 文件变化(1) > 流数据(1)
+```
+
+## 持久化任务 (Task / Run)
+
+感知层最终不能直接把 signal 变成一次临时 `agent.Run` goroutine。用户从 TUI 发起的消息、Timer/Watcher/Webhook/Stream 触发的自动任务，本质上都应该先落成一条持久化任务，再由 daemon 执行。
+
+这样可以统一处理：
+
+- TUI 断开后 agent 仍在后台运行。
+- 下次进入 TUI 时恢复正在运行、已完成或失败的任务状态。
+- transport 写入成功但客户端未收到响应时，避免重复提交同一条用户输入。
+- Trigger 触发的任务在没有 TUI 在线时仍可执行，并在之后被用户查看。
+- AskUser / GuardConfirm 等等待用户输入的中间状态可以被新 TUI 连接重新接管。
+
+### 统一任务来源
+
+```
+用户输入 (TUI/local/Web)   -> tasks
+Timer / Watcher / Webhook -> tasks
+Stream                   -> tasks
+远期其他入口              -> tasks
+```
+
+任务表不是长期聊天历史库。它保存的是 daemon 需要恢复和调度的执行状态，而不是完整对话 transcript。长期用户偏好仍进入 `user_memory`，最近对话恢复仍由 `conversation_state` 提供轻量快照。
+
+### 目标表结构
+
+```text
+tasks
+| id | source_type | source_id | client_msg_id | input | status |
+| created_at | started_at | finished_at | last_error | result_summary |
+
+task_events
+| id | task_id | seq | type | payload_json | created_at |
+```
+
+`task_events` 可以先只保存关键事件，不必保存所有 streaming chunk：
+
+```text
+user_message
+assistant_final
+ask_user
+guard_confirm
+error
+done
+```
+
+如果后续需要更完整的重连体验，再扩展为 `events_since(last_seen_event_id)`。
+
+### 状态机
+
+```text
+queued      已创建，等待 daemon 调度
+running     agent loop 正在执行
+waiting     等待 AskUser / GuardConfirm 等用户输入
+completed   正常完成
+failed      执行失败，记录 last_error
+cancelled   用户或 daemon 明确取消
+```
+
+### 幂等提交
+
+TUI 提交用户输入时应带 `client_msg_id`。daemon 接收后创建或复用对应 task，并返回 `task_id`。
+
+```text
+TUI -> daemon: agent.sendMessage(content, client_msg_id)
+daemon:
+  - 如果 client_msg_id 已存在，返回已有 task_id/status
+  - 如果不存在，创建 task(status=queued/running) 并返回 task_id
+```
+
+这样 transport 断开时客户端不需要猜测“上一条输入有没有被接收”，也不应该自动重发未知状态的输入。
+
+### 与当前 TUI 断连边界的关系
+
+当前实现中，`agent.sendMessage` 被 daemon 接收后会异步运行；TUI 断开不会天然取消 agent。但因为没有持久化 task/run 状态，也没有事件回放，新 TUI 连接只能恢复 `conversation_state` 的最近可见消息，无法可靠判断后台任务是否仍在运行、是否失败、是否正在等待 AskUser/GuardConfirm。
+
+这个问题不要在 TUI 层用本地草稿、自动重发或特殊补丁解决。应在实现持久化任务时一起解决：daemon 是任务状态 owner，TUI 只订阅和展示任务状态。
+
+### 调度边界
+
+```text
+- 同一用户当前只允许一个 main task running；新任务 queued 或按策略拒绝。
+- Trigger 重复触发时，根据 trigger 策略 skip / coalesce / enqueue。
+- Daemon 重启时，queued 继续执行；running/waiting 标记为 interrupted 或恢复为 waiting，不能静默丢失。
+- completed/failed task 可按 TTL 清理，只保留摘要和必要事件。
 ```
 
 ## 感知源的持久化

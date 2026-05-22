@@ -7,23 +7,24 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alanchenchen/suna/internal/ipc"
+	"github.com/alanchenchen/suna/internal/protocol"
+	"github.com/alanchenchen/suna/internal/transport/local"
 )
 
 /*
-Client TUI 端 IPC 客户端。
+localClient 是当前 TUI 使用的 local transport 客户端。
 
 职责：
-  - 连接 daemon (Unix Socket / Named Pipe)
-  - 发送 JSON-RPC 请求，接收响应
-  - 接收 daemon 推送的 notification，分发给回调函数
+  - 连接 daemon 的本地入口（Unix socket / Windows named pipe）
+  - 用 local transport 的 JSON-RPC framing 承载 protocol request
+  - 接收 daemon 的 protocol event notification，分发给 UI 回调
 
 设计原则（01-architecture.md I/O 抽象层）：
 
 	TUI 不持有任何业务逻辑、状态、数据库连接。
-	TUI 只做两件事：渲染 UI、通过 IPC 与 daemon 通信。
+	TUI 只负责渲染 UI，并通过 protocol schema 与 daemon 交互。
 */
-type ipcClient struct {
+type localClient struct {
 	conn      net.Conn
 	mu        sync.Mutex
 	connected bool
@@ -33,12 +34,12 @@ type ipcClient struct {
 	onNotify func(method string, params json.RawMessage)
 }
 
-// NewIPCClient 创建 TUI 端 IPC 客户端
-func NewIPCClient() *ipcClient {
-	return &ipcClient{}
+// NewLocalClient 创建当前 TUI 的 local transport 客户端。
+func NewLocalClient() *localClient {
+	return &localClient{}
 }
 
-func (c *ipcClient) Connect() error {
+func (c *localClient) Connect() error {
 	socketPath := defaultSocketPath()
 
 	conn, err := platformDial(socketPath, 5*time.Second)
@@ -54,7 +55,7 @@ func (c *ipcClient) Connect() error {
 	return nil
 }
 
-func (c *ipcClient) Close() error {
+func (c *localClient) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.connected = false
@@ -64,17 +65,17 @@ func (c *ipcClient) Close() error {
 	return nil
 }
 
-func (c *ipcClient) Connected() bool {
+func (c *localClient) Connected() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.connected
 }
 
-func (c *ipcClient) OnNotify(fn func(method string, params json.RawMessage)) {
+func (c *localClient) OnNotify(fn func(method string, params json.RawMessage)) {
 	c.onNotify = fn
 }
 
-func (c *ipcClient) SendRequestNotify(method string, params any) error {
+func (c *localClient) SendRequestNotify(method string, params any) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -87,7 +88,7 @@ func (c *ipcClient) SendRequestNotify(method string, params any) error {
 	id := c.nextReqIDLocked()
 	c.pending[id] = method
 
-	req := ipc.Request{
+	req := local.Request{
 		JSONRPC: "2.0",
 		ID:      id,
 		Method:  method,
@@ -103,59 +104,59 @@ func (c *ipcClient) SendRequestNotify(method string, params any) error {
 	return err
 }
 
-func (c *ipcClient) nextReqIDLocked() int {
+func (c *localClient) nextReqIDLocked() int {
 	c.reqID++
 	return c.reqID
 }
 
-func (c *ipcClient) SendMessage(content string) error {
-	return c.SendRequestNotify(ipc.MethodSendMessage, ipc.SendMessageParams{Content: content})
+func (c *localClient) SendMessage(content string) error {
+	return c.SendRequestNotify(protocol.MethodSendMessage, protocol.SendMessageParams{Parts: []protocol.MessagePart{{Type: "text", Text: content}}})
 }
 
-func (c *ipcClient) Cancel() error {
-	return c.SendRequestNotify(ipc.MethodCancel, nil)
+func (c *localClient) Cancel() error {
+	return c.SendRequestNotify(protocol.MethodCancel, nil)
 }
 
-func (c *ipcClient) AskReply(askID, answer string) error {
+func (c *localClient) AskReply(askID, answer string) error {
 	return c.SendRequestNotify("agent.askReply", map[string]string{
 		"id":     askID,
 		"answer": answer,
 	})
 }
 
-func (c *ipcClient) GuardReply(guardID, decision string) error {
-	return c.SendRequestNotify(ipc.MethodGuardReply, ipc.GuardReplyParams{ID: guardID, Decision: decision})
+func (c *localClient) GuardReply(guardID, decision string) error {
+	return c.SendRequestNotify(protocol.MethodGuardReply, protocol.GuardReplyParams{ID: guardID, Decision: decision})
 }
 
-func (c *ipcClient) NewSession() error {
-	return c.SendRequestNotify(ipc.MethodSessionNew, nil)
+func (c *localClient) NewSession() error {
+	return c.SendRequestNotify(protocol.MethodSessionNew, nil)
 }
 
-func (c *ipcClient) RestoreSession() error {
-	return c.SendRequestNotify(ipc.MethodSessionRestore, nil)
+func (c *localClient) RestoreSession() error {
+	return c.SendRequestNotify(protocol.MethodSessionRestore, nil)
 }
 
-func (c *ipcClient) ListMemory() error {
-	return c.SendRequestNotify(ipc.MethodMemoryList, nil)
+func (c *localClient) ListMemory() error {
+	return c.SendRequestNotify(protocol.MethodMemoryList, nil)
 }
 
-func (c *ipcClient) Compact() error {
-	return c.SendRequestNotify(ipc.MethodCompact, nil)
+func (c *localClient) Compact() error {
+	return c.SendRequestNotify(protocol.MethodCompact, nil)
 }
 
-func (c *ipcClient) DaemonStatus() error {
-	return c.SendRequestNotify(ipc.MethodDaemonStatus, nil)
+func (c *localClient) DaemonStatus() error {
+	return c.SendRequestNotify(protocol.MethodDaemonStatus, nil)
 }
 
-func (c *ipcClient) ConfigGet() error {
-	return c.SendRequestNotify(ipc.MethodConfigGet, nil)
+func (c *localClient) ConfigGet() error {
+	return c.SendRequestNotify(protocol.MethodConfigGet, nil)
 }
 
-func (c *ipcClient) ConfigSet(params ipc.ConfigSetParams) error {
-	return c.SendRequestNotify(ipc.MethodConfigSet, params)
+func (c *localClient) ConfigSet(params protocol.ConfigSetParams) error {
+	return c.SendRequestNotify(protocol.MethodConfigSet, params)
 }
 
-func (c *ipcClient) receiveLoop() {
+func (c *localClient) receiveLoop() {
 	var buf [4096]byte
 	var lineBuf []byte
 
@@ -181,7 +182,7 @@ func (c *ipcClient) receiveLoop() {
 	}
 }
 
-func (c *ipcClient) handleMessage(raw []byte) {
+func (c *localClient) handleMessage(raw []byte) {
 	var meta struct {
 		Method string `json:"method"`
 		ID     int    `json:"id"`
@@ -201,7 +202,7 @@ func (c *ipcClient) handleMessage(raw []byte) {
 		return
 	}
 
-	var resp ipc.Response
+	var resp local.Response
 	if err := json.Unmarshal(raw, &resp); err != nil || c.onNotify == nil {
 		return
 	}
@@ -214,7 +215,7 @@ func (c *ipcClient) handleMessage(raw []byte) {
 	c.mu.Unlock()
 	if resp.Error != nil {
 		data, _ := json.Marshal(map[string]string{"message": resp.Error.Message})
-		if method == ipc.MethodCompact {
+		if method == protocol.MethodCompact {
 			c.onNotify("compact.error", data)
 		} else {
 			c.onNotify("config.error", data)

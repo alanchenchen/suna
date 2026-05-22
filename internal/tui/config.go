@@ -10,7 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/alanchenchen/suna/internal/ipc"
+	"github.com/alanchenchen/suna/internal/protocol"
 )
 
 type providerFormValues struct {
@@ -132,7 +132,7 @@ func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ref := t.configDeleteConfirm
 				t.configDeleteConfirm = ""
 				t.configDeleteCursor = 0
-				return t, t.sendConfigSet(ipc.ConfigSetParams{Action: ipc.ConfigActionDeleteModel, ModelRef: ref})
+				return t, t.sendConfigSet(protocol.ConfigSetParams{Action: protocol.ConfigActionDeleteModel, ModelRef: ref})
 			case "esc":
 				t.configDeleteConfirm = ""
 				t.configDeleteCursor = 0
@@ -341,11 +341,11 @@ func (t *TUI) saveProviderForm() tea.Cmd {
 		t.configError = err.Error()
 		return nil
 	}
-	params := ipc.ConfigSetParams{
-		Action:   ipc.ConfigActionUpsertModel,
+	params := protocol.ConfigSetParams{
+		Action:   protocol.ConfigActionUpsertModel,
 		ModelRef: t.configEditingName,
 		APIKey:   v.APIKey,
-		Model: ipc.ConfigModel{
+		Model: protocol.ConfigModel{
 			Provider:      v.Provider,
 			Model:         v.Model,
 			BaseURL:       v.Endpoint,

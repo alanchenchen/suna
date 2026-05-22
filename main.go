@@ -144,7 +144,7 @@ func runTUI() {
 
 	ensureDaemonRunning()
 
-	client := tui.NewIPCClient()
+	client := tui.NewLocalClient()
 	if err := client.Connect(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot connect to daemon: %s\n", err)
 		os.Exit(1)

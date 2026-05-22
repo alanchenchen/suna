@@ -10,7 +10,6 @@ import (
 )
 
 type Request struct {
-	Input         string
 	System        string
 	ModelRef      string
 	ModelID       string

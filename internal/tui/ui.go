@@ -6,7 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/alanchenchen/suna/internal/ipc"
+	"github.com/alanchenchen/suna/internal/protocol"
 )
 
 var (
@@ -79,7 +79,7 @@ func renderHeader(title, right string, width int) string {
 	return left + strings.Repeat(" ", pad) + r + "\n" + styleDim.Render(strings.Repeat("─", width))
 }
 
-func (t *TUI) renderCompactPanel(r ipc.CompactResult) string {
+func (t *TUI) renderCompactPanel(r protocol.CompactResult) string {
 	pct := func(tokens, window int) string {
 		if window <= 0 {
 			return ""

@@ -46,7 +46,6 @@ func (s *Subtask) Run(ctx context.Context, r *runner.Runner) (Result, error) {
 	working := memory.NewWorkingMemory()
 	working.AddMessage(model.NewTextMessage(model.RoleUser, s.req.Task))
 	res, err := r.Run(ctx, runner.Request{
-		Input:         s.req.Task,
 		System:        s.req.System,
 		ModelRef:      s.req.ModelRef,
 		ModelID:       s.req.ModelID,

@@ -5,11 +5,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/alanchenchen/suna/internal/ipc"
+	"github.com/alanchenchen/suna/internal/protocol"
 )
 
 func (t *TUI) handleCommand(input string) tea.Cmd {
-	if t.ipcCli == nil {
+	if t.localCli == nil {
 		t.messages = append(t.messages, chatMsg{role: "error", content: t.i18n.T("error.not_connected")})
 		return nil
 	}
@@ -88,7 +88,7 @@ func (t *TUI) switchModelRef(ref string) tea.Cmd {
 	t.configState.ActiveModel = ref
 	t.modelPickerOpen = false
 	t.messages = append(t.messages, chatMsg{role: "system", content: t.i18n.Tf("cmd.model_switched", ref)})
-	return t.sendConfigSet(ipc.ConfigSetParams{Action: ipc.ConfigActionActivateModel, ActiveModel: ref})
+	return t.sendConfigSet(protocol.ConfigSetParams{Action: protocol.ConfigActionActivateModel, ActiveModel: ref})
 }
 
 func (t *TUI) openModelPicker() {

@@ -1,101 +1,11 @@
-package ipc
+package protocol
 
-// JSON-RPC 2.0 消息定义
-// 协议规范：https://www.jsonrpc.org/specification
-//
-// Daemon 和 TUI 之间通过 NDJSON (每行一条 JSON) 传输。
-// 每条 JSON 必须单行，JSON 内不能有裸换行符（用 \n 转义）。
-
-// Request JSON-RPC 请求
-type Request struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      int    `json:"id,omitempty"`
-	Method  string `json:"method"`
-	Params  any    `json:"params,omitempty"`
+type SendMessageParams struct {
+	ClientMsgID string `json:"client_msg_id,omitempty"`
+	// Parts 是唯一输入载体；纯文本也必须作为 text part 传入，避免回到旧的 content string 分支。
+	Parts []MessagePart `json:"parts,omitempty"`
 }
 
-// Response JSON-RPC 响应
-type Response struct {
-	JSONRPC string `json:"jsonrpc"`
-	ID      int    `json:"id,omitempty"`
-	Result  any    `json:"result,omitempty"`
-	Error   *Error `json:"error,omitempty"`
-}
-
-// Notification JSON-RPC 通知（无 ID，不需要响应）
-type Notification struct {
-	JSONRPC string `json:"jsonrpc"`
-	Method  string `json:"method"`
-	Params  any    `json:"params,omitempty"`
-}
-
-// Error JSON-RPC 错误
-type Error struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	Data    any    `json:"data,omitempty"`
-}
-
-// 标准错误码
-const (
-	ErrParse         = -32700
-	ErrInvalid       = -32600
-	ErrNotFound      = -32601
-	ErrInvalidParams = -32602
-	ErrInternal      = -32603
-)
-
-// === TUI → Daemon 方法 ===
-
-const (
-	MethodSendMessage    = "agent.sendMessage"
-	MethodCancel         = "agent.cancel"
-	MethodGuardReply     = "agent.guardReply"
-	MethodMemoryList     = "memory.list"
-	MethodTriggerList    = "trigger.list"
-	MethodTriggerAdd     = "trigger.add"
-	MethodTriggerRemove  = "trigger.remove"
-	MethodDaemonStatus   = "daemon.status"
-	MethodDaemonStop     = "daemon.stop"
-	MethodDaemonRestart  = "daemon.restart"
-	MethodConfigGet      = "config.get"
-	MethodConfigSet      = "config.set"
-	MethodSkillList      = "skill.list"
-	MethodSkillValidate  = "skill.validate"
-	MethodSessionNew     = "session.new"
-	MethodSessionRestore = "session.restore"
-	MethodCompact        = "session.compact"
-	MethodUsage          = "session.usage"
-)
-
-const (
-	ConfigActionUpsertModel   = "upsert_model"
-	ConfigActionDeleteModel   = "delete_model"
-	ConfigActionActivateModel = "activate_model"
-	ConfigActionUpdateGeneral = "update_general"
-)
-
-// === Daemon → TUI 通知 ===
-
-const (
-	NotifyStream              = "agent.stream"
-	NotifyReasoning           = "agent.reasoning"
-	NotifyToolStart           = "agent.tool_start"
-	NotifyToolEnd             = "agent.tool_end"
-	NotifyAskUser             = "agent.ask_user"
-	NotifyGuardConfirm        = "agent.guard_confirm"
-	NotifyDaemonState         = "daemon.state"
-	NotifyPerception          = "perception.event"
-	NotifyMemoryUpdated       = "memory.updated"
-	NotifyCompactResult       = "session.compact_result"
-	NotifyMemoryListResult    = "memory.list_result"
-	NotifySessionRestoreMsg   = "session.restore_message"
-	NotifySessionRestoreInput = "session.restore_input"
-)
-
-// StreamParams 是 daemon 向 TUI 推送单轮对话进度的统一载荷。
-// token/cache/context/speed 必须来自 LLM usage；服务不返回 usage 时 HasUsage=false，TUI 展示未知，
-// 不在 daemon 或 TUI 本地估算，避免把近似值伪装成接口真实用量。
 type StreamParams struct {
 	Chunk         string  `json:"chunk"`
 	ID            string  `json:"id"`
@@ -109,7 +19,6 @@ type StreamParams struct {
 	TokensPerSec  float64 `json:"tokens_per_sec,omitempty"`
 }
 
-// ToolStartParams 工具开始执行通知
 type ToolStartParams struct {
 	ID     string         `json:"id"`
 	Tool   string         `json:"tool"`
@@ -126,7 +35,6 @@ type ToolEndParams struct {
 	ResultBytes     int    `json:"result_bytes,omitempty"`
 }
 
-// AskUserParams 向用户提问
 type AskUserParams struct {
 	Question string   `json:"question"`
 	Options  []string `json:"options,omitempty"`
@@ -148,7 +56,6 @@ type GuardReplyParams struct {
 	Decision string `json:"decision"`
 }
 
-// DaemonStateParams 连接时推送 daemon 状态
 type DaemonStateParams struct {
 	SessionID    string `json:"session_id"`
 	AgentStatus  string `json:"agent_status"`
@@ -215,11 +122,6 @@ type SessionStats struct {
 	LastID    string `json:"last_id,omitempty"`
 }
 
-// SendMessageParams 发送消息参数
-type SendMessageParams struct {
-	Content string `json:"content"`
-}
-
 type MemoryListResult struct {
 	Memories []MemoryItem `json:"memories"`
 }
@@ -233,7 +135,6 @@ type MemoryItem struct {
 	IsCore   bool     `json:"is_core"`
 }
 
-// UsageResult 用量查询结果
 type UsageResult struct {
 	Today UsagePeriod `json:"today"`
 	Week  UsagePeriod `json:"week"`
@@ -247,7 +148,6 @@ type UsagePeriod struct {
 	Requests     int     `json:"requests"`
 }
 
-// CompactResult 压缩结果
 type CompactResult struct {
 	BeforeTokens     int `json:"before_tokens"`
 	AfterTokens      int `json:"after_tokens"`
@@ -257,7 +157,6 @@ type CompactResult struct {
 	TruncatedOutputs int `json:"truncated_outputs"`
 }
 
-// AskUserReply AskUser 的回复
 type AskUserReply struct {
 	ID     string `json:"id"`
 	Answer string `json:"answer"`

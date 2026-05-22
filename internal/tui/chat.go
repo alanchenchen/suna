@@ -408,8 +408,8 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return t, nil
 
-	case ipcNotification:
-		t.handleIPCNotification(m)
+	case localNotification:
+		t.handleLocalNotification(m)
 		t.syncContent()
 		if t.loading {
 			return t, func() tea.Msg { return t.sp.Tick() }

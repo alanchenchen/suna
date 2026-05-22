@@ -2,7 +2,7 @@
 
 > 最后更新: 2026-05-21
 > 本文档以当前 `internal/tui` 实现为准，描述已经可用的 TUI 行为、仍需保留的设计约束，以及尚未实现的功能。
-> 范围只包含 TUI 前端视觉、布局、交互和 IPC 展示数据，不定义 daemon/agent 业务逻辑。
+> 范围只包含 TUI 前端视觉、布局、交互和 protocol/local transport 展示数据，不定义 daemon/agent 业务逻辑。
 
 ---
 
@@ -27,7 +27,7 @@ TUI 现在已经能跑通基本使用流：启动后进入 Welcome，进入 Chat
 
 | 功能 | 当前状态 | 关键文件 | 备注 |
 |---|---|---|---|
-| Bubble Tea 主状态机 | 已实现 | `app.go` | mode 分发、AltScreen、IPC notification 分发 |
+| Bubble Tea 主状态机 | 已实现 | `app.go` | mode 分发、AltScreen、local notification 分发 |
 | Welcome 菜单 | 已实现 | `welcome.go` | `New`、`Resume`、`Config`、`Help`，状态区显示版本 |
 | Chat 布局 | 已实现 | `chat_render.go` | mini pet 顶栏、viewport、textarea、命令建议、底栏、复制模式提示 |
 | 流式回答 | 已实现 | `app.go`, `chat.go` | `agent.stream` 追加 assistant 内容 |
@@ -41,8 +41,8 @@ TUI 现在已经能跑通基本使用流：启动后进入 Welcome，进入 Chat
 | Config 模型管理 | 已实现基础版 | `config.go`, `config_model.go` | add/edit/delete/activate model |
 | Config 本地文件入口 | 已实现 | `config_model.go`, `open_dir_*.go` | Config Home 展示 config/credentials 路径，`Enter` 打开 config 目录 |
 | Provider kind 选择 | 已实现 | `config.go` | openai-compatible / openai / anthropic |
-| Context Window | 已打通 | `config.go`, `message.go`, `chat_render.go` | config/IPc/顶栏/compact 均可使用 |
-| Credentials | 已实现基础版 | `config.go`, daemon config IPC | API Key 通过 IPC 保存到 credentials，不在 TUI 明文展示 |
+| Context Window | 已打通 | `config.go`, `protocol/messages.go`, `chat_render.go` | config/protocol/顶栏/compact 均可使用 |
+| Credentials | 已实现基础版 | `config.go`, daemon config protocol | API Key 通过 protocol 保存到 credentials，不在 TUI 明文展示 |
 | 语言切换 | 已实现 | `i18n.go`, `i18n_keys.go`, `config_model.go` | 中文/英文内置翻译，Config 可切换 |
 | 主题切换 | 已实现 | `theme.go`, `config_model.go` | auto/dark/light |
 | Provider Test | 未实现真实 ping | `config.go` | `T` 只显示 `local config only; API ping not implemented` |
@@ -59,7 +59,7 @@ TUI 现在已经能跑通基本使用流：启动后进入 Welcome，进入 Chat
 
 1. **当前实现优先**：文档描述必须和 `internal/tui` 当前行为一致，未实现功能放入“未实现清单”，不能混在主流程里。
 2. **Chat 优先**：Chat 是核心页面，常驻信息只保留身份、模型、context、输入和运行状态。
-3. **TUI 纯前端**：TUI 只持有 UI 展示/输入状态，不持有业务逻辑、数据库连接或模型执行逻辑，只渲染 UI 并通过 IPC 与 daemon 通信。
+3. **TUI 纯前端**：TUI 只持有 UI 展示/输入状态，不持有业务逻辑、数据库连接或模型执行逻辑，只渲染 UI 并通过 local transport 承载 protocol 与 daemon 通信。
 4. **配置足够可用**：MVP 只要求能配置模型连接、凭证、context window、语言和主题；高级配置后续分组补齐。
 5. **信息不重复**：Chat 顶栏显示 provider/model/context/连接状态；底栏只显示 token 和速度；快捷键通过 help 查看。
 6. **全程 i18n**：用户可见文本必须走 `internal/tui/i18n_keys.go` 或 translator，不在页面代码里散落硬编码文案。
@@ -226,7 +226,7 @@ token status bar / copy mode hint
 - 3 行 mini pet。
 - 当前 `provider/model`。
 - `ctx used/window`。
-- IPC 连接点。
+- local transport 连接点。
 
 规则：
 
@@ -301,14 +301,14 @@ Current status line：
 - Loading 状态只显示工具执行中和 running 数量，不再拼接当前 tool name/intent，避免和 tool tree 重复。
 - Tool/subtask 固定 UI 文案走 i18n；主线只在父 spawn 显示 `Subtask` 标识，子工具依靠树结构表达归属，不重复加 `Subtask tool`。
 - Tool detail overlay 底部提示根据当前位置动态显示 `previous`/`next`，首项不显示 previous，末项不显示 next。
-- Tool detail overlay 限制内容高度，避免 result 过长撑破 box；完整展示仍以 IPC 16KB 上限和后续滚动/详情机制为准。
+- Tool detail overlay 限制内容高度，避免 result 过长撑破 box；完整展示仍以 local/protocol 展示层 16KB 上限和后续滚动/详情机制为准。
 - Guard confirm payload 携带 `tool_call_id`；用户 reject 后，TUI 立即把对应 tool 标为 error，而不是只追加系统消息。
 
 ### AskUser Options
 
 AskUser 已实现，不再是缺失项。
 
-IPC 数据结构：
+Protocol 数据结构：
 
 ```go
 type AskUserParams struct {
@@ -337,7 +337,7 @@ type AskUserParams struct {
 
 Guard confirm 使用独立 overlay 面板，不复用 AskUser 事件。
 
-IPC 数据结构：
+Protocol 数据结构：
 
 ```go
 type GuardConfirmParams struct {
@@ -395,7 +395,7 @@ type GuardConfirmParams struct {
 - 未注册的 `/...` 输入会作为普通用户消息发送给 agent，不再显示 unknown command 错误。
 - 已注册入口以 `allCommands()` 为准，Help 页面直接从该列表生成，避免指令文档遗漏。
 
-当前未暴露的 IPC 能力：
+当前未暴露的 protocol 能力：
 
 - `/daemon status|stop|restart`
 - `/trigger ...`
@@ -468,7 +468,7 @@ type GuardConfirmParams struct {
 
 ## Compact 面板
 
-`/compact` 当前通过 IPC 调 `session.compact`，结果由 `session.compact_result` 推回 TUI。
+`/compact` 当前通过 protocol 调 `session.compact`，结果由 `session.compact_result` 推回 TUI。
 
 面板展示：
 
@@ -701,7 +701,7 @@ Help 有两个形态：
 
 ---
 
-## IPC 展示数据
+## Protocol 展示数据
 
 TUI 需要 daemon 提供的展示数据：
 
@@ -726,6 +726,8 @@ TUI 需要 daemon 提供的展示数据：
 
 `agent.tool_end.result` 是 UI 展示内容，不是 agent 内部完整 tool result。daemon 会把该字段限制到 16KB；如果结果被截断，payload 会带 `result_truncated=true` 和 `result_bytes=<原始字节数>`。完整 tool result 仍保留在 agent/runner/LLM 上下文中。
 
+TUI 断开但 daemon 中的 agent 仍在执行时，当前 TUI 只依赖 `conversation_state` 恢复最近可见消息，不能可靠恢复正在运行、失败或等待 AskUser/GuardConfirm 的后台任务。这个边界不在 TUI 层通过自动重发、本地草稿或临时状态补丁解决；后续应随 [07-trigger.md](07-trigger.md) 的持久化 Task/Run 能力一起实现，由 daemon 持有任务状态、幂等提交和事件回放，TUI 只负责订阅与展示。
+
 已打通的关键结构：
 
 ```go
@@ -742,7 +744,7 @@ type ConfigModel struct {
 `context_window` 当前已经不再是文档缺口：
 
 - `internal/config.ModelConfig.ContextWindow` 可持久化到 TOML。
-- `internal/ipc.ConfigModel.ContextWindow` 已存在。
+- `internal/protocol.ConfigModel.ContextWindow` 已存在。
 - Config form 可编辑 Context Window。
 - Chat 顶栏显示 `ctx used/window`。
 - Compact 面板按 Context Window 计算百分比。
@@ -755,7 +757,7 @@ type ConfigModel struct {
 
 ```text
 internal/tui/
-├── app.go                # TUI struct, Init/Update/View, mode 切换、IPC notification 分发
+├── app.go                # TUI struct, Init/Update/View, mode 切换、local notification 分发
 ├── chat.go               # Chat 状态、输入、AskUser、Guard confirm、tool/thinking 渲染核心
 ├── chat_render.go        # Chat 布局、顶栏/底栏、命令建议、model picker、Guard overlay、渲染辅助
 ├── commands.go           # slash commands
@@ -764,9 +766,9 @@ internal/tui/
 ├── help.go               # Help 页面、Chat/Config help overlay、key bindings
 ├── i18n.go               # translator 和 fallback
 ├── i18n_keys.go          # 内置中文/英文文案（含 Guard confirm 文案）
-├── ipc_client.go         # TUI IPC client 接口和公共逻辑
-├── ipc_client_unix.go    # Unix socket IPC client
-├── ipc_client_windows.go # Windows named pipe IPC client
+├── local_client.go         # 当前 TUI local client 公共逻辑
+├── local_client_unix.go    # Unix socket local client
+├── local_client_windows.go # Windows named pipe local client
 ├── markdown.go           # Glamour renderer
 ├── pet.go                # Welcome pet 和 Chat mini pet
 ├── theme.go              # auto/dark/light 主题
@@ -796,10 +798,10 @@ internal/tui/
 | 结构化 AskUser options | 当前只有 `[]string` | 低 |
 | AskUser 鼠标点击选择 | 未实现 | 低 |
 | 外部 locale 文件加载 | 有函数，未接入启动流程 | 低 |
-| `/daemon` 命令 | IPC 有方法，TUI 未暴露 | 低 |
-| `/trigger` 命令 | IPC 有方法，TUI 未暴露 | Phase 3 |
-| `/skill` 命令 | IPC 有方法，TUI 未暴露 | Phase 3 |
-| `/usage` 命令 | IPC 有方法，TUI 未暴露 | 低 |
+| `/daemon` 命令 | protocol 有方法，TUI 未暴露 | 低 |
+| `/trigger` 命令 | protocol 有方法，TUI 未暴露 | Phase 3 |
+| `/skill` 命令 | protocol 有方法，TUI 未暴露 | Phase 3 |
+| `/usage` 命令 | protocol 有方法，TUI 未暴露 | 低 |
 | auto compact UI 开关 | 未实现 | 低 |
 | 全局状态栏 | 未实现，当前也不建议 MVP 做 | 低 |
 

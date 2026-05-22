@@ -22,7 +22,7 @@
   github.com/nicholasgasior/quickjs-wasm-go   # QuickJS (Phase 3, 编译为 WASM)
   github.com/tetratelabs/wazero               # 纯 Go WASM 运行时 (Phase 3)
 
-IPC 通信 (1):
+Local transport (1):
   github.com/Microsoft/go-winio               # Windows Named Pipe (Docker 同款)
 
 TUI (4):
@@ -64,13 +64,19 @@ TUI (4):
 #### 跨平台文件分布
 
 ```
-internal/ipc/
-  ├── transport.go          # Transport + Conn 接口定义 (平台无关)
-  ├── socket_unix.go        # Unix Socket (//go:build !windows)
+internal/protocol/
+  ├── transport.go          # protocol.Transport 接口 (平台无关)
+  ├── service.go            # protocol.Service / EventSink
+  ├── methods.go            # 方法和事件名
+  ├── messages.go           # 请求/响应/事件 payload schema
+  └── multimodal.go         # MessagePart / AttachmentRef
+
+internal/transport/local/
+  ├── jsonrpc.go            # local transport 的 NDJSON + JSON-RPC framing
+  ├── transport_unix.go     # Unix Socket (//go:build !windows)
   │   func NewPlatformTransport(path) → net.Listen("unix", path)
-  ├── socket_windows.go     # Named Pipe  (//go:build windows)
+  └── transport_windows.go  # Named Pipe  (//go:build windows)
   │   func NewPlatformTransport(path) → winio.ListenPipe(path, ...)
-  └── server.go             # JSON-RPC Server (平台无关)
 
 internal/tool/
   ├── exec.go               # Exec 工具主体 (平台无关)
@@ -90,14 +96,14 @@ internal/guard/
   └── sensitive.go          # 敏感信息检测
 ```
 
-#### IPC 确定性坑
+#### Local Transport 确定性坑
 
 ```
 1. Windows 没有 Unix Socket → Named Pipe (go-winio, 微软官方, Docker 同款)
 2. Socket 残留文件 → daemon 启动时检测+清理 (尝试连接 → 连不上 → 删除残留)
 3. NDJSON 分帧 → 每条 JSON 单行，\n 分隔，JSON 内用 \n 转义
 4. TUI 重连 → daemon 推送 daemon.state 恢复显示
-5. 大消息阻塞 → Conn.Send 带 context timeout
+5. 大消息阻塞 → local conn.Send 带 context timeout
 ```
 
 #### Exec 工具 (os/exec)
@@ -133,7 +139,7 @@ MVP 目标平台:
 ```
 ❌ Go plugin      → 跨平台问题
 ❌ YAML 解析器    → 配置用 TOML，能力用 Markdown
-❌ gRPC/protobuf  → IPC 用 JSON-RPC，MCP 也用 JSON-RPC
+❌ gRPC/protobuf  → local transport 用 JSON-RPC；Web transport 后续可用 HTTP/WebSocket/SSE
 ❌ goja           → ES5.1 限制大，LLM 生成代码需额外约束
 ❌ esbuild        → 需内嵌平台特定 native binary，违背单二进制原则
 ```
@@ -153,15 +159,16 @@ suna/
 │   ├── daemon/                  # Daemon 进程管理
 │   │   ├── daemon.go            # Daemon 主循环 (启动/停止/信号处理)
 │   │   └── lifecycle.go         # 自动退出策略 (无客户端 + 无感知源 → 退出)
-│   ├── ipc/                     # IPC 通信层
-│   │   ├── transport.go         # Transport + Conn 接口定义
-│   │   ├── socket_unix.go       # Unix Socket (//go:build !windows)
-│   │   ├── socket_windows.go    # Named Pipe  (//go:build windows)
-│   │   ├── client.go            # TUI 端 IPC Client
-│   │   ├── client_unix.go       # Client Unix Socket 连接
-│   │   ├── client_windows.go    # Client Named Pipe 连接
-│   │   ├── server.go            # Daemon 端 JSON-RPC Server + pendingGuards
-│   │   └── message.go           # JSON-RPC 2.0 Message + GuardConfirmParams/GuardReplyParams
+│   ├── protocol/                # daemon 对外业务协议
+│   │   ├── transport.go         # Transport 挂载接口
+│   │   ├── service.go           # Service / EventSink
+│   │   ├── methods.go           # method / notification 常量
+│   │   ├── messages.go          # 请求/响应/事件 payload
+│   │   └── multimodal.go        # MessagePart / AttachmentRef
+│   ├── transport/local/         # 本机 transport：TUI/CLI
+│   │   ├── jsonrpc.go           # NDJSON + JSON-RPC framing
+│   │   ├── transport_unix.go    # Unix Socket (//go:build !windows)
+│   │   └── transport_windows.go # Named Pipe  (//go:build windows)
 │   ├── core/                    # Agent 内核
 │   │   ├── agent.go             # Agent struct + Run loop + 管理 API + Guard confirm
 │   │   ├── agent_management.go  # NewSession/RestoreSession/newGuardForSession
@@ -349,7 +356,7 @@ command = "echo checking"
 
 ### credentials.toml
 
-`credentials.toml` 按 provider 保存 API key，同一 provider 下多个模型共享一个 key。该文件由 TUI 通过 IPC 写入，权限为 `0600`。
+`credentials.toml` 按 provider 保存 API key，同一 provider 下多个模型共享一个 key。该文件由 TUI 通过 protocol/config.set 写入，权限为 `0600`。
 
 ```toml
 [glm]
@@ -368,7 +375,7 @@ api_key = "..."
 
 | 模块 | 状态 | 当前能力 | 主要缺口 |
 |---|---|---|---|
-| Daemon / IPC | Usable MVP | Unix Socket / Windows Named Pipe、JSON-RPC、stream/config/session/guard 通知 | 多客户端边界和错误恢复仍需加强 |
+| Daemon / Protocol/Transport | Usable MVP | protocol schema、local transport、stream/config/session/guard 事件 | 多客户端边界和错误恢复仍需加强 |
 | Model | Usable MVP | OpenAI-compatible 与 Anthropic provider、tool calling、usage/context 透传；OpenAI-compatible 支持 streaming，Anthropic 当前非 streaming | provider ping、成本统计、Anthropic usage/reasoning 映射和高级路由策略不完整 |
 | Core Agent | Usable MVP | agent loop、provider-dependent streaming、tool call 并发执行、AskUser、Spawn、session 管理 | 更细的取消/并发边界和长期任务恢复 |
 | Tools | Usable MVP | read/list/readhttp/exec/write/edit/writehttp/askuser/spawn | Windows 命令翻译层仍是后续项 |

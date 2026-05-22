@@ -135,8 +135,13 @@ func (p *AnthropicProvider) buildMessages(req *CompletionRequest) []anthropic.Me
 func (p *AnthropicProvider) buildUserBlocks(m Message) []anthropic.ContentBlockParamUnion {
 	var blocks []anthropic.ContentBlockParamUnion
 	for _, c := range m.Content {
-		if c.Type == ContentText {
+		switch c.Type {
+		case ContentText:
 			blocks = append(blocks, anthropic.NewTextBlock(c.Text))
+		case ContentImage:
+			if imageBlock, ok := anthropicImageBlock(c); ok {
+				blocks = append(blocks, imageBlock)
+			}
 		}
 	}
 	if len(blocks) == 0 && m.TextContent != "" {
@@ -148,8 +153,16 @@ func (p *AnthropicProvider) buildUserBlocks(m Message) []anthropic.ContentBlockP
 func (p *AnthropicProvider) buildAssistantBlocks(m Message) []anthropic.ContentBlockParamUnion {
 	var blocks []anthropic.ContentBlockParamUnion
 	for _, c := range m.Content {
-		if c.Type == ContentText && c.Text != "" {
+		switch c.Type {
+		case ContentText:
+			if c.Text == "" {
+				continue
+			}
 			blocks = append(blocks, anthropic.NewTextBlock(c.Text))
+		case ContentImage:
+			if imageBlock, ok := anthropicImageBlock(c); ok {
+				blocks = append(blocks, imageBlock)
+			}
 		}
 	}
 	if m.TextContent != "" && len(blocks) == 0 {
@@ -159,6 +172,20 @@ func (p *AnthropicProvider) buildAssistantBlocks(m Message) []anthropic.ContentB
 		blocks = append(blocks, anthropic.NewToolUseBlock(tc.ID, tc.Arguments, tc.Name))
 	}
 	return blocks
+}
+
+func anthropicImageBlock(block ContentBlock) (anthropic.ContentBlockParamUnion, bool) {
+	if block.MediaB64 != "" {
+		mimeType := block.MimeType
+		if mimeType == "" {
+			mimeType = "image/png"
+		}
+		return anthropic.NewImageBlockBase64(mimeType, block.MediaB64), true
+	}
+	if block.MediaURL != "" {
+		return anthropic.NewImageBlock(anthropic.URLImageSourceParam{URL: block.MediaURL}), true
+	}
+	return anthropic.ContentBlockParamUnion{}, false
 }
 
 func (p *AnthropicProvider) buildTools(tools []ToolDef) []anthropic.ToolUnionParam {

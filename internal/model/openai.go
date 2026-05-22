@@ -235,18 +235,55 @@ func (p *OpenAIProvider) buildMessages(req *CompletionRequest) []openai.ChatComp
 		}
 		if len(m.Content) > 0 {
 			var textParts []string
+			var multi []openai.ChatMessagePart
 			for _, c := range m.Content {
-				if c.Type == ContentText {
+				switch c.Type {
+				case ContentText:
 					textParts = append(textParts, c.Text)
+					multi = append(multi, openai.ChatMessagePart{Type: openai.ChatMessagePartTypeText, Text: c.Text})
+				case ContentImage:
+					if imageURL := openAIImageURL(c); imageURL != "" {
+						multi = append(multi, openai.ChatMessagePart{
+							Type:     openai.ChatMessagePartTypeImageURL,
+							ImageURL: &openai.ChatMessageImageURL{URL: imageURL},
+						})
+					}
 				}
 			}
-			msg.Content = joinStrings(textParts, "\n")
+			if hasImagePart(m.Content) {
+				msg.MultiContent = multi
+			} else {
+				msg.Content = joinStrings(textParts, "\n")
+			}
 		} else if m.TextContent != "" {
 			msg.Content = m.TextContent
 		}
 		msgs = append(msgs, msg)
 	}
 	return msgs
+}
+
+func hasImagePart(blocks []ContentBlock) bool {
+	for _, b := range blocks {
+		if b.Type == ContentImage && (b.MediaURL != "" || b.MediaB64 != "") {
+			return true
+		}
+	}
+	return false
+}
+
+func openAIImageURL(block ContentBlock) string {
+	if block.MediaURL != "" {
+		return block.MediaURL
+	}
+	if block.MediaB64 == "" {
+		return ""
+	}
+	mimeType := block.MimeType
+	if mimeType == "" {
+		mimeType = "image/png"
+	}
+	return "data:" + mimeType + ";base64," + block.MediaB64
 }
 
 func (p *OpenAIProvider) buildTools(tools []ToolDef) []openai.Tool {

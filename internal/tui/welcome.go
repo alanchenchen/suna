@@ -126,8 +126,8 @@ func (t *TUI) handleWelcomeAction(action welcomeAction) tea.Cmd {
 		t.messages = []chatMsg{}
 		t.resetConversationStats()
 		t.resetPhase()
-		if t.ipcCli != nil {
-			go t.ipcCli.NewSession()
+		if t.localCli != nil {
+			go t.localCli.NewSession()
 		}
 		return t.initChatComponents()
 	case actionResume:
@@ -138,7 +138,7 @@ func (t *TUI) handleWelcomeAction(action welcomeAction) tea.Cmd {
 		t.messages = []chatMsg{}
 		t.resetConversationStats()
 		t.resetPhase()
-		go func() { t.ipcCli.RestoreSession() }()
+		go func() { t.localCli.RestoreSession() }()
 		return t.initChatComponents()
 	case actionConfig:
 		t.mode = "config"

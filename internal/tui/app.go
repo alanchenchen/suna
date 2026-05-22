@@ -13,7 +13,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/alanchenchen/suna/internal/ipc"
+	"github.com/alanchenchen/suna/internal/protocol"
 )
 
 /*
@@ -21,15 +21,15 @@ TUI 纯前端，无业务逻辑。
 
 设计原则（01-architecture.md I/O 抽象层）：
   - TUI 不持有任何业务逻辑、状态、数据库连接
-  - TUI 只做两件事：渲染 UI、通过 IPC 与 daemon 通信
-  - 所有输入 → JSON-RPC request → daemon
-  - daemon notification → 渲染到终端
+  - TUI 只做两件事：渲染 UI、通过 local transport 与 daemon 通信
+  - 所有输入 → protocol request → local JSON-RPC framing → daemon
+  - daemon protocol event → local notification → 渲染到终端
 */
 type TUI struct {
-	ipcCli   *ipcClient
+	localCli *localClient
 	i18n     *translator
 	program  *tea.Program
-	notifyCh chan ipcNotification
+	notifyCh chan localNotification
 
 	mode     string // "welcome" | "chat" | "config" | "help"
 	prevMode string
@@ -91,8 +91,8 @@ type TUI struct {
 	cmdSuggestionIdx    int
 	modelPickerOpen     bool
 	modelPickerCursor   int
-	daemonStatus        ipc.DaemonStatusParams
-	configState         ipc.ConfigParams
+	daemonStatus        protocol.DaemonStatusParams
+	configState         protocol.ConfigParams
 
 	streamStart      time.Time
 	sessionInputTok  int
@@ -141,9 +141,9 @@ func (t *TUI) Run() error {
 }
 
 func (t *TUI) doQuit() {
-	if t.ipcCli != nil {
-		t.ipcCli.Close()
-		t.ipcCli = nil
+	if t.localCli != nil {
+		t.localCli.Close()
+		t.localCli = nil
 	}
 }
 
@@ -154,14 +154,14 @@ func (t *TUI) Init() tea.Cmd {
 }
 
 func (t *TUI) refreshDaemonStatus() {
-	if t.ipcCli != nil {
-		go t.ipcCli.DaemonStatus()
+	if t.localCli != nil {
+		go t.localCli.DaemonStatus()
 	}
 }
 
 func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if notif, ok := msg.(ipcNotification); ok {
-		t.handleIPCNotification(notif)
+	if notif, ok := msg.(localNotification); ok {
+		t.handleLocalNotification(notif)
 		if t.mode == "welcome" && t.ready {
 			t.initWelcomeList()
 		}
@@ -304,10 +304,10 @@ func toolDisplayName(name string) string {
 	}
 }
 
-func (t *TUI) handleIPCNotification(notif ipcNotification) {
+func (t *TUI) handleLocalNotification(notif localNotification) {
 	switch notif.method {
-	case ipc.NotifyStream:
-		var p ipc.StreamParams
+	case protocol.NotifyStream:
+		var p protocol.StreamParams
 		json.Unmarshal(notif.params, &p)
 		if p.Done {
 			if strings.HasPrefix(p.Chunk, "error:") || p.Chunk == "cancelled" {
@@ -350,8 +350,8 @@ func (t *TUI) handleIPCNotification(notif ipcNotification) {
 		} else {
 			t.messages = append(t.messages, chatMsg{role: "assistant", content: p.Chunk})
 		}
-	case ipc.NotifyReasoning:
-		var p ipc.StreamParams
+	case protocol.NotifyReasoning:
+		var p protocol.StreamParams
 		json.Unmarshal(notif.params, &p)
 		if t.phase == phaseFirstLLM || t.phase == phaseLLM {
 			t.phase = phaseThinking
@@ -363,8 +363,8 @@ func (t *TUI) handleIPCNotification(notif ipcNotification) {
 		} else {
 			t.messages = append(t.messages, chatMsg{role: "reasoning", content: p.Chunk})
 		}
-	case ipc.NotifyToolStart:
-		var p ipc.ToolStartParams
+	case protocol.NotifyToolStart:
+		var p protocol.ToolStartParams
 		json.Unmarshal(notif.params, &p)
 		t.phase = phaseTool
 		t.phaseStart = time.Now()
@@ -397,8 +397,8 @@ func (t *TUI) handleIPCNotification(notif ipcNotification) {
 		if t.selectedToolID == "" {
 			t.selectedToolID = id
 		}
-	case ipc.NotifyToolEnd:
-		var p ipc.ToolEndParams
+	case protocol.NotifyToolEnd:
+		var p protocol.ToolEndParams
 		json.Unmarshal(notif.params, &p)
 		id := p.ID
 		if id == "" {
@@ -426,24 +426,24 @@ func (t *TUI) handleIPCNotification(notif ipcNotification) {
 			t.phaseStart = time.Now()
 			t.lastAssistantText = ""
 		}
-	case ipc.NotifyAskUser:
-		var p ipc.AskUserParams
+	case protocol.NotifyAskUser:
+		var p protocol.AskUserParams
 		json.Unmarshal(notif.params, &p)
 		t.pendingAskID = p.ID
 		t.pendingAskOptions = p.Options
 		t.pendingAskCursor = 0
 		t.messages = append(t.messages, chatMsg{role: "system", content: "❓ " + p.Question})
 		t.resetPhase()
-	case ipc.NotifyGuardConfirm:
-		var p ipc.GuardConfirmParams
+	case protocol.NotifyGuardConfirm:
+		var p protocol.GuardConfirmParams
 		json.Unmarshal(notif.params, &p)
 		t.pendingGuard = &guardConfirmView{id: p.ID, toolCallID: p.ToolCallID, tool: p.Tool, params: p.Params, risk: p.Risk, reason: p.Reason, suggestion: p.Suggestion}
 		t.guardCursor = 1
 		t.loading = false
 		t.phase = phaseIdle
 		t.phaseStart = time.Time{}
-	case ipc.NotifyDaemonState:
-		var p ipc.DaemonStateParams
+	case protocol.NotifyDaemonState:
+		var p protocol.DaemonStateParams
 		json.Unmarshal(notif.params, &p)
 		if p.ProviderName != "" {
 			t.providerName = p.ProviderName
@@ -454,8 +454,8 @@ func (t *TUI) handleIPCNotification(notif ipcNotification) {
 		if t.mode == "chat" && len(t.messages) == 0 {
 			t.messages = append(t.messages, chatMsg{role: "system", content: t.i18n.Tf("status.daemon_connected", p.PID)})
 		}
-	case ipc.NotifyCompactResult:
-		var p ipc.CompactResult
+	case protocol.NotifyCompactResult:
+		var p protocol.CompactResult
 		json.Unmarshal(notif.params, &p)
 		t.messages = append(t.messages, chatMsg{role: "system", content: t.renderCompactPanel(p)})
 	case "compact.error":
@@ -464,15 +464,15 @@ func (t *TUI) handleIPCNotification(notif ipcNotification) {
 		}
 		json.Unmarshal(notif.params, &p)
 		t.messages = append(t.messages, chatMsg{role: "error", content: p.Message})
-	case ipc.NotifyMemoryListResult:
-		var p ipc.MemoryListResult
+	case protocol.NotifyMemoryListResult:
+		var p protocol.MemoryListResult
 		json.Unmarshal(notif.params, &p)
 		if len(p.Memories) == 0 {
 			t.messages = append(t.messages, chatMsg{role: "system", content: t.i18n.T("memory.not_found")})
 		} else {
 			t.messages = append(t.messages, chatMsg{role: "panel", content: t.renderMemoryList(p.Memories)})
 		}
-	case ipc.NotifySessionRestoreMsg:
+	case protocol.NotifySessionRestoreMsg:
 		var p struct {
 			Role    string `json:"role"`
 			Content string `json:"content"`
@@ -481,7 +481,7 @@ func (t *TUI) handleIPCNotification(notif ipcNotification) {
 		if p.Content != "" {
 			t.messages = append(t.messages, chatMsg{role: p.Role, content: p.Content})
 		}
-	case ipc.NotifySessionRestoreInput:
+	case protocol.NotifySessionRestoreInput:
 		var p struct {
 			Content string `json:"content"`
 		}

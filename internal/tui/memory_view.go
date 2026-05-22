@@ -6,10 +6,10 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	"github.com/alanchenchen/suna/internal/ipc"
+	"github.com/alanchenchen/suna/internal/protocol"
 )
 
-func (t *TUI) renderMemoryList(memories []ipc.MemoryItem) string {
+func (t *TUI) renderMemoryList(memories []protocol.MemoryItem) string {
 	width := max(36, min(t.width-6, 92))
 	inner := max(24, width-8)
 	var lines []string

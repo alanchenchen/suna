@@ -11,11 +11,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/alanchenchen/suna/internal/ipc"
+	"github.com/alanchenchen/suna/internal/protocol"
 )
 
 // Config 的页面模型和纯计算辅助。
-// TUI 只维护当前页、光标、表单等轻量状态；真实配置持久化、active model、credential 均由 daemon 通过 IPC 处理。
+// TUI 只维护当前页、光标、表单等轻量状态；真实配置持久化、active model、credential 均由 daemon 通过 protocol 处理。
 type configRow struct{ kind, name, label, value string }
 
 func (r configRow) selectable() bool {
@@ -236,16 +236,16 @@ func (t *TUI) activateModelRef(ref string) tea.Cmd {
 		t.modelName = mc.Model
 		t.contextWindow = defaultContextWindow(mc)
 	}
-	return t.sendConfigSet(ipc.ConfigSetParams{Action: ipc.ConfigActionActivateModel, ActiveModel: ref})
+	return t.sendConfigSet(protocol.ConfigSetParams{Action: protocol.ConfigActionActivateModel, ActiveModel: ref})
 }
 
-func (t *TUI) sendConfigSet(params ipc.ConfigSetParams) tea.Cmd {
+func (t *TUI) sendConfigSet(params protocol.ConfigSetParams) tea.Cmd {
 	return func() tea.Msg {
-		if t.ipcCli == nil || !t.ipcCli.Connected() {
-			return ipcNotification{method: "config.error", params: []byte(fmt.Sprintf(`{"message":%q}`, t.tr("tui.error.daemon_not_connected")))}
+		if t.localCli == nil || !t.localCli.Connected() {
+			return localNotification{method: "config.error", params: []byte(fmt.Sprintf(`{"message":%q}`, t.tr("tui.error.daemon_not_connected")))}
 		}
-		if err := t.ipcCli.ConfigSet(params); err != nil {
-			return ipcNotification{method: "config.error", params: []byte(fmt.Sprintf(`{"message":%q}`, err.Error()))}
+		if err := t.localCli.ConfigSet(params); err != nil {
+			return localNotification{method: "config.error", params: []byte(fmt.Sprintf(`{"message":%q}`, err.Error()))}
 		}
 		return nil
 	}
@@ -287,7 +287,7 @@ func (t *TUI) toggleLanguage() tea.Cmd {
 		locale = string(LocaleEN)
 	}
 	t.i18n.SetLocale(LocaleID(locale))
-	return t.sendConfigSet(ipc.ConfigSetParams{Action: ipc.ConfigActionUpdateGeneral, Locale: locale, Theme: t.theme})
+	return t.sendConfigSet(protocol.ConfigSetParams{Action: protocol.ConfigActionUpdateGeneral, Locale: locale, Theme: t.theme})
 }
 
 func (t *TUI) toggleTheme() tea.Cmd {
@@ -296,13 +296,13 @@ func (t *TUI) toggleTheme() tea.Cmd {
 	if t.mode == "chat" {
 		t.syncContent()
 	}
-	return t.sendConfigSet(ipc.ConfigSetParams{Action: ipc.ConfigActionUpdateGeneral, Locale: string(t.i18n.Locale()), Theme: theme})
+	return t.sendConfigSet(protocol.ConfigSetParams{Action: protocol.ConfigActionUpdateGeneral, Locale: string(t.i18n.Locale()), Theme: theme})
 }
 
 func (t *TUI) toggleGuardMode() tea.Cmd {
 	mode := nextGuardMode(t.configState.GuardMode)
 	t.configState.GuardMode = mode
-	return t.sendConfigSet(ipc.ConfigSetParams{Action: ipc.ConfigActionUpdateGeneral, Locale: string(t.i18n.Locale()), Theme: t.theme, GuardMode: mode})
+	return t.sendConfigSet(protocol.ConfigSetParams{Action: protocol.ConfigActionUpdateGeneral, Locale: string(t.i18n.Locale()), Theme: t.theme, GuardMode: mode})
 }
 
 func (t *TUI) currentLangDisplay() string {

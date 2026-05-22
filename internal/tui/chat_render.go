@@ -229,7 +229,7 @@ func (t *TUI) chatPetState() petState {
 }
 
 func (t *TUI) chatConnectionDot(state petState) string {
-	if t.ipcCli == nil || !t.ipcCli.Connected() {
+	if t.localCli == nil || !t.localCli.Connected() {
 		return styleDim.Render("○")
 	}
 	switch state {

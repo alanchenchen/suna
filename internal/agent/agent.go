@@ -133,7 +133,7 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 	return agent, nil
 }
 
-func (a *Agent) Run(ctx context.Context, input string) <-chan Event {
+func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 	events := make(chan Event, 64)
 	if !a.runMu.TryLock() {
 		events <- Event{Type: EventStatus, Content: "error: agent is already running"}
@@ -161,12 +161,19 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan Event {
 			return
 		}
 
-		a.working.AddMessage(model.NewTextMessage(model.RoleUser, input))
+		userMessage := input.Message(model.RoleUser)
+		inputText := userMessage.Text()
+		if len(userMessage.Content) == 0 {
+			events <- Event{Type: EventStatus, Content: "error: input is required"}
+			return
+		}
+
+		a.working.AddMessage(userMessage)
 		a.turnCount++
-		a.enqueueMemoryEvent(runCtx, model.RoleUser, input, false, false, false, false)
+		a.enqueueMemoryEvent(runCtx, model.RoleUser, inputText, false, false, false, false)
 		a.saveConversationState(runCtx)
 
-		_, modelRef, err := a.router.Route(runCtx, input)
+		_, modelRef, err := a.router.Route(runCtx, inputText)
 		if err != nil {
 			logging.Error("agent", "route_failed", err, logging.Event{"session_id": a.sessionID})
 			events <- Event{Type: EventStatus, Content: "error: " + err.Error()}
@@ -177,7 +184,6 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan Event {
 
 		r := a.newRunner(events)
 		res, err := r.Run(runCtx, runner.Request{
-			Input:         input,
 			System:        systemPrompt,
 			ModelRef:      modelRef,
 			ModelID:       modelID,

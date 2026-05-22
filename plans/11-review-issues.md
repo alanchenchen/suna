@@ -298,7 +298,7 @@
 ### ✅ TUI Guard Mode 配置
 - Config home 新增 Guard Mode 行
 - 可切换 ask→smart→auto→readonly→ask
-- 通过 IPC config.set 持久化
+- 通过 protocol config.set 持久化
 
 ### ✅ 04-guard.md 更新
 - 新增"当前实现事实"状态块

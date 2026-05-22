@@ -1,6 +1,6 @@
 //go:build !windows
 
-package ipc
+package local
 
 import (
 	"context"
@@ -13,14 +13,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/alanchenchen/suna/internal/protocol"
 )
 
-// UnixSocketTransport Unix Domain Socket 传输层实现
-// 用于 macOS 和 Linux
 type UnixSocketTransport struct {
 	socketPath string
 	listener   net.Listener
-	connCB     func(Conn)
+	svc        protocol.Service
 	ctx        context.Context
 	cancel     context.CancelFunc
 	conns      map[string]*socketConn
@@ -34,50 +34,36 @@ type socketConn struct {
 	mu   sync.Mutex
 }
 
-func NewUnixSocketTransport(socketPath string) *UnixSocketTransport {
-	return &UnixSocketTransport{
-		socketPath: socketPath,
-		conns:      make(map[string]*socketConn),
-	}
-}
-
-// NewPlatformTransport 创建平台对应的 Transport（Unix Socket 或 Named Pipe）
+// NewPlatformTransport 在 Unix-like 平台使用 Unix domain socket；平台选择由文件名和 build tag 在编译期完成。
 func NewPlatformTransport(socketPath string) *UnixSocketTransport {
-	return NewUnixSocketTransport(socketPath)
+	return &UnixSocketTransport{socketPath: socketPath, conns: make(map[string]*socketConn)}
 }
 
-func (t *UnixSocketTransport) Listen(ctx context.Context) error {
-	t.ctx, t.cancel = context.WithCancel(ctx)
+func (t *UnixSocketTransport) Name() string { return "local" }
 
-	// 清理残留 socket 文件
+func (t *UnixSocketTransport) Mount(ctx context.Context, svc protocol.Service) error {
+	t.svc = svc
+	t.ctx, t.cancel = context.WithCancel(ctx)
+	// 启动前清理残留 socket；如果残留 socket 仍可连接，说明已有 daemon 在运行。
 	if err := os.Remove(t.socketPath); err != nil && !os.IsNotExist(err) {
-		// 残留文件可能是活跃的 daemon，尝试连接检测
 		conn, err := net.DialTimeout("unix", t.socketPath, 2*time.Second)
 		if err == nil {
 			conn.Close()
 			return fmt.Errorf("daemon already running (socket %s is active)", t.socketPath)
 		}
-		// 连不上 → 残留文件 → 删除
 		os.Remove(t.socketPath)
 	}
-
-	// 确保 socket 目录存在
 	if err := os.MkdirAll(filepath.Dir(t.socketPath), 0755); err != nil {
 		return fmt.Errorf("create socket dir: %w", err)
 	}
-
 	listener, err := net.Listen("unix", t.socketPath)
 	if err != nil {
 		return fmt.Errorf("listen unix socket: %w", err)
 	}
-
-	// socket 文件权限 0600：只有当前用户可连接
+	// socket 权限限制为当前用户可读写，避免其他本机用户连接 daemon。
 	os.Chmod(t.socketPath, 0600)
-
 	t.listener = listener
-
 	go t.acceptLoop()
-
 	return nil
 }
 
@@ -88,7 +74,6 @@ func (t *UnixSocketTransport) acceptLoop() {
 			return
 		default:
 		}
-
 		conn, err := t.listener.Accept()
 		if err != nil {
 			if t.closed.Load() {
@@ -96,23 +81,21 @@ func (t *UnixSocketTransport) acceptLoop() {
 			}
 			continue
 		}
-
-		sc := &socketConn{
-			id:   uuid.New().String()[:8],
-			conn: conn,
-		}
-
+		sc := &socketConn{id: uuid.New().String()[:8], conn: conn}
 		t.mu.Lock()
 		t.conns[sc.id] = sc
 		t.mu.Unlock()
-
-		if t.connCB != nil {
-			t.connCB(sc)
-		}
+		// 每个连接独立处理 JSON-RPC 流，业务逻辑通过 protocol.Service 进入 daemon。
+		go serveConn(t.ctx, sc, t.svc, func() {
+			t.mu.Lock()
+			delete(t.conns, sc.id)
+			t.mu.Unlock()
+			sc.Close()
+		})
 	}
 }
 
-func (t *UnixSocketTransport) Close() error {
+func (t *UnixSocketTransport) Close(ctx context.Context) error {
 	t.closed.Store(true)
 	if t.cancel != nil {
 		t.cancel()
@@ -127,37 +110,27 @@ func (t *UnixSocketTransport) Close() error {
 		t.listener.Close()
 	}
 	os.Remove(t.socketPath)
+	_ = ctx
 	return nil
 }
 
-func (t *UnixSocketTransport) OnConnect(cb func(Conn)) {
-	t.connCB = cb
-}
-
-// RemoveConn 从连接池移除（连接断开时调用）
-func (t *UnixSocketTransport) RemoveConn(id string) {
+func (t *UnixSocketTransport) ConnectionCount() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	delete(t.conns, id)
+	return len(t.conns)
 }
-
-// socketConn 实现 Conn 接口
 
 func (c *socketConn) ID() string { return c.id }
 
 func (c *socketConn) Send(ctx context.Context, msg []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	// 带超时的写入
 	done := make(chan error, 1)
 	go func() {
-		// NDJSON: 每条消息一行
 		data := append(msg, '\n')
 		_, err := c.conn.Write(data)
 		done <- err
 	}()
-
 	select {
 	case err := <-done:
 		return err
@@ -167,7 +140,6 @@ func (c *socketConn) Send(ctx context.Context, msg []byte) error {
 }
 
 func (c *socketConn) Receive() ([]byte, error) {
-	// NDJSON: 按行读取
 	var buf [1]byte
 	var line []byte
 	for {
@@ -185,6 +157,4 @@ func (c *socketConn) Receive() ([]byte, error) {
 	}
 }
 
-func (c *socketConn) Close() error {
-	return c.conn.Close()
-}
+func (c *socketConn) Close() error { return c.conn.Close() }
