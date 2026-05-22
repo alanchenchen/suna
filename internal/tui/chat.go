@@ -128,8 +128,7 @@ func (t *TUI) syncContent() {
 	for _, msg := range t.messages {
 		switch msg.role {
 		case "user":
-			content, _ := msg.content.(string)
-			sb.WriteString("\n" + renderInlineUserMessage(content, max(20, t.width-8)) + "\n")
+			sb.WriteString("\n" + t.renderUserMessage(msg.content, max(20, t.width-8)) + "\n")
 			inSunaBlock = false
 		case "assistant":
 			content, _ := msg.content.(string)
@@ -287,6 +286,17 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if t.modelPickerOpen {
 			return t.updateModelPicker(ks)
 		}
+		if t.pendingImagePaste != nil {
+			cmd := t.updatePendingImagePaste(ks)
+			t.syncContent()
+			return t, cmd
+		}
+		if t.attachmentMode || t.attachmentDelete {
+			if t.updateAttachmentMode(ks) {
+				t.syncContent()
+				return t, nil
+			}
+		}
 		switch {
 		case ks == "ctrl+c":
 			t.doQuit()
@@ -380,6 +390,8 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 					t.pendingAskCursor--
 				}
 				t.syncContent()
+			} else if t.updateAttachmentMode(ks) {
+				t.syncContent()
 			}
 			return t, nil
 		case ks == "down":
@@ -395,6 +407,8 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 					t.pendingAskCursor++
 				}
 				t.syncContent()
+			} else if t.updateAttachmentMode(ks) {
+				t.syncContent()
 			}
 			return t, nil
 		}
@@ -407,6 +421,11 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, cmd
 		}
 		return t, nil
+
+	case tea.PasteMsg:
+		cmd := t.handlePaste(m.Content)
+		t.syncContent()
+		return t, cmd
 
 	case localNotification:
 		t.handleLocalNotification(m)
@@ -558,11 +577,16 @@ func (t *TUI) acceptCommandSuggestion() tea.Cmd {
 
 func (t *TUI) handleSend() tea.Cmd {
 	input := strings.TrimSpace(t.ta.Value())
+	attachments := append([]attachmentItem(nil), t.attachments...)
 	t.ta.Reset()
-	if input == "" {
+	if input == "" && len(attachments) == 0 {
 		return t.ta.Focus()
 	}
-	t.messages = append(t.messages, chatMsg{role: "user", content: input})
+	t.messages = append(t.messages, chatMsg{role: "user", content: userMessageContent{text: input, attachments: attachments}})
+	t.attachments = nil
+	t.attachmentMode = false
+	t.attachmentDelete = false
+	t.attachmentCursor = 0
 	t.syncContent()
 
 	if t.pendingAskID != "" {
@@ -588,7 +612,7 @@ func (t *TUI) handleSend() tea.Cmd {
 		}
 		return t.ta.Focus()
 	}
-	return t.runAgent(input)
+	return t.runAgent(input, attachments)
 }
 
 func (t *TUI) setInputValue(input string) {

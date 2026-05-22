@@ -13,7 +13,6 @@ import (
 	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/memory"
-	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/protocol"
 )
 
@@ -99,7 +98,10 @@ func (s *service) handleSendMessage(ctx context.Context, req protocol.Request, s
 	if err := decodeParams(req.Params, &params); err != nil {
 		return nil, invalidParams(err.Error())
 	}
-	input := agentInputFromParams(params)
+	input, err := agentInputFromParams(ctx, params)
+	if err != nil {
+		return nil, invalidParams(err.Error())
+	}
 	inputText := input.Text()
 	if inputText == "" && len(input.Blocks) == 0 {
 		return nil, invalidParams("content is required")
@@ -315,22 +317,6 @@ func (s *service) ensureConfigLoaded() {
 	if _, err := s.daemon.agent.ReloadConfigFromDiskIfNeeded(); err != nil {
 		logging.Error("config", "reload_skipped", err, nil)
 	}
-}
-
-func agentInputFromParams(params protocol.SendMessageParams) agent.Input {
-	blocks := make([]model.ContentBlock, 0, len(params.Parts))
-	for _, part := range params.Parts {
-		switch part.Type {
-		case "text":
-			blocks = append(blocks, model.ContentBlock{Type: model.ContentText, Text: part.Text})
-		case "image":
-			// protocol 只描述媒体来源；daemon/service 负责转成 agent/provider 可理解的 ContentBlock。
-			blocks = append(blocks, model.ContentBlock{Type: model.ContentImage, MediaURL: part.Source.URL, MediaB64: part.Source.Base64, MimeType: part.Source.MimeType})
-		case "audio":
-			blocks = append(blocks, model.ContentBlock{Type: model.ContentAudio, MediaURL: part.Source.URL, MediaB64: part.Source.Base64, MimeType: part.Source.MimeType})
-		}
-	}
-	return agent.Input{Blocks: blocks}
 }
 
 func emit(ctx context.Context, sink protocol.EventSink, method string, params any) {

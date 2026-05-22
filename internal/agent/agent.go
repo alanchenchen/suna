@@ -162,6 +162,7 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 		}
 
 		userMessage := input.Message(model.RoleUser)
+		storedUserMessage := input.StoredMessage(model.RoleUser)
 		inputText := userMessage.Text()
 		if len(userMessage.Content) == 0 {
 			events <- Event{Type: EventStatus, Content: "error: input is required"}
@@ -169,9 +170,13 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 		}
 
 		a.working.AddMessage(userMessage)
+		// 多模态 raw media 只允许参与当前 agent run；run 结束后立即替换为轻量 metadata，避免进入下一轮上下文或会话快照。
+		defer func() {
+			a.replaceLastUserMessage(inputText, storedUserMessage)
+			a.saveConversationState(runCtx)
+		}()
 		a.turnCount++
 		a.enqueueMemoryEvent(runCtx, model.RoleUser, inputText, false, false, false, false)
-		a.saveConversationState(runCtx)
 
 		_, modelRef, err := a.router.Route(runCtx, inputText)
 		if err != nil {
@@ -202,6 +207,8 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 			events <- Event{Type: EventStatus, Content: content}
 			return
 		}
+
+		a.replaceLastUserMessage(inputText, storedUserMessage)
 
 		a.enqueueMemoryEvent(runCtx, model.RoleAssistant, res.FinalText, res.HadToolCall, res.HadToolError, false, false)
 		a.saveConversationState(runCtx)

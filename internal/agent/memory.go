@@ -20,6 +20,17 @@ func (a *Agent) enqueueMemoryEvent(ctx context.Context, role model.Role, content
 	a.extractQueue.Push(ctx, memory.DefaultUserID, string(role), content, sig)
 }
 
+func (a *Agent) replaceLastUserMessage(text string, replacement model.Message) {
+	msgs := a.working.Messages()
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == model.RoleUser && msgs[i].Text() == text {
+			msgs[i] = replacement
+			a.working.SetMessages(msgs)
+			return
+		}
+	}
+}
+
 func (a *Agent) saveConversationState(ctx context.Context) {
 	if a.conversation == nil || a.working == nil {
 		return

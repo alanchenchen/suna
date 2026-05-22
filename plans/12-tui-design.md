@@ -50,6 +50,7 @@ TUI 现在已经能跑通基本使用流：启动后进入 Welcome，进入 Chat
 | Copy mode | 已实现 | `app.go`, `chat_render.go`, `help.go` | 默认保留鼠标滚轮，`Ctrl+Y` 临时关闭鼠标捕获以便终端原生选中文本 |
 | Guard Mode 配置 | 已实现 | `config_model.go` | Config home 可切换 ask→smart→auto→readonly |
 | Config 删除确认 | 已实现 | `config.go`, `config_model.go` | 按钮式确认，默认 Cancel，`←→` 选择、`Enter` 确认、`Esc` 取消 |
+| 图片附件 | 已实现 MVP | `attachments.go` | Ctrl+V 检测图片 path/url/data URI，确认后加入附件列表；只发送 path/url |
 | 外部 i18n 文件加载 | 未接入主流程 | `i18n.go` | 有 `LoadLocale`，但当前主要用内置翻译表 |
 | Config 高级项 | 未实现 | `config.go` | 未编辑 guard/hooks/max_model_rps/cost_per_1k |
 
@@ -404,6 +405,35 @@ type GuardConfirmParams struct {
 - `/memory search|facts|status`
 
 这些不属于当前 TUI MVP。
+
+### 图片附件
+
+TUI 只在粘贴时检测图片，不新增 `/attach` 命令，也不自动扫描普通提示词里的路径。
+
+支持：
+
+- 本地图片 path：`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`。
+- 远程图片 URL：明显图片后缀的 `http/https` URL。
+- `data:image/...;base64,...`：确认后保存到 `~/.suna/tmp/paste-*.png`，再作为 path attachment。
+
+交互规则：
+
+- 粘贴图片 path/url 后弹确认；确认则加入附件列表且不进入输入框，取消则按普通文本插入输入框。
+- 粘贴 data URI 后弹确认；确认则保存临时文件并加入附件列表，取消则丢弃，不进入输入框。
+- 疑似非图片大段 base64 会被拦截并提示，避免污染上下文。
+- 有附件时 `↑/↓` 进入附件选择模式，`Delete/Backspace` 触发删除确认，`Esc` 回到输入框。
+
+发送规则：
+
+- 发送 `protocol.SendMessageParams.Parts`，包含一个 text part 和若干 image part。
+- image part 的 `AttachmentRef` 只使用 `path` 或 `url`。
+- 发送成功后清空输入框和附件列表。
+
+持久化规则：
+
+- 本轮 provider request 会带完整图片内容。
+- working memory / conversation_state / user_memory 不保存 raw media、base64、完整 path/url。
+- 对话展示和恢复只保留用户文本与附件 metadata。
 
 ### Chat 快捷键
 

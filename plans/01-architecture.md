@@ -148,18 +148,16 @@ type MessagePart struct {
 }
 
 type AttachmentRef struct {
-    Kind     string `json:"kind"` // path | url | base64 | blob
+    Kind     string `json:"kind"` // path | url
     Path     string `json:"path,omitempty"`
     URL      string `json:"url,omitempty"`
-    Base64   string `json:"base64,omitempty"`
-    BlobID   string `json:"blob_id,omitempty"`
     MimeType string `json:"mime_type,omitempty"`
     Name     string `json:"name,omitempty"`
     Size     int64  `json:"size,omitempty"`
 }
 ```
 
-TUI/local transport 可以优先传 `path` 或小图片 `base64`；Web UI 后续应通过上传得到 `blob_id`。daemon/agent 侧统一校验和规范化为 `model.ContentBlock`，provider 再转换为 OpenAI、Anthropic 等模型各自的多模态格式。
+TUI/local transport 只传 `path` 或 `url`。粘贴的 `data:image/...;base64,...` 必须先在 TUI 本地保存为临时文件，再作为 `path` 发送。daemon/agent 侧统一校验和规范化为 `model.ContentBlock`，provider 再转换为 OpenAI、Anthropic 等模型各自的多模态格式。raw media 只参与本轮 provider request，working memory、conversation_state 和 user_memory 只保存用户文本与附件 metadata。
 
 当前 TUI 的 `agent.stream`、`agent.tool_start`、`agent.tool_end`、`agent.ask_user`、`agent.guard_confirm` 等事件也应归入 `protocol`，因为它们是 daemon 对外一致事件流，不是 local transport 私有事件。
 

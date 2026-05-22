@@ -6,13 +6,11 @@ type MessagePart struct {
 	Source AttachmentRef `json:"source,omitempty"`
 }
 
-// AttachmentRef 描述媒体来源；本地客户端通常用 path/base64，Web 客户端后续应优先用 blob_id。
+// AttachmentRef 描述媒体来源。对外协议只接受 path/url；base64 只允许作为 daemon 内部到 provider 的短生命周期格式。
 type AttachmentRef struct {
-	Kind     string `json:"kind"`
+	Kind     string `json:"kind"` // path | url
 	Path     string `json:"path,omitempty"`
 	URL      string `json:"url,omitempty"`
-	Base64   string `json:"base64,omitempty"`
-	BlobID   string `json:"blob_id,omitempty"`
 	MimeType string `json:"mime_type,omitempty"`
 	Name     string `json:"name,omitempty"`
 	Size     int64  `json:"size,omitempty"`

@@ -109,8 +109,12 @@ func (c *localClient) nextReqIDLocked() int {
 	return c.reqID
 }
 
-func (c *localClient) SendMessage(content string) error {
-	return c.SendRequestNotify(protocol.MethodSendMessage, protocol.SendMessageParams{Parts: []protocol.MessagePart{{Type: "text", Text: content}}})
+func (c *localClient) SendMessage(content string, attachments []attachmentItem) error {
+	parts := []protocol.MessagePart{{Type: "text", Text: content}}
+	for _, attachment := range attachments {
+		parts = append(parts, attachment.toPart())
+	}
+	return c.SendRequestNotify(protocol.MethodSendMessage, protocol.SendMessageParams{Parts: parts})
 }
 
 func (c *localClient) Cancel() error {

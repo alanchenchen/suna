@@ -7,7 +7,8 @@ import (
 )
 
 type Input struct {
-	Blocks []model.ContentBlock
+	Blocks       []model.ContentBlock
+	StoredBlocks []model.ContentBlock
 }
 
 func TextInput(text string) Input {
@@ -16,6 +17,18 @@ func TextInput(text string) Input {
 
 func (in Input) Message(role model.Role) model.Message {
 	blocks := normalizeInputBlocks(in.Blocks)
+	return model.Message{
+		Role:        role,
+		TextContent: textFromBlocks(blocks),
+		Content:     blocks,
+	}
+}
+
+func (in Input) StoredMessage(role model.Role) model.Message {
+	blocks := normalizeInputBlocks(in.StoredBlocks)
+	if len(blocks) == 0 {
+		blocks = normalizeInputBlocks(in.Blocks)
+	}
 	return model.Message{
 		Role:        role,
 		TextContent: textFromBlocks(blocks),

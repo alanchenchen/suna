@@ -300,7 +300,7 @@ Tool intent 展示:
 
 ## 多模态输入
 
-当前模型消息结构已经预留 `ContentBlock` 的 image/audio 字段，但主链路主要使用文本块。图片/音视频作为消息内容的一部分是目标设计，不是当前 TUI 已打通能力。
+当前主链路支持图片作为结构化 `ContentBlock` 进入 provider request。TUI MVP 只支持图片 path/url；音频、视频、PDF 不在当前范围。
 
 ### 消息格式
 
@@ -308,62 +308,55 @@ Tool intent 展示:
 type ContentBlock struct {
     Type     string  // "text" | "image" | "audio"
     Text     string
-    MediaURL string  // 文件路径或 URL
-    MediaB64 string  // base64 编码 (小文件直接内嵌)
+    MediaURL string  // 远程 URL
+    MediaB64 string  // daemon 内部读取 path 后生成，不能进入 protocol 或持久化存储
     MimeType string  // "image/png", "audio/mp3" 等
 }
 
 type Message struct {
     Role    string
-    Content []ContentBlock  // 支持混合文本+图片+音频
+    Content []ContentBlock  // 当前主链路支持混合文本+图片
 }
 ```
 
-### TUI 中的输入方式 — 目标设计
+### TUI 中的输入方式
 
 ```
-1. 拖拽文件到终端窗口
-   TUI 检测到文件拖拽事件 → 读取文件 → base64 编码
-   → 作为 image/audio content block 发给模型
-   → 这是主要的多模态输入方式，不需要 /file 命令
+1. Ctrl+V 粘贴图片 path
+   TUI 检测到 .png/.jpg/.jpeg/.webp/.gif → 询问是否加入附件
+   → 确认后作为 path attachment 发送，不插入输入框
 
-2. 剪贴板粘贴 (Ctrl+V)
-   用户截图后 Ctrl+V → TUI 读取剪贴板图片
-   → base64 → image content block
+2. Ctrl+V 粘贴远程图片 URL
+   TUI 检测明显图片后缀 URL → 询问是否加入附件
+   → 确认后作为 url attachment 发送
 
-3. 路径引用
-   用户在对话中提到文件路径 (如 "看看这张截图 ~/Desktop/screenshot.png")
-   → agent 通过 ReadFile 读取 → 编码为 base64 → 注入消息
-   → 纯自然语言交互，不需要额外命令
+3. Ctrl+V 粘贴 data:image base64
+   TUI 询问是否加入附件 → 确认后保存到 ~/.suna/tmp/paste-*.png
+   → 再作为 path attachment 发送；base64 不进入 protocol
 
-注: /file 命令已移除。当前 TUI 未实现拖拽/剪贴板图片到 ContentBlock 的完整链路；自然语言路径引用仍主要由 agent 通过 ReadFile 读取文本或 base64。
+注: 不支持 /attach 命令、不识别裸 base64、不自动扫描普通提示词里的图片路径。
 ```
 
 ### 模型路由配合 — 目标设计
 
 ```
 用户发送图片时:
-  路由层检查当前模型是否支持多模态
-  - 支持 (kimi/gpt-4o/claude) → 直接使用
-  - 不支持 (纯文本模型) → 自动路由到多模态模型
-
-用户发送音频时:
-  大部分模型不支持直接处理音频
-  → agent 检查是否有音频转写能力 (Whisper skill)
-  → 有: 先转写为文本，再处理
-  → 没有: 建议用户安装音频转写能力，或路由到支持音频的模型
+  daemon 将 path/url 规范化为 ContentImage
+  provider 将 ContentImage 转成各家模型的 image block
+  如果当前模型不支持图片，应在 daemon/provider 层报错或后续路由到支持多模态的模型
 ```
 
-### 文件大小限制 — 目标设计
+### 文件大小和存储限制
 
 ```
-内嵌 base64:
-  图片: 最大 10MB (base64 后约 13MB)
-  音频: 最大 20MB
-  超过 → 写入临时文件 → 传文件路径 → 模型从 URL 读取 (如果支持)
+protocol:
+  只接受 path/url，不接受 base64/blob
 
-注意: 大文件会大量消耗 token
-  agent 应在 system prompt 中被引导:
-  "如果用户发送了大图片，先确认是否需要分析全图，
-   还是只需要分析某个局部。如果只需要局部，建议裁剪后发送。"
+daemon:
+  path 图片最大 10MB
+  path -> 读取文件 -> 短生命周期 base64 -> provider request
+
+持久化:
+  working memory / conversation_state / user_memory 不保存 raw media
+  只保存用户文本和附件 metadata
 ```

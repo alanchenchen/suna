@@ -89,6 +89,11 @@ type TUI struct {
 	copyMode            bool
 	cmdSuggestions      []commandSpec
 	cmdSuggestionIdx    int
+	attachments         []attachmentItem
+	attachmentMode      bool
+	attachmentCursor    int
+	attachmentDelete    bool
+	pendingImagePaste   *pendingImagePaste
 	modelPickerOpen     bool
 	modelPickerCursor   int
 	daemonStatus        protocol.DaemonStatusParams
@@ -121,6 +126,11 @@ type guardConfirmView struct {
 type chatMsg struct {
 	role    string
 	content any
+}
+
+type userMessageContent struct {
+	text        string
+	attachments []attachmentItem
 }
 
 func New(locale LocaleID) *TUI {
@@ -232,13 +242,13 @@ func (t *TUI) View() tea.View {
 	return v
 }
 
-func (t *TUI) runAgent(input string) tea.Cmd {
+func (t *TUI) runAgent(input string, attachments []attachmentItem) tea.Cmd {
 	t.startLLMWait()
 	t.activeTools = make(map[string]*toolEntry)
 	t.toolStartTimes = make(map[string]time.Time)
 	t.currentToolBlock = nil
 	t.selectedToolID = ""
-	return tea.Batch(t.sendMessageCmd(input), t.sp.Tick)
+	return tea.Batch(t.sendMessageCmd(input, attachments), t.sp.Tick)
 }
 
 func (t *TUI) startLLMWait() {

@@ -138,11 +138,15 @@ func (t *TUI) layoutChat() {
 		return
 	}
 	inputH := max(1, t.ta.Height())
+	attachmentH := 0
+	if panel := t.renderAttachmentPanel(); panel != "" {
+		attachmentH = strings.Count(panel, "\n") + 2
+	}
 	suggestionH := 0
 	if len(t.cmdSuggestions) > 0 {
 		suggestionH = min(4, len(t.cmdSuggestions)) + 2
 	}
-	fixedH := 6 + inputH + suggestionH
+	fixedH := 6 + attachmentH + inputH + suggestionH
 	vpHeight := max(3, t.height-fixedH)
 	t.vp.SetWidth(t.width)
 	t.vp.SetHeight(vpHeight)
@@ -214,6 +218,9 @@ func (t *TUI) renderInputArea() string {
 	view := strings.TrimRight(t.ta.View(), "\n")
 	if view == "" {
 		view = "> "
+	}
+	if panel := t.renderAttachmentPanel(); panel != "" {
+		return "  " + strings.ReplaceAll(panel, "\n", "\n  ") + "\n" + "  " + strings.ReplaceAll(view, "\n", "\n  ")
 	}
 	return "  " + strings.ReplaceAll(view, "\n", "\n  ")
 }

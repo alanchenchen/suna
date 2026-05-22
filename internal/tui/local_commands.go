@@ -79,13 +79,13 @@ func (t *TUI) configGetCmd() tea.Cmd {
 	}
 }
 
-func (t *TUI) sendMessageCmd(input string) tea.Cmd {
+func (t *TUI) sendMessageCmd(input string, attachments []attachmentItem) tea.Cmd {
 	return func() tea.Msg {
 		// 所有 transport 写请求都必须放在 tea.Cmd 中执行，避免快捷键处理阻塞 Update 主循环。
 		if t.localCli == nil {
 			return ipcErrorNotification("config.error", fmt.Errorf("%s", t.tr("error.not_connected")))
 		}
-		if err := t.localCli.SendMessage(input); err != nil {
+		if err := t.localCli.SendMessage(input, attachments); err != nil {
 			return ipcErrorNotification("config.error", err)
 		}
 		return nil
