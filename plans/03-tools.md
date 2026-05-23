@@ -33,7 +33,7 @@ Communicate (协作) — 特殊处理
   Spawn       委派 subtask (仅 main agent 可用，不经过 Guard)
 ```
 
-Exec 归类为 Act 的原因：Exec 可以执行任何命令，包括删除、安装、网络操作。Guard 通过 `isReadOnlyCommand` 白名单机制，将 grep/ls/cat 等只读命令快速放行（零 LLM 审查成本），其余命令走完整审查流程。
+Exec 归类为 Act 的原因：Exec 可以执行任何命令，包括删除、安装、网络操作。Guard 通过轻量 shell analyzer 将可证明只读的 grep/ls/cat/git status 等命令归为 low risk（零 LLM 审查成本）；复杂/动态/未知命令至少归为 medium risk，高危命令归为 high risk 或命中硬拦截。
 
 ## 逐工具详细设计
 
@@ -227,7 +227,7 @@ options 参数:
 工具权限:
   tools 参数必填，指定 subtask 可用的工具列表
   没有"默认工具集" — 缺少 tools 会返回错误，让 main LLM 重选
-  Exec 在 subtask 中仍然经过 Guard 审查（含 isReadOnlyCommand 快速放行）
+  Exec 在 subtask 中仍然经过 Guard 审查（含轻量 shell analyzer 的只读快速放行）
   subtask 禁止授予 askuser 和 spawn — 防止交互逃逸和嵌套
   daemon 校验每个 tool name: 空/不存在/spawn/askuser 都返回 tool error
 

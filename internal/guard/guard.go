@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 
@@ -361,9 +360,8 @@ func (g *Guard) builtinBlockedRules() []blockRule {
 		pattern string
 		reason  string
 	}{
-		{`curl.*\|\s*sh`, "blocked: remote script pipe execution"},
-		{`wget.*\|\s*sh`, "blocked: remote script pipe execution"},
-		{`eval\s*\$\(`, "blocked: command injection pattern"},
+		{`(?i)\b(curl|wget|iwr|irm|invoke-webrequest|invoke-restmethod)\b.*\|\s*(sh|bash|zsh|fish|iex|invoke-expression|powershell|pwsh)\b`, "blocked: remote script pipe execution"},
+		{`(?i)\beval\s*\$\(`, "blocked: command injection pattern"},
 	}
 	for _, r := range genericRules {
 		re, err := regexp.Compile(r.pattern)
@@ -383,21 +381,16 @@ func (g *Guard) assessRisk(tool string, params map[string]any) RiskLevel {
 	switch tool {
 	case "exec":
 		cmd, _ := params["command"].(string)
-		if g.isReadOnlyCommand(cmd) {
-			return RiskLow
-		}
-		cmdLower := strings.ToLower(cmd)
-		if containsAny(cmdLower, []string{"rm", "rmdir", "del", "rmdir"}) {
-			return RiskHigh
-		}
-		return RiskMedium
+		shell, _ := params["shell"].(string)
+		return analyzeExecCommand(cmd, shell, g.allowedCmds)
 	case "writefile":
 		path, _ := params["path"].(string)
-		if fileExists(path) {
-			return RiskMedium
-		}
-		return RiskLow
+		return assessFileWriteRisk(path)
 	case "editfile":
+		path, _ := params["path"].(string)
+		if isHighRiskFilePath(path) {
+			return RiskHigh
+		}
 		return RiskMedium
 	case "writehttp":
 		method, _ := params["method"].(string)
@@ -406,7 +399,9 @@ func (g *Guard) assessRisk(tool string, params map[string]any) RiskLevel {
 		}
 		return RiskMedium
 	default:
-		return RiskLow
+		// Unknown Act tools are never safe-by-default. New capabilities must be
+		// explicitly classified before they can bypass confirmation.
+		return RiskMedium
 	}
 }
 
@@ -432,72 +427,12 @@ func isReadOnlyTool(tool string) bool {
 	}
 }
 
-func (g *Guard) isReadOnlyCommand(cmd string) bool {
-	readOnly := platformReadOnlyCommands()
-	trimmed := strings.TrimSpace(cmd)
-	for _, ro := range readOnly {
-		if strings.HasPrefix(trimmed, ro+" ") || trimmed == ro {
-			return true
+func compileRegexps(patterns []string) []*regexp.Regexp {
+	compiled := make([]*regexp.Regexp, 0, len(patterns))
+	for _, pattern := range patterns {
+		if re, err := regexp.Compile(pattern); err == nil {
+			compiled = append(compiled, re)
 		}
 	}
-	for _, rule := range g.userAllowed {
-		if rule.pattern.MatchString(trimmed) && rule.tool == "exec" {
-			return true
-		}
-	}
-	if strings.Contains(cmd, "|") {
-		parts := strings.Split(cmd, "|")
-		for _, p := range parts {
-			if !g.isReadOnlyCommand(strings.TrimSpace(p)) {
-				return false
-			}
-		}
-		return true
-	}
-	return false
-}
-
-func containsAny(s string, patterns []string) bool {
-	for _, p := range patterns {
-		if strings.Contains(s, p) {
-			return true
-		}
-	}
-	return false
-}
-
-func fileExists(path string) bool {
-	if path == "" {
-		return false
-	}
-	_, err := os.Stat(path)
-	return err == nil
-}
-
-func marshalParams(params map[string]any) (string, error) {
-	if params == nil {
-		return "{}", nil
-	}
-	var buf strings.Builder
-	buf.WriteByte('{')
-	first := true
-	for k, v := range params {
-		if !first {
-			buf.WriteByte(',')
-		}
-		first = false
-		buf.WriteByte('"')
-		buf.WriteString(k)
-		buf.WriteString(`":`)
-		switch val := v.(type) {
-		case string:
-			buf.WriteByte('"')
-			buf.WriteString(val)
-			buf.WriteByte('"')
-		default:
-			buf.WriteString(fmt.Sprintf("%v", v))
-		}
-	}
-	buf.WriteByte('}')
-	return buf.String(), nil
+	return compiled
 }

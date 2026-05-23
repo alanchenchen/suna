@@ -188,7 +188,7 @@ TUI/local transport 只传 `path` 或 `url`。粘贴的 `data:image/...;base64,.
 │     ├── 同一批 Tool Calls → 并发执行，结果按原顺序回填           │
 │     │   ├── Perceive 工具 → 直接执行                          │
 │     │   ├── Act 工具 → 经过 Guard 审查 → 执行                 │
-│     │   │   (Exec 中只读命令经 isReadOnlyCommand 快速放行)      │
+│     │   │   (Exec 中可证明只读命令经轻量 shell analyzer 放行)   │
 │     │   └── Spawn 工具 → 创建 subtask (仅 main)               │
 │     └── 工具结果 → 追加到对话历史 → 回到步骤 2                 │
 │                                                               │

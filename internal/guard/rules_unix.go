@@ -9,13 +9,14 @@ func platformBlockedRules() []blockRule {
 		pattern string
 		reason  string
 	}{
-		{`rm\s+-rf\s+/`, "blocked: recursive delete root"},
-		{`rm\s+-rf\s+~`, "blocked: recursive delete home"},
-		{`rm\s+-rf\s+\$HOME`, "blocked: recursive delete home"},
-		{`mkfs`, "blocked: disk format"},
-		{`dd\s+if=/dev/zero`, "blocked: disk wipe"},
+		{`(?i)\brm\b(?=.*\s-[^\s]*r)(?=.*\s-[^\s]*f).*\s/\s*$`, "blocked: recursive delete root"},
+		{`(?i)\brm\b(?=.*\s-[^\s]*r)(?=.*\s-[^\s]*f).*\s(~|\$HOME)\b`, "blocked: recursive delete home"},
+		{`(?i)\bmkfs\b`, "blocked: disk format"},
+		{`(?i)\bdd\b.*\b(if=/dev/zero|of=/dev/)`, "blocked: disk wipe"},
 		{`:\s*/etc/|:\s*/usr/|:\s*/System/`, "blocked: write to system directory"},
-		{`chmod\s+-R\s+777\s+/`, "blocked: recursive open permissions"},
+		{`(?i)\bchmod\b.*\s-r\b.*\s777\s+/`, "blocked: recursive open permissions"},
+		{`(?i)\b(curl|wget)\b.*\|\s*(sh|bash|zsh|fish)\b`, "blocked: remote script pipe execution"},
+		{`(?i)\beval\s*\$\(`, "blocked: command injection pattern"},
 		{`>\s*/dev/sd`, "blocked: write to disk device"},
 	}
 	var result []blockRule
