@@ -35,8 +35,8 @@ func (c *Config) Clone() *Config {
 	return &cp
 }
 
-// DefaultMaxModelRPS 是每个模型 ref 的默认请求限速，避免 sub-agent 并发打爆供应商。
-const DefaultMaxModelRPS = 5
+// DefaultMaxModelRPS 是每个模型 ref 的默认请求限速，避免 subtask 并发打爆供应商。
+const DefaultMaxModelRPS = 15
 
 func (c *Config) GetMaxModelRPS() int {
 	if c.MaxModelRPS <= 0 {

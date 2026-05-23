@@ -18,7 +18,7 @@ func New() (*Loader, error) {
 		templates: make(map[string]*template.Template),
 	}
 	files := []string{
-		"system", "guard", "guard_review", "compress", "extract_batch", "spawn_system",
+		"system", "guard", "guard_review", "compress", "extract_batch", "subtask_system",
 	}
 	for _, name := range files {
 		data, err := templatesFS.ReadFile("templates/" + name + ".md")
@@ -87,8 +87,8 @@ func (l *Loader) RenderMemoryCompact(data map[string]any) (string, error) {
 	})
 }
 
-func (l *Loader) RenderSpawnSystem(data SpawnPromptData) (string, error) {
-	return l.Render("spawn_system", map[string]any{
+func (l *Loader) RenderSubtaskSystem(data SubtaskPromptData) (string, error) {
+	return l.Render("subtask_system", map[string]any{
 		"Task":    data.Task,
 		"Tools":   data.Tools,
 		"Context": data.Context,
@@ -115,7 +115,7 @@ type GuardReviewData struct {
 	RecentContext string
 }
 
-type SpawnPromptData struct {
+type SubtaskPromptData struct {
 	Task    string
 	Tools   string
 	Context string

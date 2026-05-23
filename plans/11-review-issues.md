@@ -267,12 +267,12 @@
 ### ✅ 系统提示词优化
 - 删除 Current Time 和 User 字段
 - 重排 system.md 为稳定策略→低频动态→高频动态
-- sub-agent 不继承 system.md，使用独立 spawn_system.md
-- spawn_system.md 只含 task/env/tools/context/rules
+- subtask 不继承 system.md，使用独立 subtask_system.md
+- subtask_system.md 只含 task/env/tools/context/rules，并明确隔离上下文和单向数据流
 
-### ✅ Sub-agent 隔离
+### ✅ Subtask 隔离
 - 新增 `systemPromptOverride` 字段
-- sub-agent 不暴露 askuser/spawn tool schema
+- subtask 不暴露 askuser/spawn tool schema
 - 删除 SpawnToolGuide/SpawnTools 模板变量
 
 ### ✅ Guard mode 实现
@@ -308,7 +308,7 @@
 ### ✅ 03-tools.md 更新
 - Spawn 参数 model 和 tools 改为必填
 - 删除"默认工具集"
-- 新增 daemon 校验说明和 sub-agent 限制
+- 新增 daemon 校验说明和 subtask 限制
 
 ### ✅ 12-tui-design.md 更新
 - 新增 Guard confirm overlay 章节
@@ -318,11 +318,11 @@
 
 ### ✅ 01-architecture.md 更新
 - Guard 描述更新为 4 mode
-- Sub Agent 属性更新（必填 model/tools、禁用 askuser、独立 spawn_system.md）
+- Subtask 属性更新（必填 model/tools、禁用 askuser、独立 subtask_system.md）
 
 ### ✅ 08-tech-stack.md 更新
 - 项目结构新增 agent_management.go / agent_prompt.go
 - guard.go 描述更新
-- 新增 spawn_system.md 模板
+- 新增 subtask_system.md 模板
 - IPC server/message 描述更新
 - config.toml 新增 guard.mode

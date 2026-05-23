@@ -215,7 +215,7 @@ suna/
 │   │   ├── loader.go            # go:embed 加载 + 模板渲染
 │   │   └── templates/           # Markdown 模板 (编译进二进制)
 │   │       ├── system.md        # 主 agent 系统提示词 (稳定前缀→动态内容排序)
-│   │       ├── spawn_system.md  # sub-agent 独立 prompt (task/env/tools/context/rules)
+│   │       ├── subtask_system.md # subtask 隔离 prompt (task/env/tools/context/rules)
 │   │       ├── guard.md         # Guard 审查提示词
 │   │       ├── compress.md      # 压缩摘要提示词
 	│   │       └── extract_batch.md # active memory full compaction 提示词
@@ -270,8 +270,8 @@ Suna 当前只读取 `~/.suna/config.toml` 和 `~/.suna/credentials.toml`。`con
 # 主代理使用的模型 (必填，格式为 "provider/model")
 active_model = "glm/glm-4"
 
-# 每个模型 ref 的默认请求限速。<= 0 时使用默认值 5。
-max_model_rps = 5
+# 每个模型 ref 的默认请求限速。<= 0 时使用默认值 15。
+max_model_rps = 15
 
 # 模型列表，每个模型平级
 [[models]]
@@ -330,7 +330,7 @@ command = "echo checking"
 | 字段 | 类型 | 必填 | 默认值 | 当前用途 |
 |---|---|---|---|---|
 | `active_model` | string | 否 | 第一个 `[[models]]` | 当前 daemon 默认模型，格式为 `provider/model`，必须能匹配某个模型配置。 |
-| `max_model_rps` | int | 否 | `5` | 每个模型 ref 的请求限速，用于避免 sub-agent 并发打爆供应商。 |
+| `max_model_rps` | int | 否 | `15` | 每个模型 ref 的请求限速，用于避免 subtask 并发打爆供应商。 |
 | `[[models]]` | array | 是 | 无 | 至少需要一个模型，否则 daemon/TUI 进入配置向导。 |
 | `models.provider` | string | 是 | 无 | provider 名称，也是 `credentials.toml` 里 API key 的分组名。 |
 | `models.model` | string | 是 | 无 | 模型 ID。模型 ref 为 `provider/model`。 |

@@ -216,7 +216,7 @@ options 参数:
   tools: [string],           // 必填: subtask 可用工具列表
   timeout?: int,             // 默认 300 秒
   context?: string,          // 传给 subtask 的额外上下文
-  system?: string            // 可选 fallback；正常由 spawn_system.md 模板生成
+  system?: string            // 可选 fallback；正常由 subtask_system.md 模板生成
 }
 返回: JSON 文本 { result: string, success: bool, status: string }
 
@@ -237,9 +237,14 @@ options 参数:
   model 为空或非法 → 返回 tool error，main LLM 重新选择
 
 系统提示词:
-  subtask 使用独立 spawn_system.md，不继承 main system.md
-  spawn_system.md 只含 task/env/tools/context/rules
+  subtask 使用独立 subtask_system.md，不继承 main system.md、active memory、main working memory 或 conversation history
+  subtask_system.md 只含 task/env/tools/context/rules，并明确 one-way data flow
   通过 runner request 的 System 字段注入
+
+上下文隔离:
+  spawn request 只把 task/context/tools/model 显式传入 subtask
+  subtask 的 tool events 会转发给 TUI 用于可观察性，但不会成为 main 对话继承给 subtask 的共享上下文
+  subtask 返回 final result/status 给 main，不保存独立长期记忆
 
 超时:
   默认 300 秒

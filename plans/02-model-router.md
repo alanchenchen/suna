@@ -164,7 +164,7 @@ api_key = "sk-xxx..."
 
 ## 路由策略
 
-当前实现采用 **main-agent delegated routing**。main agent 始终使用用户手动选择的 `active_model`，不自动切换自身。智能路由只发生在 main agent 调用 `spawn` 时：main LLM 基于完整任务上下文、可用模型 strengths 和 `spawn` tool schema，显式选择 sub-agent 的 `model` 和 `tools`。
+当前实现采用 **main-agent delegated routing**。main agent 始终使用用户手动选择的 `active_model`，不自动切换自身。智能路由只发生在 main agent 调用 `spawn` 时：main LLM 基于完整任务上下文、可用模型 strengths 和 `spawn` tool schema，显式选择 subtask 的 `model` 和 `tools`。
 
 daemon 不再为 spawn 额外调用路由 LLM。`RouteWithLLM` / `routeByLLM` / `route.md` 已从主实现移除。
 
@@ -186,10 +186,10 @@ daemon 不再为 spawn 额外调用路由 LLM。`RouteWithLLM` / `routeByLLM` / 
 
 ### Main-Agent Delegated Routing
 
-main system prompt 中动态注入可用 sub-agent models：
+main system prompt 中动态注入可用于 spawned subtasks 的 models：
 
 ```text
-Available sub-agent models:
+Available models for spawned subtasks:
 - glm/GLM-5.1: coding, reasoning; ctx 128k
 - anthropic/claude-sonnet-4: architecture, review; ctx 200k
 ```
@@ -210,8 +210,8 @@ daemon 只做校验和执行：
 
 - `model` 为空或不是已配置 ref → tool error。
 - `tools` 为空或包含不存在工具 → tool error。
-- `spawn` 和 `askuser` 不能授予 sub-agent。
-- sub-agent 只看到授权 tools 的 tool schema。
+- `spawn` 和 `askuser` 不能授予 subtask。
+- subtask 只看到授权 tools 的 tool schema。
 
 ### strengths 偏好标签
 
@@ -239,16 +239,16 @@ LLM 据此判断:
 不再有独立路由请求，因此不需要把任务摘要传给 router。main agent 已经拥有完整上下文，可以在同一个 LLM 回合中同时决定：
 
 - 是否需要 spawn。
-- sub-agent task。
-- sub-agent model。
-- sub-agent tools 权限。
-- 传给 sub-agent 的简短 context。
+- subtask task。
+- subtask model。
+- subtask tools 权限。
+- 传给 subtask 的简短 context。
 
-这减少一次额外 LLM 请求，也避免 router 只看到 task 摘要而丢失用户意图。
+这减少一次额外 LLM 请求，也避免 router 只看到 task 摘要而丢失用户意图。只有这些显式 spawn 字段会传入 subtask；subtask 不继承 main conversation、active memory 或 main working memory。
 
-## Sub Agent 的模型选择
+## Subtask 的模型选择
 
-Main agent 使用 active_model 运行。Sub agent 的模型由 main agent 在 `spawn.model` 中显式指定：
+Main agent 使用 active_model 运行。Subtask 的模型由 main agent 在 `spawn.model` 中显式指定：
 
 ```
 场景 1: Main 根据任务选择子代理模型
@@ -264,7 +264,7 @@ Main agent 使用 active_model 运行。Sub agent 的模型由 main agent 在 `s
   → Main 理解意图，Spawn 时指定 model: "anthropic/claude-sonnet-4-20250514"
 
 关键: Main agent 始终使用 active_model，不自动切换自身
-      Sub agent 只能使用 main 显式指定且 daemon 校验通过的模型
+      Subtask 只能使用 main 显式指定且 daemon 校验通过的模型
 ```
 
 ## 缓存策略

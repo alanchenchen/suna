@@ -251,7 +251,7 @@ reason = "读文件直接放行"
 ```
 Guard 结构中保留 recent context 字段，LLM review prompt 也支持注入该字段。
 
-当前 core 执行路径尚未在每次工具调用前填充最近 3 轮对话或 sub-agent task context，因此多数 LLM review 的 recent context 为空。若 review 不确定，smart mode 会保守转用户确认。
+当前 core 执行路径尚未在每次工具调用前填充最近 3 轮对话或 subtask task/context，因此多数 LLM review 的 recent context 为空。subtask 不继承 main conversation 或 active memory；如果需要 Guard review 上下文，应使用显式 delegated task/context。若 review 不确定，smart mode 会保守转用户确认。
 ```
 
 ## 风险评级的实现
@@ -352,11 +352,11 @@ func isReadOnlyCommand(cmd string) bool {
 
 审计日志不进入 user_memory，也不通过 `/memory search` 暴露，避免污染用户画像。
 
-## Sub Agent 的 Guard
+## Subtask 的 Guard
 
 ```
-Sub agent 的 Guard 和 main 共享同一套规则
-但 sub agent 的操作上下文更少 (sub 没有完整对话历史)
+Subtask 的 Guard 和 main 共享同一套规则
+但 subtask 的操作上下文更少：不继承 main conversation、active memory 或 main working memory
 
 当前处理方式:
   - sub 通过 newGuardForSession() 继承同一套 mode、blocked/allowed、audit DB 和 LLM reviewer

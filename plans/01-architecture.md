@@ -165,6 +165,8 @@ TUI/local transport 只传 `path` 或 `url`。粘贴的 `data:image/...;base64,.
 
 行动层拆为三层代码边界：`internal/agent` 是唯一对外编排层，`internal/runner` 是通用 agent loop 引擎，`internal/subtask` 是 spawn 创建的一次性轻量任务执行器。当前输入来自 `protocol` 用户消息、AskUser/Guard 回传和管理命令；Timer/Watcher/Webhook/Stream 感知信号仍是预留设计。
 
+术语约定：`spawn` 是 main agent 可调用的工具/动作；`subtask` 是由 `spawn` 创建的隔离运行单元；`subtask_system.md` 是 subtask 的独立系统提示词模板。
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  1. 接收输入                                                  │
@@ -237,13 +239,13 @@ Subtasks:    Spawn 作为 tool call 执行
 
 ### Subtask (`internal/subtask`)
 
-- 系统提示词由 spawn_system.md 模板生成，针对具体子任务
+- 系统提示词由 `subtask_system.md` 模板生成，针对具体子任务
 - 工具权限由 main 精确授权（subset of 9 tools，不含 Spawn 和 AskUser）
 - 模型由 main 在 spawn.model 中显式指定（必填）
 - tools 由 main 在 spawn.tools 中显式指定（必填，无默认工具集；不能包含 `spawn`/`askuser`）
 - daemon 校验 model ref 和 tool name
-- 有独立的上下文窗口，不与 main 共享对话历史
-- 执行完毕后自动销毁，只把最终结果回传给 main LLM
+- 有独立的上下文窗口，不继承 main conversation、working memory、active memory、restored conversation state 或 main system prompt
+- 数据流单向进入 subtask：`spawn.task`、`spawn.context`、授权 tools、自己的 tool results；执行完毕后自动销毁，只把最终结果回传给 main LLM
 - usage 记录绑定 main session，不创建独立 session
 - 继承全局 Guard policy、blocked/allowed、audit DB；需要用户确认时由 main 事件流负责
 - tool call/result 通过 main 事件流转发；stream/reasoning 不外显
@@ -393,7 +395,7 @@ Main: 测试通过 → 通知用户完成
   - ReadFile: content 为空且文件应该有内容 → 异常
   - WriteFile: 写入字节数为 0 → 异常
   - WriteHTTP: status 4xx/5xx → 失败
-  - Spawn: success=false → sub agent 失败
+  - Spawn: success=false → subtask 失败
 
 快速检查命中率: ~80% 的失败场景
 处理: 直接记录失败记忆 → agent 决定重试或调整

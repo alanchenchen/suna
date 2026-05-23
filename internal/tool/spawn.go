@@ -19,7 +19,7 @@ func NewSpawn(handler SpawnHandler) *Spawn {
 
 func (s *Spawn) Name() string { return "spawn" }
 func (s *Spawn) Description() string {
-	return "Create a sub agent to execute a sub-task. Only available to the main agent. Model and tools must be explicitly selected; tools are permissions."
+	return "Create an isolated subtask runtime to execute a self-contained task. Only available to the main agent. Model and tools must be explicitly selected; tools are permissions."
 }
 func (s *Spawn) Category() Category { return Communicate }
 func (s *Spawn) Parameters() map[string]any {
@@ -28,10 +28,10 @@ func (s *Spawn) Parameters() map[string]any {
 		"properties": map[string]any{
 			"task":    map[string]any{"type": "string", "description": "Sub-task description"},
 			"model":   map[string]any{"type": "string", "description": "Exact model ref to use"},
-			"system":  map[string]any{"type": "string", "description": "System prompt for sub agent"},
-			"tools":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Explicit tool permissions for sub agent"},
+			"system":  map[string]any{"type": "string", "description": "Fallback system prompt for the subtask"},
+			"tools":   map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Explicit tool permissions for the subtask"},
 			"timeout": map[string]any{"type": "integer", "description": "Timeout in seconds (default 300)"},
-			"context": map[string]any{"type": "string", "description": "Extra context for sub agent"},
+			"context": map[string]any{"type": "string", "description": "Extra context for the subtask"},
 		},
 		"required": []string{"task", "model", "tools"},
 	}
@@ -67,7 +67,7 @@ func (s *Spawn) Execute(ctx context.Context, params map[string]any) Result {
 
 	for _, t := range tools {
 		if t == "spawn" {
-			return ErrorResult("sub agent cannot use spawn tool (nesting not allowed)")
+			return ErrorResult("subtask cannot use spawn tool (nesting not allowed)")
 		}
 	}
 

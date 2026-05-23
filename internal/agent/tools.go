@@ -140,14 +140,14 @@ func (a *Agent) executeSpawn(ctx context.Context, id string, params map[string]a
 	extraCtx, _ := params["context"].(string)
 	env := getEnvInfo()
 	toolsSummary := strings.Join(subRegistry.Names(), ", ")
-	spawnPrompt, err := a.prompts.RenderSpawnSystem(prompt.SpawnPromptData{Task: task, Tools: toolsSummary, Context: extraCtx, OS: env["OS"], Arch: env["Arch"], WorkDir: env["WorkDir"]})
-	if err != nil || spawnPrompt == "" {
+	subtaskPrompt, err := a.prompts.RenderSubtaskSystem(prompt.SubtaskPromptData{Task: task, Tools: toolsSummary, Context: extraCtx, OS: env["OS"], Arch: env["Arch"], WorkDir: env["WorkDir"]})
+	if err != nil || subtaskPrompt == "" {
 		if sys, ok := params["system"].(string); ok && sys != "" {
-			spawnPrompt = sys
+			subtaskPrompt = sys
 		}
 	}
-	if spawnPrompt == "" {
-		spawnPrompt = fmt.Sprintf("You are a Suna subtask runner. Complete this task and return a concise result.\n\nTask:\n%s\n\nTools:\n%s", task, toolsSummary)
+	if subtaskPrompt == "" {
+		subtaskPrompt = fmt.Sprintf("You are an isolated Suna subtask runner. Complete this task and return a concise result.\n\nTask:\n%s\n\nTools:\n%s", task, toolsSummary)
 	}
 
 	spawnID := id
@@ -155,7 +155,7 @@ func (a *Agent) executeSpawn(ctx context.Context, id string, params map[string]a
 		spawnID = uuid.New().String()
 	}
 	r := a.newSubtaskRunner(events, spawnID, subRegistry)
-	st := subtask.New(subtask.Request{ID: spawnID, Task: task, ModelRef: modelRef, ModelID: resolveModelID(a.cfg, modelRef), System: spawnPrompt, Tools: subRegistry, Timeout: time.Duration(timeout) * time.Second})
+	st := subtask.New(subtask.Request{ID: spawnID, Task: task, ModelRef: modelRef, ModelID: resolveModelID(a.cfg, modelRef), System: subtaskPrompt, Tools: subRegistry, Timeout: time.Duration(timeout) * time.Second})
 	res, err := st.Run(ctx, r)
 	if err != nil && res.Text == "" {
 		res.Text = err.Error()

@@ -28,7 +28,7 @@
 | **记忆** | auto memory (learnings) | memory_search + workspace files | 少量用户画像 + 纠错规避 + active memory 刷新 | ✅ 更轻、更贴合通用 agent |
 | **有状态** | 无状态循环 | Gateway daemon 但 agent 无状态 | Daemon 常驻 + 异步记忆；感知 24/7 未实现 | ✅ Suna 领先 |
 | **定时任务** | Routines (云端) | cron 工具 | Timer/Watcher/Webhook/Stream 为目标设计 | ⏳ 未接入 runtime |
-| **Sub Agent** | Lead + sub agents | subagents + multi-agent routing | Main + Sub (Spawn) | ⚠️ 基本一致 |
+| **Delegation** | Lead + delegated agents | subagents + multi-agent routing | Main + spawned subtasks | ⚠️ 基本一致 |
 | **Hooks** | PreToolUse/PostToolUse/Notification | Plugin hooks | hooks 字段预留，执行链路未接入 | ⏳ 后续项 |
 | **长任务** | Goal 命令 (8h+) | cron + sessions | Daemon 常驻 + Spawn；感知驱动未实现 | ⚠️ 部分覆盖 |
 | **人格** | CLAUDE.md | SOUL.md | capability (persona SKILL.md) | ✅ 统一到能力系统 |
