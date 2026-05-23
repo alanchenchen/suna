@@ -244,6 +244,7 @@ suna/
 ├── sunad.pid                    # Daemon PID 文件
 ├── sunad.sock                   # Unix Socket (macOS/Linux)
 ├── memory.db                    # SQLite (记忆 + 审计 + 触发器)
+├── tmp/                         # TUI 粘贴图片等短生命周期临时文件
 ├── capabilities/                # 已安装能力 (含人格 persona/)
 │   ├── persona/
 │   │   └── SKILL.md             # 人格/沟通风格 (capability 实现)
@@ -256,13 +257,19 @@ suna/
 │       ├── SKILL.md
 │       └── mcp.json
 └── logs/
-    ├── suna.log                 # 应用日志
-    └── audit.log                # 审计日志
+    ├── app.log                  # 标准库 log 输出 + 默认分类日志
+    ├── agent.log                # Agent 运行、工具调用和生命周期日志
+    ├── config.log               # 配置更新/重载日志
+    ├── ipc.log                  # 本地 transport / JSON-RPC 日志
+    ├── llm.log                  # Provider 请求摘要日志
+    └── memory.log               # memory queue / compaction 日志
 ```
+
+注：`tmp/` 当前主要由 TUI 保存 `data:image/*` 粘贴图片，daemon 消费后只会清理 `tmp/paste-*` 文件，不会删除用户手动选择的普通图片路径。`sunad.sock` 只对应 macOS/Linux 的 Unix Socket；Windows local transport 使用 Named Pipe，不会在 `~/.suna/` 下创建 socket 文件。
 
 ## config.toml 当前支持参数
 
-Suna 当前只读取 `~/.suna/config.toml` 和 `~/.suna/credentials.toml`。`config.toml` 保存模型、UI、Guard 和预留 hooks 配置；API key 不写入 `config.toml`，而是按 provider 维度写入 `credentials.toml`，文件权限为 `0600`。
+Suna 当前只读取 `~/.suna/config.toml` 和 `~/.suna/credentials.toml`。`config.toml` 保存模型、UI、Guard 和预留 hooks 配置；运行态路径 `DataDir` 不持久化。API key 不写入 `config.toml`，而是按 provider 维度写入 `credentials.toml`，文件权限为 `0600`。
 
 ### config.toml 完整示例
 
@@ -301,6 +308,7 @@ strengths = ["前端生成", "多模态", "图片理解"]
 
 [guard]
 mode = "ask"                      # readonly | ask | auto | smart (默认 ask)
+workspace = ""                     # 空表示不限制；非空时拦截 workspace 外本地文件/exec 操作
 review_model = ""                  # 预留；当前 LLM review 使用 active_model
 
 # 内置规则已覆盖危险操作 (rm -rf /, rmdir /s /q 等，按 OS 区分)
@@ -325,6 +333,8 @@ tool = "exec"
 command = "echo checking"
 ```
 
+上面示例已覆盖 `internal/config.Config` 当前所有会持久化到 `config.toml` 的字段：`active_model`、`max_model_rps`、`[[models]]`、`[guard]`、`[guard].workspace`、`[[guard.blocked]]`、`[[guard.allowed]]`、`[ui]`、`[[hooks]]`。`DataDir` 与模型 `APIKey` 为运行态字段，不会写入 `config.toml`。
+
 ### 字段说明
 
 | 字段 | 类型 | 必填 | 默认值 | 当前用途 |
@@ -335,14 +345,15 @@ command = "echo checking"
 | `models.provider` | string | 是 | 无 | provider 名称，也是 `credentials.toml` 里 API key 的分组名。 |
 | `models.model` | string | 是 | 无 | 模型 ID。模型 ref 为 `provider/model`。 |
 | `models.base_url` | string | 否 | provider 默认 | OpenAI-compatible endpoint；OpenAI 官方 provider 可留空。 |
-| `models.context_window` | int | 否 | provider 默认或 TUI fallback | 上下文窗口，用于顶栏展示和 compact 判断。 |
+| `models.context_window` | int | 否 | `anthropic` 为 `200000`，其它 provider 为 `128000` | 上下文窗口，用于顶栏展示和 compact 判断；TUI 会按 provider 显示默认值/placeholder，但未填写时不会自动写入 `config.toml`。 |
 | `models.cost_per_1k` | float | 否 | `0` | 成本字段已持久化，当前 UI/计费统计未完整使用。 |
 | `models.strengths` | string[] | 否 | 空 | TUI 展示模型擅长项。 |
 | `[guard].mode` | string | 否 | `ask` | `readonly` / `ask` / `auto` / `smart`。具体决策见 `plans/04-guard.md`。 |
+| `[guard].workspace` | string | 否 | 空 | workspace 硬边界；非空时必须是存在目录。除 `askuser`/`spawn` 外所有 tool 都先过 Guard，文件类路径和 `exec.cwd`/明显命令路径解析到 workspace 外会直接 reject；`exec` shell 变量展开无法安全检查时也会 reject。优先级高于 allowed、auto、LLM review 和用户确认。 |
 | `[guard].review_model` | string | 否 | 空 | 预留字段；当前 LLM review 实际使用 active model。 |
 | `[[guard.blocked]]` | array | 否 | 空 | 用户自定义硬拦截规则，追加到内置 blocked rules 后。 |
 | `guard.blocked.pattern` | string | 是 | 无 | Go regexp，匹配命令、路径或 URL。 |
-| `guard.blocked.reason` | string | 否 | 空 | 拦截原因，显示在审计/错误信息中。 |
+| `guard.blocked.reason` | string | 否 | 空 | 拦截原因，显示在 Guard 决策错误信息中。 |
 | `[[guard.allowed]]` | array | 否 | 空 | 用户自定义允许规则，优先于 mode/risk，低于硬拦截。 |
 | `guard.allowed.pattern` | string | 是 | 无 | Go regexp，匹配命令、路径或 URL。 |
 | `guard.allowed.tool` | string | 否 | 空 | 限定 tool；为空表示匹配所有 guard target。 |
@@ -353,6 +364,31 @@ command = "echo checking"
 | `hooks.event` | string | 否 | 空 | 预留 hook 事件名。 |
 | `hooks.tool` | string | 否 | 空 | 预留 hook 作用 tool。 |
 | `hooks.command` | string | 否 | 空 | 预留 hook shell command。 |
+
+Guard rule 的 `pattern` 是 Go regexp，匹配当前 tool 的 guard target：`exec.command`、文件类工具的 `path`、HTTP 工具的 `url`。TOML 字符串中反斜杠需要转义，例如 `\s` 要写成 `\\s`，字面量 `.` 要写成 `\\.`。
+
+常用示例：
+
+```toml
+[[guard.blocked]]
+pattern = "npm\\s+publish"
+reason = "禁止发布 npm 包"
+
+[[guard.blocked]]
+pattern = "(^|/)private-notes(/|$)"
+reason = "禁止读取私人笔记目录"
+
+[[guard.blocked]]
+pattern = "169\\.254\\.169\\.254|localhost|127\\.0\\.0\\.1"
+reason = "禁止访问 metadata/local HTTP 服务"
+
+[[guard.allowed]]
+pattern = "^(ls|pwd|git status|git diff)(\\s|$)"
+tool = "exec"
+reason = "常用只读命令直接放行"
+```
+
+更完整的 rule target 映射和示例见 `plans/04-guard.md`。
 
 ### credentials.toml
 
@@ -381,7 +417,7 @@ api_key = "..."
 | Tools | Usable MVP | read/list/readhttp/exec/write/edit/writehttp/askuser/spawn | Windows 命令翻译层仍是后续项 |
 | Guard | Usable MVP | `readonly` / `ask` / `auto` / `smart`、硬拦截、风险分级、TUI confirm、LLM review | rules 编辑 UI、modify 参数改写、渐进信任未完成 |
 | Memory | Usable MVP | SQLite active memory、memory_queue、conversation_state、异步 full compaction、上下文压缩 | 记忆质量评估、用户可编辑记忆 UI |
-| TUI | Usable MVP | Welcome/Chat/Config/Help、模型配置、工具记录、AskUser、Guard overlay、compact、active memory list | Provider test、Config 高级项和 Help 覆盖仍不完整 |
+| TUI | Usable MVP | Welcome/Chat/Config/Help、模型配置、Workspace 配置、工具记录、AskUser、Guard overlay、compact、active memory list、context-aware help | Provider test、Config 高级项（guard rules/hooks/限速/成本）仍不完整 |
 | Logging | Usable MVP | 分类文本日志和 provider 调用日志已接入；具体文件分类以 `internal/logging` 当前实现为准 | UI 查看日志、导出诊断包 |
 | Capability | Basic | SKILL.md 加载和能力目录结构 | JS/WASM runner、MCP client、能力市场未完成 |
 

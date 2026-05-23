@@ -273,7 +273,7 @@ func (a *Agent) newGuardForSession(sessionID string) *guard.Guard {
 	if a.store != nil {
 		db = a.store.DB()
 	}
-	g := guard.NewGuardWithConfigAndMode(db, sessionID, mode, blockedPats, blockedReasons, allowedPats, allowedTools)
+	g := guard.NewGuardWithConfigModeAndWorkspace(db, sessionID, mode, a.cfg.Guard.Workspace, blockedPats, blockedReasons, allowedPats, allowedTools)
 	if a.router != nil && mode == guard.ModeSmart {
 		g.SetLLMReviewer(a.guardLLMReview)
 	}

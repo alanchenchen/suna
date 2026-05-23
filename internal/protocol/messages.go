@@ -88,6 +88,7 @@ type ConfigParams struct {
 	Locale      string        `json:"locale,omitempty"`
 	Theme       string        `json:"theme,omitempty"`
 	GuardMode   string        `json:"guard_mode,omitempty"`
+	Workspace   string        `json:"workspace,omitempty"`
 }
 
 type ConfigModel struct {
@@ -108,6 +109,7 @@ type ConfigSetParams struct {
 	Locale      string      `json:"locale,omitempty"`
 	Theme       string      `json:"theme,omitempty"`
 	GuardMode   string      `json:"guard_mode,omitempty"`
+	Workspace   *string     `json:"workspace,omitempty"`
 }
 
 type MemoryStats struct {
@@ -149,12 +151,12 @@ type UsagePeriod struct {
 }
 
 type CompactResult struct {
-	BeforeTokens     int `json:"before_tokens"`
-	AfterTokens      int `json:"after_tokens"`
-	ContextWindow    int `json:"context_window"`
-	TurnsCompressed  int `json:"turns_compressed"`
-	SummaryTokens    int `json:"summary_tokens"`
-	TruncatedOutputs int `json:"truncated_outputs"`
+	BeforeTokens     int  `json:"before_tokens"`
+	AfterTokens      int  `json:"after_tokens"`
+	ContextWindow    int  `json:"context_window"`
+	TurnsCompressed  int  `json:"turns_compressed"`
+	SummaryTokens    int  `json:"summary_tokens"`
+	TruncatedOutputs int  `json:"truncated_outputs"`
 	Noop             bool `json:"noop,omitempty"`
 }
 

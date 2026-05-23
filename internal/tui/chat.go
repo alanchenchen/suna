@@ -479,6 +479,10 @@ func (t *TUI) updateGuardConfirm(ks string) (tea.Model, tea.Cmd) {
 		return t, nil
 	case "esc":
 		return t, t.submitGuardDecision("reject")
+	case "y", "Y", "a", "A":
+		return t, t.submitGuardDecision("approve")
+	case "n", "N", "r", "R":
+		return t, t.submitGuardDecision("reject")
 	case "enter":
 		if t.guardCursor == 0 {
 			return t, t.submitGuardDecision("approve")

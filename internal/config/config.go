@@ -58,6 +58,7 @@ type ModelConfig struct {
 // GuardConfig 保存本地安全规则和可选 LLM 审查模型配置，对应 plans/04-guard.md。
 type GuardConfig struct {
 	Mode        string           `toml:"mode,omitempty"`
+	Workspace   string           `toml:"workspace,omitempty"`
 	ReviewModel string           `toml:"review_model"`
 	Blocked     []GuardRule      `toml:"blocked"`
 	Allowed     []GuardAllowRule `toml:"allowed"`
@@ -115,6 +116,9 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
 	cfg.NormalizeUI()
+	if err := cfg.NormalizeGuard(); err != nil {
+		return nil, err
+	}
 	if len(cfg.Models) == 0 {
 		return nil, fmt.Errorf("config has no [[models]] entries")
 	}
@@ -140,6 +144,36 @@ func (c *Config) NormalizeUI() {
 	}
 }
 
+func (c *Config) NormalizeGuard() error {
+	workspace := strings.TrimSpace(c.Guard.Workspace)
+	if workspace == "" {
+		c.Guard.Workspace = ""
+		return nil
+	}
+	if strings.HasPrefix(workspace, "~/") {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			workspace = filepath.Join(home, workspace[2:])
+		}
+	}
+	abs, err := filepath.Abs(workspace)
+	if err != nil {
+		return fmt.Errorf("guard.workspace %q is invalid: %w", c.Guard.Workspace, err)
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return fmt.Errorf("guard.workspace %q is not accessible: %w", c.Guard.Workspace, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("guard.workspace %q must be a directory", c.Guard.Workspace)
+	}
+	if real, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = real
+	}
+	c.Guard.Workspace = filepath.Clean(abs)
+	return nil
+}
+
 // NeedsSetup 判断当前配置是否足以启动 daemon；首次启动时 TUI 会进入配置向导。
 func NeedsSetup(path string) bool {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -161,6 +195,9 @@ func (c *Config) Save(path string) error {
 		return err
 	}
 	c.NormalizeUI()
+	if err := c.NormalizeGuard(); err != nil {
+		return err
+	}
 	var buf bytes.Buffer
 	if err := toml.NewEncoder(&buf).Encode(c); err != nil {
 		return fmt.Errorf("encode config: %w", err)

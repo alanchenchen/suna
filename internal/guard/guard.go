@@ -55,6 +55,7 @@ type Guard struct {
 	userBlocked  []blockRule
 	userAllowed  []allowedRule
 	allowedCmds  []string
+	workspace    string
 	sessionID    string
 	llmReviewer  LLMReviewer
 	recentCtx    []string
@@ -91,6 +92,10 @@ func NewGuardWithConfig(db *sql.DB, sessionID string, blockedPatterns []string, 
 }
 
 func NewGuardWithConfigAndMode(db *sql.DB, sessionID string, mode Mode, blockedPatterns []string, blockedReasons []string, allowedPatterns []string, allowedTools []string) *Guard {
+	return NewGuardWithConfigModeAndWorkspace(db, sessionID, mode, "", blockedPatterns, blockedReasons, allowedPatterns, allowedTools)
+}
+
+func NewGuardWithConfigModeAndWorkspace(db *sql.DB, sessionID string, mode Mode, workspace string, blockedPatterns []string, blockedReasons []string, allowedPatterns []string, allowedTools []string) *Guard {
 	g := &Guard{
 		db:        db,
 		sessionID: sessionID,
@@ -98,6 +103,7 @@ func NewGuardWithConfigAndMode(db *sql.DB, sessionID string, mode Mode, blockedP
 	}
 	g.blockedRules = g.builtinBlockedRules()
 	g.allowedCmds = g.builtinAllowedCommands()
+	g.workspace = normalizeWorkspaceRoot(workspace)
 	for i, p := range blockedPatterns {
 		re, err := regexp.Compile(p)
 		if err != nil {
@@ -143,6 +149,13 @@ func (g *Guard) Mode() Mode {
 	return g.mode
 }
 
+func (g *Guard) Workspace() string {
+	if g == nil {
+		return ""
+	}
+	return g.workspace
+}
+
 // SetLLMReviewer 注入 LLM 审查函数，由 Agent 在创建 Guard 后调用
 func (g *Guard) SetLLMReviewer(reviewer LLMReviewer) {
 	g.llmReviewer = reviewer
@@ -155,6 +168,11 @@ func (g *Guard) SetRecentContext(messages []string) {
 
 func (g *Guard) Check(ctx context.Context, tool string, params map[string]any) *GuardResult {
 	risk := g.assessRisk(tool, params)
+
+	if blocked, reason := g.checkWorkspace(tool, params); blocked {
+		g.audit(ctx, tool, params, risk, "workspace_reject", reason)
+		return &GuardResult{Decision: Reject, Reason: reason, Risk: risk}
+	}
 
 	if blocked, reason := g.checkBlocked(tool, params); blocked {
 		g.audit(ctx, tool, params, risk, "blocked", reason)
@@ -280,6 +298,10 @@ func (g *Guard) checkBlocked(tool string, params map[string]any) (bool, string) 
 		target, _ = params["path"].(string)
 	case "writehttp":
 		target, _ = params["url"].(string)
+	case "readfile", "listdir":
+		target, _ = params["path"].(string)
+	case "readhttp":
+		target, _ = params["url"].(string)
 	default:
 		return false, ""
 	}
@@ -398,6 +420,8 @@ func (g *Guard) assessRisk(tool string, params map[string]any) RiskLevel {
 			return RiskHigh
 		}
 		return RiskMedium
+	case "readfile", "listdir", "readhttp":
+		return RiskLow
 	default:
 		// Unknown Act tools are never safe-by-default. New capabilities must be
 		// explicitly classified before they can bypass confirmation.

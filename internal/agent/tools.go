@@ -42,14 +42,8 @@ func (a *Agent) executeTool(ctx context.Context, id string, name string, params 
 	if !ok {
 		return tool.ErrorResult(fmt.Sprintf("tool %q not found", name))
 	}
-	if name == "readfile" {
-		if path, ok := params["path"].(string); ok {
-			if sensitive, reason := guard.IsSensitivePath(path); sensitive {
-				return tool.ErrorResult(fmt.Sprintf("blocked: sensitive file (%s). Reading credential/secret files is not allowed.", reason))
-			}
-		}
-	}
-	if t.Category() == tool.Act {
+	if a.shouldGuardTool(name) {
+		a.prepareWorkspaceParams(name, params)
 		result := a.guard.Check(ctx, name, params)
 		if result.Decision == guard.Reject {
 			return tool.ErrorResult("blocked: " + result.Reason)
@@ -59,6 +53,9 @@ func (a *Agent) executeTool(ctx context.Context, id string, name string, params 
 				return tool.ErrorResult("blocked: user rejected guard confirmation")
 			}
 		}
+	}
+	if err := sensitiveReadError(name, params); err != "" {
+		return tool.ErrorResult(err)
 	}
 	result := t.Execute(ctx, params)
 	if !result.IsError {
@@ -183,7 +180,8 @@ func (e subtaskExecutor) ExecuteTool(ctx context.Context, id string, name string
 	if !ok {
 		return tool.ErrorResult(fmt.Sprintf("tool %q not allowed for subtask", name))
 	}
-	if t.Category() == tool.Act {
+	if e.agent.shouldGuardTool(name) {
+		e.agent.prepareWorkspaceParams(name, params)
 		result := e.agent.guard.Check(ctx, name, params)
 		if result.Decision == guard.Reject {
 			return tool.ErrorResult("blocked: " + result.Reason)
@@ -194,11 +192,39 @@ func (e subtaskExecutor) ExecuteTool(ctx context.Context, id string, name string
 			}
 		}
 	}
+	if err := sensitiveReadError(name, params); err != "" {
+		return tool.ErrorResult(err)
+	}
 	res := t.Execute(ctx, params)
 	if !res.IsError {
 		res.Content = guard.MaskSensitiveContent(res.Content)
 	}
 	return res
+}
+
+func (a *Agent) shouldGuardTool(name string) bool {
+	return name != "askuser" && name != "spawn"
+}
+
+func (a *Agent) prepareWorkspaceParams(name string, params map[string]any) {
+	if name != "exec" || params == nil || a.guard == nil || a.guard.Workspace() == "" {
+		return
+	}
+	if cwd, _ := params["cwd"].(string); strings.TrimSpace(cwd) == "" {
+		// workspace 启用后，未显式指定 cwd 的 exec 默认从 workspace 根目录执行。
+		params["cwd"] = a.guard.Workspace()
+	}
+}
+
+func sensitiveReadError(name string, params map[string]any) string {
+	if name != "readfile" || params == nil {
+		return ""
+	}
+	path, _ := params["path"].(string)
+	if sensitive, reason := guard.IsSensitivePath(path); sensitive {
+		return fmt.Sprintf("blocked: sensitive file (%s). Reading credential/secret files is not allowed.", reason)
+	}
+	return ""
 }
 
 type subtaskSink struct {

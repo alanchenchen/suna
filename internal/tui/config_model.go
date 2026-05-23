@@ -20,7 +20,7 @@ type configRow struct{ kind, name, label, value string }
 
 func (r configRow) selectable() bool {
 	switch r.kind {
-	case "section", "general_language", "general_theme", "general_guard", "open_config_dir", "add_model", "edit_model", "activate_model", "delete_model", "check_model", "model", "empty":
+	case "section", "general_language", "general_theme", "general_guard", "general_workspace", "open_config_dir", "add_model", "edit_model", "activate_model", "delete_model", "check_model", "model", "empty":
 		return true
 	default:
 		return false
@@ -61,6 +61,7 @@ func (t *TUI) configHomeRows() []configRow {
 		{"general_language", "", "  " + t.tr("tui.config.language"), t.currentLangDisplay()},
 		{"general_theme", "", "  " + t.tr("tui.config.theme"), t.themeDisplay()},
 		{"general_guard", "", "  " + t.tr("tui.config.guard_mode"), t.guardModeDisplay()},
+		{"general_workspace", "", "  " + t.tr("tui.config.workspace"), t.workspaceDisplay()},
 		{"info", "", "", ""},
 		{"label", "", t.tr("tui.config.local_files"), ""},
 		{"info", "", "  " + t.tr("tui.config.config_path"), configFilePath()},
@@ -143,6 +144,8 @@ func (t *TUI) handleConfigAction(rows []configRow) tea.Cmd {
 		return t.toggleTheme()
 	case "general_guard":
 		return t.toggleGuardMode()
+	case "general_workspace":
+		return t.openWorkspaceForm()
 	case "open_config_dir":
 		return t.openConfigDirCmd()
 	case "add_model":
@@ -263,6 +266,11 @@ func (t *TUI) leaveConfig() tea.Cmd {
 		t.configDeleteConfirm = ""
 		return nil
 	}
+	if t.configWorkspaceOpen {
+		t.configWorkspaceOpen = false
+		t.configFormOpen = false
+		return nil
+	}
 	if t.configPage == "detail" {
 		t.configPage = "models"
 		t.configCursor = 0
@@ -323,6 +331,14 @@ func (t *TUI) guardModeDisplay() string {
 	default:
 		return t.tr("tui.guard.mode.ask") + " · " + t.tr("tui.guard.mode.ask.desc")
 	}
+}
+
+func (t *TUI) workspaceDisplay() string {
+	workspace := strings.TrimSpace(t.configState.Workspace)
+	if workspace == "" {
+		return t.tr("tui.config.disabled")
+	}
+	return workspace
 }
 
 func normalizeGuardMode(mode string) string {
@@ -403,6 +419,9 @@ func (t *TUI) viewConfig() string {
 		base := t.viewConfigPage()
 		return overlayBlock(base, t.viewProviderKind())
 	}
+	if t.configWorkspaceOpen {
+		return t.viewWorkspaceForm()
+	}
 	if t.configFormOpen {
 		return t.viewProviderForm()
 	}
@@ -458,7 +477,7 @@ func (t *TUI) viewConfigPage() string {
 	if t.configDeleteConfirm != "" {
 		sb.WriteString("\n" + t.renderConfigDeleteConfirm() + "\n")
 	}
-	if help := t.configHelp(); help != "" {
+	if help := t.configHelp(rows); help != "" {
 		sb.WriteString("\n" + styleDim.Render("  "+help) + "\n")
 	}
 	return sb.String()
@@ -476,9 +495,37 @@ func (t *TUI) configTitle() string {
 	return t.tr("tui.config.title")
 }
 
-func (t *TUI) configHelp() string {
+func (t *TUI) configHelp(rows []configRow) string {
 	if t.configDeleteConfirm != "" {
 		return ""
+	}
+	if t.configCursor >= 0 && t.configCursor < len(rows) {
+		switch rows[t.configCursor].kind {
+		case "section":
+			return t.tr("tui.config.help_open_models")
+		case "general_language":
+			return t.tr("tui.config.help_language")
+		case "general_theme":
+			return t.tr("tui.config.help_theme")
+		case "general_guard":
+			return t.tr("tui.config.help_guard")
+		case "general_workspace":
+			return t.tr("tui.config.help_workspace")
+		case "open_config_dir":
+			return t.tr("tui.config.help_open_config_dir")
+		case "add_model":
+			return t.tr("tui.config.help_add_model")
+		case "model":
+			return t.tr("tui.config.help_model_row")
+		case "edit_model":
+			return t.tr("tui.config.help_edit_model")
+		case "activate_model":
+			return t.tr("tui.config.help_activate_model")
+		case "check_model":
+			return t.tr("tui.config.help_check_model")
+		case "delete_model":
+			return t.tr("tui.config.help_delete_model")
+		}
 	}
 	switch t.configPage {
 	case "models":

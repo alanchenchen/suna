@@ -18,6 +18,7 @@ type ConfigSetParams struct {
 	Locale      string
 	Theme       string
 	GuardMode   string
+	Workspace   *string
 }
 
 type ConfigModel struct {
@@ -125,6 +126,9 @@ func (a *Agent) UpdateConfig(params ConfigSetParams) (*config.Config, error) {
 		}
 		if params.GuardMode != "" {
 			cfg.Guard.Mode = config.GuardConfig{Mode: params.GuardMode}.ModeOrDefault()
+		}
+		if params.Workspace != nil {
+			cfg.Guard.Workspace = *params.Workspace
 		}
 	default:
 		return nil, fmt.Errorf("unknown config action %q", params.Action)

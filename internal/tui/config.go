@@ -96,6 +96,9 @@ func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if t.configKindOpen {
 		return t.updateProviderKind(msg)
 	}
+	if t.configWorkspaceOpen {
+		return t.updateWorkspaceForm(msg)
+	}
 	if t.configFormOpen {
 		return t.updateProviderForm(msg)
 	}
@@ -262,6 +265,7 @@ func (t *TUI) updateProviderForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (t *TUI) openProviderForm(ref string, mc *tuiModelConfig) {
+	t.configWorkspaceOpen = false
 	t.configFormOpen = true
 	t.configFormTitle = "tui.config.provider.edit"
 	t.configEditingName = ref
@@ -269,6 +273,63 @@ func (t *TUI) openProviderForm(ref string, mc *tuiModelConfig) {
 		t.configFormTitle = "tui.config.provider.add"
 	}
 	t.initProviderForm(mc)
+}
+
+func (t *TUI) openWorkspaceForm() tea.Cmd {
+	t.configWorkspaceOpen = true
+	t.configFormOpen = true
+	t.configFormTitle = "tui.config.workspace.edit"
+	t.configEditingName = ""
+	t.initWorkspaceForm()
+	return t.configInputs[t.configInputFocus].Focus()
+}
+
+func (t *TUI) initWorkspaceForm() {
+	in := textinput.New()
+	in.Prompt = t.tr("tui.config.workspace") + ": "
+	in.Placeholder = t.tr("tui.config.workspace.placeholder")
+	in.SetValue(t.configState.Workspace)
+	in.SetWidth(64)
+	styles := textinput.DefaultStyles(false)
+	styles.Focused.Prompt = lipgloss.NewStyle().Foreground(ColorBrand).Bold(true)
+	styles.Blurred.Prompt = lipgloss.NewStyle().Foreground(ColorDim)
+	in.SetStyles(styles)
+	t.configInputs = []textinput.Model{in}
+	t.configInputFocus = 0
+	t.focusConfigInput(0)
+}
+
+func (t *TUI) updateWorkspaceForm(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch m := msg.(type) {
+	case tea.WindowSizeMsg:
+		t.width, t.height, t.ready = m.Width, m.Height, true
+		return t, nil
+	case tea.KeyPressMsg:
+		t.configError = ""
+		switch m.String() {
+		case "ctrl+c":
+			t.doQuit()
+			return t, tea.Quit
+		case "esc":
+			t.configWorkspaceOpen = false
+			t.configFormOpen = false
+			return t, nil
+		case "enter":
+			return t, t.saveWorkspaceForm()
+		}
+	}
+	var cmd tea.Cmd
+	t.configInputs[t.configInputFocus], cmd = t.configInputs[t.configInputFocus].Update(msg)
+	return t, cmd
+}
+
+func (t *TUI) saveWorkspaceForm() tea.Cmd {
+	workspace := ""
+	if len(t.configInputs) > 0 {
+		workspace = strings.TrimSpace(t.configInputs[0].Value())
+	}
+	t.configState.Workspace = workspace
+	return t.sendConfigSet(protocol.ConfigSetParams{Action: protocol.ConfigActionUpdateGeneral, Locale: string(t.i18n.Locale()), Theme: t.theme, GuardMode: t.configState.GuardMode, Workspace: &workspace})
 }
 
 func (t *TUI) initProviderForm(mc *tuiModelConfig) {

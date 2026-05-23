@@ -197,15 +197,17 @@ func welcomeBoxStyle(width int) lipgloss.Style {
 
 func (t *TUI) welcomeMenuItems() []welcomeItem {
 	noModel := !t.hasConfiguredModel()
-	items := []welcomeItem{{"tui.welcome.new", "", actionNew, false}}
+	var items []welcomeItem
 	if noModel {
+		items = append(items, welcomeItem{"tui.welcome.new", "", actionNew, false})
 		items = append(items, welcomeItem{"tui.welcome.config", "", actionConfig, false})
 		items = append(items, welcomeItem{"tui.welcome.help_menu", "", actionHelp, false})
 		return items
 	}
-	if !noModel && t.daemonStatus.Sessions != nil && t.daemonStatus.Sessions.LastID != "" {
+	if t.daemonStatus.Sessions != nil && t.daemonStatus.Sessions.LastID != "" {
 		items = append(items, welcomeItem{"tui.welcome.resume", "", actionResume, false})
 	}
+	items = append(items, welcomeItem{"tui.welcome.new", "", actionNew, false})
 	items = append(items, welcomeItem{"tui.welcome.config", "", actionConfig, false})
 	items = append(items, welcomeItem{"tui.welcome.help_menu", "", actionHelp, false})
 	return items
@@ -234,8 +236,19 @@ func (t *TUI) renderWelcomeInfo() string {
 	if s.Memory != nil {
 		rows = append(rows, fmt.Sprintf("%-8s %s", t.tr("tui.status.memory"), styleHL.Render(fmt.Sprintf("%d active · %d core · %d queued", s.Memory.Active, s.Memory.Core, s.Memory.Queued))))
 	}
-	if s.Sessions != nil {
-		rows = append(rows, fmt.Sprintf("%-8s %s", t.tr("tui.status.session"), styleHL.Render(fmt.Sprintf("%d active · %d done", s.Sessions.Active, s.Sessions.Completed))))
-	}
+	rows = append(rows, fmt.Sprintf("%-8s %s", t.tr("tui.status.guard"), styleHL.Render(t.welcomeGuardStatus())))
+	rows = append(rows, fmt.Sprintf("%-8s %s", t.tr("tui.status.workspace"), styleHL.Render(t.welcomeWorkspaceStatus())))
 	return strings.Join(rows, "\n")
+}
+
+func (t *TUI) welcomeGuardStatus() string {
+	mode := normalizeGuardMode(t.configState.GuardMode)
+	return mode
+}
+
+func (t *TUI) welcomeWorkspaceStatus() string {
+	if strings.TrimSpace(t.configState.Workspace) == "" {
+		return t.tr("tui.config.disabled")
+	}
+	return t.tr("tui.config.configured")
 }

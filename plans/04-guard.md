@@ -5,9 +5,11 @@
 
 ## 当前实现事实
 
-Guard 已有最低安全闭环，支持 4 种 mode，真实 confirm 和 LLM review：
+Guard 已有最低安全闭环，支持 4 种 mode、workspace 硬边界、真实 confirm 和 LLM review：
 
 - **Guard Mode**: `readonly` / `ask` / `auto` / `smart`，默认 `ask`，可通过 TUI Config 切换。
+- **Guard 覆盖范围**: 除 `askuser` 和 `spawn` 外，所有 tool call 都会在实际执行前进入 Guard；`spawn` 本身跳过，但 subtask 内部工具继续继承同一个 Guard。
+- **Workspace 硬边界**: `[guard].workspace` 默认为空，不启用限制；非空时必须是存在目录，Guard 会优先拦截 workspace 外的本地文件路径和 `exec` 明显路径访问，返回明确 reject 原因。
 - **Mode 策略**:
   - `readonly`: 只允许 low risk 且只读的操作；其他操作 reject，不弹窗。
   - `ask`: Low risk auto approve，Medium/High risk 真实暂停等待用户确认。
@@ -18,7 +20,7 @@ Guard 已有最低安全闭环，支持 4 种 mode，真实 confirm 和 LLM revi
 - **Modify 处理**: 当前不做自动参数改写，作为带 suggestion 的 confirm 处理。
 - **Sub-agent**: 通过 `newGuardForSession()` 继承主 Guard policy、blocked/allowed、audit DB。
 - **审计**: 当前记录 Guard 决策本身；tool 执行后的最终 result/error 暂未回写到 audit_log。审计参数会脱敏/摘要化，当前暂未提供读取 UI 或查询工具。
-- **TUI**: Guard confirm overlay 显示 tool/risk/reason/suggestion/params，支持键位操作；Config home 可切换 Guard Mode。
+- **TUI**: Guard confirm overlay 显示 tool/risk/reason/suggestion/params，支持 `Y/A` approve、`N/R/Esc` reject、方向键选择、`Enter` 确认所选；Config home 可切换 Guard Mode 并编辑 Workspace。
 - **IPC**: `MethodGuardReply` / `NotifyGuardConfirm` / `GuardConfirmParams` / `GuardReplyParams`；server 用 `pendingGuards sync.Map` 管理。
 
 未实现：
@@ -30,10 +32,11 @@ Guard 已有最低安全闭环，支持 4 种 mode，真实 confirm 和 LLM revi
 
 Guard 决策顺序固定如下：
 
-1. 命中内置或用户 blocked rule -> `reject`，不询问。
-2. 命中用户 allowed rule -> `approve`，不询问。
-3. 根据 tool 和参数计算 `low` / `medium` / `high`。
-4. 根据 guard mode 决定自动放行、拒绝、询问或 LLM review。
+1. `[guard].workspace` 非空且操作解析到 workspace 外 -> `reject`，不询问。
+2. 命中内置 blocked rule 或用户 `[[guard.blocked]]` -> `reject`，不询问。
+3. 命中用户 `[[guard.allowed]]` -> `approve`，不询问。
+4. 根据 tool 和参数计算 `low` / `medium` / `high`。
+5. 根据 guard mode 决定自动放行、拒绝、询问或 LLM review。
 
 ### Mode 行为矩阵
 
@@ -48,7 +51,8 @@ Guard 决策顺序固定如下：
 - `confirm` 表示 TUI 显示 Guard confirmation overlay，由用户选择 approve/reject。
 - `LLM review` 表示先让 active model 审查，返回 approve/reject/confirm/modify；失败或不确定时转 confirm。
 - `auto` 不是“自动判断风险后询问”，而是“除硬拦截外全部自动放行”。
-- 用户 allowed rule 优先级高于 mode 和 risk，但低于硬拦截。
+- workspace 硬边界优先级最高；用户 allowed rule、`auto`、用户确认和 LLM review 都不能绕过 workspace reject。
+- 用户 allowed rule 优先级高于 mode 和 risk，但低于 workspace 与其他硬拦截。
 
 ### Risk 分级矩阵
 
@@ -58,6 +62,7 @@ Guard 决策顺序固定如下：
 | `writefile` | 当前无 low 分支 | 普通文件写入（含新建和覆盖） | 敏感路径、系统路径、profile、启动项、CI、git hooks、高影响配置 |
 | `editfile` | 当前无 low 分支 | 普通文件修改 | 敏感路径、系统路径、profile、启动项、CI、git hooks、高影响配置 |
 | `writehttp` | 当前无 low 分支 | 非 DELETE 写请求 | method 为 `DELETE` |
+| `readfile` / `listdir` / `readhttp` | 只读感知工具 | 当前无 medium 分支 | 当前无 high 分支 |
 | 其他 Act 工具 | 当前无 low 分支 | 未显式分类的 Act 工具默认 medium | 当前无 high 分支 |
 
 `RiskLow` 被刻意收窄，只代表“可证明只读”。除 `readonly` mode 外，low risk 会自动放行，因此不能把“不确定但看起来还好”的操作归为 low。轻量 shell analyzer 的原则是：
@@ -108,9 +113,21 @@ Suna: 硬规则兜底 + LLM 理解意图后动态决策
 ## 审查流程
 
 ```
-Action 请求 (WriteFile / EditFile / Exec / WriteHTTP)
+Tool 请求 (ReadFile / ListDir / ReadHTTP / WriteFile / EditFile / Exec / WriteHTTP)
   │
   ▼
+┌──────────────────────────┐
+│  Stage 0: Workspace 检查 │  确定性，零延迟
+│                          │
+│  guard.workspace 为空时跳过│
+│  非空时检查本地路径边界    │
+│  - 文件类 path            │
+│  - exec.cwd              │
+│  - exec 明显命令路径       │
+│  命中外部路径 → 直接拒绝   │
+└──────────┬───────────────┘
+           │
+           ▼
 ┌──────────────────────────┐
 │  Stage 1: 硬规则检查      │  确定性，零延迟
 │  永远拦截的操作            │
@@ -215,6 +232,8 @@ Windows:
 
 ```toml
 [guard]
+mode = "ask"
+workspace = ""                            # 空表示不限制；非空时必须是存在目录
 review_model = "fast"                    # 用哪个模型做 LLM 审查
 
 # 用户自定义拦截 (追加到内置规则之上)
@@ -222,9 +241,17 @@ review_model = "fast"                    # 用哪个模型做 LLM 审查
 pattern = "npm\\s+publish"
 reason = "禁止发布 npm 包"
 
-# 用户自定义放行 (优先于 mode/risk，低于硬拦截)
+[[guard.blocked]]
+pattern = "(^|/)private-notes(/|$)"
+reason = "禁止读取私人笔记目录"
+
+[[guard.blocked]]
+pattern = "169\\.254\\.169\\.254|localhost|127\\.0\\.0\\.1"
+reason = "禁止访问 metadata/local HTTP 服务"
+
+# 用户自定义放行 (优先于 mode/risk，低于 workspace 和其他硬拦截)
 [[guard.allowed]]
-pattern = "ls|cat|head|tail|grep|find|wc"
+pattern = "^(ls|pwd|git status|git diff)(\\s|$)"
 tool = "exec"
 reason = "只读命令直接放行"
 
@@ -234,7 +261,74 @@ tool = "readfile"
 reason = "读文件直接放行"
 ```
 
-内置规则不可配置、不可覆盖。用户自定义规则追加在内置规则之后。
+内置规则不可配置、不可覆盖。用户自定义规则追加在内置规则之后。`guard.workspace` 是最高优先级硬边界，启用后会在 blocked/allowed/mode/LLM review 之前执行。
+
+### Guard Rule Pattern
+
+`guard.blocked.pattern` 和 `guard.allowed.pattern` 都是 Go regexp，匹配当前 tool 的 guard target。匹配的是 tool 参数里的原始字符串，不是 workspace 解析后的真实路径。
+
+当前 target 映射：
+
+| Tool | Pattern 匹配对象 | 示例 target |
+|---|---|---|
+| `exec` | `command` | `git status --short` |
+| `readfile` | `path` | `docs/plan.md` |
+| `listdir` | `path` | `/Users/me/project/private-notes` |
+| `writefile` | `path` | `src/generated.ts` |
+| `editfile` | `path` | `internal/guard/guard.go` |
+| `readhttp` | `url` | `http://169.254.169.254/latest/meta-data` |
+| `writehttp` | `url` | `https://api.example.com/items/1` |
+
+常用写法：
+
+```toml
+# 禁止发布 npm 包。\\s+ 表示一个或多个空白字符。
+[[guard.blocked]]
+pattern = "npm\\s+publish"
+reason = "禁止发布 npm 包"
+
+# 禁止读取或列出 private-notes 目录；同时覆盖相对路径和绝对路径里的路径段。
+[[guard.blocked]]
+pattern = "(^|/)private-notes(/|$)"
+reason = "禁止读取私人笔记目录"
+
+# 禁止访问云 metadata 和本机 HTTP 服务，适用于 readhttp/writehttp 的 url。
+[[guard.blocked]]
+pattern = "169\\.254\\.169\\.254|localhost|127\\.0\\.0\\.1"
+reason = "禁止访问 metadata/local HTTP 服务"
+
+# 只允许 exec 中几类只读命令绕过确认。
+[[guard.allowed]]
+pattern = "^(ls|pwd|git status|git diff)(\\s|$)"
+tool = "exec"
+reason = "常用只读命令直接放行"
+
+# 只允许读取 docs 目录下的 markdown 文件。
+[[guard.allowed]]
+pattern = "^docs/.*\\.md$"
+tool = "readfile"
+reason = "允许读取文档"
+```
+
+注意事项：
+- TOML 字符串里的反斜杠需要转义，例如 regexp 的 `\s` 要写成 `\\s`，`.` 字面量要写成 `\\.`。
+- `tool` 为空表示匹配所有 guard target；建议给 `allowed` rule 显式写 `tool`，避免误放行其它工具。
+- `blocked` 优先于 `allowed`。如果同一个 target 同时命中 blocked 和 allowed，最终是 reject。
+- `allowed` 不能绕过 workspace、内置 blocked rule、用户 blocked rule。
+- `readfile`、`listdir`、`readhttp` 通过 workspace 和 blocked 后通常是 low risk，会自动放行；需要额外限制时使用 `[[guard.blocked]]`。
+
+### Workspace 边界
+
+`guard.workspace` 为空时不启用限制。非空时，配置加载会将其展开为绝对路径并要求目录存在；配置非法会导致加载失败，避免安全配置写错后静默降级。
+
+当前检查范围：
+- `readfile.path`、`listdir.path`、`writefile.path`、`editfile.path` 必须解析到 workspace 内。
+- `exec.cwd` 必须解析到 workspace 内；启用 workspace 后，未传 `cwd` 的 `exec` 会默认使用 workspace 根目录。
+- `exec.command` 中明显的绝对路径、相对路径和重定向目标会按 `cwd` 解析，解析到 workspace 外则直接 reject。
+- `exec.command` 中出现 shell 变量展开（如 `$HOME`、`${VAR}`）时无法可靠证明目标路径，会保守 reject。
+- `readhttp`/`writehttp` 仍会经过 Guard，但 workspace 对 URL 不适用。
+
+路径解析会处理 `~`、相对路径、绝对路径和 symlink；新建文件会解析最近存在的父目录，避免通过 workspace 内 symlink 写到外部。该机制是 Guard 级预执行检查，不是 OS sandbox，不能完全阻止程序运行后内部访问 workspace 外文件。
 
 注意：`guard.allowed.reason` 当前可以持久化到 config，但 `newGuardForSession()` 创建 Guard 时只传递 pattern/tool，放行原因暂未进入 Guard 决策或审计输出。
 
@@ -471,7 +565,7 @@ LLM review 的输出处理：
 2. Core 通过 EventGuardConfirm 暂停 tool 执行
 3. IPC 发送 NotifyGuardConfirm 到 TUI
 4. TUI 渲染 Guard confirm overlay
-5. 用户选择 approve/reject
+5. 用户通过 `Y/A` approve、`N/R/Esc` reject，或方向键选择后 `Enter` 确认
 6. TUI 通过 MethodGuardReply 回传决策
 7. Core 通过 Reply chan 收到决策
 8. 执行或拒绝 tool

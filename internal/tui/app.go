@@ -70,6 +70,7 @@ type TUI struct {
 	configCursor        int
 	configSetupMode     bool
 	configFormOpen      bool
+	configWorkspaceOpen bool
 	configKindOpen      bool
 	configKindCursor    int
 	configDeleteCursor  int
@@ -546,8 +547,12 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 			return
 		}
 		if t.configFormOpen {
+			wasWorkspace := t.configWorkspaceOpen
 			t.configFormOpen = false
-			if t.configEditingName != "" {
+			t.configWorkspaceOpen = false
+			if wasWorkspace {
+				t.configPage = "home"
+			} else if t.configEditingName != "" {
 				t.openConfigDetail(t.configEditingName)
 			} else {
 				t.configPage = "models"
