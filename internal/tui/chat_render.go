@@ -367,21 +367,35 @@ func truncateRunes(s string, maxWidth int) string {
 }
 
 func wrapLine(s string, maxWidth int) []string {
+	return wrapLineLimit(s, maxWidth, 0)
+}
+
+func wrapLineLimit(s string, maxWidth int, maxLines int) []string {
 	if maxWidth <= 0 || lipgloss.Width(s) <= maxWidth {
 		return []string{s}
 	}
-	runes := []rune(s)
 	var lines []string
-	for len(runes) > 0 {
-		end := len(runes)
-		for end > 0 && lipgloss.Width(string(runes[:end])) > maxWidth {
-			end--
+	var current []rune
+	for _, r := range s {
+		candidate := append(current, r)
+		if len(current) > 0 && lipgloss.Width(string(candidate)) > maxWidth {
+			lines = append(lines, string(current))
+			if maxLines > 0 && len(lines) >= maxLines {
+				return append(lines, "...")
+			}
+			current = current[:0]
 		}
-		if end <= 0 {
-			end = 1
+		current = append(current, r)
+		if lipgloss.Width(string(current)) > maxWidth {
+			lines = append(lines, string(current))
+			if maxLines > 0 && len(lines) >= maxLines {
+				return append(lines, "...")
+			}
+			current = current[:0]
 		}
-		lines = append(lines, string(runes[:end]))
-		runes = runes[end:]
+	}
+	if len(current) > 0 {
+		lines = append(lines, string(current))
 	}
 	return lines
 }

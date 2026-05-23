@@ -25,3 +25,13 @@ func TestDefaultFenceLanguageOnlyAddsOpeningFence(t *testing.T) {
 		t.Fatalf("expected only opening fence to get default language:\n%s", out)
 	}
 }
+
+func TestWrapLineLimitStopsAfterRequestedLines(t *testing.T) {
+	out := wrapLineLimit(strings.Repeat("x", 5000), 10, 2)
+	if len(out) != 3 {
+		t.Fatalf("expected two wrapped lines plus ellipsis, got %d", len(out))
+	}
+	if out[2] != "..." {
+		t.Fatalf("expected ellipsis marker, got %q", out[2])
+	}
+}

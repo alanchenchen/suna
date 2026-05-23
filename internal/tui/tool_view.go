@@ -100,11 +100,11 @@ func (t *TUI) renderToolEntry(te *toolEntry, nested bool) string {
 	}
 	label := t.displayToolIntentLabel(te)
 	maxWidth := max(20, t.width-lipgloss.Width(stripANSI(prefix))-8)
-	wrapped := wrapLine(label, maxWidth)
 	maxLines := 2
 	if isSubtask(te) {
 		maxLines = 3
 	}
+	wrapped := wrapLineLimit(label, maxWidth, maxLines)
 	if len(wrapped) > maxLines {
 		wrapped = wrapped[:maxLines]
 	}
@@ -250,7 +250,14 @@ func (t *TUI) appendSubtaskParams(lines *[]string, te *toolEntry, width int) {
 func splitWrapped(content string, width int, maxLines int) []string {
 	var out []string
 	for _, line := range strings.Split(strings.TrimRight(content, "\n"), "\n") {
-		for _, wrapped := range wrapLine(line, width) {
+		remaining := 0
+		if maxLines > 0 {
+			remaining = maxLines - len(out)
+			if remaining <= 0 {
+				return append(out, styleDim.Render("..."))
+			}
+		}
+		for _, wrapped := range wrapLineLimit(line, width, remaining) {
 			out = append(out, styleToolDim.Render(wrapped))
 			if maxLines > 0 && len(out) >= maxLines {
 				return append(out, styleDim.Render("..."))
