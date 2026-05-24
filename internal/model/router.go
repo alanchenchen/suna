@@ -117,7 +117,11 @@ func createProvider(mc config.ModelConfig) (Provider, error) {
 	switch {
 	case mc.IsAnthropic():
 		return NewAnthropicProvider(apiKey, mc.Model, mc.ContextWindow), nil
+	case mc.IsOpenAI():
+		// 内置 openai 固定走官方 Responses API；不要把自定义 base_url 混进这条路径。
+		return NewOpenAIResponsesProvider(apiKey, mc.Model, mc.ContextWindow), nil
 	default:
-		return NewOpenAIProvider(apiKey, mc.EffectiveBaseURL(), mc.Model, mc.ContextWindow), nil
+		// 其他 provider 视为 OpenAI-compatible，走 Chat Completions 协议并要求配置 base_url。
+		return NewOpenAIChatProvider(apiKey, mc.BaseURL, mc.Model, mc.ContextWindow), nil
 	}
 }

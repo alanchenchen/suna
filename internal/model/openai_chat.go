@@ -13,14 +13,14 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
-type OpenAIProvider struct {
+type OpenAIChatProvider struct {
 	client        *openai.Client
 	model         string
 	contextWindow int
 	httpClient    *http.Client
 }
 
-func NewOpenAIProvider(apiKey, baseURL, model string, contextWindow int) *OpenAIProvider {
+func NewOpenAIChatProvider(apiKey, baseURL, model string, contextWindow int) *OpenAIChatProvider {
 	cfg := openai.DefaultConfig(apiKey)
 	if baseURL != "" {
 		cfg.BaseURL = baseURL
@@ -31,7 +31,7 @@ func NewOpenAIProvider(apiKey, baseURL, model string, contextWindow int) *OpenAI
 	cfg.HTTPClient = httpClient
 
 	client := openai.NewClientWithConfig(cfg)
-	return &OpenAIProvider{
+	return &OpenAIChatProvider{
 		client:        client,
 		model:         model,
 		contextWindow: contextWindow,
@@ -39,7 +39,7 @@ func NewOpenAIProvider(apiKey, baseURL, model string, contextWindow int) *OpenAI
 	}
 }
 
-func (p *OpenAIProvider) Complete(ctx context.Context, req *CompletionRequest) (<-chan Chunk, error) {
+func (p *OpenAIChatProvider) Complete(ctx context.Context, req *CompletionRequest) (<-chan Chunk, error) {
 	ch := make(chan Chunk, 64)
 
 	messages := p.buildMessages(req)
@@ -173,39 +173,39 @@ func (p *OpenAIProvider) Complete(ctx context.Context, req *CompletionRequest) (
 	return ch, nil
 }
 
-func (p *OpenAIProvider) EstimateTokens(text string) int {
+func (p *OpenAIChatProvider) EstimateTokens(text string) int {
 	return len(text) / 4
 }
 
-func (p *OpenAIProvider) ContextWindow() int {
+func (p *OpenAIChatProvider) ContextWindow() int {
 	if p.contextWindow > 0 {
 		return p.contextWindow
 	}
 	return 128000
 }
 
-func (p *OpenAIProvider) resolveModel(m string) string {
+func (p *OpenAIChatProvider) resolveModel(m string) string {
 	if m != "" {
 		return m
 	}
 	return p.model
 }
 
-func (p *OpenAIProvider) resolveMaxTokens(m int) int {
+func (p *OpenAIChatProvider) resolveMaxTokens(m int) int {
 	if m > 0 {
 		return m
 	}
 	return 4096
 }
 
-func (p *OpenAIProvider) resolveTemperature(t float64) float64 {
+func (p *OpenAIChatProvider) resolveTemperature(t float64) float64 {
 	if t > 0 {
 		return t
 	}
 	return 0.7
 }
 
-func (p *OpenAIProvider) buildMessages(req *CompletionRequest) []openai.ChatCompletionMessage {
+func (p *OpenAIChatProvider) buildMessages(req *CompletionRequest) []openai.ChatCompletionMessage {
 	msgs := make([]openai.ChatCompletionMessage, 0, len(req.Messages)+1)
 	if req.System != "" {
 		msgs = append(msgs, openai.ChatCompletionMessage{
@@ -251,6 +251,7 @@ func (p *OpenAIProvider) buildMessages(req *CompletionRequest) []openai.ChatComp
 				}
 			}
 			if hasImagePart(m.Content) {
+				// Chat Completions 的多模态 content 必须是 part 数组；纯文本仍用 string content 提高兼容性。
 				msg.MultiContent = multi
 			} else {
 				msg.Content = joinStrings(textParts, "\n")
@@ -286,7 +287,7 @@ func openAIImageURL(block ContentBlock) string {
 	return "data:" + mimeType + ";base64," + block.MediaB64
 }
 
-func (p *OpenAIProvider) buildTools(tools []ToolDef) []openai.Tool {
+func (p *OpenAIChatProvider) buildTools(tools []ToolDef) []openai.Tool {
 	if len(tools) == 0 {
 		return nil
 	}
@@ -305,7 +306,7 @@ func (p *OpenAIProvider) buildTools(tools []ToolDef) []openai.Tool {
 	return result
 }
 
-func (p *OpenAIProvider) accumulateToolCalls(acc map[int]*openai.ToolCall) []ToolCall {
+func (p *OpenAIChatProvider) accumulateToolCalls(acc map[int]*openai.ToolCall) []ToolCall {
 	indexes := make([]int, 0, len(acc))
 	for idx := range acc {
 		indexes = append(indexes, idx)

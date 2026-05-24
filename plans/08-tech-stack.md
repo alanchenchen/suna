@@ -177,7 +177,8 @@ suna/
 │   │   ├── agent_tools.go       # 工具执行逻辑 + spawn 校验 + confirmGuard
 │   ├── model/                   # 多模型抽象 + 路由
 │   │   ├── provider.go          # Provider 接口 + 消息/工具定义
-│   │   ├── openai.go            # go-openai 适配
+│   │   ├── openai_responses.go  # OpenAI 官方 Responses API 适配
+│   │   ├── openai_chat.go       # OpenAI-compatible Chat Completions 适配
 │   │   ├── anthropic.go         # anthropic-sdk-go 适配
 │   │   ├── router.go            # 路由工具函数 (RouteWithLLM 已移除)
 │   │   └── token.go             # token 估算
@@ -305,6 +306,11 @@ model = "moonshot-v1-auto"
 base_url = "https://api.moonshot.cn/v1"
 strengths = ["前端生成", "多模态", "图片理解"]
 
+[[models]]
+provider = "openai"
+model = "gpt-4o"
+strengths = ["通用", "多模态"]
+
 [guard]
 mode = "ask"                      # readonly | ask | auto | smart (默认 ask)
 workspace = ""                     # 空表示不限制；非空时拦截 workspace 外本地文件/exec 操作
@@ -342,7 +348,7 @@ command = "echo checking"
 | `[[models]]` | array | 是 | 无 | 至少需要一个模型，否则 daemon/TUI 进入配置向导。 |
 | `models.provider` | string | 是 | 无 | provider 名称，也是 `credentials.toml` 里 API key 的分组名。 |
 | `models.model` | string | 是 | 无 | 模型 ID。模型 ref 为 `provider/model`。 |
-| `models.base_url` | string | 否 | provider 默认 | OpenAI-compatible endpoint；OpenAI 官方 provider 可留空。 |
+| `models.base_url` | string | 否 | 空 | OpenAI-compatible Chat Completions endpoint；`openai` 官方 Responses API 和 `anthropic` 可留空。 |
 | `models.context_window` | int | 否 | `anthropic` 为 `200000`，其它 provider 为 `128000` | 上下文窗口，用于顶栏展示和 compact 判断；TUI 会按 provider 显示默认值/placeholder，但未填写时不会自动写入 `config.toml`。 |
 | `models.strengths` | string[] | 否 | 空 | TUI 展示模型擅长项。 |
 | `[guard].mode` | string | 否 | `ask` | `readonly` / `ask` / `auto` / `smart`。具体决策见 `plans/04-guard.md`。 |
@@ -401,14 +407,14 @@ api_key = "..."
 api_key = "..."
 ```
 
-注意：`models.provider` 必须和 `credentials.toml` 的 table 名一致，否则 `ResolveAPIKey()` 会返回缺失 key。
+注意：`models.provider` 必须和 `credentials.toml` 的 table 名一致，否则 `ResolveAPIKey()` 会返回缺失 key。`provider = "openai"` 是保留值，固定走 OpenAI Responses API；任意其他非 `anthropic` provider 都按 OpenAI-compatible Chat Completions 调用，并需要 `base_url`。
 
 ## 当前实现状态
 
 | 模块 | 状态 | 当前能力 | 主要缺口 |
 |---|---|---|---|
 | Daemon / Protocol/Transport | Usable MVP | protocol schema、local transport、stream/config/session/guard 事件 | 多客户端边界和错误恢复仍需加强 |
-| Model | Usable MVP | OpenAI-compatible 与 Anthropic provider、tool calling、usage/context 透传；OpenAI-compatible 支持 streaming，Anthropic 当前非 streaming | provider ping、Anthropic usage/reasoning 映射和高级路由策略不完整 |
+| Model | Usable MVP | OpenAI Responses、OpenAI-compatible Chat 与 Anthropic provider；图片输入、tool calling、usage/context 透传；OpenAI/OpenAI-compatible 支持 streaming，Anthropic 当前非 streaming | provider ping、Anthropic usage/reasoning 映射和高级路由策略不完整 |
 | Core Agent | Usable MVP | agent loop、provider-dependent streaming、tool call 并发执行、AskUser、Spawn、session 管理 | 更细的取消/并发边界和长期任务恢复 |
 | Tools | Usable MVP | read/list/readhttp/exec/write/edit/writehttp/askuser/spawn | Windows 命令翻译层仍是后续项 |
 | Guard | Usable MVP | `readonly` / `ask` / `auto` / `smart`、硬拦截、风险分级、TUI confirm、LLM review | rules 编辑 UI、modify 参数改写、渐进信任未完成 |

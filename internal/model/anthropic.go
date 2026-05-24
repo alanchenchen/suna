@@ -180,6 +180,7 @@ func anthropicImageBlock(block ContentBlock) (anthropic.ContentBlockParamUnion, 
 		if mimeType == "" {
 			mimeType = "image/png"
 		}
+		// Anthropic base64 图片必须拆成 source.type/media_type/data，不能使用 OpenAI 的 data URL 结构。
 		return anthropic.NewImageBlockBase64(mimeType, block.MediaB64), true
 	}
 	if block.MediaURL != "" {

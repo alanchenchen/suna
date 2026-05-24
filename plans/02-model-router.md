@@ -14,17 +14,20 @@ type Provider interface {
 }
 ```
 
-### 两种 Provider 实现
+### 三类 Provider 实现
 
-| Provider | SDK | 适用场景 |
+| Provider | 协议/SDK | 适用场景 |
 |---|---|---|
-| `openai` | `go-openai` | OpenAI 官方 + 所有 OpenAI 兼容 API（GLM、Qwen、DeepSeek、Moonshot 等） |
-| `anthropic` | `anthropic-sdk-go` | Claude |
+| `openai` | OpenAI Responses API | OpenAI 官方模型 |
+| `anthropic` | `anthropic-sdk-go` Messages API | Claude |
+| 自定义 provider | OpenAI Chat Completions 兼容协议 (`go-openai`) | GLM、Qwen、DeepSeek、Moonshot、Ollama、vLLM 等 |
 
-为什么不是全部用 `go-openai`：
+为什么要拆开 OpenAI 官方和 OpenAI-compatible：
+- OpenAI 官方优先走 Responses API，便于后续统一工具调用、usage 和多模态事件。
+- OpenAI-compatible 厂商普遍兼容 Chat Completions，不一定支持 Responses API。
 - Anthropic 的 API 格式与 OpenAI 差异大（tool calling 格式、thinking blocks、content blocks）
 - 用官方 SDK 更稳定，减少适配 bug
-- 其他厂商（智谱、通义、DeepSeek、Kimi 等）全部兼容 OpenAI 协议，复用 `openai` provider
+- 其他厂商（智谱、通义、DeepSeek、Kimi 等）复用 Chat Completions provider，避免把各家 endpoint 内置到代码里
 
 ### 统一的消息格式
 
@@ -36,8 +39,9 @@ type Provider interface {
   Chunk              { Content, ToolCalls, Done, Usage }
 
 Provider 内部处理:
-  openai    → ChatCompletionStream → Chunk 流式输出，支持 usage
-  anthropic → Messages.New → 一次性 Message，再转换为 content/tool_calls/done
+  openai             → Responses API stream → Chunk 流式输出，支持 usage/tool_calls
+  openai-compatible  → ChatCompletionStream → Chunk 流式输出，支持 usage
+  anthropic          → Messages.New → 一次性 Message，再转换为 content/tool_calls/done
 ```
 
 ### Tool Calling 的统一
@@ -53,26 +57,38 @@ Provider 负责双向转换：
 - `CompletionRequest.Tools[]` → 各厂商格式
 - 各厂商的 tool_call 响应 → `Chunk.ToolCalls[]`
 
-当前差异：OpenAI-compatible provider 已走 streaming；Anthropic provider 当前使用非 streaming API，收到完整响应后再发一个 content chunk 和 done，usage/reasoning 暂未映射。
+当前差异：OpenAI 官方和 OpenAI-compatible provider 已走 streaming；Anthropic provider 当前使用非 streaming API，收到完整响应后再发一个 content chunk 和 done，usage/reasoning 暂未映射。
+
+### 多模态图片输入
+
+Suna 内部统一使用 `model.ContentBlock` 表示图片，Provider 层按协议转换：
+
+| Provider | 图片结构 |
+|---|---|
+| `openai` Responses | `input_image.image_url`，base64 图片先转为 `data:image/...;base64,...` |
+| OpenAI-compatible Chat | `content[]` 中的 `image_url.url`，base64 图片同样使用 data URL |
+| `anthropic` | `image.source`，URL 使用 `type=url`，base64 使用 `type=base64` + `media_type` + `data` |
+
+当前实际支持图片输入；`ContentAudio` 只是预留类型，尚未映射到各 provider 协议。
 
 ## Provider 类型
 
-用户添加模型时，选择 provider 类型。只有两种内置类型，其余全部走 OpenAI 兼容：
+用户添加模型时，选择 provider 类型。只有 `openai` 和 `anthropic` 是保留 provider ID，其余全部走 OpenAI-compatible Chat 协议：
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  provider = "openai"                                    │
-│  内置 base_url: https://api.openai.com/v1              │
-│  用户可覆盖 base_url                                    │
-│  SDK: go-openai                                         │
+│  API: https://api.openai.com/v1/responses               │
+│  协议: OpenAI Responses                                 │
 ├─────────────────────────────────────────────────────────┤
 │  provider = "anthropic"                                 │
-│  内置 base_url: https://api.anthropic.com               │
+│  API: Anthropic Messages                                │
 │  SDK: anthropic-sdk-go                                  │
 ├─────────────────────────────────────────────────────────┤
 │  provider = "openai-compatible" (或任意自定义名称)       │
 │  用户必须提供 base_url                                   │
-│  SDK: go-openai (改 baseURL)                            │
+│  协议: OpenAI Chat Completions                           │
+│  SDK: go-openai (改 baseURL)                             │
 │  覆盖: GLM, Kimi, DeepSeek, Qwen, Ollama, vLLM, ...   │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -91,7 +107,7 @@ Provider 负责双向转换：
 active_model = "glm/glm-4"
 
 # 模型列表，每个模型平级
-# openai-compatible 需要提供 base_url，openai/anthropic 不需要（有内置地址）
+# openai-compatible 需要提供 base_url，openai/anthropic 不需要。
 
 [[models]]
 provider = "glm"
@@ -155,8 +171,8 @@ api_key = "sk-xxx..."
 ### 设计说明
 
 - **唯一标识：`provider/model`** — 如 `glm/glm-4`、`anthropic/claude-sonnet-4-20250514`，全局唯一
-- **provider 类型决定 SDK**：`openai` → go-openai，`anthropic` → anthropic-sdk-go，其余 → go-openai 改 baseURL
-- **只有 openai 和 anthropic 内置 base_url**，其他 provider（如 glm/moonshot/deepseek）用户需提供 base_url
+- **provider 类型决定协议**：`openai` → Responses API，`anthropic` → Anthropic Messages，其余 → OpenAI Chat Completions 兼容协议
+- **只有 openai 和 anthropic 不需要 base_url**，其他 provider（如 glm/moonshot/deepseek）用户需提供 base_url
 - **凭证按 provider 维度**：同一厂商的多个模型共享一个 API key，不重复配置
 - **active_model**：指定主代理使用的模型，格式为 `provider/model`
 - **strengths 偏好标签**：用于 LLM 路由判断，描述该模型擅长的领域
