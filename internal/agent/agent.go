@@ -249,7 +249,7 @@ func (a *Agent) RecordUsage(ctx context.Context, modelID string, usage *model.Us
 	}
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	if err := a.sessions.SaveUsage(saveCtx, a.sessionID, modelID, usage.InputTokens, usage.OutputTokens, 0); err != nil {
+	if err := a.sessions.SaveUsage(saveCtx, a.sessionID, modelID, usage.InputTokens, usage.OutputTokens); err != nil {
 		logging.Error("agent", "save_usage_failed", err, logging.Event{"session_id": a.sessionID, "model": modelID})
 	}
 }

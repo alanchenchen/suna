@@ -50,7 +50,6 @@ type ModelConfig struct {
 	Model         string   `toml:"model"`
 	BaseURL       string   `toml:"base_url,omitempty"`
 	ContextWindow int      `toml:"context_window,omitempty"`
-	CostPer1K     float64  `toml:"cost_per_1k,omitempty"`
 	Strengths     []string `toml:"strengths,omitempty"`
 	APIKey        string   `toml:"-"`
 }

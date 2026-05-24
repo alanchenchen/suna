@@ -337,7 +337,7 @@ func decodeParams(src any, dst any) error {
 }
 
 func periodFromSummary(sum *memory.UsageSummary) protocol.UsagePeriod {
-	return protocol.UsagePeriod{InputTokens: sum.InputTokens, OutputTokens: sum.OutputTokens, Cost: sum.Cost, Requests: sum.Requests}
+	return protocol.UsagePeriod{InputTokens: sum.InputTokens, OutputTokens: sum.OutputTokens, Requests: sum.Requests}
 }
 
 func configToParams(cfg *config.Config) protocol.ConfigParams {

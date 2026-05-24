@@ -53,7 +53,7 @@ TUI 现在已经能跑通基本使用流：启动后进入 Welcome，进入 Chat
 | Config 删除确认 | 已实现 | `config.go`, `config_model.go` | 按钮式确认，默认 Cancel，`←→` 选择、`Enter` 确认、`Esc` 取消 |
 | 图片附件 | 已实现 MVP | `attachments.go` | Ctrl+V 检测图片 path/url/data URI，确认后加入附件列表；只发送 path/url |
 | 外部 i18n 文件加载 | 未接入主流程 | `i18n.go` | 有 `LoadLocale`，但当前主要用内置翻译表 |
-| Config 高级项 | 未实现 | `config.go` | 未编辑 guard rules/hooks/max_model_rps/cost_per_1k |
+| Config 高级项 | 未实现 | `config.go` | 未编辑 guard rules/hooks/max_model_rps |
 
 ---
 
@@ -712,8 +712,6 @@ Workspace 通过单字段表单编辑：
 - Guard rules 编辑。
 - Hooks 编辑。
 - max_model_rps。
-- cost_per_1k。
-- model pricing / usage budget。
 
 ---
 
@@ -852,7 +850,7 @@ internal/tui/
 |---|---|---|
 | Provider API ping | `T` 只有占位提示 | 中 |
 | Help 按页面分组 | 只覆盖 Chat 通用快捷键 | 中 |
-| Config 高级配置 | 未覆盖 guard/hooks/rate/cost | 低到中 |
+| Config 高级配置 | 未覆盖 guard/hooks/rate | 低到中 |
 | Provider/Model 分离表单 | 当前是一张 model connection 表单 | 中 |
 | 结构化 AskUser options | 当前只有 `[]string` | 低 |
 | AskUser 鼠标点击选择 | 未实现 | 低 |

@@ -286,7 +286,6 @@ provider = "glm"
 model = "glm-4"
 base_url = "https://open.bigmodel.cn/api/paas/v4"
 context_window = 128000
-cost_per_1k = 0.0
 strengths = ["后端", "Go", "API 开发", "通用"]
 
 [[models]]
@@ -346,7 +345,6 @@ command = "echo checking"
 | `models.model` | string | 是 | 无 | 模型 ID。模型 ref 为 `provider/model`。 |
 | `models.base_url` | string | 否 | provider 默认 | OpenAI-compatible endpoint；OpenAI 官方 provider 可留空。 |
 | `models.context_window` | int | 否 | `anthropic` 为 `200000`，其它 provider 为 `128000` | 上下文窗口，用于顶栏展示和 compact 判断；TUI 会按 provider 显示默认值/placeholder，但未填写时不会自动写入 `config.toml`。 |
-| `models.cost_per_1k` | float | 否 | `0` | 成本字段已持久化，当前 UI/计费统计未完整使用。 |
 | `models.strengths` | string[] | 否 | 空 | TUI 展示模型擅长项。 |
 | `[guard].mode` | string | 否 | `ask` | `readonly` / `ask` / `auto` / `smart`。具体决策见 `plans/04-guard.md`。 |
 | `[guard].workspace` | string | 否 | 空 | workspace 硬边界；非空时必须是存在目录。除 `askuser`/`spawn` 外所有 tool 都先过 Guard，文件类路径和 `exec.cwd`/明显命令路径解析到 workspace 外会直接 reject；`exec` shell 变量展开无法安全检查时也会 reject。优先级高于 allowed、auto、LLM review 和用户确认。 |
@@ -412,12 +410,12 @@ api_key = "..."
 | 模块 | 状态 | 当前能力 | 主要缺口 |
 |---|---|---|---|
 | Daemon / Protocol/Transport | Usable MVP | protocol schema、local transport、stream/config/session/guard 事件 | 多客户端边界和错误恢复仍需加强 |
-| Model | Usable MVP | OpenAI-compatible 与 Anthropic provider、tool calling、usage/context 透传；OpenAI-compatible 支持 streaming，Anthropic 当前非 streaming | provider ping、成本统计、Anthropic usage/reasoning 映射和高级路由策略不完整 |
+| Model | Usable MVP | OpenAI-compatible 与 Anthropic provider、tool calling、usage/context 透传；OpenAI-compatible 支持 streaming，Anthropic 当前非 streaming | provider ping、Anthropic usage/reasoning 映射和高级路由策略不完整 |
 | Core Agent | Usable MVP | agent loop、provider-dependent streaming、tool call 并发执行、AskUser、Spawn、session 管理 | 更细的取消/并发边界和长期任务恢复 |
 | Tools | Usable MVP | read/list/readhttp/exec/write/edit/writehttp/askuser/spawn | Windows 命令翻译层仍是后续项 |
 | Guard | Usable MVP | `readonly` / `ask` / `auto` / `smart`、硬拦截、风险分级、TUI confirm、LLM review | rules 编辑 UI、modify 参数改写、渐进信任未完成 |
 | Memory | Usable MVP | SQLite active memory、memory_queue、conversation_state、异步 full compaction、上下文压缩 | 记忆质量评估、用户可编辑记忆 UI |
-| TUI | Usable MVP | Welcome/Chat/Config/Help、模型配置、Workspace 配置、工具记录、AskUser、Guard overlay、compact、active memory list、context-aware help | Provider test、Config 高级项（guard rules/hooks/限速/成本）仍不完整 |
+| TUI | Usable MVP | Welcome/Chat/Config/Help、模型配置、Workspace 配置、工具记录、AskUser、Guard overlay、compact、active memory list、context-aware help | Provider test、Config 高级项（guard rules/hooks/限速）仍不完整 |
 | Logging | Usable MVP | 分类文本日志和 provider 调用日志已接入；具体文件分类以 `internal/logging` 当前实现为准 | UI 查看日志、导出诊断包 |
 | Capability | Basic | SKILL.md 加载和能力目录结构 | JS/WASM runner、MCP client、能力市场未完成 |
 

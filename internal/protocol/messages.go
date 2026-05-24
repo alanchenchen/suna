@@ -144,10 +144,9 @@ type UsageResult struct {
 }
 
 type UsagePeriod struct {
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
-	Cost         float64 `json:"cost"`
-	Requests     int     `json:"requests"`
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+	Requests     int `json:"requests"`
 }
 
 type CompactResult struct {

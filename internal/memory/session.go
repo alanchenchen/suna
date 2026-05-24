@@ -16,11 +16,11 @@ func NewSessionStore(db *sql.DB) *SessionStore {
 }
 
 // SaveUsage records one LLM call's token usage.
-func (s *SessionStore) SaveUsage(ctx context.Context, sessionID, model string, inputTokens, outputTokens int, cost float64) error {
+func (s *SessionStore) SaveUsage(ctx context.Context, sessionID, model string, inputTokens, outputTokens int) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO usage_log (session_id, model, input_tokens, output_tokens, cost, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		sessionID, model, inputTokens, outputTokens, cost, time.Now(),
+		INSERT INTO usage_log (session_id, model, input_tokens, output_tokens, created_at)
+		VALUES (?, ?, ?, ?, ?)`,
+		sessionID, model, inputTokens, outputTokens, time.Now(),
 	)
 	return err
 }
@@ -30,13 +30,12 @@ func (s *SessionStore) UsageSummary(ctx context.Context, since time.Time) (*Usag
 		SELECT
 			COALESCE(SUM(input_tokens), 0),
 			COALESCE(SUM(output_tokens), 0),
-			COALESCE(SUM(cost), 0),
 			COUNT(*)
 		FROM usage_log
 		WHERE created_at >= ?`, since,
 	)
 	var sum UsageSummary
-	if err := row.Scan(&sum.InputTokens, &sum.OutputTokens, &sum.Cost, &sum.Requests); err != nil {
+	if err := row.Scan(&sum.InputTokens, &sum.OutputTokens, &sum.Requests); err != nil {
 		return nil, err
 	}
 	return &sum, nil
@@ -45,6 +44,5 @@ func (s *SessionStore) UsageSummary(ctx context.Context, since time.Time) (*Usag
 type UsageSummary struct {
 	InputTokens  int
 	OutputTokens int
-	Cost         float64
 	Requests     int
 }

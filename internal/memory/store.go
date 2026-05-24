@@ -95,7 +95,6 @@ func (s *Store) migrate() error {
 			model TEXT NOT NULL,
 			input_tokens INTEGER NOT NULL DEFAULT 0,
 			output_tokens INTEGER NOT NULL DEFAULT 0,
-			cost REAL NOT NULL DEFAULT 0,
 			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 		)`,
 
@@ -150,11 +149,5 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("exec migration: %w\nquery: %s", err, m)
 		}
 	}
-	s.db.Exec(`ALTER TABLE conversation_state ADD COLUMN tool_summary TEXT NOT NULL DEFAULT '[]'`)
-	s.db.Exec(`ALTER TABLE memory_queue ADD COLUMN next_attempt_at DATETIME`)
-	s.db.Exec(`ALTER TABLE memory_queue ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0`)
-	s.db.Exec(`ALTER TABLE memory_queue ADD COLUMN last_error TEXT NOT NULL DEFAULT ''`)
-	s.db.Exec(`UPDATE memory_queue SET next_attempt_at = datetime('now') WHERE next_attempt_at IS NULL`)
-
 	return nil
 }
