@@ -66,6 +66,10 @@ func (p *OpenAIResponsesProvider) Complete(ctx context.Context, req *CompletionR
 				if event.Delta != "" {
 					ch <- Chunk{Content: event.Delta, Done: false}
 				}
+			case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
+				if reasoning := responseReasoningContent(event); reasoning != "" {
+					ch <- Chunk{ReasoningContent: reasoning, Done: false}
+				}
 			case "response.function_call_arguments.delta", "response.function_call_arguments.done", "response.output_item.done", "response.output_item.added":
 				mergeResponseToolCall(event, toolCallsByID, &toolCallOrder)
 			case "response.completed":
@@ -104,6 +108,15 @@ func (p *OpenAIResponsesProvider) Complete(ctx context.Context, req *CompletionR
 
 func responsesGeneratedKeys() map[string]bool {
 	return map[string]bool{"model": true, "input": true, "max_output_tokens": true, "temperature": true, "parallel_tool_calls": true, "instructions": true, "tools": true, "stream": true}
+}
+
+func responseReasoningContent(event responses.ResponseStreamEventUnion) string {
+	switch event.Type {
+	case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
+		return event.Delta
+	default:
+		return ""
+	}
 }
 
 func (p *OpenAIResponsesProvider) EstimateTokens(text string) int { return len(text) / 4 }

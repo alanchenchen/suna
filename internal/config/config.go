@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -68,6 +70,26 @@ type ModelConfig struct {
 	Reasoning     map[string]any `toml:"reasoning,omitempty"`
 	APIKey        string         `toml:"-"`
 }
+
+type configTOML struct {
+	ActiveModel string            `toml:"active_model"`
+	Models      []modelConfigTOML `toml:"models"`
+	Guard       GuardConfig       `toml:"guard"`
+	UI          UIConfig          `toml:"ui"`
+	Hooks       []HookConfig      `toml:"hooks"`
+	MaxModelRPS int               `toml:"max_model_rps,omitempty"`
+}
+
+type modelConfigTOML struct {
+	Provider      string          `toml:"provider"`
+	Model         string          `toml:"model"`
+	BaseURL       string          `toml:"base_url,omitempty"`
+	ContextWindow int             `toml:"context_window,omitempty"`
+	Strengths     []string        `toml:"strengths,omitempty"`
+	Reasoning     inlineTOMLTable `toml:"reasoning,omitempty"`
+}
+
+type inlineTOMLTable map[string]any
 
 // GuardConfig 保存本地安全规则配置，对应 plans/04-guard.md。
 type GuardConfig struct {
@@ -212,10 +234,136 @@ func (c *Config) Save(path string) error {
 		return err
 	}
 	var buf bytes.Buffer
-	if err := toml.NewEncoder(&buf).Encode(c); err != nil {
+	if err := toml.NewEncoder(&buf).Encode(c.tomlView()); err != nil {
 		return fmt.Errorf("encode config: %w", err)
 	}
 	return os.WriteFile(path, buf.Bytes(), 0644)
+}
+
+func (c *Config) tomlView() configTOML {
+	models := make([]modelConfigTOML, 0, len(c.Models))
+	for _, mc := range c.Models {
+		models = append(models, modelConfigTOML{
+			Provider:      mc.Provider,
+			Model:         mc.Model,
+			BaseURL:       mc.BaseURL,
+			ContextWindow: mc.ContextWindow,
+			Strengths:     mc.Strengths,
+			Reasoning:     inlineTOMLTable(mc.Reasoning),
+		})
+	}
+	return configTOML{
+		ActiveModel: c.ActiveModel,
+		Models:      models,
+		Guard:       c.Guard,
+		UI:          c.UI,
+		Hooks:       c.Hooks,
+		MaxModelRPS: c.MaxModelRPS,
+	}
+}
+
+func (t inlineTOMLTable) MarshalTOML() ([]byte, error) {
+	return []byte(formatInlineTOMLTable(map[string]any(t))), nil
+}
+
+func formatInlineTOMLTable(m map[string]any) string {
+	keys := make([]string, 0, len(m))
+	for k, v := range m {
+		if v == nil {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, formatTOMLKey(key)+" = "+formatInlineTOMLValue(m[key]))
+	}
+	return "{ " + strings.Join(parts, ", ") + " }"
+}
+
+func formatInlineTOMLValue(v any) string {
+	switch x := v.(type) {
+	case string:
+		return strconv.Quote(x)
+	case bool:
+		if x {
+			return "true"
+		}
+		return "false"
+	case int:
+		return strconv.FormatInt(int64(x), 10)
+	case int8:
+		return strconv.FormatInt(int64(x), 10)
+	case int16:
+		return strconv.FormatInt(int64(x), 10)
+	case int32:
+		return strconv.FormatInt(int64(x), 10)
+	case int64:
+		return strconv.FormatInt(x, 10)
+	case uint:
+		return strconv.FormatUint(uint64(x), 10)
+	case uint8:
+		return strconv.FormatUint(uint64(x), 10)
+	case uint16:
+		return strconv.FormatUint(uint64(x), 10)
+	case uint32:
+		return strconv.FormatUint(uint64(x), 10)
+	case uint64:
+		return strconv.FormatUint(x, 10)
+	case float32:
+		return strconv.FormatFloat(float64(x), 'f', -1, 32)
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case []any:
+		return formatInlineTOMLArray(x)
+	case []string:
+		items := make([]any, 0, len(x))
+		for _, item := range x {
+			items = append(items, item)
+		}
+		return formatInlineTOMLArray(items)
+	case map[string]any:
+		return formatInlineTOMLTable(x)
+	default:
+		rv := reflect.ValueOf(v)
+		if rv.IsValid() && rv.Kind() == reflect.Map && rv.Type().Key().Kind() == reflect.String {
+			out := make(map[string]any, rv.Len())
+			for _, key := range rv.MapKeys() {
+				out[key.String()] = rv.MapIndex(key).Interface()
+			}
+			return formatInlineTOMLTable(out)
+		}
+		return strconv.Quote(fmt.Sprint(v))
+	}
+}
+
+func formatInlineTOMLArray(items []any) string {
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		parts = append(parts, formatInlineTOMLValue(item))
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+func formatTOMLKey(key string) string {
+	if isBareTOMLKey(key) {
+		return key
+	}
+	return strconv.Quote(key)
+}
+
+func isBareTOMLKey(key string) bool {
+	if key == "" {
+		return false
+	}
+	for _, r := range key {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // SaveCredential 按 provider 保存密钥；同一 provider 下的多模型共享同一个 API key。

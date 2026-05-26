@@ -105,7 +105,7 @@ func chatGeneratedKeys() map[string]bool {
 
 func chatReasoningContent(delta openai.ChatCompletionChunkChoiceDelta) string {
 	field, ok := delta.JSON.ExtraFields["reasoning_content"]
-	if !ok || !field.Valid() {
+	if !ok || field.Raw() == "" || field.Raw() == "null" {
 		return ""
 	}
 	var value string
