@@ -137,7 +137,7 @@ func (s *service) runAgent(ctx context.Context, connID, inputText string, input 
 		case agent.EventToolResult:
 			display := limitToolResult(evt.ToolResult)
 			logging.Info("agent", "tool_result", logging.Event{"conn_id": connID, "tool": evt.ToolName, "tool_error": evt.ToolError, "result_chars": len(evt.ToolResult), "display_truncated": display.truncated})
-			emit(ctx, sink, protocol.NotifyToolEnd, protocol.ToolEndParams{ID: evt.ToolCallID, Tool: evt.ToolName, Result: display.text, Error: evt.ToolError, ResultTruncated: display.truncated, ResultBytes: display.bytes})
+			emit(ctx, sink, protocol.NotifyToolEnd, protocol.ToolEndParams{ID: evt.ToolCallID, Tool: evt.ToolName, Result: display.text, Error: evt.ToolError, ResultTruncated: display.truncated, ResultBytes: display.bytes, Metadata: evt.ToolMetadata})
 		case agent.EventAskUser:
 			askID := connID + "_" + fmt.Sprintf("%d", time.Now().UnixNano())
 			if evt.Reply != nil {

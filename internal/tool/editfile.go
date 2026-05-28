@@ -52,7 +52,8 @@ func (EditFile) Execute(ctx context.Context, params map[string]any) Result {
 		return ErrorResult(fmt.Sprintf("read file: %s", err))
 	}
 
-	content := string(data)
+	original := string(data)
+	content := original
 	count := strings.Count(content, oldStr)
 	if count == 0 {
 		return ErrorResult("old_string not found in file")
@@ -81,5 +82,9 @@ func (EditFile) Execute(ctx context.Context, params map[string]any) Result {
 	if !replaceAll {
 		replacements = 1
 	}
-	return TextResult(fmt.Sprintf("replaced %d occurrence(s) in %s", replacements, path))
+	operation := "updated"
+	if original == content {
+		operation = "unchanged"
+	}
+	return fileChangeResult(fileChange{Path: path, Operation: operation, OldContent: original, NewContent: content, OldExists: true, Replacements: replacements})
 }

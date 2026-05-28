@@ -23,8 +23,9 @@ type Event struct {
 	ToolParams map[string]any
 	ToolIntent string
 
-	ToolResult string
-	ToolError  bool
+	ToolResult   string
+	ToolError    bool
+	ToolMetadata map[string]any
 
 	Question string
 	Options  []string

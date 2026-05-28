@@ -14,12 +14,14 @@ const (
 	Act
 )
 
-// Result 是工具执行结果；IsError 必须准确反映工具是否失败，避免 Agent 误判执行状态。
+// Result 是工具执行结果；Content 会进入 LLM 上下文，Metadata 只给 UI/API 展示使用。
+// IsError 必须准确反映工具是否失败，避免 Agent 误判执行状态。
 type Result struct {
-	Content   string `json:"content"`
-	Error     string `json:"error,omitempty"`
-	IsError   bool   `json:"is_error"`
-	Truncated bool   `json:"truncated,omitempty"`
+	Content   string         `json:"content"`
+	Error     string         `json:"error,omitempty"`
+	IsError   bool           `json:"is_error"`
+	Truncated bool           `json:"truncated,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
 }
 
 // TextResult 创建成功的文本工具结果。

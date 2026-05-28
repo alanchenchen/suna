@@ -43,6 +43,15 @@ func (WriteFile) Execute(ctx context.Context, params map[string]any) Result {
 	if isSystemPath(path) {
 		return ErrorResult(fmt.Sprintf("cannot write to system directory: %s", path))
 	}
+	oldData, err := os.ReadFile(path)
+	oldExists := true
+	if err != nil {
+		if os.IsNotExist(err) {
+			oldExists = false
+		} else {
+			return ErrorResult(fmt.Sprintf("read existing file: %s", err))
+		}
+	}
 
 	if createDirs {
 		dir := filepath.Dir(path)
@@ -55,7 +64,14 @@ func (WriteFile) Execute(ctx context.Context, params map[string]any) Result {
 		return ErrorResult(fmt.Sprintf("write file: %s", err))
 	}
 
-	return TextResult(fmt.Sprintf("wrote %d bytes to %s", len(content), path))
+	operation := "created"
+	if oldExists {
+		operation = "updated"
+		if string(oldData) == content {
+			operation = "unchanged"
+		}
+	}
+	return fileChangeResult(fileChange{Path: path, Operation: operation, OldContent: string(oldData), NewContent: content, OldExists: oldExists})
 }
 
 func isSystemPath(path string) bool {

@@ -299,5 +299,5 @@ func (s eventSink) ToolCall(call runner.ToolCallEvent) {
 	s.events <- Event{Type: EventToolCall, ToolCallID: call.ID, ToolName: call.Name, ToolParams: call.Params, ToolIntent: call.Intent}
 }
 func (s eventSink) ToolResult(result runner.ToolResultEvent) {
-	s.events <- Event{Type: EventToolResult, ToolCallID: result.ID, ToolName: result.Name, ToolResult: result.Result, ToolError: result.Error}
+	s.events <- Event{Type: EventToolResult, ToolCallID: result.ID, ToolName: result.Name, ToolResult: result.Result, ToolError: result.Error, ToolMetadata: result.Metadata}
 }

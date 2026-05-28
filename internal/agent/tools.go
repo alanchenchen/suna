@@ -242,13 +242,14 @@ type subtaskSink struct {
 func (s subtaskSink) Status(content string)    {}
 func (s subtaskSink) Stream(content string)    {}
 func (s subtaskSink) Reasoning(content string) {}
+
 // subtask 的 usage 只需要落库，不进入主 TUI token 展示。
 func (s subtaskSink) Usage(usage runner.UsageEvent) {}
 func (s subtaskSink) ToolCall(call runner.ToolCallEvent) {
 	s.events <- Event{Type: EventToolCall, ToolCallID: s.namespaced(call.ID), ToolName: call.Name, ToolParams: call.Params, ToolIntent: call.Intent}
 }
 func (s subtaskSink) ToolResult(result runner.ToolResultEvent) {
-	s.events <- Event{Type: EventToolResult, ToolCallID: s.namespaced(result.ID), ToolName: result.Name, ToolResult: result.Result, ToolError: result.Error}
+	s.events <- Event{Type: EventToolResult, ToolCallID: s.namespaced(result.ID), ToolName: result.Name, ToolResult: result.Result, ToolError: result.Error, ToolMetadata: result.Metadata}
 }
 func (s subtaskSink) namespaced(id string) string {
 	return "spawn:" + s.spawnID + ":" + id

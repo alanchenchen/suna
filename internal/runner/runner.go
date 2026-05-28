@@ -150,7 +150,7 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 		results := r.executeToolCalls(ctx, preparedCalls)
 		for _, execResult := range results {
 			if r.Sink != nil {
-				r.Sink.ToolResult(ToolResultEvent{ID: execResult.tc.ID, Name: execResult.tc.Name, Result: execResult.result.Content, Error: execResult.result.IsError})
+				r.Sink.ToolResult(ToolResultEvent{ID: execResult.tc.ID, Name: execResult.tc.Name, Result: execResult.result.Content, Error: execResult.result.IsError, Metadata: execResult.result.Metadata})
 			}
 			if execResult.result.IsError {
 				result.HadToolError = true

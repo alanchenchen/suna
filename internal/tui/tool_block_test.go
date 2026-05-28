@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/alanchenchen/suna/internal/protocol"
@@ -86,6 +87,54 @@ func TestSystemMessageClosesCurrentToolBlock(t *testing.T) {
 	if len(blocks) != 2 {
 		t.Fatalf("len(tool blocks) = %d, want 2", len(blocks))
 	}
+}
+
+func TestRenderToolEntryShowsFileChangeSummary(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
+	te := &toolEntry{
+		rawName: "editfile",
+		name:    "editfile",
+		intent:  "Update config",
+		status:  toolDone,
+		metadata: map[string]any{
+			"kind":          "file_change",
+			"path":          "internal/tool/writefile.go",
+			"operation":     "updated",
+			"added_lines":   18,
+			"removed_lines": 4,
+			"replacements":  1,
+			"size_before":   2140,
+			"size_after":    2601,
+		},
+	}
+
+	rendered := tui.renderToolEntry(te, false)
+	plain := stripANSIForTest(rendered)
+	for _, want := range []string{"↳", "internal/tool/writefile.go", "updated", "+18", "-4", "1 repl", "2.1KB", "2.5KB"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered summary missing %q:\n%s", want, plain)
+		}
+	}
+}
+
+func stripANSIForTest(s string) string {
+	var b strings.Builder
+	inEsc := false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inEsc {
+			if c >= '@' && c <= '~' {
+				inEsc = false
+			}
+			continue
+		}
+		if c == 0x1b {
+			inEsc = true
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
 }
 
 func mustJSON(t *testing.T, v any) json.RawMessage {

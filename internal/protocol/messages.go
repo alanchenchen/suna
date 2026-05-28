@@ -32,12 +32,13 @@ type ToolStartParams struct {
 }
 
 type ToolEndParams struct {
-	ID              string `json:"id"`
-	Tool            string `json:"tool"`
-	Result          string `json:"result"`
-	Error           bool   `json:"error,omitempty"`
-	ResultTruncated bool   `json:"result_truncated,omitempty"`
-	ResultBytes     int    `json:"result_bytes,omitempty"`
+	ID              string         `json:"id"`
+	Tool            string         `json:"tool"`
+	Result          string         `json:"result"`
+	Error           bool           `json:"error,omitempty"`
+	ResultTruncated bool           `json:"result_truncated,omitempty"`
+	ResultBytes     int            `json:"result_bytes,omitempty"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
 }
 
 type AskUserParams struct {

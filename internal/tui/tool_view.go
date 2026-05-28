@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -129,8 +130,136 @@ func (t *TUI) renderToolEntry(te *toolEntry, nested bool) string {
 		if err != "" {
 			line += "\n" + prefix + "  " + styleToolErr.Render(truncateRunes(err, max(24, t.width-12)))
 		}
+	} else if te.status == toolDone {
+		if summary := t.renderToolMetadataSummary(te, prefix); summary != "" {
+			line += "\n" + summary
+		}
 	}
 	return line + "\n"
+}
+
+func (t *TUI) renderToolMetadataSummary(te *toolEntry, prefix string) string {
+	if te == nil || te.metadata == nil {
+		return ""
+	}
+	if kind, _ := te.metadata["kind"].(string); kind == "file_change" {
+		return t.renderFileChangeSummary(te.metadata, prefix)
+	}
+	return ""
+}
+
+// file_change metadata 用于主工具块的一行结果条；不解析 tool result 文本，避免 UI 绑定 LLM 文案。
+func (t *TUI) renderFileChangeSummary(metadata map[string]any, prefix string) string {
+	path, _ := metadata["path"].(string)
+	operation, _ := metadata["operation"].(string)
+	if path == "" || operation == "" {
+		return ""
+	}
+	added := metadataInt(metadata["added_lines"])
+	removed := metadataInt(metadata["removed_lines"])
+	replacements := metadataInt(metadata["replacements"])
+	sizeBefore, hasBefore := metadataIntOK(metadata["size_before"])
+	sizeAfter, hasAfter := metadataIntOK(metadata["size_after"])
+
+	arrow := styleDim.Render("↳ ")
+	status := renderFileChangeStatus(operation)
+	add := renderLineDelta("+", added, true)
+	del := renderLineDelta("-", removed, false)
+	parts := []string{status, add, del}
+	plainParts := []string{operation, fmt.Sprintf("+%d", added), fmt.Sprintf("-%d", removed)}
+	if replacements > 0 {
+		parts = append(parts, styleToolDim.Render(fmt.Sprintf("%d repl", replacements)))
+		plainParts = append(plainParts, fmt.Sprintf("%d repl", replacements))
+	}
+	if hasAfter {
+		if hasBefore && sizeBefore != sizeAfter {
+			size := fmt.Sprintf("%s → %s", formatTinyBytes(sizeBefore), formatTinyBytes(sizeAfter))
+			parts = append(parts, styleToolDim.Render(size))
+			plainParts = append(plainParts, size)
+		} else if !hasBefore || operation == "created" {
+			size := formatTinyBytes(sizeAfter)
+			parts = append(parts, styleToolDim.Render(size))
+			plainParts = append(plainParts, size)
+		}
+	}
+
+	maxWidth := max(24, t.width-lipgloss.Width(stripANSI(prefix))-8)
+	metaWidth := lipgloss.Width(strings.Join(plainParts, "  "))
+	pathWidth := max(10, maxWidth-metaWidth-4)
+	pathText := styleToolDim.Render(compactPath(path, pathWidth))
+	return prefix + "  " + arrow + pathText + "  " + strings.Join(parts, "  ")
+}
+
+func renderFileChangeStatus(operation string) string {
+	switch operation {
+	case "created":
+		return lipgloss.NewStyle().Foreground(ColorAgent).Bold(true).Render("created")
+	case "updated":
+		return lipgloss.NewStyle().Foreground(ColorBrand).Bold(true).Render("updated")
+	case "unchanged":
+		return styleToolDim.Render("unchanged")
+	default:
+		return styleToolDim.Render(operation)
+	}
+}
+
+func renderLineDelta(prefix string, n int, added bool) string {
+	text := fmt.Sprintf("%s%d", prefix, n)
+	if n == 0 {
+		return styleToolDim.Render(text)
+	}
+	if added {
+		return styleToolAdd.Render(text)
+	}
+	return styleToolDel.Render(text)
+}
+
+func compactPath(path string, maxWidth int) string {
+	if maxWidth <= 0 || lipgloss.Width(path) <= maxWidth {
+		return path
+	}
+	base := path
+	if idx := strings.LastIndexAny(path, "/\\"); idx >= 0 && idx < len(path)-1 {
+		base = path[idx+1:]
+	}
+	if lipgloss.Width(base)+1 <= maxWidth {
+		return "…" + base
+	}
+	return truncateRunes(base, maxWidth)
+}
+
+func formatTinyBytes(n int) string {
+	if n >= 1024*1024 {
+		return fmt.Sprintf("%.1fMB", float64(n)/(1024*1024))
+	}
+	if n >= 1024 {
+		return fmt.Sprintf("%.1fKB", float64(n)/1024)
+	}
+	return fmt.Sprintf("%dB", n)
+}
+
+func metadataInt(value any) int {
+	n, _ := metadataIntOK(value)
+	return n
+}
+
+func metadataIntOK(value any) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	case float64:
+		return int(v), true
+	case float32:
+		return int(v), true
+	case json.Number:
+		i, err := v.Int64()
+		if err == nil {
+			return int(i), true
+		}
+	}
+	return 0, false
 }
 
 func stripANSI(s string) string { return s }

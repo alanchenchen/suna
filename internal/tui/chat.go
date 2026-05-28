@@ -32,6 +32,8 @@ var (
 	styleToolErr   = lipgloss.NewStyle().Foreground(ColorError).Bold(true)
 	styleToolRun   = lipgloss.NewStyle().Foreground(ColorBrand).Bold(true)
 	styleToolDim   = lipgloss.NewStyle().Foreground(ColorDim)
+	styleToolAdd   = lipgloss.NewStyle().Foreground(ColorAgent).Bold(true)
+	styleToolDel   = lipgloss.NewStyle().Foreground(ColorError).Bold(true)
 	styleSysLine   = lipgloss.NewStyle().Foreground(ColorDim)
 	styleErrLine   = lipgloss.NewStyle().Foreground(ColorError).Bold(true)
 )
@@ -61,6 +63,7 @@ type toolEntry struct {
 	result          string
 	resultTruncated bool
 	resultBytes     int
+	metadata        map[string]any
 }
 
 type toolBlock struct {

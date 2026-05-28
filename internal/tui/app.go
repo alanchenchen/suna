@@ -447,6 +447,7 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 			te.endedAt = time.Now()
 			te.resultTruncated = p.ResultTruncated
 			te.resultBytes = p.ResultBytes
+			te.metadata = p.Metadata
 			if p.Error {
 				te.status = toolError
 				te.result = p.Result

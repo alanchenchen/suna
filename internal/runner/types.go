@@ -64,10 +64,11 @@ type ToolCallEvent struct {
 }
 
 type ToolResultEvent struct {
-	ID     string
-	Name   string
-	Result string
-	Error  bool
+	ID       string
+	Name     string
+	Result   string
+	Error    bool
+	Metadata map[string]any
 }
 
 type UsageEvent struct {
