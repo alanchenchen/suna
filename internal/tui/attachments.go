@@ -132,9 +132,9 @@ func (t *TUI) updatePendingImagePaste(key string) tea.Cmd {
 		return nil
 	}
 	switch key {
-	case "enter", "y", "Y":
+	case "enter":
 		return t.confirmPendingImagePaste()
-	case "esc", "n", "N":
+	case "esc":
 		p := t.pendingImagePaste
 		t.pendingImagePaste = nil
 		if p.SourceKind == protocol.AttachmentKindPath || p.SourceKind == protocol.AttachmentKindURL {
@@ -170,9 +170,9 @@ func (t *TUI) confirmPendingImagePaste() tea.Cmd {
 func (t *TUI) updateAttachmentMode(key string) bool {
 	if t.attachmentDelete {
 		switch key {
-		case "enter", "y", "Y":
+		case "enter":
 			t.deleteSelectedAttachment()
-		case "esc", "n", "N":
+		case "esc":
 			t.attachmentDelete = false
 		}
 		return true
@@ -192,8 +192,6 @@ func (t *TUI) updateAttachmentMode(key string) bool {
 				t.attachmentDelete = true
 			}
 		case "esc":
-			t.attachmentMode = false
-		case "enter":
 			t.attachmentMode = false
 		default:
 			return false

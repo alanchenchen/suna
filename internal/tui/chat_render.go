@@ -144,7 +144,7 @@ func (t *TUI) layoutChat() {
 	}
 	suggestionH := 0
 	if len(t.cmdSuggestions) > 0 {
-		suggestionH = min(4, len(t.cmdSuggestions)) + 2
+		suggestionH = min(4, len(t.cmdSuggestions)) + 3
 	}
 	confirmH := 0
 	if t.confirmDiscardDraft {
@@ -194,6 +194,7 @@ func (t *TUI) renderCommandSuggestions() string {
 		line := prefix + style.Render(fmt.Sprintf("%-16s", c.cmd)) + styleDim.Render(t.tr(c.descKey))
 		lines = append(lines, line)
 	}
+	lines = append(lines, styleDim.Render(t.tr("tui.command.suggestion_help")))
 	return boxStyle.Width(width).Render(strings.Join(lines, "\n"))
 }
 

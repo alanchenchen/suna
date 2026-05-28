@@ -71,13 +71,13 @@ func (t *TUI) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, tea.Quit
 		case "esc":
 			return t, nil
-		case "up", "k":
+		case "up":
 			if t.welcomeCursor > 0 {
 				t.welcomeCursor--
 			}
 			t.menu.Select(t.welcomeCursor)
 			return t, nil
-		case "down", "j":
+		case "down":
 			if t.welcomeCursor < len(items)-1 {
 				t.welcomeCursor++
 			}

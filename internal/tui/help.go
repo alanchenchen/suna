@@ -72,13 +72,11 @@ func (t *TUI) renderHelpOverlay(width int) string {
 		"  " + styleBrand.Render("Enter") + styleDim.Render("  ") + t.tr("tui.key.send"),
 		"  " + styleBrand.Render("Esc") + styleDim.Render("    ") + t.tr("tui.key.back"),
 		"  " + styleBrand.Render("?") + styleDim.Render("      ") + t.tr("tui.key.help"),
+		"  " + styleBrand.Render("Ctrl+C") + styleDim.Render(" ") + t.tr("tui.key.quit"),
 	}
-	commands := []string{
-		styleHL.Render(t.tr("tui.help.commands")),
-		t.commandLine("/new", "tui.command.new.desc"),
-		t.commandLine("/model", "tui.command.model.desc"),
-		t.commandLine("/compact", "tui.command.compact.desc"),
-		t.commandLine("/config", "tui.command.config.desc"),
+	commands := []string{styleHL.Render(t.tr("tui.help.commands"))}
+	for _, c := range t.allCommands() {
+		commands = append(commands, t.commandLine(c.cmd, c.descKey))
 	}
 	more := []string{
 		styleHL.Render(t.tr("tui.help.more")),
@@ -116,9 +114,11 @@ func (t *TUI) renderHelpContent() string {
 		t.helpLine("Enter", "tui.help.chat_send"),
 		t.helpLine("Shift+Enter", "tui.help.chat_newline"),
 		t.helpLine("Esc", "tui.help.chat_back"),
+		t.helpLine("?", "tui.key.help"),
 		t.helpLine("PgUp/PgDn", "tui.help.chat_scroll"),
 		t.helpLine("Ctrl+Y", "tui.help.copy_mode"),
 		t.helpLine("Esc", "tui.help.copy_exit"),
+		t.helpLine("Ctrl+C", "tui.key.quit"),
 		"",
 		strings.Join(commands, "\n"),
 		"",

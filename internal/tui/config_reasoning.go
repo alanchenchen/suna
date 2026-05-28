@@ -46,12 +46,12 @@ func (t *TUI) updateReasoning(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			t.configReasoningOpen = false
 			return t, nil
-		case "up", "k":
+		case "up":
 			if t.configReasoningCursor > 0 {
 				t.configReasoningCursor--
 			}
 			return t, nil
-		case "down", "j":
+		case "down":
 			if t.configReasoningCursor < len(items)-1 {
 				t.configReasoningCursor++
 			}

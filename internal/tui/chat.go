@@ -307,7 +307,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case ks == "ctrl+c":
 			t.doQuit()
 			return t, tea.Quit
-		case ks == "?" || ks == "f1":
+		case ks == "?":
 			t.showHelp = !t.showHelp
 			return t, nil
 		case ks == "enter":
@@ -336,7 +336,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return t, t.handleSend()
 			}
 			return t, nil
-		case ks == "shift+enter", ks == "alt+enter":
+		case ks == "shift+enter":
 			t.confirmDiscardDraft = false
 			t.ta.InsertString("\n")
 			t.layoutChat()
@@ -516,7 +516,7 @@ func (t *TUI) updateGuardConfirm(ks string) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		t.doQuit()
 		return t, tea.Quit
-	case "left", "h", "up", "k", "tab", "shift+tab":
+	case "left":
 		if t.guardCursor == 0 {
 			t.guardCursor = 1
 		} else {
@@ -524,7 +524,7 @@ func (t *TUI) updateGuardConfirm(ks string) (tea.Model, tea.Cmd) {
 		}
 		t.syncContent()
 		return t, nil
-	case "right", "l", "down", "j":
+	case "right":
 		if t.guardCursor == 0 {
 			t.guardCursor = 1
 		} else {
@@ -533,10 +533,6 @@ func (t *TUI) updateGuardConfirm(ks string) (tea.Model, tea.Cmd) {
 		t.syncContent()
 		return t, nil
 	case "esc":
-		return t, t.submitGuardDecision("reject")
-	case "y", "Y", "a", "A":
-		return t, t.submitGuardDecision("approve")
-	case "n", "N", "r", "R":
 		return t, t.submitGuardDecision("reject")
 	case "enter":
 		if t.guardCursor == 0 {

@@ -123,13 +123,13 @@ func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "ctrl+c":
 				t.doQuit()
 				return t, tea.Quit
-			case "left", "h", "up", "k", "shift+tab", "right", "l", "down", "j", "tab":
+			case "left", "right":
 				options := t.configDeleteOptions()
 				if len(options) == 0 {
 					return t, nil
 				}
 				delta := 1
-				if m.String() == "left" || m.String() == "h" || m.String() == "up" || m.String() == "k" || m.String() == "shift+tab" {
+				if m.String() == "left" {
 					delta = -1
 				}
 				t.configDeleteCursor = (t.configDeleteCursor + delta + len(options)) % len(options)
@@ -158,17 +158,17 @@ func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, tea.Quit
 		case "esc":
 			return t, t.leaveConfig()
-		case "up", "k":
+		case "up":
 			t.moveConfigCursor(rows, -1)
 			return t, nil
-		case "down", "j":
+		case "down":
 			t.moveConfigCursor(rows, 1)
 			return t, nil
 		case "enter":
 			return t, t.handleConfigAction(rows)
 		case " ", "space":
 			return t, t.activateSelectedConfigModel(rows)
-		case "?", "f1":
+		case "?":
 			t.showHelp = !t.showHelp
 			return t, nil
 		}
@@ -197,12 +197,12 @@ func (t *TUI) updateProviderKind(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			t.configKindOpen = false
 			return t, nil
-		case "up", "k":
+		case "up":
 			if t.configKindCursor > 0 {
 				t.configKindCursor--
 			}
 			return t, nil
-		case "down", "j":
+		case "down":
 			if t.configKindCursor < len(options)-1 {
 				t.configKindCursor++
 			}

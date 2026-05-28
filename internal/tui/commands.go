@@ -112,11 +112,11 @@ func (t *TUI) updateModelPicker(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "esc":
 		t.modelPickerOpen = false
-	case "up", "k":
+	case "up":
 		if t.modelPickerCursor > 0 {
 			t.modelPickerCursor--
 		}
-	case "down", "j":
+	case "down":
 		if t.modelPickerCursor < len(models)-1 {
 			t.modelPickerCursor++
 		}
