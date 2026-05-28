@@ -63,7 +63,7 @@ client -> transport implementation -> protocol.Service -> daemon/agent -> provid
 `protocol` 是 daemon/agent 的稳定通信协议，不绑定具体通信方式。它定义：
 
 - 请求 / 响应 schema，例如 `SendMessageRequest`、`StatusRequest`。
-- 事件 schema，例如 stream、tool_start、tool_end、ask_user、guard_confirm、daemon_status。
+- 事件 schema，例如 stream、tool_start、tool_guard、tool_end、ask_user、guard_confirm、daemon_status。
 - 多模态输入 schema，例如 `MessagePart`、`AttachmentRef`。
 - `Service` 接口，由 daemon/agent 侧实现。
 - `EventSink` 接口，用于 service 向当前客户端推送事件。
@@ -159,7 +159,7 @@ type AttachmentRef struct {
 
 TUI/local transport 只传 `path`、`url` 或 `attachment` 引用。粘贴的 `data:image/...;base64,...` 必须先在 TUI 本地保存到默认数据目录的 `attachments/`（当前默认 `~/.suna/attachments`），再作为 `attachment` 发送。daemon 侧二次校验并规范化为 `model.ContentBlock{MediaRef}`；agent、runner、subtask 只传轻量引用；provider 请求阶段再通过 media resolver 临时转成各协议需要的 URL/base64。raw media 不进入 working memory、conversation_state 或 user_memory。
 
-当前 TUI 的 `agent.stream`、`agent.tool_start`、`agent.tool_end`、`agent.ask_user`、`agent.guard_confirm` 等事件也应归入 `protocol`，因为它们是 daemon 对外一致事件流，不是 local transport 私有事件。
+当前 TUI 的 `agent.stream`、`agent.tool_start`、`agent.tool_guard`、`agent.tool_end`、`agent.ask_user`、`agent.guard_confirm` 等事件也应归入 `protocol`，因为它们是 daemon 对外一致事件流，不是 local transport 私有事件。
 
 ## Agent / Runner / Subtask
 
@@ -649,6 +649,7 @@ daemon → client (事件):
 agent.stream         {chunk, done, usage?}  // LLM 输出；streaming 能力取决于 provider
 agent.reasoning      {content}              // reasoning/thinking 内容（provider 支持时）
 agent.tool_start     {tool, params}         // 工具开始执行
+agent.tool_guard     {tool_call_id, tool, risk, decision, source, reason?, suggestion?} // 工具执行前 Guard 决策来源
 agent.tool_end       {tool, result}         // 工具执行完毕
 agent.ask_user       {id, question, options?}
 agent.guard_confirm  {id, tool, risk, reason, suggestion, params}

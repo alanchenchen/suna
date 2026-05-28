@@ -432,6 +432,12 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 		if t.selectedToolID == "" {
 			t.selectedToolID = id
 		}
+	case protocol.NotifyToolGuard:
+		var p protocol.ToolGuardParams
+		json.Unmarshal(notif.params, &p)
+		if te := t.findTool(p.ToolCallID); te != nil {
+			te.guard = &guardInfo{risk: p.Risk, decision: p.Decision, source: p.Source, reason: p.Reason, suggestion: p.Suggestion}
+		}
 	case protocol.NotifyToolEnd:
 		var p protocol.ToolEndParams
 		json.Unmarshal(notif.params, &p)

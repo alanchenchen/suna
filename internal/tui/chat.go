@@ -35,6 +35,11 @@ var (
 	styleToolDim   = lipgloss.NewStyle().Foreground(ColorDim)
 	styleToolAdd   = lipgloss.NewStyle().Foreground(ColorAgent).Bold(true)
 	styleToolDel   = lipgloss.NewStyle().Foreground(ColorError).Bold(true)
+	styleMetaPill  = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(ColorBrand).Padding(0, 1).Bold(true)
+	styleGuardOK   = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(ColorAgent).Padding(0, 1).Bold(true)
+	styleGuardWarn = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(ColorTool).Padding(0, 1).Bold(true)
+	styleGuardErr  = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(ColorError).Padding(0, 1).Bold(true)
+	styleFilePath  = lipgloss.NewStyle().Foreground(ColorHL).Bold(true)
 	styleSysLine   = lipgloss.NewStyle().Foreground(ColorDim)
 	styleErrLine   = lipgloss.NewStyle().Foreground(ColorError).Bold(true)
 )
@@ -65,6 +70,15 @@ type toolEntry struct {
 	resultTruncated bool
 	resultBytes     int
 	metadata        map[string]any
+	guard           *guardInfo
+}
+
+type guardInfo struct {
+	risk       string
+	decision   string
+	source     string
+	reason     string
+	suggestion string
 }
 
 type toolBlock struct {

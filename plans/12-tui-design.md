@@ -1,6 +1,6 @@
 # 12 — TUI 交互设计
 
-> 最后更新: 2026-05-23
+> 最后更新: 2026-05-28
 > 本文档以当前 `internal/tui` 实现为准，描述已经可用的 TUI 行为、仍需保留的设计约束，以及尚未实现的功能。
 > 范围只包含 TUI 前端视觉、布局、交互和 protocol/local transport 展示数据，不定义 daemon/agent 业务逻辑。
 
@@ -32,7 +32,7 @@ TUI 现在已经能跑通基本使用流：启动后进入 Welcome，进入 Chat
 | Chat 布局 | 已实现 | `chat_render.go` | mini pet 顶栏、viewport、textarea、命令建议、底栏、复制模式提示 |
 | 流式回答 | 已实现 | `app.go`, `chat.go` | `agent.stream` 追加 assistant 内容 |
 | Reasoning/Thinking | 已实现 | `app.go`, `chat.go` | 默认折叠，`Ctrl+R` 展开 |
-| Tool 展示 | 已实现 | `app.go`, `chat.go`, `chat_render.go`, `tool_view.go` | running/done/error，归入 Suna 回合，`Ctrl+T` 打开 tool detail overlay |
+| Tool 展示 | 已实现 | `app.go`, `chat.go`, `chat_render.go`, `tool_view.go` | running/done/error，展示 Guard 与 file metadata 注解，归入 Suna 回合，`Ctrl+T` 打开 tool detail overlay |
 | AskUser 选项 | 已实现 | `app.go`, `chat.go` | options 为 `[]string`，支持上下选择、Enter、数字输入、自定义答案 |
 | Slash command | 已实现 | `commands.go` | `/new`, `/model`, `/memory`, `/compact`, `/config`, `/help` |
 | Model picker | 已实现 | `commands.go`, `chat_render.go` | `/model` 无参数时打开列表 |
@@ -284,6 +284,7 @@ Suna 回合分组规则：
 | `phaseLLM` | 正在接收普通回答 |
 | `phaseThinking` | 正在接收 reasoning |
 | `phaseTool` | 正在执行工具 |
+| `phaseWaitingAfterTool` | 工具已完成，等待下一轮模型响应 |
 
 Chat pet 根据 phase 切换。运行中状态在当前 Suna 回合底部只显示一条 current status line，避免 thinking、tool running、phase spinner 同时跳动。tool 完成后回到 LLM phase；stream done 后 reset 到 idle。
 
@@ -296,7 +297,9 @@ Current status line：
 - `phaseThinking` 显示思考中，但不额外插入空 thinking box。
 - 有 running tool 时优先显示 `Executing tool... intent`。
 - 历史 reasoning/tool 事件仍保留在 Suna 回合里，运行中只强调“当前正在做什么”。
-- Tool 展示使用并发状态模型：`tool_start` 创建 running 项，`tool_end` 更新 done/error，不等待前一个 tool 完成。
+- Tool 展示使用并发状态模型：`tool_start` 创建 running 项，`tool_guard` 更新 Guard 注解，`tool_end` 更新 done/error，不等待前一个 tool 完成。
+- Guard 注解显示为工具行下方 `Guard` badge，包含决策、风险和短 reason；完整 reason/suggestion 在 tool detail overlay 展示。
+- 文件变更 metadata 显示为工具行下方 `File` badge，路径、operation、`+/-` 行数使用高亮/背景色，避免重要变化淹没在 dim 文本里。
 - Subtask 内部 tool 通过 `spawn:<parentToolCallID>:<subToolCallID>` 归到父 spawn 下，渲染为树形结构。
 - 主聊天流不渲染完整 params/result，避免频繁展开导致 viewport 重排卡顿。
 - Tool error 必须在主线展示短错误摘要；完整 params/result 只在详情面板展示。
@@ -781,6 +784,7 @@ TUI 需要 daemon 提供的展示数据：
 | `agent.stream` | assistant chunk、usage、context tokens/window、done |
 | `agent.reasoning` | thinking 内容 |
 | `agent.tool_start` | tool running 行 |
+| `agent.tool_guard` | tool 下方 Guard 注解，包含 risk/decision/source/reason/suggestion |
 | `agent.tool_end` | tool done/error 行 |
 | `agent.ask_user` | 用户确认或补充信息 |
 | `agent.askReply` | TUI 回传用户答案 |

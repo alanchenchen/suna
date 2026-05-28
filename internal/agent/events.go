@@ -11,6 +11,7 @@ const (
 	EventStatus
 	EventAskUser
 	EventGuardConfirm
+	EventToolGuard
 )
 
 type Event struct {
@@ -35,6 +36,8 @@ type Event struct {
 	GuardTool       string
 	GuardParams     map[string]any
 	GuardRisk       string
+	GuardDecision   string
+	GuardSource     string
 	GuardReason     string
 	GuardSuggestion string
 

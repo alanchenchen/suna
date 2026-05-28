@@ -45,6 +45,7 @@ func (a *Agent) executeTool(ctx context.Context, id string, name string, params 
 	if a.shouldGuardTool(name) {
 		a.prepareWorkspaceParams(name, params)
 		result := a.guard.Check(ctx, name, params)
+		a.emitToolGuard(events, id, name, result)
 		if result.Decision == guard.Reject {
 			return tool.ErrorResult("blocked: " + result.Reason)
 		}
@@ -64,6 +65,14 @@ func (a *Agent) executeTool(ctx context.Context, id string, name string, params 
 	return result
 }
 
+func (a *Agent) emitToolGuard(events chan<- Event, id string, name string, result *guard.GuardResult) {
+	if events == nil || result == nil {
+		return
+	}
+	// Guard 决策是工具执行前的安全来源，单独发事件，避免混入工具执行结果 metadata。
+	events <- Event{Type: EventToolGuard, GuardToolCallID: id, GuardTool: name, GuardRisk: guard.RiskString(result.Risk), GuardDecision: string(result.Decision), GuardSource: result.Source, GuardReason: result.Reason, GuardSuggestion: result.Suggestion}
+}
+
 func (a *Agent) confirmGuard(ctx context.Context, id string, name string, params map[string]any, result *guard.GuardResult, events chan<- Event) bool {
 	if events == nil {
 		return false
@@ -74,7 +83,16 @@ func (a *Agent) confirmGuard(ctx context.Context, id string, name string, params
 	case <-ctx.Done():
 		return false
 	case decision := <-replyCh:
-		return strings.EqualFold(strings.TrimSpace(decision), "approve")
+		approved := strings.EqualFold(strings.TrimSpace(decision), "approve")
+		finalDecision := guard.Reject
+		finalReason := "user rejected guard confirmation"
+		if approved {
+			finalDecision = guard.Approve
+			finalReason = result.Reason
+		}
+		// 用户确认会覆盖前置 LLM/兜底 Guard 行，让历史工具块记录最终批准来源。
+		events <- Event{Type: EventToolGuard, GuardToolCallID: id, GuardTool: name, GuardRisk: guard.RiskString(result.Risk), GuardDecision: string(finalDecision), GuardSource: "user", GuardReason: finalReason, GuardSuggestion: result.Suggestion}
+		return approved
 	}
 }
 
@@ -190,6 +208,7 @@ func (e subtaskExecutor) ExecuteTool(ctx context.Context, id string, name string
 	if e.agent.shouldGuardTool(name) {
 		e.agent.prepareWorkspaceParams(name, params)
 		result := e.agent.guard.Check(ctx, name, params)
+		e.agent.emitToolGuard(e.events, id, name, result)
 		if result.Decision == guard.Reject {
 			return tool.ErrorResult("blocked: " + result.Reason)
 		}

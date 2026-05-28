@@ -41,6 +41,16 @@ type ToolEndParams struct {
 	Metadata        map[string]any `json:"metadata,omitempty"`
 }
 
+type ToolGuardParams struct {
+	ToolCallID string `json:"tool_call_id"`
+	Tool       string `json:"tool"`
+	Risk       string `json:"risk"`
+	Decision   string `json:"decision"`
+	Source     string `json:"source"`
+	Reason     string `json:"reason,omitempty"`
+	Suggestion string `json:"suggestion,omitempty"`
+}
+
 type AskUserParams struct {
 	Question string   `json:"question"`
 	Options  []string `json:"options,omitempty"`

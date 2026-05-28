@@ -38,6 +38,8 @@ type GuardResult struct {
 	Reason     string
 	Risk       RiskLevel
 	Suggestion string
+	Source     string
+	Audit      string
 }
 
 type RiskLevel int
@@ -171,43 +173,43 @@ func (g *Guard) Check(ctx context.Context, tool string, params map[string]any) *
 
 	if blocked, reason := g.checkWorkspace(tool, params); blocked {
 		g.audit(ctx, tool, params, risk, "workspace_reject", reason)
-		return &GuardResult{Decision: Reject, Reason: reason, Risk: risk}
+		return &GuardResult{Decision: Reject, Reason: reason, Risk: risk, Source: "rule", Audit: "workspace_reject"}
 	}
 
 	if blocked, reason := g.checkBlocked(tool, params); blocked {
 		g.audit(ctx, tool, params, risk, "blocked", reason)
-		return &GuardResult{Decision: Reject, Reason: reason, Risk: risk}
+		return &GuardResult{Decision: Reject, Reason: reason, Risk: risk, Source: "rule", Audit: "blocked"}
 	}
 	if allowed, reason := g.checkAllowed(tool, params); allowed {
 		if reason == "" {
 			reason = "allowed rule"
 		}
 		g.audit(ctx, tool, params, risk, "allowed", reason)
-		return &GuardResult{Decision: Approve, Reason: reason, Risk: risk}
+		return &GuardResult{Decision: Approve, Reason: reason, Risk: risk, Source: "rule", Audit: "allowed"}
 	}
 
 	if g.Mode() == ModeReadonly {
 		if risk == RiskLow && isReadOnlyTool(tool) {
 			g.audit(ctx, tool, params, risk, "auto_approve", "readonly low risk")
-			return &GuardResult{Decision: Approve, Reason: "readonly low risk", Risk: risk}
+			return &GuardResult{Decision: Approve, Reason: "readonly low risk", Risk: risk, Source: "static", Audit: "auto_approve"}
 		}
 		g.audit(ctx, tool, params, risk, "readonly_reject", "readonly mode blocks this operation")
-		return &GuardResult{Decision: Reject, Reason: "readonly mode blocks this operation", Risk: risk}
+		return &GuardResult{Decision: Reject, Reason: "readonly mode blocks this operation", Risk: risk, Source: "static", Audit: "readonly_reject"}
 	}
 
 	if risk == RiskLow {
 		g.audit(ctx, tool, params, risk, "auto_approve", "low_risk")
-		return &GuardResult{Decision: Approve, Reason: "low risk", Risk: risk}
+		return &GuardResult{Decision: Approve, Reason: "low risk", Risk: risk, Source: "static", Audit: "auto_approve"}
 	}
 
 	if g.Mode() == ModeAuto {
 		g.audit(ctx, tool, params, risk, "auto_approve", fmt.Sprintf("auto mode risk=%s", RiskString(risk)))
-		return &GuardResult{Decision: Approve, Reason: "auto mode", Risk: risk}
+		return &GuardResult{Decision: Approve, Reason: "auto mode", Risk: risk, Source: "static", Audit: "auto_approve"}
 	}
 
 	if g.Mode() == ModeAsk {
 		g.audit(ctx, tool, params, risk, "confirm", fmt.Sprintf("ask mode risk=%s", RiskString(risk)))
-		return &GuardResult{Decision: Confirm, Reason: "confirm risky operation", Risk: risk}
+		return &GuardResult{Decision: Confirm, Reason: "confirm risky operation", Risk: risk, Source: "user", Audit: "confirm"}
 	}
 
 	// smart mode: LLM 审查（中高风险），失败或不确定时转用户确认。
@@ -219,7 +221,7 @@ func (g *Guard) Check(ctx context.Context, tool string, params map[string]any) *
 	}
 
 	g.audit(ctx, tool, params, risk, "confirm", "smart review unavailable or inconclusive")
-	return &GuardResult{Decision: Confirm, Reason: "smart review unavailable or inconclusive", Risk: risk}
+	return &GuardResult{Decision: Confirm, Reason: "smart review unavailable or inconclusive", Risk: risk, Source: "fallback", Audit: "confirm"}
 }
 
 // llmReview 调用 LLM 进行安全审查
@@ -262,19 +264,19 @@ func (g *Guard) llmReview(ctx context.Context, toolName string, params map[strin
 	switch decision.Decision {
 	case "reject":
 		g.audit(ctx, toolName, params, risk, "llm_reject", decision.Reason)
-		return &GuardResult{Decision: Reject, Reason: decision.Reason, Risk: risk}
+		return &GuardResult{Decision: Reject, Reason: decision.Reason, Risk: risk, Source: "llm", Audit: "llm_reject"}
 	case "confirm":
 		g.audit(ctx, toolName, params, risk, "llm_confirm", decision.Reason)
-		return &GuardResult{Decision: Confirm, Reason: decision.Reason, Risk: risk}
+		return &GuardResult{Decision: Confirm, Reason: decision.Reason, Risk: risk, Source: "llm", Audit: "llm_confirm"}
 	case "modify":
 		g.audit(ctx, toolName, params, risk, "llm_modify", decision.Reason)
-		return &GuardResult{Decision: Confirm, Reason: decision.Reason, Risk: risk, Suggestion: decision.Suggestion}
+		return &GuardResult{Decision: Modify, Reason: decision.Reason, Risk: risk, Suggestion: decision.Suggestion, Source: "llm", Audit: "llm_modify"}
 	case "approve":
 		g.audit(ctx, toolName, params, risk, "llm_approve", decision.Reason)
-		return &GuardResult{Decision: Approve, Reason: decision.Reason, Risk: risk}
+		return &GuardResult{Decision: Approve, Reason: decision.Reason, Risk: risk, Source: "llm", Audit: "llm_approve"}
 	default:
 		g.audit(ctx, toolName, params, risk, "llm_uncertain", decision.Reason)
-		return &GuardResult{Decision: Confirm, Reason: decision.Reason, Risk: risk, Suggestion: decision.Suggestion}
+		return &GuardResult{Decision: Confirm, Reason: decision.Reason, Risk: risk, Suggestion: decision.Suggestion, Source: "llm", Audit: "llm_uncertain"}
 	}
 }
 

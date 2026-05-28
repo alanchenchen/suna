@@ -334,6 +334,7 @@ IPC 展示层额外限制:
 
 Tool intent 展示:
   - tool_start.intent 是 UI 主线展示的首要文本，用来让用户第一眼知道 agent 正在做什么
+  - tool_guard 是工具执行前的安全来源事件，展示 Guard 决策、风险、来源和原因，不进入 tool.Result.Metadata
   - params/result 默认不在聊天主线展开，只进入详情面板
   - tool error 需要在主线显示短错误摘要
   - Guard reject 视为该 tool 失败，UI 应把对应 tool 标为 error

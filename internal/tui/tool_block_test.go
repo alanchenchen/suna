@@ -110,9 +110,33 @@ func TestRenderToolEntryShowsFileChangeSummary(t *testing.T) {
 
 	rendered := tui.renderToolEntry(te, false)
 	plain := stripANSIForTest(rendered)
-	for _, want := range []string{"↳", "internal/tool/writefile.go", "updated", "+18", "-4", "1 repl", "2.1KB", "2.5KB"} {
+	for _, want := range []string{"↳", "File", "internal/tool/writefile.go", "updated", "+18", "-4", "1 repl", "2.1KB", "2.5KB"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("rendered summary missing %q:\n%s", want, plain)
+		}
+	}
+}
+
+func TestRenderToolEntryShowsGuardSummary(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
+	te := &toolEntry{
+		rawName: "editfile",
+		name:    "editfile",
+		intent:  "Update config",
+		status:  toolRunning,
+		guard: &guardInfo{
+			risk:     "medium",
+			decision: "approve",
+			source:   "llm",
+			reason:   "matches requested edit",
+		},
+	}
+
+	rendered := tui.renderToolEntry(te, false)
+	plain := stripANSIForTest(rendered)
+	for _, want := range []string{"Guard", "LLM approved", "medium", "matches requested edit"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered guard summary missing %q:\n%s", want, plain)
 		}
 	}
 }

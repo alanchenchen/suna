@@ -130,12 +130,102 @@ func (t *TUI) renderToolEntry(te *toolEntry, nested bool) string {
 		if err != "" {
 			line += "\n" + prefix + "  " + styleToolErr.Render(truncateRunes(err, max(24, t.width-12)))
 		}
-	} else if te.status == toolDone {
+	}
+	if summary := t.renderGuardSummary(te.guard, prefix); summary != "" {
+		line += "\n" + summary
+	}
+	if te.status == toolDone {
 		if summary := t.renderToolMetadataSummary(te, prefix); summary != "" {
 			line += "\n" + summary
 		}
 	}
 	return line + "\n"
+}
+
+func (t *TUI) renderGuardSummary(info *guardInfo, prefix string) string {
+	if info == nil {
+		return ""
+	}
+	parts := []string{styleMetaPill.Render(t.tr("tui.tool.guard.badge")), t.renderGuardDecisionBadge(info), t.renderRiskBadge(info.risk)}
+	if reason := shortGuardReason(info.reason); reason != "" {
+		parts = append(parts, styleToolDim.Render(reason))
+	}
+	return prefix + "  " + styleDim.Render("↳ ") + strings.Join(parts, "  ")
+}
+
+func (t *TUI) renderGuardDecisionBadge(info *guardInfo) string {
+	label := t.guardDecisionLabel(info)
+	switch info.decision {
+	case "approve":
+		return styleGuardOK.Render(label)
+	case "reject":
+		return styleGuardErr.Render(label)
+	case "confirm", "modify":
+		return styleGuardWarn.Render(label)
+	default:
+		if info.source == "fallback" {
+			return styleGuardWarn.Render(label)
+		}
+		return styleMetaPill.Render(label)
+	}
+}
+
+func (t *TUI) guardDecisionLabel(info *guardInfo) string {
+	if info == nil {
+		return t.tr("tui.tool.guard.unknown")
+	}
+	switch info.source {
+	case "llm":
+		switch info.decision {
+		case "approve":
+			return t.tr("tui.tool.guard.llm_approved")
+		case "reject":
+			return t.tr("tui.tool.guard.llm_blocked")
+		case "modify":
+			return t.tr("tui.tool.guard.llm_suggested")
+		case "confirm":
+			return t.tr("tui.tool.guard.llm_confirm")
+		}
+	case "user":
+		if info.decision == "reject" {
+			return t.tr("tui.tool.guard.user_rejected")
+		}
+		return t.tr("tui.tool.guard.user_approved")
+	case "rule":
+		if info.decision == "reject" {
+			return t.tr("tui.tool.guard.rule_blocked")
+		}
+		return t.tr("tui.tool.guard.rule_approved")
+	case "static":
+		if info.decision == "reject" {
+			return t.tr("tui.tool.guard.policy_blocked")
+		}
+		return t.tr("tui.tool.guard.auto_approved")
+	case "fallback":
+		return t.tr("tui.tool.guard.review_unavailable")
+	}
+	return info.decision
+}
+
+func (t *TUI) renderRiskBadge(risk string) string {
+	switch risk {
+	case "high":
+		return styleGuardErr.Render(t.tr("tui.tool.guard.risk.high"))
+	case "medium":
+		return styleGuardWarn.Render(t.tr("tui.tool.guard.risk.medium"))
+	case "low":
+		return styleGuardOK.Render(t.tr("tui.tool.guard.risk.low"))
+	default:
+		return styleMetaPill.Render(risk)
+	}
+}
+
+func shortGuardReason(reason string) string {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return ""
+	}
+	return truncateRunes(reason, 64)
 }
 
 func (t *TUI) renderToolMetadataSummary(te *toolEntry, prefix string) string {
@@ -186,16 +276,16 @@ func (t *TUI) renderFileChangeSummary(metadata map[string]any, prefix string) st
 	maxWidth := max(24, t.width-lipgloss.Width(stripANSI(prefix))-8)
 	metaWidth := lipgloss.Width(strings.Join(plainParts, "  "))
 	pathWidth := max(10, maxWidth-metaWidth-4)
-	pathText := styleToolDim.Render(compactPath(path, pathWidth))
-	return prefix + "  " + arrow + pathText + "  " + strings.Join(parts, "  ")
+	pathText := styleFilePath.Render(compactPath(path, pathWidth))
+	return prefix + "  " + arrow + styleMetaPill.Render(t.tr("tui.tool.file.badge")) + "  " + pathText + "  " + strings.Join(parts, "  ")
 }
 
 func renderFileChangeStatus(operation string) string {
 	switch operation {
 	case "created":
-		return lipgloss.NewStyle().Foreground(ColorAgent).Bold(true).Render("created")
+		return styleGuardOK.Render("created")
 	case "updated":
-		return lipgloss.NewStyle().Foreground(ColorBrand).Bold(true).Render("updated")
+		return styleMetaPill.Render("updated")
 	case "unchanged":
 		return styleToolDim.Render("unchanged")
 	default:
@@ -209,9 +299,9 @@ func renderLineDelta(prefix string, n int, added bool) string {
 		return styleToolDim.Render(text)
 	}
 	if added {
-		return styleToolAdd.Render(text)
+		return styleGuardOK.Render(text)
 	}
-	return styleToolDel.Render(text)
+	return styleGuardErr.Render(text)
 }
 
 func compactPath(path string, maxWidth int) string {
@@ -335,6 +425,22 @@ func (t *TUI) renderToolDetailOverlay(width int) string {
 	} else if te.params != "" {
 		lines = append(lines, "", styleDim.Render(t.tr("tui.tool.params")))
 		lines = append(lines, splitWrapped(te.params, inner, 18)...)
+	}
+	if te.guard != nil {
+		lines = append(lines, "", styleDim.Render(t.tr("tui.tool.guard")))
+		lines = append(lines, styleDim.Render(t.tr("tui.tool.guard.decision"))+" "+t.renderGuardDecisionBadge(te.guard))
+		lines = append(lines, styleDim.Render(t.tr("tui.tool.guard.risk"))+" "+t.renderRiskBadge(te.guard.risk))
+		if te.guard.source != "" {
+			lines = append(lines, styleDim.Render(t.tr("tui.tool.guard.source"))+" "+styleToolDim.Render(te.guard.source))
+		}
+		if strings.TrimSpace(te.guard.reason) != "" {
+			lines = append(lines, styleDim.Render(t.tr("tui.tool.guard.reason")))
+			lines = append(lines, splitWrapped(te.guard.reason, inner, 5)...)
+		}
+		if strings.TrimSpace(te.guard.suggestion) != "" {
+			lines = append(lines, styleDim.Render(t.tr("tui.tool.guard.suggestion")))
+			lines = append(lines, splitWrapped(te.guard.suggestion, inner, 5)...)
+		}
 	}
 	if te.result != "" {
 		meta := t.tr("tui.tool.result")

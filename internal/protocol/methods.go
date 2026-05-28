@@ -54,6 +54,7 @@ const (
 	NotifyReasoning    = "agent.reasoning"
 	NotifyUsage        = "agent.usage"
 	NotifyToolStart    = "agent.tool_start"
+	NotifyToolGuard    = "agent.tool_guard"
 	NotifyToolEnd      = "agent.tool_end"
 	NotifyAskUser      = "agent.ask_user"
 	NotifyGuardConfirm = "agent.guard_confirm"
