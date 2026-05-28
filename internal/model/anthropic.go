@@ -2,8 +2,10 @@ package model
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/alanchenchen/suna/internal/logging"
@@ -19,7 +21,8 @@ type AnthropicProvider struct {
 }
 
 func NewAnthropicProvider(apiKey, baseURL, model string, contextWindow int, mediaResolver MediaResolver) *AnthropicProvider {
-	client := anthropic.NewClient(option.WithAPIKey(apiKey), option.WithBaseURL(baseURL))
+	httpClient := compatibleHTTPClient(&http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}})
+	client := anthropic.NewClient(option.WithAPIKey(apiKey), option.WithBaseURL(baseURL), option.WithHTTPClient(httpClient))
 	return &AnthropicProvider{
 		client:        &client,
 		model:         model,

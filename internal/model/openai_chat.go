@@ -21,7 +21,7 @@ type OpenAIChatProvider struct {
 }
 
 func NewOpenAIChatProvider(apiKey, baseURL, model string, contextWindow int, mediaResolver MediaResolver) *OpenAIChatProvider {
-	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}}
+	httpClient := compatibleHTTPClient(&http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}})
 	opts := []option.RequestOption{option.WithAPIKey(apiKey), option.WithHTTPClient(httpClient)}
 	if baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))

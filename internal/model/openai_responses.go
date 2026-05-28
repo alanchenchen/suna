@@ -20,7 +20,7 @@ type OpenAIResponsesProvider struct {
 }
 
 func NewOpenAIResponsesProvider(apiKey, baseURL, model string, contextWindow int, mediaResolver MediaResolver) *OpenAIResponsesProvider {
-	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}}}
+	httpClient := compatibleHTTPClient(&http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}})
 	client := openai.NewClient(option.WithAPIKey(apiKey), option.WithBaseURL(baseURL), option.WithHTTPClient(httpClient))
 	return &OpenAIResponsesProvider{client: client, model: model, contextWindow: contextWindow, media: mediaResolver}
 }
