@@ -92,6 +92,7 @@ type TUI struct {
 	configEditingName     string
 	showHelp              bool
 	copyMode              bool
+	confirmDiscardDraft   bool
 	cmdSuggestions        []commandSpec
 	cmdSuggestionIdx      int
 	attachments           []attachmentItem

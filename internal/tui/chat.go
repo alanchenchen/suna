@@ -283,6 +283,9 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		ks := m.String()
+		if t.confirmDiscardDraft {
+			return t.updateDiscardDraftConfirm(ks, msg)
+		}
 		if t.pendingGuard != nil {
 			return t.updateGuardConfirm(ks)
 		}
@@ -308,6 +311,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t.showHelp = !t.showHelp
 			return t, nil
 		case ks == "enter":
+			t.confirmDiscardDraft = false
 			if len(t.cmdSuggestions) > 0 {
 				cmd := t.acceptCommandSuggestion()
 				if cmd != nil {
@@ -333,6 +337,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return t, nil
 		case ks == "shift+enter", ks == "alt+enter":
+			t.confirmDiscardDraft = false
 			t.ta.InsertString("\n")
 			t.layoutChat()
 			return t, nil
@@ -352,13 +357,14 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				t.syncContent()
 				return t, tea.Batch(t.cancelCmd(), t.ta.Focus())
 			}
-			if t.ta.Value() == "" {
+			if !t.hasDraft() {
 				t.mode = "welcome"
 				t.refreshDaemonStatus()
 				t.initWelcomeList()
 				return t, nil
 			}
-			t.ta.Reset()
+			t.confirmDiscardDraft = true
+			t.layoutChat()
 			return t, t.ta.Focus()
 		case ks == "ctrl+t":
 			t.showToolDetail = !t.showToolDetail
@@ -444,19 +450,65 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, cmd
 	}
 
+	if t.confirmDiscardDraft {
+		t.confirmDiscardDraft = false
+	}
+
 	var cmd tea.Cmd
 	t.ta, cmd = t.ta.Update(msg)
 
-	val := t.ta.Value()
-	if strings.HasPrefix(val, "/") && !strings.Contains(strings.TrimPrefix(val, "/"), " ") {
-		t.updateCmdSuggestions(val)
-	} else {
-		t.cmdSuggestions = nil
-		t.cmdSuggestionIdx = 0
-	}
+	t.updateCmdSuggestionState()
 	t.layoutChat()
 
 	return t, cmd
+}
+
+func (t *TUI) updateDiscardDraftConfirm(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch ks {
+	case "ctrl+c":
+		t.doQuit()
+		return t, tea.Quit
+	case "enter":
+		t.discardDraft()
+		return t, t.ta.Focus()
+	case "esc":
+		t.confirmDiscardDraft = false
+		t.layoutChat()
+		return t, t.ta.Focus()
+	}
+
+	t.confirmDiscardDraft = false
+	var cmd tea.Cmd
+	t.ta, cmd = t.ta.Update(msg)
+	t.updateCmdSuggestionState()
+	t.layoutChat()
+	return t, cmd
+}
+
+func (t *TUI) hasDraft() bool {
+	return strings.TrimSpace(t.ta.Value()) != "" || len(t.attachments) > 0
+}
+
+func (t *TUI) discardDraft() {
+	t.confirmDiscardDraft = false
+	t.ta.Reset()
+	t.attachments = nil
+	t.attachmentMode = false
+	t.attachmentDelete = false
+	t.attachmentCursor = 0
+	t.cmdSuggestions = nil
+	t.cmdSuggestionIdx = 0
+	t.layoutChat()
+}
+
+func (t *TUI) updateCmdSuggestionState() {
+	val := t.ta.Value()
+	if strings.HasPrefix(val, "/") && !strings.Contains(strings.TrimPrefix(val, "/"), " ") {
+		t.updateCmdSuggestions(val)
+		return
+	}
+	t.cmdSuggestions = nil
+	t.cmdSuggestionIdx = 0
 }
 
 func (t *TUI) updateGuardConfirm(ks string) (tea.Model, tea.Cmd) {

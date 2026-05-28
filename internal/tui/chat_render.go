@@ -146,7 +146,11 @@ func (t *TUI) layoutChat() {
 	if len(t.cmdSuggestions) > 0 {
 		suggestionH = min(4, len(t.cmdSuggestions)) + 2
 	}
-	fixedH := 6 + attachmentH + inputH + suggestionH
+	confirmH := 0
+	if t.confirmDiscardDraft {
+		confirmH = 1
+	}
+	fixedH := 6 + attachmentH + inputH + suggestionH + confirmH
 	vpHeight := max(3, t.height-fixedH)
 	t.vp.SetWidth(t.width)
 	t.vp.SetHeight(vpHeight)
@@ -219,10 +223,22 @@ func (t *TUI) renderInputArea() string {
 	if view == "" {
 		view = "> "
 	}
-	if panel := t.renderAttachmentPanel(); panel != "" {
-		return "  " + strings.ReplaceAll(panel, "\n", "\n  ") + "\n" + "  " + strings.ReplaceAll(view, "\n", "\n  ")
+	confirm := ""
+	if t.confirmDiscardDraft {
+		confirm = styleError.Render(t.tr("tui.chat.discard_draft")) + " " + styleDim.Render(t.tr("tui.chat.discard_draft_help"))
 	}
-	return "  " + strings.ReplaceAll(view, "\n", "\n  ")
+	if panel := t.renderAttachmentPanel(); panel != "" {
+		body := "  " + strings.ReplaceAll(panel, "\n", "\n  ") + "\n" + "  " + strings.ReplaceAll(view, "\n", "\n  ")
+		if confirm != "" {
+			body += "\n  " + confirm
+		}
+		return body
+	}
+	body := "  " + strings.ReplaceAll(view, "\n", "\n  ")
+	if confirm != "" {
+		body += "\n  " + confirm
+	}
+	return body
 }
 
 func (t *TUI) chatPetState() petState {
