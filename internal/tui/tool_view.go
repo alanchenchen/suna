@@ -19,13 +19,25 @@ func (b *toolBlock) add(te *toolEntry) {
 }
 
 func (t *TUI) ensureToolBlock() *toolBlock {
-	if t.currentToolBlock != nil {
+	if t.canAppendToCurrentToolBlock() {
 		return t.currentToolBlock
 	}
 	block := &toolBlock{entries: make(map[string]*toolEntry)}
 	t.currentToolBlock = block
 	t.messages = append(t.messages, chatMsg{role: "tool", content: block})
 	return block
+}
+
+func (t *TUI) canAppendToCurrentToolBlock() bool {
+	if t.currentToolBlock == nil || len(t.messages) == 0 {
+		return false
+	}
+	last := t.messages[len(t.messages)-1]
+	if last.role != "tool" {
+		return false
+	}
+	block, ok := last.content.(*toolBlock)
+	return ok && block == t.currentToolBlock
 }
 
 func parseSubtaskToolID(id string) (string, string) {

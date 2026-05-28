@@ -10,7 +10,7 @@ import (
 
 func (t *TUI) handleCommand(input string) tea.Cmd {
 	if t.localCli == nil {
-		t.messages = append(t.messages, chatMsg{role: "error", content: t.i18n.T("error.not_connected")})
+		t.appendNonToolMessage(chatMsg{role: "error", content: t.i18n.T("error.not_connected")})
 		return nil
 	}
 
@@ -38,7 +38,7 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 	case "/memory":
 		return t.handleMemory(parts)
 	case "/compact":
-		t.messages = append(t.messages, chatMsg{role: "system", content: t.i18n.T("compact.running")})
+		t.appendNonToolMessage(chatMsg{role: "system", content: t.i18n.T("compact.running")})
 		return t.compactCmd()
 	case "/config":
 		t.mode = "config"
@@ -53,7 +53,7 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 		t.initHelpPage()
 		return nil
 	default:
-		t.messages = append(t.messages, chatMsg{role: "error", content: t.i18n.Tf("cmd.unknown", cmd)})
+		t.appendNonToolMessage(chatMsg{role: "error", content: t.i18n.Tf("cmd.unknown", cmd)})
 	}
 	return nil
 }
@@ -83,12 +83,12 @@ func (t *TUI) switchModelRef(ref string) tea.Cmd {
 		ref = t.providerName + "/" + ref
 	}
 	if _, ok := t.modelByRef(ref); !ok {
-		t.messages = append(t.messages, chatMsg{role: "error", content: t.i18n.Tf("cmd.model_not_found", ref)})
+		t.appendNonToolMessage(chatMsg{role: "error", content: t.i18n.Tf("cmd.model_not_found", ref)})
 		return nil
 	}
 	t.configState.ActiveModel = ref
 	t.modelPickerOpen = false
-	t.messages = append(t.messages, chatMsg{role: "system", content: t.i18n.Tf("cmd.model_switched", ref)})
+	t.appendNonToolMessage(chatMsg{role: "system", content: t.i18n.Tf("cmd.model_switched", ref)})
 	return t.sendConfigSet(protocol.ConfigSetParams{Action: protocol.ConfigActionActivateModel, ActiveModel: ref})
 }
 
@@ -131,6 +131,6 @@ func (t *TUI) handleMemory(parts []string) tea.Cmd {
 	if len(parts) == 1 {
 		return t.listMemoryCmd()
 	}
-	t.messages = append(t.messages, chatMsg{role: "system", content: t.i18n.T("memory.list_hint")})
+	t.appendNonToolMessage(chatMsg{role: "system", content: t.i18n.T("memory.list_hint")})
 	return nil
 }

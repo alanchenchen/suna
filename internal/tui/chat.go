@@ -319,7 +319,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 					askID := t.pendingAskID
 					t.pendingAskID = ""
 					t.pendingAskOptions = nil
-					t.messages = append(t.messages, chatMsg{role: "user", content: answer})
+					t.appendNonToolMessage(chatMsg{role: "user", content: answer})
 					t.startLLMWait()
 					t.syncContent()
 					return t, tea.Batch(t.askReplyCmd(askID, answer), t.sp.Tick)
@@ -345,7 +345,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if t.loading {
 				t.resetPhase()
-				t.messages = append(t.messages, chatMsg{role: "system", content: t.i18n.T("status.cancelled")})
+				t.appendNonToolMessage(chatMsg{role: "system", content: t.i18n.T("status.cancelled")})
 				t.syncContent()
 				return t, tea.Batch(t.cancelCmd(), t.ta.Focus())
 			}
@@ -618,7 +618,7 @@ func (t *TUI) handleSend() tea.Cmd {
 	if input == "" && len(attachments) == 0 {
 		return t.ta.Focus()
 	}
-	t.messages = append(t.messages, chatMsg{role: "user", content: userMessageContent{text: input, attachments: attachments}})
+	t.appendNonToolMessage(chatMsg{role: "user", content: userMessageContent{text: input, attachments: attachments}})
 	t.attachments = nil
 	t.attachmentMode = false
 	t.attachmentDelete = false

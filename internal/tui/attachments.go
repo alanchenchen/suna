@@ -113,7 +113,7 @@ type pendingImagePaste struct {
 func (t *TUI) handlePaste(content string) tea.Cmd {
 	pending, ok, blocked := detectImagePaste(content)
 	if blocked {
-		t.messages = append(t.messages, chatMsg{role: "error", content: t.tr("tui.attachment.base64_blocked")})
+		t.appendNonToolMessage(chatMsg{role: "error", content: t.tr("tui.attachment.base64_blocked")})
 		return nil
 	}
 	if !ok {
@@ -154,7 +154,7 @@ func (t *TUI) confirmPendingImagePaste() tea.Cmd {
 	if p.SourceKind == "data_uri" {
 		path, name, size, err := t.savePastedImage(p)
 		if err != nil {
-			t.messages = append(t.messages, chatMsg{role: "error", content: err.Error()})
+			t.appendNonToolMessage(chatMsg{role: "error", content: err.Error()})
 			return nil
 		}
 		p.SourceKind = protocol.AttachmentKindAttachment

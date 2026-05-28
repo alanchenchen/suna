@@ -264,6 +264,11 @@ func (t *TUI) startLLMWait() {
 	t.streamStart = time.Now()
 }
 
+func (t *TUI) appendNonToolMessage(msg chatMsg) {
+	t.currentToolBlock = nil
+	t.messages = append(t.messages, msg)
+}
+
 func extractLastSentence(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -327,7 +332,7 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 		json.Unmarshal(notif.params, &p)
 		if p.Done {
 			if strings.HasPrefix(p.Chunk, "error:") || p.Chunk == "cancelled" {
-				t.messages = append(t.messages, chatMsg{role: "error", content: p.Chunk})
+				t.appendNonToolMessage(chatMsg{role: "error", content: p.Chunk})
 			}
 			t.resetPhase()
 			if p.ContextWindow > 0 {
@@ -349,7 +354,7 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 			prev, _ := t.messages[len(t.messages)-1].content.(string)
 			t.messages[len(t.messages)-1].content = prev + p.Chunk
 		} else {
-			t.messages = append(t.messages, chatMsg{role: "assistant", content: p.Chunk})
+			t.appendNonToolMessage(chatMsg{role: "assistant", content: p.Chunk})
 		}
 	case protocol.NotifyReasoning:
 		var p protocol.StreamParams
@@ -362,7 +367,7 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 			prev, _ := t.messages[len(t.messages)-1].content.(string)
 			t.messages[len(t.messages)-1].content = prev + p.Chunk
 		} else {
-			t.messages = append(t.messages, chatMsg{role: "reasoning", content: p.Chunk})
+			t.appendNonToolMessage(chatMsg{role: "reasoning", content: p.Chunk})
 		}
 	case protocol.NotifyUsage:
 		var p protocol.UsageParams
@@ -455,7 +460,7 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 		t.pendingAskID = p.ID
 		t.pendingAskOptions = p.Options
 		t.pendingAskCursor = 0
-		t.messages = append(t.messages, chatMsg{role: "system", content: "❓ " + p.Question})
+		t.appendNonToolMessage(chatMsg{role: "system", content: "❓ " + p.Question})
 		t.resetPhase()
 	case protocol.NotifyGuardConfirm:
 		var p protocol.GuardConfirmParams
@@ -471,25 +476,25 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 			t.modelName = p.ModelName
 		}
 		if t.mode == "chat" && len(t.messages) == 0 {
-			t.messages = append(t.messages, chatMsg{role: "system", content: t.i18n.Tf("status.daemon_connected", p.PID)})
+			t.appendNonToolMessage(chatMsg{role: "system", content: t.i18n.Tf("status.daemon_connected", p.PID)})
 		}
 	case protocol.NotifyCompactResult:
 		var p protocol.CompactResult
 		json.Unmarshal(notif.params, &p)
-		t.messages = append(t.messages, chatMsg{role: "system", content: t.renderCompactPanel(p)})
+		t.appendNonToolMessage(chatMsg{role: "system", content: t.renderCompactPanel(p)})
 	case "compact.error":
 		var p struct {
 			Message string `json:"message"`
 		}
 		json.Unmarshal(notif.params, &p)
-		t.messages = append(t.messages, chatMsg{role: "error", content: p.Message})
+		t.appendNonToolMessage(chatMsg{role: "error", content: p.Message})
 	case protocol.NotifyMemoryListResult:
 		var p protocol.MemoryListResult
 		json.Unmarshal(notif.params, &p)
 		if len(p.Memories) == 0 {
-			t.messages = append(t.messages, chatMsg{role: "system", content: t.i18n.T("memory.not_found")})
+			t.appendNonToolMessage(chatMsg{role: "system", content: t.i18n.T("memory.not_found")})
 		} else {
-			t.messages = append(t.messages, chatMsg{role: "panel", content: t.renderMemoryList(p.Memories)})
+			t.appendNonToolMessage(chatMsg{role: "panel", content: t.renderMemoryList(p.Memories)})
 		}
 	case protocol.NotifySessionRestoreMsg:
 		var p struct {
@@ -498,7 +503,7 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 		}
 		json.Unmarshal(notif.params, &p)
 		if p.Content != "" {
-			t.messages = append(t.messages, chatMsg{role: p.Role, content: p.Content})
+			t.appendNonToolMessage(chatMsg{role: p.Role, content: p.Content})
 		}
 	case protocol.NotifySessionRestoreInput:
 		var p struct {
