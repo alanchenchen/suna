@@ -59,6 +59,63 @@ func TestSaveKeepsGuardWorkspace(t *testing.T) {
 	}
 }
 
+func TestSaveOmitsDefaultMaxModelRPS(t *testing.T) {
+	dir := t.TempDir()
+	workspace := filepath.Join(dir, "workspace")
+	if err := os.Mkdir(workspace, 0755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	cfg := &Config{
+		ActiveModel: "test/model",
+		Models:      []ModelConfig{{Provider: "test", Model: "model"}},
+		Guard:       GuardConfig{Mode: "ask", Workspace: workspace},
+		UI:          UIConfig{Theme: "auto", Locale: "en"},
+		MaxModelRPS: 0,
+		DataDir:     dir,
+	}
+	path := filepath.Join(dir, "config.toml")
+	if err := cfg.Save(path); err != nil {
+		t.Fatalf("Save error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	if strings.Contains(string(data), "max_model_rps") {
+		t.Fatalf("saved config should omit default max_model_rps: %s", string(data))
+	}
+	if got := cfg.GetMaxModelRPS(); got != DefaultMaxModelRPS {
+		t.Fatalf("GetMaxModelRPS() = %d, want %d", got, DefaultMaxModelRPS)
+	}
+}
+
+func TestSaveKeepsCustomMaxModelRPS(t *testing.T) {
+	dir := t.TempDir()
+	workspace := filepath.Join(dir, "workspace")
+	if err := os.Mkdir(workspace, 0755); err != nil {
+		t.Fatalf("mkdir workspace: %v", err)
+	}
+	cfg := &Config{
+		ActiveModel: "test/model",
+		Models:      []ModelConfig{{Provider: "test", Model: "model"}},
+		Guard:       GuardConfig{Mode: "ask", Workspace: workspace},
+		UI:          UIConfig{Theme: "auto", Locale: "en"},
+		MaxModelRPS: 20,
+		DataDir:     dir,
+	}
+	path := filepath.Join(dir, "config.toml")
+	if err := cfg.Save(path); err != nil {
+		t.Fatalf("Save error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	if !strings.Contains(string(data), "max_model_rps = 20") {
+		t.Fatalf("saved config missing custom max_model_rps: %s", string(data))
+	}
+}
+
 func TestReasoningRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")

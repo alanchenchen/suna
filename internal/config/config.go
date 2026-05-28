@@ -77,7 +77,7 @@ type configTOML struct {
 	Guard       GuardConfig       `toml:"guard"`
 	UI          UIConfig          `toml:"ui"`
 	Hooks       []HookConfig      `toml:"hooks"`
-	MaxModelRPS int               `toml:"max_model_rps,omitempty"`
+	MaxModelRPS int               `toml:"max_model_rps,omitzero"`
 }
 
 type modelConfigTOML struct {
