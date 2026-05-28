@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/model"
 )
 
@@ -21,11 +22,7 @@ type Store struct {
 func NewStore(root string) *Store { return &Store{Root: root} }
 
 func DefaultRoot() string {
-	home, _ := os.UserHomeDir()
-	if home == "" {
-		return ""
-	}
-	return filepath.Join(home, ".suna", "attachments")
+	return config.DefaultAttachmentsDir()
 }
 
 func (s *Store) ValidateImage(ref model.MediaRef) (model.MediaRef, error) {

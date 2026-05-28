@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"time"
 
+	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/protocol"
 	"github.com/alanchenchen/suna/internal/transport/local"
 )
@@ -174,6 +174,5 @@ func removePID() {
 }
 
 func pidPath() string {
-	homeDir, _ := os.UserHomeDir()
-	return filepath.Join(homeDir, ".suna", "sunad.pid")
+	return config.DefaultPIDPath()
 }

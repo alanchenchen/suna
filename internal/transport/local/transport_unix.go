@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/protocol"
 )
 
@@ -36,8 +37,7 @@ type socketConn struct {
 
 // DefaultEndpoint 返回当前平台 local transport 使用的默认监听地址。
 func DefaultEndpoint() string {
-	homeDir, _ := os.UserHomeDir()
-	return filepath.Join(homeDir, ".suna", "sunad.sock")
+	return config.DefaultSocketPath()
 }
 
 func platformDial(endpoint string, timeout time.Duration) (net.Conn, error) {

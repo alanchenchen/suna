@@ -18,7 +18,7 @@ Suna 的核心创新：空杯出厂 + 按需学习。能力不是预装的，是
 每个能力是一个目录：
 
 ```
-~/.suna/capabilities/
+<data-dir>/capabilities/      # 当前默认 ~/.suna/capabilities/
 ├── vue-style/              # 类型 1: 纯知识
 │   └── SKILL.md
 ├── log-parser/             # 类型 2: 知识 + 程序
@@ -308,7 +308,7 @@ module.exports = {
 Agent 启动
   │
   ▼
-扫描 ~/.suna/capabilities/
+扫描默认数据目录下的 capabilities/
   │
   ├── 每个 skill 目录:
   │   └── 读 SKILL.md → 解析 name 和 prompt 摘要
@@ -434,7 +434,7 @@ Step 3: 验证 (有 main.js 时自动执行)
 
 Step 4: 用户确认
   TUI 显示能力摘要 → [确认保存] [修改] [取消]
-  确认 → 保存到 ~/.suna/capabilities/xxx/
+  确认 → 保存到默认数据目录下的 capabilities/xxx/
 
 Step 5: 后续优化
   使用中发现不够好 → 自省检测 → 建议更新 → 用户确认后覆盖
@@ -491,7 +491,9 @@ Agent: "我学会了:
   - 能力市场 (远期)
 
 安装方式:
-  - 解压到 ~/.suna/capabilities/xxx/
+  - 解压到默认数据目录下的 capabilities/xxx/
   - TUI: /skill load ./xxx/
   - 市场安装后自动验证
 ```
+
+能力根目录由 `internal/config/paths.go` 的 `DefaultCapabilitiesDir()` / `Config.CapabilitiesDir()` 派生，当前默认展开为 `~/.suna/capabilities`。

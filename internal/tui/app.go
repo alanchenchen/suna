@@ -394,6 +394,12 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 	case protocol.NotifyToolStart:
 		var p protocol.ToolStartParams
 		json.Unmarshal(notif.params, &p)
+		if t.activeTools == nil {
+			t.activeTools = make(map[string]*toolEntry)
+		}
+		if t.toolStartTimes == nil {
+			t.toolStartTimes = make(map[string]time.Time)
+		}
 		t.phase = phaseTool
 		t.phaseStart = time.Now()
 		t.loading = true

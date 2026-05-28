@@ -141,8 +141,7 @@ type credentialsFile map[string]struct {
 // Load 从 TOML 加载配置并校验模型引用；缺失或非法字段直接返回错误，不做旧格式兼容。
 func Load(path string) (*Config, error) {
 	cfg := &Config{UI: UIConfig{Theme: "auto", Locale: "en"}}
-	homeDir, _ := os.UserHomeDir()
-	cfg.DataDir = filepath.Join(homeDir, ".suna")
+	cfg.DataDir = DefaultDataDir()
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil, fmt.Errorf("config file not found: %s\nPlease create ~/.suna/config.toml with active_model and [[models]] entries", path)
@@ -463,9 +462,6 @@ func (c *Config) EnsureDataDir() error {
 	}
 	return nil
 }
-
-func (c *Config) DBPath() string     { return filepath.Join(c.DataDir, "memory.db") }
-func (c *Config) ConfigPath() string { return filepath.Join(c.DataDir, "config.toml") }
 
 func (c *Config) EnsureDataDirs() error {
 	for _, d := range []string{

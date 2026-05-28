@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/protocol"
 )
 
@@ -200,19 +200,15 @@ func (t *TUI) configDetailDefaultCursor() int {
 }
 
 func configDataDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return ".suna"
-	}
-	return filepath.Join(home, ".suna")
+	return config.DefaultDataDir()
 }
 
 func configFilePath() string {
-	return filepath.Join(configDataDir(), "config.toml")
+	return config.DataDirConfigPath(configDataDir())
 }
 
 func credentialsFilePath() string {
-	return filepath.Join(configDataDir(), "credentials.toml")
+	return config.DataDirCredentialsPath(configDataDir())
 }
 
 func (t *TUI) openConfigDirCmd() tea.Cmd {

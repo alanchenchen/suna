@@ -395,7 +395,7 @@ Use it only when relevant. Current user instructions override this context.
 
 ## SQLite 设计
 
-数据库仍可使用 `~/.suna/memory.db`，但表结构收敛为最小集合。
+数据库仍可使用默认数据目录下的 `memory.db`（当前默认 `~/.suna/memory.db`），但表结构收敛为最小集合。路径由 `internal/config/paths.go` 的 `DefaultDBPath()` / `Config.DBPath()` 派生。
 
 ### user_memory
 

@@ -223,7 +223,8 @@ suna/
 │   ├── i18n/                    # 国际化
 │   │   └── i18n.go              # key-value 翻译表 (中英文，可扩展)
 │   ├── config/                  # 配置
-│   │   └── config.go            # TOML 加载/保存/验证 + 凭证管理
+│   │   ├── config.go            # TOML 加载/保存/验证 + 凭证管理
+│   │   └── paths.go             # 默认数据目录和派生运行路径
 │   └── tui/                     # 终端 UI (只持有 UI 状态，无模型/DB 业务逻辑)
 │       ├── app.go               # Bubble Tea 主程序 + Setup Wizard
 │       ├── chat.go              # 对话界面 + 键盘快捷键 + 命令补全
@@ -237,6 +238,8 @@ suna/
 ```
 
 ## 用户数据目录
+
+默认用户数据目录由 `internal/config/paths.go` 统一定义和派生。当前默认值是 `~/.suna/`；代码中不得在入口、daemon、transport、media、TUI 等模块重复手写 `$HOME/.suna`，应使用 `config.DefaultDataDir()`、`config.DefaultConfigPath()`、`config.DefaultPIDPath()`、`config.DefaultSocketPath()`、`config.DefaultAttachmentsDir()` 或 `Config` 上的路径方法。
 
 ```
 ~/.suna/
@@ -266,11 +269,11 @@ suna/
     └── memory.log               # memory queue / compaction 日志
 ```
 
-注：`tmp/` 当前主要由 TUI 保存 `data:image/*` 粘贴图片，daemon 消费后只会清理 `tmp/paste-*` 文件，不会删除用户手动选择的普通图片路径。`sunad.sock` 只对应 macOS/Linux 的 Unix Socket；Windows local transport 使用 Named Pipe，不会在 `~/.suna/` 下创建 socket 文件。
+注：`attachments/` 当前主要保存 TUI 粘贴 `data:image/*` 后落盘的图片附件。`sunad.sock` 只对应 macOS/Linux 的 Unix Socket；Windows local transport 使用 Named Pipe，不会在默认数据目录下创建 socket 文件。若后续默认目录改为 XDG、macOS Application Support 或 Windows AppData，只修改 `internal/config/paths.go` 的默认路径策略和必要迁移逻辑。
 
 ## config.toml 当前支持参数
 
-Suna 当前只读取 `~/.suna/config.toml` 和 `~/.suna/credentials.toml`。`config.toml` 保存模型、UI、Guard 和预留 hooks 配置；运行态路径 `DataDir` 不持久化。API key 不写入 `config.toml`，而是按 provider 维度写入 `credentials.toml`，文件权限为 `0600`。
+Suna 当前只读取默认数据目录下的 `config.toml` 和 `credentials.toml`，当前默认展开为 `~/.suna/config.toml` 和 `~/.suna/credentials.toml`。`config.toml` 保存模型、UI、Guard 和预留 hooks 配置；运行态路径 `DataDir` 不持久化。API key 不写入 `config.toml`，而是按 provider 维度写入 `credentials.toml`，文件权限为 `0600`。
 
 ### config.toml 完整示例
 

@@ -161,8 +161,10 @@ type = "enabled"
 API key 不在 config.toml 中配置，统一存储在凭证文件中：
 
 ```
-~/.suna/credentials.toml    # 权限 0600，与 config 分离
+<data-dir>/credentials.toml    # 当前默认 ~/.suna/credentials.toml，权限 0600，与 config 分离
 ```
+
+凭证路径由 `internal/config/paths.go` 的 `DefaultCredentialsPath()` / `Config.CredentialsPath()` 派生，不在模型路由或 TUI 中手写 `$HOME/.suna`。
 
 ```toml
 # 按 provider 维度存 key，同一 provider 下的多个模型共享一个 key

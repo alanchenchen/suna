@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/alanchenchen/suna/internal/config"
 )
 
 // 敏感文件路径匹配规则。
@@ -46,9 +48,8 @@ func IsSensitivePath(path string) (bool, string) {
 
 	for _, rule := range sensitiveFilePatterns {
 		if strings.Contains(lower, strings.ToLower(rule.pattern)) {
-			homeDir, _ := os.UserHomeDir()
 			// ~/.suna/config.toml 不是敏感文件，允许读取
-			if strings.HasPrefix(lower, strings.ToLower(filepath.Join(homeDir, ".suna"))) {
+			if strings.HasPrefix(lower, strings.ToLower(config.DefaultDataDir())) {
 				if strings.HasSuffix(lower, "config.toml") || strings.HasSuffix(lower, "memory.db") {
 					continue
 				}

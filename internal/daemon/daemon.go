@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
@@ -176,13 +175,9 @@ func (d *Daemon) ModelName() string {
 }
 
 func (d *Daemon) writePID() error {
-	homeDir, _ := os.UserHomeDir()
-	pidPath := filepath.Join(homeDir, ".suna", "sunad.pid")
-	return os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0644)
+	return os.WriteFile(d.cfg.PIDPath(), []byte(strconv.Itoa(os.Getpid())), 0644)
 }
 
 func (d *Daemon) removePID() {
-	homeDir, _ := os.UserHomeDir()
-	pidPath := filepath.Join(homeDir, ".suna", "sunad.pid")
-	os.Remove(pidPath)
+	os.Remove(d.cfg.PIDPath())
 }

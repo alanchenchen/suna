@@ -345,7 +345,7 @@ type Message struct {
    → 确认后作为 url attachment 发送
 
 3. Ctrl+V 粘贴 data:image base64
-   TUI 询问是否加入附件 → 确认后保存到 ~/.suna/attachments/sha256-*.png
+   TUI 询问是否加入附件 → 确认后保存到默认数据目录的 attachments/sha256-*.png
    → 再作为 attachment ref 发送；base64 不进入 protocol/daemon/agent memory
 
 注: 不支持 /attach 命令、不识别裸 base64、不自动扫描普通提示词里的图片路径。
@@ -371,6 +371,8 @@ media resolver:
   url 保留 URL；path/attachment 只在 provider request 阶段临时读取并编码 base64
 
 持久化:
-  working memory / conversation_state / user_memory 不保存 raw media
-  只保存用户文本和附件 metadata
+   working memory / conversation_state / user_memory 不保存 raw media
+   只保存用户文本和附件 metadata
 ```
+
+附件根目录由 `internal/config/paths.go` 的 `DefaultAttachmentsDir()` 派生，当前默认展开为 `~/.suna/attachments`。

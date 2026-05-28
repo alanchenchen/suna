@@ -195,7 +195,7 @@ Tool 请求 (ReadFile / ListDir / ReadHTTP / WriteFile / EditFile / Exec / Write
 
 ## 硬规则配置
 
-硬规则在 `~/.suna/config.toml` 中配置，用户可自定义。内置规则按 OS 区分：
+硬规则在默认数据目录下的 `config.toml` 中配置，当前默认路径为 `~/.suna/config.toml`，用户可自定义。配置路径由 `internal/config/paths.go` 的 `DefaultConfigPath()` / `Config.ConfigPath()` 派生。内置规则按 OS 区分：
 
 ### 内置硬规则（按 OS）
 

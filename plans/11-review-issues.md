@@ -231,7 +231,7 @@
 - 06-memory.md 注入策略 + 压缩策略更新
 
 ### ✅ 移除 SOUL.md
-- 人格定义改为 capability: ~/.suna/capabilities/persona/SKILL.md
+- 人格定义改为 capability: 默认数据目录下的 capabilities/persona/SKILL.md
 - 不引入额外概念，统一到能力系统
 - 用户可以让 agent 自己创建/调整人格
 - 01-architecture.md 人格定义节重写

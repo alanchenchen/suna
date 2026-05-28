@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/daemon"
@@ -15,13 +14,7 @@ import (
 )
 
 func main() {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-		os.Exit(1)
-	}
-
-	configPath := filepath.Join(homeDir, ".suna", "config.toml")
+	configPath := config.DefaultConfigPath()
 	if os.Getenv("SUNA_RUN_DAEMON") == "1" {
 		runDaemon(configPath)
 		return
@@ -142,9 +135,8 @@ func loadOrCreateConfig(configPath string) *config.Config {
 		}
 		return cfg
 	}
-	homeDir, _ := os.UserHomeDir()
 	return &config.Config{
-		DataDir: filepath.Join(homeDir, ".suna"),
+		DataDir: config.DefaultDataDir(),
 		UI:      config.UIConfig{Locale: "en", Theme: "auto"},
 	}
 }
