@@ -127,12 +127,16 @@ func (t *TUI) initChatComponents() tea.Cmd {
 		t.pendingInput = ""
 	}
 
-	return t.ta.Focus()
+	return t.syncInputFocus()
 }
 
 func (t *TUI) syncContent() {
 	// 用户没有主动上滚时保持贴底；主动上滚后不打断阅读。
-	followBottom := t.followBottom || t.vp.AtBottom()
+	// 发送新消息这类明确动作会设置 forceBottom，下一次内容同步必须回到底部。
+	followBottom := t.forceBottom || t.followBottom || t.vp.AtBottom()
+	if t.forceBottom {
+		t.forceBottom = false
+	}
 	var sb strings.Builder
 	inSunaBlock := false
 	renderSunaHeader := func() {
@@ -211,29 +215,27 @@ func (t *TUI) syncContent() {
 	}
 }
 
-func (t *TUI) renderThinkingBox(content string, running bool) string {
+func (t *TUI) renderThinkingBox(content string, running bool, startedAt, endedAt time.Time) string {
 	width := max(24, min(t.width-8, 62))
 	inner := width - 4
+	elapsed := reasoningElapsed(running, startedAt, endedAt)
 	title := " ◎ " + t.tr("tui.chat.thinking") + " "
 	if running {
-		elapsed := 0.0
-		if !t.phaseStart.IsZero() {
-			elapsed = time.Since(t.phaseStart).Seconds()
-		}
-		title = fmt.Sprintf(" ◎ %s %s %.1fs ", t.tr("tui.chat.thinking"), t.sp.View(), elapsed)
+		title = fmt.Sprintf(" ◎ %s %s %.1fs ", t.tr("tui.chat.thinking"), t.sp.View(), elapsed.Seconds())
+	} else if elapsed > 0 {
+		title = fmt.Sprintf(" ◎ %s %.1fs ", t.tr("tui.chat.thinking"), elapsed.Seconds())
 	}
 	display := strings.TrimSpace(content)
 	if running && display == "" {
 		display = t.tr("status.thinking")
 	}
-	if !t.showReasoningDetail && !running {
+	if !t.showReasoningDetail {
 		display = extractLastSentence(display)
 		if display == "" {
 			display = t.tr("tui.chat.thought_done")
 		}
 		display += "    [Ctrl+R " + t.tr("tui.key.reasoning_detail") + "]"
-	}
-	if t.showReasoningDetail {
+	} else {
 		if running {
 			display = renderStreamingText(strings.TrimSpace(content), inner)
 		} else {
@@ -241,8 +243,8 @@ func (t *TUI) renderThinkingBox(content string, running bool) string {
 		}
 	}
 	lines := strings.Split(strings.TrimRight(display, "\n"), "\n")
-	if running && !t.showReasoningDetail && len(lines) > 8 {
-		lines = append([]string{"..."}, lines[len(lines)-8:]...)
+	if running && !t.showReasoningDetail && len(lines) > 4 {
+		lines = append([]string{"..."}, lines[len(lines)-4:]...)
 	}
 	if t.showReasoningDetail && len(lines) > 15 {
 		if running {
@@ -260,6 +262,19 @@ func (t *TUI) renderThinkingBox(content string, running bool) string {
 	}
 	sb.WriteString("    " + styleDim.Render("└"+strings.Repeat("─", width-2)+"┘") + "\n")
 	return sb.String()
+}
+
+func reasoningElapsed(running bool, startedAt, endedAt time.Time) time.Duration {
+	if startedAt.IsZero() {
+		return 0
+	}
+	if running {
+		return time.Since(startedAt).Truncate(100 * time.Millisecond)
+	}
+	if endedAt.IsZero() || endedAt.Before(startedAt) {
+		return 0
+	}
+	return endedAt.Sub(startedAt).Truncate(100 * time.Millisecond)
 }
 
 func (t *TUI) renderCurrentStatusLine() string {
@@ -374,6 +389,7 @@ func (t *TUI) submitGuardDecision(decision string) tea.Cmd {
 	restartSpinner := false
 	if t.pendingGuard == nil {
 		t.loading = true
+		t.ta.Blur()
 		t.phase = phaseTool
 		t.phaseStart = time.Now()
 		restartSpinner = true
@@ -420,12 +436,14 @@ func (t *TUI) advanceGuardQueue() {
 }
 
 func (t *TUI) resetPhase() {
+	t.finishStreamingMessages()
 	t.loading = false
 	t.phase = phaseIdle
 	t.phaseStart = time.Time{}
 	t.activeTools = make(map[string]*toolEntry)
 	t.toolStartTimes = make(map[string]time.Time)
 	t.currentToolBlock = nil
+	_ = t.syncInputFocus()
 }
 
 func (t *TUI) moveSelectedTool(delta int) {
@@ -492,15 +510,20 @@ func (t *TUI) acceptCommandSuggestion() tea.Cmd {
 	return cmd
 }
 
+func (t *TUI) scrollToBottomOnNextSync() {
+	t.followBottom = true
+	t.forceBottom = true
+}
+
 func (t *TUI) handleSend() tea.Cmd {
 	input := strings.TrimSpace(t.ta.Value())
 	attachments := append([]attachmentItem(nil), t.attachments...)
 	t.ta.Reset()
 	if input == "" && len(attachments) == 0 {
-		return t.ta.Focus()
+		return t.syncInputFocus()
 	}
 	t.appendNonToolMessage(chatMsg{role: "user", content: userMessageContent{text: input, attachments: attachments}})
-	t.followBottom = true
+	t.scrollToBottomOnNextSync()
 	t.attachments = nil
 	t.attachmentMode = false
 	t.attachmentDelete = false
@@ -528,7 +551,7 @@ func (t *TUI) handleSend() tea.Cmd {
 		if cmd != nil {
 			return cmd
 		}
-		return t.ta.Focus()
+		return t.syncInputFocus()
 	}
 	return t.runAgent(input, attachments)
 }

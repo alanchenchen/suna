@@ -14,7 +14,7 @@
 TUI 在 notification pump 层合并连续文本流：
 
 - 只合并 `agent.stream` 和 `agent.reasoning`。
-- 默认约 16ms flush 一次，接近帧级刷新。
+- 默认约 8ms flush 一次，比原 16ms 更接近字符级反馈，但仍避免每个 delta 都触发完整 UI 重绘。
 - 遇到 `done`、tool、ask、guard、error 等非文本事件时，先 flush pending 文本，再即时投递状态事件。
 - local transport read loop 仍不阻塞在 `program.Send` 上，避免反向卡住 daemon 写入。
 
@@ -46,6 +46,12 @@ TUI 在 notification pump 层合并连续文本流：
 - 等待回复和处于底部时，流式输出自动跟随底部。
 - 用户 PgUp/鼠标上滚离开底部后，暂停自动跟随，避免打断阅读历史。
 - 用户滚回底部或再次发送消息后，恢复自动跟随。
+
+### 交互细节修正
+
+- reasoning 在 streaming 阶段默认也保持折叠，只显示 compact 摘要和 `Ctrl+R` 提示；用户手动展开后才显示实时详情。
+- reasoning 时长绑定到单条 reasoning message 的 `startedAt/endedAt`，完成后固定，不再继续跟随全局 phase 计时。
+- LLM/tool 运行期间 composer 进入只读/失焦状态，显示当前状态与 Esc 取消提示；保留滚动、帮助、工具/思考详情快捷键。
 
 ## 设计约束
 

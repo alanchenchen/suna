@@ -258,6 +258,9 @@ func (t *TUI) renderInputArea() string {
 	if view == "" {
 		view = "> "
 	}
+	if t.inputLocked() && !t.hasDraft() {
+		view = "> " + styleDim.Render(t.lockedInputPlaceholder())
+	}
 	confirm := ""
 	if t.confirmDiscardDraft {
 		confirm = styleError.Render(t.tr("tui.chat.discard_draft")) + " " + styleDim.Render(t.tr("tui.chat.discard_draft_help"))
@@ -275,6 +278,14 @@ func (t *TUI) renderInputArea() string {
 		body += "\n  " + confirm
 	}
 	return body
+}
+
+func (t *TUI) lockedInputPlaceholder() string {
+	label := t.currentStatusLabel()
+	if label == "" {
+		label = t.tr("status.responding")
+	}
+	return label + " · Esc " + t.tr("tui.key.cancel")
 }
 
 func (t *TUI) chatPetState() petState {

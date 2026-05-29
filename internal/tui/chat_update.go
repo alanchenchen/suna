@@ -5,6 +5,27 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+func (t *TUI) inputLocked() bool {
+	return t.loading && t.pendingAskID == "" && t.pendingGuard == nil
+}
+
+func (t *TUI) allowLockedInputKey(ks string) bool {
+	switch ks {
+	case "ctrl+c", "?", "esc", "ctrl+t", "ctrl+r", "pgup", "pgdown", "up", "down":
+		return true
+	default:
+		return false
+	}
+}
+
+func (t *TUI) syncInputFocus() tea.Cmd {
+	if t.inputLocked() {
+		t.ta.Blur()
+		return nil
+	}
+	return t.ta.Focus()
+}
+
 func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -37,6 +58,9 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return t, nil
 			}
 		}
+		if t.inputLocked() && !t.allowLockedInputKey(ks) {
+			return t, nil
+		}
 		switch {
 		case ks == "ctrl+c":
 			t.doQuit()
@@ -51,7 +75,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if cmd != nil {
 					return t, cmd
 				}
-				return t, t.ta.Focus()
+				return t, t.syncInputFocus()
 			}
 			if t.pendingAskID != "" && len(t.pendingAskOptions) > 0 && t.ta.Value() == "" {
 				idx := t.pendingAskCursor
@@ -61,6 +85,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 					t.pendingAskID = ""
 					t.pendingAskOptions = nil
 					t.appendNonToolMessage(chatMsg{role: "user", content: answer})
+					t.scrollToBottomOnNextSync()
 					t.startLLMWait()
 					t.syncContent()
 					return t, tea.Batch(t.askReplyCmd(askID, answer), t.sp.Tick)
@@ -89,7 +114,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				t.resetPhase()
 				t.appendNonToolMessage(chatMsg{role: "system", content: t.i18n.T("status.cancelled")})
 				t.syncContent()
-				return t, tea.Batch(t.cancelCmd(), t.ta.Focus())
+				return t, tea.Batch(t.cancelCmd(), t.syncInputFocus())
 			}
 			if !t.hasDraft() {
 				t.mode = "welcome"
@@ -99,7 +124,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			t.confirmDiscardDraft = true
 			t.layoutChat()
-			return t, t.ta.Focus()
+			return t, t.syncInputFocus()
 		case ks == "ctrl+t":
 			t.showToolDetail = !t.showToolDetail
 			t.toolDetailScroll = 0
@@ -179,6 +204,9 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, nil
 
 	case tea.PasteMsg:
+		if t.inputLocked() {
+			return t, nil
+		}
 		cmd := t.handlePaste(m.Content)
 		t.syncContent()
 		return t, cmd
@@ -243,11 +271,11 @@ func (t *TUI) updateDiscardDraftConfirm(ks string, msg tea.Msg) (tea.Model, tea.
 		return t, tea.Quit
 	case "enter":
 		t.discardDraft()
-		return t, t.ta.Focus()
+		return t, t.syncInputFocus()
 	case "esc":
 		t.confirmDiscardDraft = false
 		t.layoutChat()
-		return t, t.ta.Focus()
+		return t, t.syncInputFocus()
 	}
 
 	t.confirmDiscardDraft = false

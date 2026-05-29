@@ -7,7 +7,7 @@ import (
 	"github.com/alanchenchen/suna/internal/protocol"
 )
 
-const streamFlushInterval = 16 * time.Millisecond
+const streamFlushInterval = 8 * time.Millisecond
 
 type notificationBatcher struct {
 	program *TUI

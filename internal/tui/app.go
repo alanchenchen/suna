@@ -63,6 +63,7 @@ type TUI struct {
 	showReasoningDetail   bool
 	toolDetailScroll      int
 	followBottom          bool
+	forceBottom           bool
 	phase                 phase
 	phaseStart            time.Time
 	activeTools           map[string]*toolEntry
@@ -137,6 +138,8 @@ type chatMsg struct {
 	role      string
 	content   any
 	streaming bool
+	startedAt time.Time
+	endedAt   time.Time
 	render    msgRenderCache
 }
 
@@ -272,6 +275,7 @@ func (t *TUI) runAgent(input string, attachments []attachmentItem) tea.Cmd {
 
 func (t *TUI) startLLMWait() {
 	t.loading = true
+	t.ta.Blur()
 	t.phase = phaseFirstLLM
 	t.phaseStart = time.Now()
 	t.streamStart = time.Now()
@@ -287,21 +291,31 @@ func (t *TUI) appendStreamMessage(role, chunk string) {
 	if chunk == "" {
 		return
 	}
+	now := time.Now()
 	if len(t.messages) > 0 && t.messages[len(t.messages)-1].role == role {
 		prev, _ := t.messages[len(t.messages)-1].content.(string)
 		msg := &t.messages[len(t.messages)-1]
 		msg.content = prev + chunk
 		msg.streaming = true
+		if msg.startedAt.IsZero() {
+			msg.startedAt = now
+		}
+		msg.endedAt = time.Time{}
 		msg.render = msgRenderCache{}
 		return
 	}
-	t.appendNonToolMessage(chatMsg{role: role, content: chunk, streaming: true})
+	t.finishStreamingMessages()
+	t.appendNonToolMessage(chatMsg{role: role, content: chunk, streaming: true, startedAt: now})
 }
 
 func (t *TUI) finishStreamingMessages() {
+	now := time.Now()
 	for i := range t.messages {
 		if t.messages[i].streaming {
 			t.messages[i].streaming = false
+			if t.messages[i].endedAt.IsZero() {
+				t.messages[i].endedAt = now
+			}
 			t.messages[i].render = msgRenderCache{}
 		}
 	}
@@ -429,9 +443,11 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 		if t.toolStartTimes == nil {
 			t.toolStartTimes = make(map[string]time.Time)
 		}
+		t.finishStreamingMessages()
 		t.phase = phaseTool
 		t.phaseStart = time.Now()
 		t.loading = true
+		t.ta.Blur()
 		id := p.ID
 		if id == "" {
 			id = fmt.Sprintf("%s_%d", p.Tool, time.Now().UnixNano())

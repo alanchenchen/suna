@@ -14,7 +14,7 @@ func (t *TUI) renderAssistantMessage(msg *chatMsg) string {
 
 func (t *TUI) renderReasoningMessage(msg *chatMsg) string {
 	content, _ := msg.content.(string)
-	return t.renderThinkingBox(content, msg.streaming)
+	return t.renderThinkingBox(content, msg.streaming, msg.startedAt, msg.endedAt)
 }
 
 func (t *TUI) cachedMarkdown(msg *chatMsg, content string, width int) string {
