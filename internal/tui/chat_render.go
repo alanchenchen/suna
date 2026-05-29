@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
 
@@ -173,7 +174,7 @@ func (t *TUI) layoutChat() {
 	inputH := max(1, t.ta.Height())
 	attachmentH := 0
 	if panel := t.renderAttachmentPanel(); panel != "" {
-		attachmentH = strings.Count(panel, "\n") + 2
+		attachmentH = strings.Count(panel, "\n") + 1
 	}
 	suggestionH := 0
 	if len(t.cmdSuggestions) > 0 {
@@ -262,7 +263,7 @@ func (t *TUI) renderInputArea() string {
 		confirm = styleError.Render(t.tr("tui.chat.discard_draft")) + " " + styleDim.Render(t.tr("tui.chat.discard_draft_help"))
 	}
 	if panel := t.renderAttachmentPanel(); panel != "" {
-		body := "  " + strings.ReplaceAll(panel, "\n", "\n  ") + "\n" + "  " + strings.ReplaceAll(view, "\n", "\n  ")
+		body := indentLines(panel, "  ") + "\n" + "  " + strings.ReplaceAll(view, "\n", "\n  ")
 		if confirm != "" {
 			body += "\n  " + confirm
 		}
@@ -358,6 +359,28 @@ func toolParamSummary(name string, params map[string]any) string {
 	default:
 		return pick("name", "id", "path", "query")
 	}
+}
+
+func (t *TUI) mouseInComposer(msg tea.MouseMsg) bool {
+	if t.height <= 0 {
+		return false
+	}
+	m := msg.Mouse()
+	inputH := max(1, t.ta.Height())
+	attachmentH := 0
+	if panel := t.renderAttachmentPanel(); panel != "" {
+		attachmentH = strings.Count(panel, "\n") + 1
+	}
+	suggestionH := 0
+	if len(t.cmdSuggestions) > 0 {
+		suggestionH = min(4, len(t.cmdSuggestions)) + 3
+	}
+	confirmH := 0
+	if t.confirmDiscardDraft {
+		confirmH = 1
+	}
+	composerStart := t.height - (attachmentH + inputH + suggestionH + confirmH + 1)
+	return m.Y >= composerStart
 }
 
 func (t *TUI) overlayMaxHeight() int {

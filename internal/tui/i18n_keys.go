@@ -77,6 +77,7 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"tui.tool.close":                     {LocaleEN: "close", LocaleZH: "关闭"},
 		"tui.ask.help":                       {LocaleEN: "↑↓ choose · Enter confirm · type a custom answer", LocaleZH: "↑↓ 选择 · Enter 确认 · 也可直接输入自定义回答"},
 		"tui.attachment.title":               {LocaleEN: "Attachments", LocaleZH: "附件"},
+		"tui.attachment.pending_title":       {LocaleEN: "Pending attachments", LocaleZH: "待发送附件"},
 		"tui.attachment.detected":            {LocaleEN: "Detected image:", LocaleZH: "检测到图片："},
 		"tui.attachment.detected_data":       {LocaleEN: "Detected pasted image data", LocaleZH: "检测到粘贴图片数据"},
 		"tui.attachment.confirm_help":        {LocaleEN: "Enter attach · Esc keep as text", LocaleZH: "Enter 加入附件 · Esc 作为文本"},

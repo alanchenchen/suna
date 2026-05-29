@@ -67,20 +67,29 @@ func (t *TUI) renderToolBlock(block *toolBlock) string {
 	if block == nil || len(block.order) == 0 {
 		return ""
 	}
+	entries := t.visibleToolEntries(block)
 	var sb strings.Builder
-	sb.WriteString("    " + styleDim.Render(t.tr("tui.tool.tools")) + "\n")
+	sb.WriteString("    " + styleDim.Render(t.toolBlockTitle(entries)) + "\n")
+	for _, te := range entries {
+		sb.WriteString(t.renderToolEntry(te, te.parentID != ""))
+	}
+	return sb.String()
+}
+
+func (t *TUI) visibleToolEntries(block *toolBlock) []*toolEntry {
+	var entries []*toolEntry
 	for _, id := range block.order {
 		te := block.entries[id]
 		if te == nil || te.parentID != "" {
 			continue
 		}
-		sb.WriteString(t.renderToolEntry(te, false))
+		entries = append(entries, te)
 		for _, childID := range block.order {
 			child := block.entries[childID]
 			if child == nil || child.parentID != te.id {
 				continue
 			}
-			sb.WriteString(t.renderToolEntry(child, true))
+			entries = append(entries, child)
 		}
 	}
 	for _, id := range block.order {
@@ -88,9 +97,41 @@ func (t *TUI) renderToolBlock(block *toolBlock) string {
 		if te == nil || te.parentID == "" || block.entries[te.parentID] != nil {
 			continue
 		}
-		sb.WriteString(t.renderToolEntry(te, true))
+		entries = append(entries, te)
 	}
-	return sb.String()
+	return entries
+}
+
+func (t *TUI) toolBlockTitle(entries []*toolEntry) string {
+	parts := []string{t.tr("tui.tool.tools")}
+	if len(entries) > 0 {
+		parts = append(parts, fmt.Sprintf("%d actions", len(entries)))
+	}
+	fileChanges := 0
+	guards := 0
+	for _, te := range entries {
+		if hasFileChange(te) {
+			fileChanges++
+		}
+		if shouldShowGuardSummary(te.guard) {
+			guards++
+		}
+	}
+	if fileChanges > 0 {
+		parts = append(parts, fmt.Sprintf("%d files changed", fileChanges))
+	}
+	if guards > 0 {
+		parts = append(parts, fmt.Sprintf("%d guarded", guards))
+	}
+	return strings.Join(parts, " · ")
+}
+
+func hasFileChange(te *toolEntry) bool {
+	if te == nil || te.metadata == nil {
+		return false
+	}
+	kind, _ := te.metadata["kind"].(string)
+	return kind == "file_change"
 }
 
 func (t *TUI) renderToolEntry(te *toolEntry, nested bool) string {
@@ -111,19 +152,24 @@ func (t *TUI) renderToolEntry(te *toolEntry, nested bool) string {
 	if nested {
 		prefix = "      " + styleDim.Render("└─ ")
 	}
-	label := t.displayToolIntentLabel(te)
+	mainLabel, detailLabel := t.toolEntryLabels(te)
 	maxWidth := max(20, t.width-lipgloss.Width(stripANSI(prefix))-8)
 	maxLines := 2
 	if isSubtask(te) {
 		maxLines = 3
 	}
-	wrapped := wrapLineLimit(label, maxWidth, maxLines)
+	wrapped := wrapLineLimit(mainLabel, maxWidth, maxLines)
 	if len(wrapped) > maxLines {
 		wrapped = wrapped[:maxLines]
 	}
-	line := fmt.Sprintf("%s%s %s%s", prefix, statusIcon, styleToolDim.Render(wrapped[0]), styleDim.Render(dur))
+	line := fmt.Sprintf("%s%s %s%s", prefix, statusIcon, styleHL.Render(wrapped[0]), styleDim.Render(dur))
 	for _, extra := range wrapped[1:] {
-		line += "\n" + prefix + "  " + styleToolDim.Render(extra)
+		line += "\n" + prefix + "  " + styleHL.Render(extra)
+	}
+	if detailLabel != "" {
+		for _, detail := range splitWrapped(detailLabel, maxWidth, 2) {
+			line += "\n" + prefix + "  " + detail
+		}
 	}
 	if te.status == toolError {
 		err := shortToolError(te.result)
@@ -131,43 +177,69 @@ func (t *TUI) renderToolEntry(te *toolEntry, nested bool) string {
 			line += "\n" + prefix + "  " + styleToolErr.Render(truncateRunes(err, max(24, t.width-12)))
 		}
 	}
-	if summary := t.renderGuardSummary(te.guard, prefix); summary != "" {
-		line += "\n" + summary
-	}
 	if te.status == toolDone {
 		if summary := t.renderToolMetadataSummary(te, prefix); summary != "" {
 			line += "\n" + summary
 		}
 	}
+	if summary := t.renderGuardSummary(te.guard, prefix); summary != "" {
+		line += "\n" + summary
+	}
 	return line + "\n"
 }
 
+func (t *TUI) toolEntryLabels(te *toolEntry) (string, string) {
+	label := t.displayToolIntentLabel(te)
+	if hasFileChange(te) {
+		if path, _ := te.metadata["path"].(string); path != "" {
+			main := te.name + " " + compactPath(path, 36)
+			if strings.TrimSpace(label) != "" && strings.TrimSpace(label) != main {
+				return main, label
+			}
+			return main, ""
+		}
+	}
+	return label, ""
+}
+
 func (t *TUI) renderGuardSummary(info *guardInfo, prefix string) string {
-	if info == nil {
+	if !shouldShowGuardSummary(info) {
 		return ""
 	}
-	parts := []string{styleMetaPill.Render(t.tr("tui.tool.guard.badge")), t.renderGuardDecisionBadge(info), t.renderRiskBadge(info.risk)}
+	parts := []string{styleDim.Render(t.tr("tui.tool.guard.badge")), t.renderGuardDecisionBadge(info), t.renderRiskBadge(info.risk)}
 	if reason := shortGuardReason(info.reason); reason != "" {
 		parts = append(parts, styleToolDim.Render(reason))
 	}
 	return prefix + "  " + styleDim.Render("↳ ") + strings.Join(parts, "  ")
 }
 
+func shouldShowGuardSummary(info *guardInfo) bool {
+	if info == nil {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(info.risk), "low") && strings.EqualFold(strings.TrimSpace(info.decision), "approve") {
+		return false
+	}
+	return true
+}
+
 func (t *TUI) renderGuardDecisionBadge(info *guardInfo) string {
 	label := t.guardDecisionLabel(info)
-	switch info.decision {
-	case "approve":
-		return styleGuardOK.Render(label)
-	case "reject":
-		return styleGuardErr.Render(label)
-	case "confirm", "modify":
-		return styleGuardWarn.Render(label)
-	default:
-		if info.source == "fallback" {
-			return styleGuardWarn.Render(label)
-		}
+	if info == nil {
 		return styleMetaPill.Render(label)
 	}
+	source := strings.ToLower(info.source)
+	decision := strings.ToLower(info.decision)
+	if decision == "reject" || strings.Contains(label, "blocked") || strings.Contains(label, "拒绝") || strings.Contains(label, "阻止") {
+		return styleGuardErr.Render(label)
+	}
+	if decision == "confirm" || decision == "modify" || source == "fallback" || (decision == "approve" && strings.ToLower(info.risk) != "low" && source == "static") {
+		return styleGuardWarn.Render(label)
+	}
+	if decision == "approve" {
+		return styleGuardOK.Render(label)
+	}
+	return styleMetaPill.Render(label)
 }
 
 func (t *TUI) guardDecisionLabel(info *guardInfo) string {
@@ -252,42 +324,45 @@ func (t *TUI) renderFileChangeSummary(metadata map[string]any, prefix string) st
 	sizeAfter, hasAfter := metadataIntOK(metadata["size_after"])
 
 	arrow := styleDim.Render("↳ ")
-	status := renderFileChangeStatus(operation)
-	add := renderLineDelta("+", added, true)
-	del := renderLineDelta("-", removed, false)
-	parts := []string{status, add, del}
-	plainParts := []string{operation, fmt.Sprintf("+%d", added), fmt.Sprintf("-%d", removed)}
+	parts := []string{styleMetaPill.Render(t.tr("tui.tool.file.badge"))}
+	maxWidth := max(24, t.width-lipgloss.Width(stripANSI(prefix))-8)
+	pathBudget := max(10, maxWidth-34)
+	pathText := styleFilePath.Render(compactPath(path, pathBudget))
+	parts = append(parts, pathText, renderFileChangeStatus(operation), renderLineDelta("+", added, true), renderLineDelta("-", removed, false))
 	if replacements > 0 {
-		parts = append(parts, styleToolDim.Render(fmt.Sprintf("%d repl", replacements)))
-		plainParts = append(plainParts, fmt.Sprintf("%d repl", replacements))
+		repl := fmt.Sprintf("%d repl", replacements)
+		parts = append(parts, styleGuardWarn.Render(repl))
 	}
 	if hasAfter {
 		if hasBefore && sizeBefore != sizeAfter {
 			size := fmt.Sprintf("%s → %s", formatTinyBytes(sizeBefore), formatTinyBytes(sizeAfter))
 			parts = append(parts, styleToolDim.Render(size))
-			plainParts = append(plainParts, size)
 		} else if !hasBefore || operation == "created" {
 			size := formatTinyBytes(sizeAfter)
 			parts = append(parts, styleToolDim.Render(size))
-			plainParts = append(plainParts, size)
 		}
 	}
 
-	maxWidth := max(24, t.width-lipgloss.Width(stripANSI(prefix))-8)
-	metaWidth := lipgloss.Width(strings.Join(plainParts, "  "))
-	pathWidth := max(10, maxWidth-metaWidth-4)
-	pathText := styleFilePath.Render(compactPath(path, pathWidth))
-	return prefix + "  " + arrow + styleMetaPill.Render(t.tr("tui.tool.file.badge")) + "  " + pathText + "  " + strings.Join(parts, "  ")
+	line := prefix + "  " + arrow + strings.Join(parts, "  ")
+	if lipgloss.Width(stripANSI(line)) > t.width-2 {
+		allowed := max(10, pathBudget-(lipgloss.Width(stripANSI(line))-(t.width-2)))
+		parts[1] = styleFilePath.Render(compactPath(path, allowed))
+		line = prefix + "  " + arrow + strings.Join(parts, "  ")
+	}
+	return line
 }
 
 func renderFileChangeStatus(operation string) string {
+	label := strings.ToUpper(operation)
 	switch operation {
 	case "created":
-		return styleGuardOK.Render("created")
+		return styleGuardOK.Render(label)
 	case "updated":
-		return styleMetaPill.Render("updated")
+		return styleMetaPill.Render(label)
+	case "deleted":
+		return styleGuardErr.Render(label)
 	case "unchanged":
-		return styleToolDim.Render("unchanged")
+		return styleToolDim.Render(operation)
 	default:
 		return styleToolDim.Render(operation)
 	}

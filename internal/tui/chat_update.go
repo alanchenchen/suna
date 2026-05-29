@@ -190,6 +190,9 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, nil
 
 	case tea.MouseMsg:
+		if t.mouseInComposer(m) {
+			return t, nil
+		}
 		if t.pendingGuard != nil {
 			if mm, ok := any(m).(tea.MouseWheelMsg); ok {
 				if mm.Mouse().Button == tea.MouseWheelUp {

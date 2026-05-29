@@ -53,6 +53,52 @@ func (t *TUI) renderAttachmentPanel() string {
 	return t.renderAttachmentList(t.attachments, t.attachmentCursor, t.attachmentMode) + "\n" + t.attachmentHelp()
 }
 
+func (t *TUI) renderAttachmentBox(items []attachmentItem, cursor int, selectable bool, help string) string {
+	width := max(36, min(86, t.width-4))
+	inner := max(24, width-8)
+	title := fmt.Sprintf("%s · %d %s", t.tr("tui.attachment.pending_title"), len(items), attachmentTypeSummary(items))
+	var lines []string
+	limit := min(len(items), 3)
+	for i := 0; i < limit; i++ {
+		item := items[i]
+		prefix := "  "
+		st := lipgloss.NewStyle()
+		if selectable && i == cursor {
+			prefix = styleCursor.Render("▶ ")
+			st = styleHL
+		}
+		nameWidth := max(10, inner-20)
+		line := fmt.Sprintf("%s%d  %-5s  %-*s  %s", prefix, i+1, item.Type, nameWidth, truncateMiddle(item.Name, nameWidth), formatAttachmentSize(item.Size))
+		lines = append(lines, st.Render(line))
+	}
+	if len(items) > limit {
+		lines = append(lines, styleDim.Render(fmt.Sprintf("  +%d more", len(items)-limit)))
+	}
+	if strings.TrimSpace(help) != "" {
+		lines = append(lines, styleDim.Render(help))
+	}
+	return boxStyle.Width(width).Padding(0, 1).Render(styleHL.Render(title) + "\n" + strings.Join(lines, "\n"))
+}
+
+func attachmentTypeSummary(items []attachmentItem) string {
+	if len(items) == 1 {
+		if strings.TrimSpace(items[0].Type) != "" {
+			return items[0].Type
+		}
+		return "item"
+	}
+	images := 0
+	for _, item := range items {
+		if item.Type == "image" {
+			images++
+		}
+	}
+	if images == len(items) {
+		return "images"
+	}
+	return "items"
+}
+
 func (t *TUI) renderAttachmentList(items []attachmentItem, cursor int, selectable bool) string {
 	var lines []string
 	lines = append(lines, styleHL.Render(t.tr("tui.attachment.title")))

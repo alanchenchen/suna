@@ -58,19 +58,26 @@ func fillPetCell(s string, width int) string {
 }
 
 func renderMiniPet(state petState) string {
-	var eyeRow, base string
+	var eyeRow, baseInner string
 	switch state {
 	case petIdle:
-		eyeRow, base = " ◠  ◠ ", "╰──────╯"
+		eyeRow, baseInner = " ◠  ◠ ", "──────"
 	case petWorking:
-		eyeRow, base = " ▶  ◀ ", "╰──⚡──╯"
+		eyeRow, baseInner = " ▶  ◀ ", "──⚡──"
 	case petThinking:
-		eyeRow, base = " ○  ○ ", "╰──△──╯"
+		eyeRow, baseInner = " ○  ○ ", "──△──"
 	}
 
 	return strings.Join([]string{
 		"╭──────╮",
 		"│" + fillPetCell(eyeRow, 6) + "│",
-		base,
+		"╰" + padMiniBase(baseInner, 6) + "╯",
 	}, "\n")
+}
+
+func padMiniBase(s string, width int) string {
+	for lipgloss.Width(s) < width {
+		s += "─"
+	}
+	return s
 }

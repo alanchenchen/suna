@@ -110,7 +110,7 @@ func TestRenderToolEntryShowsFileChangeSummary(t *testing.T) {
 
 	rendered := tui.renderToolEntry(te, false)
 	plain := stripANSIForTest(rendered)
-	for _, want := range []string{"↳", "File", "internal/tool/writefile.go", "updated", "+18", "-4", "1 repl", "2.1KB", "2.5KB"} {
+	for _, want := range []string{"↳", "File", "internal/tool/writefile.go", "UPDATED", "+18", "-4", "1 repl", "2.1KB", "2.5KB"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("rendered summary missing %q:\n%s", want, plain)
 		}
