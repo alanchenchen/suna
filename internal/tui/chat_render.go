@@ -263,7 +263,8 @@ func (t *TUI) renderInputArea() string {
 		confirm = styleError.Render(t.tr("tui.chat.discard_draft")) + " " + styleDim.Render(t.tr("tui.chat.discard_draft_help"))
 	}
 	if panel := t.renderAttachmentPanel(); panel != "" {
-		body := indentLines(panel, "  ") + "\n" + "  " + strings.ReplaceAll(view, "\n", "\n  ")
+		separator := "  " + styleDim.Render(strings.Repeat("─", max(10, t.width-4)))
+		body := indentLines(panel, "  ") + "\n" + separator + "\n" + "  " + strings.ReplaceAll(view, "\n", "\n  ")
 		if confirm != "" {
 			body += "\n  " + confirm
 		}

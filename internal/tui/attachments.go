@@ -50,15 +50,15 @@ func (t *TUI) renderAttachmentPanel() string {
 	if len(t.attachments) == 0 {
 		return ""
 	}
-	return t.renderAttachmentList(t.attachments, t.attachmentCursor, t.attachmentMode) + "\n" + t.attachmentHelp()
+	return t.renderAttachmentBox(t.attachments, t.attachmentCursor, t.attachmentMode, t.attachmentHelp())
 }
 
 func (t *TUI) renderAttachmentBox(items []attachmentItem, cursor int, selectable bool, help string) string {
-	width := max(36, min(86, t.width-4))
+	width := max(36, t.width-4)
 	inner := max(24, width-8)
 	title := fmt.Sprintf("%s · %d %s", t.tr("tui.attachment.pending_title"), len(items), attachmentTypeSummary(items))
 	var lines []string
-	limit := min(len(items), 3)
+	limit := min(len(items), 4)
 	for i := 0; i < limit; i++ {
 		item := items[i]
 		prefix := "  "
@@ -67,7 +67,7 @@ func (t *TUI) renderAttachmentBox(items []attachmentItem, cursor int, selectable
 			prefix = styleCursor.Render("▶ ")
 			st = styleHL
 		}
-		nameWidth := max(10, inner-20)
+		nameWidth := max(10, inner-22)
 		line := fmt.Sprintf("%s%d  %-5s  %-*s  %s", prefix, i+1, item.Type, nameWidth, truncateMiddle(item.Name, nameWidth), formatAttachmentSize(item.Size))
 		lines = append(lines, st.Render(line))
 	}
@@ -75,6 +75,9 @@ func (t *TUI) renderAttachmentBox(items []attachmentItem, cursor int, selectable
 		lines = append(lines, styleDim.Render(fmt.Sprintf("  +%d more", len(items)-limit)))
 	}
 	if strings.TrimSpace(help) != "" {
+		if len(lines) > 0 {
+			lines = append(lines, styleDim.Render(strings.Repeat("─", inner)))
+		}
 		lines = append(lines, styleDim.Render(help))
 	}
 	return boxStyle.Width(width).Padding(0, 1).Render(styleHL.Render(title) + "\n" + strings.Join(lines, "\n"))
