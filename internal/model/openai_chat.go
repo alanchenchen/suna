@@ -51,7 +51,7 @@ func (p *OpenAIChatProvider) Complete(ctx context.Context, req *CompletionReques
 		return nil, err
 	}
 
-	ch := make(chan Chunk, 64)
+	ch := make(chan Chunk, providerChunkBuffer)
 	go func() {
 		defer close(ch)
 		started := time.Now()
@@ -60,26 +60,42 @@ func (p *OpenAIChatProvider) Complete(ctx context.Context, req *CompletionReques
 
 		var usage *Usage
 		var toolCallsAcc map[int]*chatToolCallAccum
+		chunkCount := 0
+		assistantBytes := 0
+		reasoningBytes := 0
+		usageReceived := false
+		lastChunkAt := started
 		for stream.Next() {
+			chunkCount++
+			lastChunkAt = time.Now()
 			chunk := stream.Current()
 			if chunk.JSON.Usage.Valid() {
 				u := chunk.Usage
 				usage = &Usage{InputTokens: int(u.PromptTokens), OutputTokens: int(u.CompletionTokens), TotalTokens: int(u.TotalTokens), CachedTokens: int(u.PromptTokensDetails.CachedTokens)}
+				usageReceived = true
 			}
 			if len(chunk.Choices) == 0 {
 				continue
 			}
 			choice := chunk.Choices[0]
 			if choice.Delta.Content != "" {
+				assistantBytes += len(choice.Delta.Content)
 				ch <- Chunk{Content: choice.Delta.Content, Done: false}
 			}
 			if reasoning := chatReasoningContent(choice.Delta); reasoning != "" {
+				reasoningBytes += len(reasoning)
 				ch <- Chunk{ReasoningContent: reasoning, Done: false}
 			}
 			mergeChatToolDeltas(choice.Delta.ToolCalls, &toolCallsAcc)
 		}
 		if err := stream.Err(); err != nil {
-			logLLMFailure(req, err, loggingFields(started, usage))
+			fields := loggingFields(started, usage)
+			fields["chunk_count"] = chunkCount
+			fields["assistant_bytes"] = assistantBytes
+			fields["reasoning_bytes"] = reasoningBytes
+			fields["usage_received"] = usageReceived
+			fields["last_chunk_age_ms"] = time.Since(lastChunkAt).Milliseconds()
+			logLLMFailure(req, err, fields)
 			ch <- Chunk{Done: true, Error: err.Error()}
 			return
 		}

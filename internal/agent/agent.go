@@ -134,7 +134,7 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 }
 
 func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
-	events := make(chan Event, 64)
+	events := make(chan Event, eventBuffer)
 	if !a.runMu.TryLock() {
 		events <- Event{Type: EventStatus, Content: "error: agent is already running"}
 		close(events)

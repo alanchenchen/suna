@@ -118,50 +118,77 @@ func (s *service) runAgent(ctx context.Context, connID, inputText string, input 
 	started := time.Now()
 	logging.Info("agent", "run_start", logging.Event{"conn_id": connID, "input_chars": len(inputText)})
 	events := s.daemon.agent.Run(ctx, input)
-	for evt := range events {
+	batcher := &streamBatcher{}
+	ticker := time.NewTicker(streamBatchInterval)
+	defer ticker.Stop()
+	flush := func() {
 		sink = s.daemon.sinkFor(connID, sink)
-		switch evt.Type {
-		case agent.EventStream:
-			emit(ctx, sink, protocol.NotifyStream, protocol.StreamParams{Chunk: evt.Content})
-		case agent.EventReasoning:
-			emit(ctx, sink, protocol.NotifyReasoning, protocol.StreamParams{Chunk: evt.Content})
-		case agent.EventUsage:
-			speed := 0.0
-			if evt.OutputTokens > 0 && evt.DurationMs > 0 {
-				speed = float64(evt.OutputTokens) / (float64(evt.DurationMs) / 1000)
+		batcher.flush(ctx, sink)
+	}
+	for {
+		select {
+		case evt, ok := <-events:
+			if !ok {
+				flush()
+				return
 			}
-			emit(ctx, sink, protocol.NotifyUsage, protocol.UsageParams{InputTokens: evt.InputTokens, OutputTokens: evt.OutputTokens, CachedTokens: evt.CachedTokens, ContextTokens: evt.ContextTokens, ContextWindow: evt.ContextWindow, DurationMs: evt.DurationMs, TokensPerSec: speed})
-		case agent.EventToolCall:
-			logging.Info("agent", "tool_call", logging.Event{"conn_id": connID, "tool": evt.ToolName, "intent": evt.ToolIntent})
-			emit(ctx, sink, protocol.NotifyToolStart, protocol.ToolStartParams{ID: evt.ToolCallID, Tool: evt.ToolName, Params: evt.ToolParams, Intent: evt.ToolIntent})
-		case agent.EventToolGuard:
-			emit(ctx, sink, protocol.NotifyToolGuard, protocol.ToolGuardParams{ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, Risk: evt.GuardRisk, Decision: evt.GuardDecision, Source: evt.GuardSource, Reason: evt.GuardReason, Suggestion: evt.GuardSuggestion})
-		case agent.EventToolResult:
-			display := limitToolResult(evt.ToolResult)
-			logging.Info("agent", "tool_result", logging.Event{"conn_id": connID, "tool": evt.ToolName, "tool_error": evt.ToolError, "result_chars": len(evt.ToolResult), "display_truncated": display.truncated})
-			emit(ctx, sink, protocol.NotifyToolEnd, protocol.ToolEndParams{ID: evt.ToolCallID, Tool: evt.ToolName, Result: display.text, Error: evt.ToolError, ResultTruncated: display.truncated, ResultBytes: display.bytes, Metadata: evt.ToolMetadata})
-		case agent.EventAskUser:
-			askID := connID + "_" + fmt.Sprintf("%d", time.Now().UnixNano())
-			if evt.Reply != nil {
-				s.pendingAsks.Store(askID, evt.Reply)
+			sink = s.daemon.sinkFor(connID, sink)
+			switch evt.Type {
+			case agent.EventStream:
+				if batcher.addStream(ctx, sink, evt.Content) {
+					flush()
+				}
+			case agent.EventReasoning:
+				if batcher.addReasoning(ctx, sink, evt.Content) {
+					flush()
+				}
+			case agent.EventUsage:
+				flush()
+				speed := 0.0
+				if evt.OutputTokens > 0 && evt.DurationMs > 0 {
+					speed = float64(evt.OutputTokens) / (float64(evt.DurationMs) / 1000)
+				}
+				emit(ctx, sink, protocol.NotifyUsage, protocol.UsageParams{InputTokens: evt.InputTokens, OutputTokens: evt.OutputTokens, CachedTokens: evt.CachedTokens, ContextTokens: evt.ContextTokens, ContextWindow: evt.ContextWindow, DurationMs: evt.DurationMs, TokensPerSec: speed})
+			case agent.EventToolCall:
+				flush()
+				logging.Info("agent", "tool_call", logging.Event{"conn_id": connID, "tool": evt.ToolName, "intent": evt.ToolIntent})
+				emit(ctx, sink, protocol.NotifyToolStart, protocol.ToolStartParams{ID: evt.ToolCallID, Tool: evt.ToolName, Params: evt.ToolParams, Intent: evt.ToolIntent})
+			case agent.EventToolGuard:
+				flush()
+				emit(ctx, sink, protocol.NotifyToolGuard, protocol.ToolGuardParams{ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, Risk: evt.GuardRisk, Decision: evt.GuardDecision, Source: evt.GuardSource, Reason: evt.GuardReason, Suggestion: evt.GuardSuggestion})
+			case agent.EventToolResult:
+				flush()
+				display := limitToolResult(evt.ToolResult)
+				logging.Info("agent", "tool_result", logging.Event{"conn_id": connID, "tool": evt.ToolName, "tool_error": evt.ToolError, "result_chars": len(evt.ToolResult), "display_truncated": display.truncated})
+				emit(ctx, sink, protocol.NotifyToolEnd, protocol.ToolEndParams{ID: evt.ToolCallID, Tool: evt.ToolName, Result: display.text, Error: evt.ToolError, ResultTruncated: display.truncated, ResultBytes: display.bytes, Metadata: evt.ToolMetadata})
+			case agent.EventAskUser:
+				flush()
+				askID := connID + "_" + fmt.Sprintf("%d", time.Now().UnixNano())
+				if evt.Reply != nil {
+					s.pendingAsks.Store(askID, evt.Reply)
+				}
+				emit(ctx, sink, protocol.NotifyAskUser, protocol.AskUserParams{Question: evt.Question, Options: evt.Options, ID: askID})
+			case agent.EventGuardConfirm:
+				flush()
+				guardID := connID + "_guard_" + fmt.Sprintf("%d", time.Now().UnixNano())
+				if evt.Reply != nil {
+					s.pendingGuards.Store(guardID, evt.Reply)
+				}
+				emit(ctx, sink, protocol.NotifyGuardConfirm, protocol.GuardConfirmParams{ID: guardID, ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, Params: evt.GuardParams, Risk: evt.GuardRisk, Reason: evt.GuardReason, Suggestion: evt.GuardSuggestion})
+			case agent.EventStatus:
+				flush()
+				if strings.HasPrefix(evt.Content, "error:") || evt.Content == "cancelled" {
+					logging.Error("agent", "run_failed", fmt.Errorf("%s", evt.Content), logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()})
+					emit(ctx, sink, protocol.NotifyStream, protocol.StreamParams{Chunk: evt.Content, Done: true})
+					emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
+				} else if evt.Content == "done" {
+					logging.Info("agent", "run_done", logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()})
+					emit(ctx, sink, protocol.NotifyStream, protocol.StreamParams{Done: true, ContextWindow: evt.ContextWindow})
+					emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
+				}
 			}
-			emit(ctx, sink, protocol.NotifyAskUser, protocol.AskUserParams{Question: evt.Question, Options: evt.Options, ID: askID})
-		case agent.EventGuardConfirm:
-			guardID := connID + "_guard_" + fmt.Sprintf("%d", time.Now().UnixNano())
-			if evt.Reply != nil {
-				s.pendingGuards.Store(guardID, evt.Reply)
-			}
-			emit(ctx, sink, protocol.NotifyGuardConfirm, protocol.GuardConfirmParams{ID: guardID, ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, Params: evt.GuardParams, Risk: evt.GuardRisk, Reason: evt.GuardReason, Suggestion: evt.GuardSuggestion})
-		case agent.EventStatus:
-			if strings.HasPrefix(evt.Content, "error:") || evt.Content == "cancelled" {
-				logging.Error("agent", "run_failed", fmt.Errorf("%s", evt.Content), logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()})
-				emit(ctx, sink, protocol.NotifyStream, protocol.StreamParams{Chunk: evt.Content, Done: true})
-				emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
-			} else if evt.Content == "done" {
-				logging.Info("agent", "run_done", logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()})
-				emit(ctx, sink, protocol.NotifyStream, protocol.StreamParams{Done: true, ContextWindow: evt.ContextWindow})
-				emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
-			}
+		case <-ticker.C:
+			flush()
 		}
 	}
 }

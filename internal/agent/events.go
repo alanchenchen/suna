@@ -1,5 +1,7 @@
 package agent
 
+const eventBuffer = 16 * 1024
+
 type EventType int
 
 const (

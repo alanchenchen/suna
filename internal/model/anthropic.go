@@ -32,7 +32,7 @@ func NewAnthropicProvider(apiKey, baseURL, model string, contextWindow int, medi
 }
 
 func (p *AnthropicProvider) Complete(ctx context.Context, req *CompletionRequest) (<-chan Chunk, error) {
-	ch := make(chan Chunk, 64)
+	ch := make(chan Chunk, providerChunkBuffer)
 
 	messages, buildErr := p.buildMessages(ctx, req)
 	if buildErr != nil {
