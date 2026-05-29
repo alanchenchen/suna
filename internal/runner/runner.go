@@ -196,7 +196,7 @@ func (r *Runner) readStream(ctx context.Context, ch <-chan model.Chunk, req Requ
 				return fullContent, toolCalls, lastUsage, ctx.Err()
 			}
 			if chunk.Error != "" {
-				return fullContent, toolCalls, lastUsage, fmt.Errorf("%s", chunk.Error)
+				return fullContent, toolCalls, lastUsage, fmt.Errorf("%s", readableLLMStreamError(chunk.Error))
 			}
 			if chunk.ReasoningContent != "" && req.EmitReasoning && r.Sink != nil {
 				r.Sink.Reasoning(chunk.ReasoningContent)
@@ -337,4 +337,13 @@ func extractToolIntent(fullContent string) string {
 		}
 	}
 	return ""
+}
+
+func readableLLMStreamError(errText string) string {
+	text := strings.TrimSpace(errText)
+	lower := strings.ToLower(text)
+	if strings.Contains(lower, "unexpected end of json input") {
+		return "LLM stream interrupted: the upstream model service returned incomplete JSON. Please retry, or switch model/provider and try again."
+	}
+	return text
 }
