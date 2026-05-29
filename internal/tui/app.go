@@ -62,6 +62,7 @@ type TUI struct {
 	showToolDetail        bool
 	showReasoningDetail   bool
 	toolDetailScroll      int
+	followBottom          bool
 	phase                 phase
 	phaseStart            time.Time
 	activeTools           map[string]*toolEntry
@@ -133,8 +134,17 @@ type guardConfirmView struct {
 }
 
 type chatMsg struct {
-	role    string
-	content any
+	role      string
+	content   any
+	streaming bool
+	render    msgRenderCache
+}
+
+type msgRenderCache struct {
+	width   int
+	theme   string
+	content string
+	output  string
 }
 
 type userMessageContent struct {
@@ -265,11 +275,36 @@ func (t *TUI) startLLMWait() {
 	t.phase = phaseFirstLLM
 	t.phaseStart = time.Now()
 	t.streamStart = time.Now()
+	t.followBottom = true
 }
 
 func (t *TUI) appendNonToolMessage(msg chatMsg) {
 	t.currentToolBlock = nil
 	t.messages = append(t.messages, msg)
+}
+
+func (t *TUI) appendStreamMessage(role, chunk string) {
+	if chunk == "" {
+		return
+	}
+	if len(t.messages) > 0 && t.messages[len(t.messages)-1].role == role {
+		prev, _ := t.messages[len(t.messages)-1].content.(string)
+		msg := &t.messages[len(t.messages)-1]
+		msg.content = prev + chunk
+		msg.streaming = true
+		msg.render = msgRenderCache{}
+		return
+	}
+	t.appendNonToolMessage(chatMsg{role: role, content: chunk, streaming: true})
+}
+
+func (t *TUI) finishStreamingMessages() {
+	for i := range t.messages {
+		if t.messages[i].streaming {
+			t.messages[i].streaming = false
+			t.messages[i].render = msgRenderCache{}
+		}
+	}
 }
 
 func extractLastSentence(text string) string {
@@ -334,6 +369,7 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 		var p protocol.StreamParams
 		json.Unmarshal(notif.params, &p)
 		if p.Done {
+			t.finishStreamingMessages()
 			if strings.HasPrefix(p.Chunk, "error:") || p.Chunk == "cancelled" {
 				t.appendNonToolMessage(chatMsg{role: "error", content: p.Chunk})
 			}
@@ -353,12 +389,7 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 		if p.Chunk != "" {
 			t.lastAssistantText += p.Chunk
 		}
-		if len(t.messages) > 0 && t.messages[len(t.messages)-1].role == "assistant" {
-			prev, _ := t.messages[len(t.messages)-1].content.(string)
-			t.messages[len(t.messages)-1].content = prev + p.Chunk
-		} else {
-			t.appendNonToolMessage(chatMsg{role: "assistant", content: p.Chunk})
-		}
+		t.appendStreamMessage("assistant", p.Chunk)
 	case protocol.NotifyReasoning:
 		var p protocol.StreamParams
 		json.Unmarshal(notif.params, &p)
@@ -366,12 +397,7 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 			t.phase = phaseThinking
 			t.phaseStart = time.Now()
 		}
-		if len(t.messages) > 0 && t.messages[len(t.messages)-1].role == "reasoning" {
-			prev, _ := t.messages[len(t.messages)-1].content.(string)
-			t.messages[len(t.messages)-1].content = prev + p.Chunk
-		} else {
-			t.appendNonToolMessage(chatMsg{role: "reasoning", content: p.Chunk})
-		}
+		t.appendStreamMessage("reasoning", p.Chunk)
 	case protocol.NotifyUsage:
 		var p protocol.UsageParams
 		json.Unmarshal(notif.params, &p)

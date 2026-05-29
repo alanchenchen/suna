@@ -121,6 +121,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				t.syncContent()
 			} else {
 				t.vp.HalfPageUp()
+				t.followBottom = false
 			}
 			return t, nil
 		case ks == "pgdown":
@@ -129,6 +130,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				t.syncContent()
 			} else {
 				t.vp.HalfPageDown()
+				t.followBottom = t.vp.AtBottom()
 			}
 			return t, nil
 		case ks == "up":
@@ -217,6 +219,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		t.vp, cmd = t.vp.Update(msg)
+		t.followBottom = t.vp.AtBottom()
 		return t, cmd
 	}
 

@@ -131,7 +131,8 @@ func (t *TUI) initChatComponents() tea.Cmd {
 }
 
 func (t *TUI) syncContent() {
-	followBottom := t.vp.AtBottom()
+	// 用户没有主动上滚时保持贴底；主动上滚后不打断阅读。
+	followBottom := t.followBottom || t.vp.AtBottom()
 	var sb strings.Builder
 	inSunaBlock := false
 	renderSunaHeader := func() {
@@ -143,19 +144,18 @@ func (t *TUI) syncContent() {
 		inSunaBlock = true
 	}
 
-	for _, msg := range t.messages {
+	for i := range t.messages {
+		msg := &t.messages[i]
 		switch msg.role {
 		case "user":
 			sb.WriteString("\n" + t.renderUserMessage(msg.content, max(20, t.width-8)) + "\n")
 			inSunaBlock = false
 		case "assistant":
-			content, _ := msg.content.(string)
 			renderSunaHeader()
-			sb.WriteString(indentLines(RenderMarkdown(content, t.width-6), "  ") + "\n")
+			sb.WriteString(t.renderAssistantMessage(msg) + "\n")
 		case "reasoning":
-			content, _ := msg.content.(string)
 			renderSunaHeader()
-			sb.WriteString(t.renderThinkingBox(content, false))
+			sb.WriteString(t.renderReasoningMessage(msg))
 		case "tool":
 			if v, ok := msg.content.(*toolBlock); ok {
 				renderSunaHeader()
@@ -205,6 +205,9 @@ func (t *TUI) syncContent() {
 	t.vp.SetContent(sb.String())
 	if followBottom {
 		t.vp.GotoBottom()
+		t.followBottom = true
+	} else {
+		t.followBottom = t.vp.AtBottom()
 	}
 }
 
@@ -231,7 +234,11 @@ func (t *TUI) renderThinkingBox(content string, running bool) string {
 		display += "    [Ctrl+R " + t.tr("tui.key.reasoning_detail") + "]"
 	}
 	if t.showReasoningDetail {
-		display = RenderMarkdown(strings.TrimSpace(content), inner)
+		if running {
+			display = renderStreamingText(strings.TrimSpace(content), inner)
+		} else {
+			display = RenderMarkdown(strings.TrimSpace(content), inner)
+		}
 	}
 	lines := strings.Split(strings.TrimRight(display, "\n"), "\n")
 	if running && !t.showReasoningDetail && len(lines) > 8 {
@@ -493,6 +500,7 @@ func (t *TUI) handleSend() tea.Cmd {
 		return t.ta.Focus()
 	}
 	t.appendNonToolMessage(chatMsg{role: "user", content: userMessageContent{text: input, attachments: attachments}})
+	t.followBottom = true
 	t.attachments = nil
 	t.attachmentMode = false
 	t.attachmentDelete = false

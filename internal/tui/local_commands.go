@@ -33,14 +33,8 @@ func (t *TUI) startNotificationPump() {
 		return
 	}
 	t.notifyCh = make(chan localNotification, 4096)
-	// 单独 goroutine 串行转发通知，保证 UI 状态只在 Bubble Tea 事件循环里更新。
-	go func() {
-		for notif := range t.notifyCh {
-			if t.program != nil {
-				t.program.Send(notif)
-			}
-		}
-	}()
+	// 单独 goroutine 串行转发通知；文本流在这里按帧合并，UI 状态仍只在 Bubble Tea 事件循环里更新。
+	go (&notificationBatcher{program: t}).run(t.notifyCh)
 }
 
 func (t *TUI) enqueueNotification(notif localNotification) {
