@@ -46,6 +46,7 @@ type TUI struct {
 	pendingGuard      *guardConfirmView
 	guardQueue        []*guardConfirmView
 	guardCursor       int
+	guardScroll       int
 	cmdSuggestion     string
 	theme             string
 
@@ -60,6 +61,7 @@ type TUI struct {
 
 	showToolDetail        bool
 	showReasoningDetail   bool
+	toolDetailScroll      int
 	phase                 phase
 	phaseStart            time.Time
 	activeTools           map[string]*toolEntry

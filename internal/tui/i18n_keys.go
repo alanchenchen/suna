@@ -96,6 +96,8 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"tui.guard.approved":                 {LocaleEN: "Guard approved", LocaleZH: "已批准安全确认"},
 		"tui.guard.rejected":                 {LocaleEN: "Guard rejected", LocaleZH: "已拒绝安全确认"},
 		"tui.guard.help":                     {LocaleEN: "←→ choose · Enter selected · Esc reject", LocaleZH: "←→ 选择 · Enter 确认所选 · Esc 拒绝"},
+		"tui.overlay.scroll":                 {LocaleEN: "scroll", LocaleZH: "滚动"},
+		"tui.overlay.content_hidden":         {LocaleEN: "content hidden; enlarge terminal to view", LocaleZH: "内容已隐藏，可放大终端查看"},
 
 		"tui.status.model":     {LocaleEN: "Model", LocaleZH: "模型"},
 		"tui.status.version":   {LocaleEN: "Version", LocaleZH: "版本"},

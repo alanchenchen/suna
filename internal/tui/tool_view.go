@@ -401,8 +401,21 @@ func (t *TUI) renderToolDetailOverlay(width int) string {
 		return ""
 	}
 	w := max(44, min(104, width-4))
+	body, bodyHeight := t.toolDetailBodyLines()
+	body, start, total := scrollWindow(body, bodyHeight, &t.toolDetailScroll)
+	lines := append([]string(nil), body...)
+	lines = append(lines, "", styleDim.Render(t.toolDetailHelpText(start, bodyHeight, total)))
+	return boxStyle.Width(w).Padding(1, 2).Render(strings.Join(lines, "\n"))
+}
+
+func (t *TUI) toolDetailBodyLines() ([]string, int) {
+	te := t.findTool(t.selectedToolID)
+	if te == nil {
+		return nil, 1
+	}
+	w := max(44, min(104, t.width-4))
 	inner := max(24, w-8)
-	maxBodyLines := max(8, t.vp.Height()-8)
+	bodyHeight := max(1, t.overlayMaxHeight()-7)
 	var lines []string
 	title := t.tr("tui.tool.detail_title")
 	if isSubtask(te) {
@@ -418,13 +431,13 @@ func (t *TUI) renderToolDetailOverlay(width int) string {
 	lines = append(lines, styleDim.Render(t.tr("tui.tool.tool")+": ")+styleTool.Render(te.rawName))
 	if strings.TrimSpace(te.intent) != "" {
 		lines = append(lines, styleDim.Render(t.tr("tui.tool.intent")))
-		lines = append(lines, splitWrapped(te.intent, inner, 4)...)
+		lines = append(lines, splitWrapped(te.intent, inner, 0)...)
 	}
 	if isSubtask(te) {
 		t.appendSubtaskParams(&lines, te, inner)
 	} else if te.params != "" {
 		lines = append(lines, "", styleDim.Render(t.tr("tui.tool.params")))
-		lines = append(lines, splitWrapped(te.params, inner, 18)...)
+		lines = append(lines, splitWrapped(te.params, inner, 0)...)
 	}
 	if te.guard != nil {
 		lines = append(lines, "", styleDim.Render(t.tr("tui.tool.guard")))
@@ -435,11 +448,11 @@ func (t *TUI) renderToolDetailOverlay(width int) string {
 		}
 		if strings.TrimSpace(te.guard.reason) != "" {
 			lines = append(lines, styleDim.Render(t.tr("tui.tool.guard.reason")))
-			lines = append(lines, splitWrapped(te.guard.reason, inner, 5)...)
+			lines = append(lines, splitWrapped(te.guard.reason, inner, 0)...)
 		}
 		if strings.TrimSpace(te.guard.suggestion) != "" {
 			lines = append(lines, styleDim.Render(t.tr("tui.tool.guard.suggestion")))
-			lines = append(lines, splitWrapped(te.guard.suggestion, inner, 5)...)
+			lines = append(lines, splitWrapped(te.guard.suggestion, inner, 0)...)
 		}
 	}
 	if te.result != "" {
@@ -451,24 +464,22 @@ func (t *TUI) renderToolDetailOverlay(width int) string {
 			meta += " · " + t.tr("tui.tool.truncated")
 		}
 		lines = append(lines, "", styleDim.Render(meta))
-		remaining := max(4, maxBodyLines-len(lines)-2)
-		lines = append(lines, splitWrapped(te.result, inner, remaining)...)
+		lines = append(lines, splitWrapped(te.result, inner, 0)...)
 	}
-	if len(lines) > maxBodyLines {
-		lines = append(lines[:maxBodyLines], styleDim.Render("..."))
-	}
-	lines = append(lines, "", styleDim.Render(t.toolDetailHelpText()))
-	return boxStyle.Width(w).Padding(1, 2).Render(strings.Join(lines, "\n"))
+	return lines, bodyHeight
 }
 
-func (t *TUI) toolDetailHelpText() string {
-	idx, total := t.selectedToolPosition()
+func (t *TUI) toolDetailHelpText(start, height, total int) string {
+	idx, toolTotal := t.selectedToolPosition()
 	var parts []string
-	if total > 1 {
+	if total > height {
+		parts = append(parts, fmt.Sprintf("PgUp/PgDn %s %d-%d/%d", t.tr("tui.overlay.scroll"), start+1, min(total, start+height), total))
+	}
+	if toolTotal > 1 {
 		if idx > 0 {
 			parts = append(parts, "↑ "+t.tr("tui.tool.prev"))
 		}
-		if idx < total-1 {
+		if idx < toolTotal-1 {
 			parts = append(parts, "↓ "+t.tr("tui.tool.next"))
 		}
 	}
@@ -486,11 +497,11 @@ func (t *TUI) appendSubtaskParams(lines *[]string, te *toolEntry, width int) {
 	}
 	if tools, ok := te.paramsRaw["tools"]; ok {
 		*lines = append(*lines, "", styleDim.Render(t.tr("tui.tool.tools")))
-		*lines = append(*lines, splitWrapped(fmt.Sprintf("%v", tools), width, 3)...)
+		*lines = append(*lines, splitWrapped(fmt.Sprintf("%v", tools), width, 0)...)
 	}
 	if task, ok := te.paramsRaw["task"]; ok {
 		*lines = append(*lines, "", styleDim.Render(t.tr("tui.tool.task")))
-		*lines = append(*lines, splitWrapped(fmt.Sprintf("%v", task), width, 10)...)
+		*lines = append(*lines, splitWrapped(fmt.Sprintf("%v", task), width, 0)...)
 	}
 }
 

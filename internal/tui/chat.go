@@ -319,7 +319,7 @@ func (t *TUI) updateGuardConfirm(ks string) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		t.doQuit()
 		return t, tea.Quit
-	case "left":
+	case "left", "right":
 		if t.guardCursor == 0 {
 			t.guardCursor = 1
 		} else {
@@ -327,12 +327,20 @@ func (t *TUI) updateGuardConfirm(ks string) (tea.Model, tea.Cmd) {
 		}
 		t.syncContent()
 		return t, nil
-	case "right":
-		if t.guardCursor == 0 {
-			t.guardCursor = 1
-		} else {
-			t.guardCursor = 0
-		}
+	case "up":
+		t.scrollGuardOverlay(-1)
+		t.syncContent()
+		return t, nil
+	case "down":
+		t.scrollGuardOverlay(1)
+		t.syncContent()
+		return t, nil
+	case "pgup":
+		t.scrollGuardOverlay(-max(1, t.guardOverlayBodyHeight()-1))
+		t.syncContent()
+		return t, nil
+	case "pgdown":
+		t.scrollGuardOverlay(max(1, t.guardOverlayBodyHeight()-1))
 		t.syncContent()
 		return t, nil
 	case "esc":
@@ -380,6 +388,7 @@ func (t *TUI) enqueueGuardConfirm(g *guardConfirmView) {
 	}
 	t.pendingGuard = g
 	t.guardCursor = 1
+	t.guardScroll = 0
 	t.loading = false
 	t.phase = phaseIdle
 	t.phaseStart = time.Time{}
@@ -389,9 +398,11 @@ func (t *TUI) advanceGuardQueue() {
 	if len(t.guardQueue) == 0 {
 		t.pendingGuard = nil
 		t.guardCursor = 0
+		t.guardScroll = 0
 		return
 	}
 	t.pendingGuard = t.guardQueue[0]
+	t.guardScroll = 0
 	copy(t.guardQueue, t.guardQueue[1:])
 	t.guardQueue[len(t.guardQueue)-1] = nil
 	t.guardQueue = t.guardQueue[:len(t.guardQueue)-1]
@@ -429,7 +440,10 @@ func (t *TUI) moveSelectedTool(delta int) {
 	if idx >= len(ids) {
 		idx = len(ids) - 1
 	}
-	t.selectedToolID = ids[idx]
+	if t.selectedToolID != ids[idx] {
+		t.selectedToolID = ids[idx]
+		t.toolDetailScroll = 0
+	}
 }
 
 func (t *TUI) allCommands() []commandSpec {

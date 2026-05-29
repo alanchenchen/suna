@@ -31,14 +31,14 @@ func (t *TUI) viewChat() string {
 	sb.WriteString(styleDim.Render(strings.Repeat("─", t.width)) + "\n")
 
 	content := t.vp.View()
-	if t.pendingGuard != nil {
-		content = overlayBlock(content, t.renderGuardOverlay(t.width))
-	}
 	if t.showToolDetail {
 		content = overlayBlock(content, t.renderToolDetailOverlay(t.width))
 	}
 	if t.showHelp {
 		content = overlayBlock(content, t.renderHelpOverlay(t.width))
+	}
+	if t.pendingGuard != nil {
+		content = overlayBlock(content, t.renderGuardOverlay(t.width))
 	}
 	sb.WriteString(content)
 	sb.WriteString(styleDim.Render(strings.Repeat("─", t.width)) + "\n")
@@ -56,35 +56,68 @@ func (t *TUI) renderGuardOverlay(width int) string {
 		return ""
 	}
 	w := max(44, min(76, width-4))
-	inner := max(20, w-8)
+	bodyHeight := t.guardOverlayBodyHeight()
+	body := t.guardOverlayBodyLines()
+	body, start, total := scrollWindow(body, bodyHeight, &t.guardScroll)
+
 	var lines []string
 	lines = append(lines, styleError.Render("⚠ "+t.tr("tui.guard.title")))
 	lines = append(lines, "")
 	lines = append(lines, styleDim.Render(t.tr("tui.guard.tool"))+" "+styleTool.Render(g.tool))
 	lines = append(lines, styleDim.Render(t.tr("tui.guard.risk"))+" "+t.guardRiskStyle(g.risk).Render(g.risk))
-	if strings.TrimSpace(g.reason) != "" {
-		lines = append(lines, styleDim.Render(t.tr("tui.guard.reason"))+" "+g.reason)
-	}
-	if strings.TrimSpace(g.suggestion) != "" {
-		lines = append(lines, styleDim.Render(t.tr("tui.guard.suggestion"))+" "+g.suggestion)
-	}
-	params := formatToolParams(g.params)
-	if params != "" {
-		lines = append(lines, "", styleDim.Render(t.tr("tui.tool.params")))
-		for i, line := range strings.Split(params, "\n") {
-			if i >= 8 {
-				lines = append(lines, styleDim.Render("..."))
-				break
-			}
-			for _, wrapped := range wrapLine(line, inner) {
-				lines = append(lines, styleToolDim.Render(wrapped))
-			}
-		}
+	if len(body) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, body...)
 	}
 	approve := t.guardButton(0, t.tr("tui.guard.approve"))
 	reject := t.guardButton(1, t.tr("tui.guard.reject"))
-	lines = append(lines, "", approve+"  "+reject, styleDim.Render(t.tr("tui.guard.help")))
+	lines = append(lines, "", approve+"  "+reject, styleDim.Render(t.guardHelpText(start, bodyHeight, total)))
 	return boxStyle.Width(w).Padding(1, 2).Render(strings.Join(lines, "\n"))
+}
+
+func (t *TUI) guardOverlayBodyLines() []string {
+	g := t.pendingGuard
+	if g == nil {
+		return nil
+	}
+	w := max(44, min(76, t.width-4))
+	inner := max(20, w-8)
+	var body []string
+	if strings.TrimSpace(g.reason) != "" {
+		body = append(body, styleDim.Render(t.tr("tui.guard.reason")))
+		body = append(body, splitWrapped(g.reason, inner, 0)...)
+	}
+	if strings.TrimSpace(g.suggestion) != "" {
+		if len(body) > 0 {
+			body = append(body, "")
+		}
+		body = append(body, styleDim.Render(t.tr("tui.guard.suggestion")))
+		body = append(body, splitWrapped(g.suggestion, inner, 0)...)
+	}
+	params := formatToolParams(g.params)
+	if params != "" {
+		if len(body) > 0 {
+			body = append(body, "")
+		}
+		body = append(body, styleDim.Render(t.tr("tui.tool.params")))
+		body = append(body, splitWrapped(params, inner, 0)...)
+	}
+	return body
+}
+
+func (t *TUI) guardOverlayBodyHeight() int {
+	return max(0, min(12, t.overlayMaxHeight()-12))
+}
+
+func (t *TUI) guardHelpText(start, height, total int) string {
+	base := t.tr("tui.guard.help")
+	if total <= height {
+		return base
+	}
+	if height <= 0 {
+		return base + " · " + t.tr("tui.overlay.content_hidden")
+	}
+	return fmt.Sprintf("%s · ↑↓ PgUp/PgDn %s %d-%d/%d", base, t.tr("tui.overlay.scroll"), start+1, min(total, start+height), total)
 }
 
 func (t *TUI) renderRestoreSummaryBox(content string) string {
@@ -324,6 +357,67 @@ func toolParamSummary(name string, params map[string]any) string {
 		return pick("question")
 	default:
 		return pick("name", "id", "path", "query")
+	}
+}
+
+func (t *TUI) overlayMaxHeight() int {
+	if t.vp.Height() > 0 {
+		return max(8, t.vp.Height())
+	}
+	if t.height > 0 {
+		return max(8, t.height-8)
+	}
+	return 16
+}
+
+func scrollWindow(lines []string, height int, offset *int) ([]string, int, int) {
+	total := len(lines)
+	if height <= 0 || total == 0 {
+		if offset != nil {
+			*offset = 0
+		}
+		return nil, 0, total
+	}
+	maxOffset := max(0, total-height)
+	start := 0
+	if offset != nil {
+		if *offset < 0 {
+			*offset = 0
+		}
+		if *offset > maxOffset {
+			*offset = maxOffset
+		}
+		start = *offset
+	}
+	end := min(total, start+height)
+	return lines[start:end], start, total
+}
+
+func (t *TUI) scrollGuardOverlay(delta int) {
+	maxOffset := max(0, len(t.guardOverlayBodyLines())-t.guardOverlayBodyHeight())
+	t.guardScroll += delta
+	if t.guardScroll < 0 {
+		t.guardScroll = 0
+	}
+	if t.guardScroll > maxOffset {
+		t.guardScroll = maxOffset
+	}
+}
+
+func (t *TUI) toolDetailPageStep() int {
+	_, bodyHeight := t.toolDetailBodyLines()
+	return max(1, bodyHeight-1)
+}
+
+func (t *TUI) scrollToolDetailOverlay(delta int) {
+	body, bodyHeight := t.toolDetailBodyLines()
+	maxOffset := max(0, len(body)-bodyHeight)
+	t.toolDetailScroll += delta
+	if t.toolDetailScroll < 0 {
+		t.toolDetailScroll = 0
+	}
+	if t.toolDetailScroll > maxOffset {
+		t.toolDetailScroll = maxOffset
 	}
 }
 

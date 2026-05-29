@@ -102,6 +102,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, t.ta.Focus()
 		case ks == "ctrl+t":
 			t.showToolDetail = !t.showToolDetail
+			t.toolDetailScroll = 0
 			if t.showToolDetail && t.selectedToolID == "" {
 				ids := t.visibleToolIDs()
 				if len(ids) > 0 {
@@ -115,10 +116,20 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t.syncContent()
 			return t, nil
 		case ks == "pgup":
-			t.vp.HalfPageUp()
+			if t.showToolDetail {
+				t.scrollToolDetailOverlay(-max(1, t.toolDetailPageStep()))
+				t.syncContent()
+			} else {
+				t.vp.HalfPageUp()
+			}
 			return t, nil
 		case ks == "pgdown":
-			t.vp.HalfPageDown()
+			if t.showToolDetail {
+				t.scrollToolDetailOverlay(max(1, t.toolDetailPageStep()))
+				t.syncContent()
+			} else {
+				t.vp.HalfPageDown()
+			}
 			return t, nil
 		case ks == "up":
 			if t.showToolDetail {
@@ -179,6 +190,28 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, nil
 
 	case tea.MouseMsg:
+		if t.pendingGuard != nil {
+			if mm, ok := any(m).(tea.MouseWheelMsg); ok {
+				if mm.Mouse().Button == tea.MouseWheelUp {
+					t.scrollGuardOverlay(-3)
+				} else if mm.Mouse().Button == tea.MouseWheelDown {
+					t.scrollGuardOverlay(3)
+				}
+				t.syncContent()
+			}
+			return t, nil
+		}
+		if t.showToolDetail {
+			if mm, ok := any(m).(tea.MouseWheelMsg); ok {
+				if mm.Mouse().Button == tea.MouseWheelUp {
+					t.scrollToolDetailOverlay(-3)
+				} else if mm.Mouse().Button == tea.MouseWheelDown {
+					t.scrollToolDetailOverlay(3)
+				}
+				t.syncContent()
+			}
+			return t, nil
+		}
 		var cmd tea.Cmd
 		t.vp, cmd = t.vp.Update(msg)
 		return t, cmd
