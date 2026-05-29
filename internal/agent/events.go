@@ -1,6 +1,6 @@
 package agent
 
-const eventBuffer = 16 * 1024
+const eventBuffer = 2048
 
 type EventType int
 

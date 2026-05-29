@@ -7,20 +7,33 @@
 
 之前 TUI 对每个 `agent.stream` / `agent.reasoning` delta 都立即投递 Bubble Tea 事件，并在每个事件里全量 `syncContent()`、重跑 assistant Markdown。长回复或大上下文时，UI 消费速度会落后于 daemon 事件生产速度，表现为 daemon 已结束但 TUI 仍在补播历史 delta。
 
-OpenAI-compatible 中转在高速碎片流下还会暴露另一类问题：如果 daemon/TUI/IPC 反压让 provider goroutine 暂停读取上游 SSE，中转可能在结束阶段返回不完整 JSON，SDK 表现为 `unexpected end of JSON input`。因此当前设计同时保护两条路径：上游 LLM 读取不能被 UI 速度轻易拖住；UI 渲染也不能被每个小 delta 打爆。
+OpenAI-compatible 中转在高速碎片流下还会暴露另一类问题：部分中转会发送 heartbeat/comment-only/empty SSE event。`openai-go` 默认 decoder 会把这些空 payload 继续交给 `json.Unmarshal`，错误表现为 `unexpected end of JSON input`。因此当前设计同时保护三条路径：兼容空 SSE 事件；上游 LLM 读取不能被 UI 速度轻易拖住；UI 渲染也不能被每个小 delta 打爆。
 
 ## 当前实现
+
+### SSE 空事件兼容
+
+OpenAI-compatible provider 使用 `openai-go` 时，全局注册兼容 decoder：
+
+- `text/event-stream` 使用 `internal/model/sse_decoder.go` 中的 `compatibleSSEDecoder`。
+- 跳过 heartbeat/comment-only SSE event，例如 `: ping` 后跟空行。
+- 跳过空 `data:` event。
+- 正常 JSON data 和 `[DONE]` 原样交给 SDK 后续 stream 逻辑处理。
+
+这个修复覆盖 OpenAI Chat Completions、OpenAI Responses 以及其他使用 `openai-go/packages/ssestream` 的 streaming 路径，不影响 Anthropic SDK。
+
+同时，OpenAI-compatible header normalizer 不再覆盖 `Accept`，避免破坏 SDK 对 SSE 的协议协商；仍保留 `User-Agent` 和 Stainless 追踪头清理。
+
+OpenAI-compatible Chat Completions 保留 `stream_options.include_usage=true`，不牺牲 usage 统计。如果服务端自行返回 usage，现有 usage 解析逻辑也会继续接收。
 
 ### daemon 传输微批处理
 
 daemon 在 `runAgent` 出口对文本流做传输级 micro-batching：
 
-- provider chunk channel 和 agent event channel 使用 16K 有界缓冲，用于吸收 400 tokens/s 级别 LLM 服务在碎片化 SSE 下的短时尖峰。
+- provider chunk channel 和 agent event channel 使用 2048 有界缓冲，用于吸收 LLM 服务在碎片化 SSE 下的短时尖峰，同时避免过高的 daemon 常驻内存。
 - daemon 只合并 `agent.stream` 和 `agent.reasoning`，默认 8ms flush 一次。
 - 单类文本 batch 超过 32KB 时立即 flush，避免单个 JSON-RPC 事件过大。
 - 遇到 usage、tool、ask、guard、done、error、cancelled 等关键事件时，先 flush pending 文本，再即时发送关键事件。
-- OpenAI-compatible Chat Completions 保留 `stream_options.include_usage=true`，不牺牲 usage 统计。
-
 这个 batcher 是传输级优化，不是 UI 缓存。daemon 不保存 Markdown 渲染状态、滚动状态、折叠状态或 copy mode；这些仍由具体 UI client 负责。
 
 ### 事件合并
@@ -72,6 +85,7 @@ TUI 在 notification pump 层合并连续文本流：
 - daemon 只输出 UI 无关的语义事件，不输出 TUI 专用展示指令。
 - daemon 可以做有界、短生命周期的传输缓冲和文本 micro-batching，但不做 UI 缓存。
 - provider 读取上游 LLM stream 时应尽量避免被 client 渲染速度反压。
+- OpenAI-compatible SSE decoder 必须忽略空 SSE 事件，避免中转 heartbeat 被当作 JSON 解析。
 - 不合并 tool/ask/guard/done 等状态事件，保证交互及时。
 - `done` 必须优先触发 pending 文本 flush，避免结束状态被大量旧 delta 堵住。
 - 流式轻量渲染只用于运行态；最终展示必须保持 Markdown。

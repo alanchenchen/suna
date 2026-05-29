@@ -61,6 +61,12 @@ Provider 负责双向转换：
 
 当前差异：OpenAI Responses 和 OpenAI-compatible provider 已走 streaming；Anthropic provider 当前使用非 streaming API，收到完整响应后再发 content/tool_calls/done，并已支持 Claude thinking 参数。
 
+OpenAI-compatible streaming 兼容策略：
+- OpenAI Chat Completions 和 OpenAI Responses 都使用 `openai-go` 的 SSE stream。
+- Suna 注册兼容 `text/event-stream` decoder，跳过 heartbeat/comment-only/empty SSE event，避免中转空事件触发 `unexpected end of JSON input`。
+- OpenAI-compatible Chat 保留 `stream_options.include_usage=true`，同时继续解析服务端自行返回的 usage chunk。
+- compatible header normalizer 不覆盖 `Accept`；仅保留 `User-Agent` 归一化和 Stainless 追踪头清理。
+
 ### 多模态图片输入
 
 Suna 内部统一使用 `model.ContentBlock` + `MediaRef` 表示图片。agent、runner、subtask 只传轻量引用，Provider 层在请求构造时通过 media resolver 临时转换：

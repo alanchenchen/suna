@@ -432,7 +432,7 @@ api_key = "..."
 | 模块 | 状态 | 当前能力 | 主要缺口 |
 |---|---|---|---|
 | Daemon / Protocol/Transport | Usable MVP | protocol schema、local transport、stream/config/session/guard 事件 | 多客户端边界和错误恢复仍需加强 |
-| Model | Usable MVP | OpenAI Responses、OpenAI-compatible Chat 与 Anthropic provider；图片输入、tool calling、usage/context 透传；OpenAI/OpenAI-compatible 支持 streaming；`models.reasoning` 支持 TUI preset 与自定义注入；Anthropic 当前非 streaming | provider ping 和高级路由策略不完整 |
+| Model | Usable MVP | OpenAI Responses、OpenAI-compatible Chat 与 Anthropic provider；图片输入、tool calling、usage/context 透传；OpenAI/OpenAI-compatible 支持 streaming，并注册兼容 SSE decoder 跳过中转 heartbeat/empty event；`models.reasoning` 支持 TUI preset 与自定义注入；Anthropic 当前非 streaming | provider ping 和高级路由策略不完整 |
 | Core Agent | Usable MVP | agent loop、provider-dependent streaming、tool call 并发执行、AskUser、Spawn、session 管理 | 更细的取消/并发边界和长期任务恢复 |
 | Tools | Usable MVP | read/list/readhttp/exec/write/edit/writehttp/askuser/spawn | Windows 命令翻译层仍是后续项 |
 | Guard | Usable MVP | `readonly` / `ask` / `auto` / `smart`、硬拦截、风险分级、TUI confirm、LLM review | rules 编辑 UI、modify 参数改写、渐进信任未完成 |

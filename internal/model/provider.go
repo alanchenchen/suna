@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 )
 
-const providerChunkBuffer = 16 * 1024
+const providerChunkBuffer = 2048
 
 // Role 表示发送给模型的消息角色，和主流 Chat Completion 协议保持一致。
 type Role string

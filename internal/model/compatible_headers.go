@@ -14,7 +14,6 @@ func normalizeCompatibleHeaders(req *http.Request) {
 	// 导致请求变成 Cloudflare/网关 502，且供应商控制台看不到记录；这里仅清理
 	// Stainless SDK 追踪头和 User-Agent，不移除 Authorization、Content-Type 或协议必需头。
 	req.Header.Set("User-Agent", "Suna/1.0")
-	req.Header.Set("Accept", "*/*")
 	for _, key := range []string{
 		"X-Stainless-Lang",
 		"X-Stainless-Package-Version",

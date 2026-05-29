@@ -131,7 +131,7 @@ Daemon 只挂载 `protocol.Transport`，当前 local transport 通过 Unix Domai
 | 9 | [09-competitive-review.md](09-competitive-review.md) | — | 竞品对比 |
 | 10 | [10-stateful-entity.md](10-stateful-entity.md) | — | 范式转变的完整思考过程 |
 | 12 | [12-tui-design.md](12-tui-design.md) | TUI | TUI 页面、交互与 protocol 展示约束 |
-| 13 | [13-tui-stream-performance.md](13-tui-stream-performance.md) | TUI | TUI 流式渲染性能、Markdown 最终渲染和贴底滚动策略 |
+| 13 | [13-tui-stream-performance.md](13-tui-stream-performance.md) | TUI/Daemon | OpenAI-compatible SSE 空事件兼容、daemon 传输 batching、TUI 流式渲染和贴底滚动策略 |
 
 ## 关键差异化
 
