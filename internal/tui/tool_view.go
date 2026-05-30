@@ -107,23 +107,31 @@ func (t *TUI) toolBlockTitle(entries []*toolEntry) string {
 	if len(entries) > 0 {
 		parts = append(parts, fmt.Sprintf("%d actions", len(entries)))
 	}
-	fileChanges := 0
+	changedFiles := make(map[string]struct{})
 	guards := 0
 	for _, te := range entries {
-		if hasFileChange(te) {
-			fileChanges++
+		if path := changedFilePath(te); path != "" {
+			changedFiles[path] = struct{}{}
 		}
 		if shouldShowGuardSummary(te.guard) {
 			guards++
 		}
 	}
-	if fileChanges > 0 {
-		parts = append(parts, fmt.Sprintf("%d files changed", fileChanges))
+	if len(changedFiles) > 0 {
+		parts = append(parts, fmt.Sprintf("%d files changed", len(changedFiles)))
 	}
 	if guards > 0 {
 		parts = append(parts, fmt.Sprintf("%d guarded", guards))
 	}
 	return strings.Join(parts, " · ")
+}
+
+func changedFilePath(te *toolEntry) string {
+	if !hasFileChange(te) {
+		return ""
+	}
+	path, _ := te.metadata["path"].(string)
+	return strings.TrimSpace(path)
 }
 
 func hasFileChange(te *toolEntry) bool {

@@ -89,6 +89,22 @@ func TestSystemMessageClosesCurrentToolBlock(t *testing.T) {
 	}
 }
 
+func TestToolBlockTitleCountsUniqueChangedFiles(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleEN)}
+	block := &toolBlock{entries: make(map[string]*toolEntry)}
+	block.add(&toolEntry{id: "edit-1", rawName: "editfile", metadata: map[string]any{"kind": "file_change", "path": "internal/a.go"}})
+	block.add(&toolEntry{id: "edit-2", rawName: "editfile", metadata: map[string]any{"kind": "file_change", "path": "internal/a.go"}})
+	block.add(&toolEntry{id: "edit-3", rawName: "editfile", metadata: map[string]any{"kind": "file_change", "path": "internal/b.go"}})
+
+	got := tui.toolBlockTitle(tui.visibleToolEntries(block))
+	if !strings.Contains(got, "2 files changed") {
+		t.Fatalf("toolBlockTitle() = %q, want unique changed file count", got)
+	}
+	if strings.Contains(got, "3 files changed") {
+		t.Fatalf("toolBlockTitle() = %q, counted file change operations instead of files", got)
+	}
+}
+
 func TestRenderToolEntryShowsFileChangeSummary(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
 	te := &toolEntry{

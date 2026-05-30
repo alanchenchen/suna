@@ -211,8 +211,8 @@ Main agent:  模型请求按 loop iteration 串行
 Subtasks:    Spawn 作为 tool call 执行
               多个 Spawn 出现在同一批 tool_calls 时会并发运行
               每个 subtask 有独立 working memory 和 timeout
-              Subtask 的 tool call/result 通过 main 事件流转发
-              Subtask tool ID 使用 spawn:<parentToolCallID>:<subToolCallID>
+              Subtask 的 tool call/guard/guard confirm/result 通过 main 事件流转发
+              Subtask tool ID 使用 spawn:<parentToolCallID>:<subToolCallID>，Guard 事件使用同一 ID 挂载到对应子工具
               Subtask stream/reasoning 不对外展示
               Main 收集全部 tool result 后继续下一轮 LLM
 ```
@@ -248,8 +248,8 @@ Subtasks:    Spawn 作为 tool call 执行
 - 有独立的上下文窗口，不继承 main conversation、working memory、active memory、restored conversation state 或 main system prompt
 - 数据流单向进入 subtask：`spawn.task`、`spawn.context`、授权 tools、`spawn.input_images` 指定的当前用户图片、自己的 tool results；执行完毕后自动销毁，只把最终结果回传给 main LLM
 - usage 记录绑定 main session，不创建独立 session
-- 继承全局 Guard policy、blocked/allowed、audit DB；需要用户确认时由 main 事件流负责
-- tool call/result 通过 main 事件流转发；stream/reasoning 不外显
+- 继承全局 Guard policy、blocked/allowed、audit DB；smart review 使用 subtask 自己的 working context；需要用户确认时由 main 事件流负责
+- tool call/guard/guard confirm/result 通过 main 事件流转发，使用统一 namespaced tool id 挂到 TUI 子工具行；stream/reasoning 不外显
 
 ### 嵌套限制
 

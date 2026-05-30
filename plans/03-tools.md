@@ -292,13 +292,17 @@ options 参数:
   Main 等待所有 sub 完成后汇总
 
 Guard 策略:
-  subtask 使用全局 Guard policy、blocked/allowed、audit DB
+  subtask 使用全局 Guard policy、workspace、blocked/allowed、audit DB
   需要用户确认时通过 main agent 事件流暂停并等待确认
   smart mode 下可使用同一 LLM reviewer
+  Guard review 上下文来自 subtask 自己的 runner working：delegated task、最近 subtask 消息摘要、tool intent、assistant context
+  LLM review 返回 modify 时不执行原调用，reason/suggestion 作为 tool error 返回 subtask LLM，由 subtask 决定是否重试
 
 事件与 usage:
   subtask 不对外发送 stream/reasoning
-  subtask 的 tool call/tool result 通过 main agent 事件流转发给 TUI
+  subtask 的 tool call/tool guard/guard confirm/tool result 通过 main agent 事件流转发给 TUI
+  subtask tool 相关事件使用统一 namespaced id: spawn:<parentToolCallID>:<subToolCallID>
+  TUI 依靠该 id 把 Guard 决策、风险、确认结果和文件变更挂到对应子工具行
   subtask 的 usage 计入 main session
 ```
 

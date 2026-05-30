@@ -203,13 +203,14 @@ func (a *Agent) executeSpawn(ctx context.Context, id string, params map[string]a
 }
 
 func (a *Agent) newSubtaskRunner(events chan<- Event, spawnID string, subRegistry *tool.Registry) *runner.Runner {
-	return &runner.Runner{Router: a.router, Compressor: a.compressor, Executor: subtaskExecutor{agent: a, events: events, registry: subRegistry}, Sink: subtaskSink{events: events, spawnID: spawnID}, UsageSink: a, Hooks: runner.Hooks{CleanToolParams: cleanParamsForRegistry(subRegistry)}}
+	return &runner.Runner{Router: a.router, Compressor: a.compressor, Executor: subtaskExecutor{agent: a, events: events, registry: subRegistry, spawnID: spawnID}, Sink: subtaskSink{events: events, spawnID: spawnID}, UsageSink: a, Hooks: runner.Hooks{CleanToolParams: cleanParamsForRegistry(subRegistry)}}
 }
 
 type subtaskExecutor struct {
 	agent    *Agent
 	events   chan<- Event
 	registry *tool.Registry
+	spawnID  string
 }
 
 func (e subtaskExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecution) tool.Result {
@@ -224,7 +225,8 @@ func (e subtaskExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecut
 	if e.agent.shouldGuardTool(name) {
 		e.agent.prepareWorkspaceParams(name, params)
 		result := e.agent.guard.Check(ctx, name, params, e.agent.buildGuardReviewContext(call))
-		e.agent.emitToolGuard(e.events, call.ID, name, result)
+		eventID := e.namespaced(call.ID)
+		e.agent.emitToolGuard(e.events, eventID, name, result)
 		if result.Decision == guard.Reject {
 			return tool.ErrorResult("blocked: " + result.Reason)
 		}
@@ -232,7 +234,7 @@ func (e subtaskExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecut
 			return guardModifyResult(result)
 		}
 		if result.Decision == guard.Confirm {
-			if !e.agent.confirmGuard(ctx, call.ID, name, params, result, e.events) {
+			if !e.agent.confirmGuard(ctx, eventID, name, params, result, e.events) {
 				return tool.ErrorResult("blocked: user rejected guard confirmation")
 			}
 		}
@@ -247,21 +249,42 @@ func (e subtaskExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecut
 	return res
 }
 
+func (e subtaskExecutor) namespaced(id string) string {
+	if e.spawnID == "" {
+		return id
+	}
+	return "spawn:" + e.spawnID + ":" + id
+}
+
 func (a *Agent) buildGuardReviewContext(call runner.ToolExecution) guard.ReviewContext {
-	// smart guard 只需要短上下文：当前用户意图 + 工具意图 + 最近几条消息摘要。
+	// smart guard 只需要短上下文：当前 runner 的用户意图 + 工具意图 + 最近几条消息摘要。
+	// main 与 subtask 共享 Guard 策略，但 review 必须使用各自 runner 的 working，避免 subtask 串用 main 对话上下文。
 	ctx := guard.ReviewContext{
 		ToolIntent:       trimForGuard(call.Intent, 500),
 		AssistantContext: trimForGuard(call.AssistantContext, 800),
 	}
-	if a.working != nil {
-		ctx.UserRequest = trimForGuard(a.working.LastUserText(), 1200)
-		ctx.RecentContext = a.recentContextForGuard(6, 1800)
+	messages := call.WorkingMessages
+	if len(messages) == 0 && a.working != nil {
+		messages = a.working.Messages()
 	}
+	ctx.UserRequest = trimForGuard(lastUserTextFromMessages(messages), 1200)
+	ctx.RecentContext = recentContextForGuardMessages(messages, 6, 1800)
 	return ctx
 }
 
-func (a *Agent) recentContextForGuard(n, maxChars int) string {
-	msgs := a.working.LastN(n)
+func lastUserTextFromMessages(msgs []model.Message) string {
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == model.RoleUser {
+			return msgs[i].Text()
+		}
+	}
+	return ""
+}
+
+func recentContextForGuardMessages(msgs []model.Message, n, maxChars int) string {
+	if n > 0 && len(msgs) > n {
+		msgs = msgs[len(msgs)-n:]
+	}
 	lines := make([]string, 0, len(msgs))
 	for _, msg := range msgs {
 		role := string(msg.Role)

@@ -300,7 +300,7 @@ Current status line：
 - Tool 展示使用并发状态模型：`tool_start` 创建 running 项，`tool_guard` 更新 Guard 注解，`tool_end` 更新 done/error，不等待前一个 tool 完成。
 - Guard 注解显示为工具行下方 `Guard` badge，包含决策、风险和短 reason；完整 reason/suggestion 在 tool detail overlay 展示。
 - 文件变更 metadata 显示为工具行下方 `File` badge，路径、operation、`+/-` 行数使用高亮/背景色，避免重要变化淹没在 dim 文本里。
-- Subtask 内部 tool 通过 `spawn:<parentToolCallID>:<subToolCallID>` 归到父 spawn 下，渲染为树形结构。
+- Subtask 内部 tool 通过 `spawn:<parentToolCallID>:<subToolCallID>` 归到父 spawn 下，渲染为树形结构；subtask 的 `tool_guard` / `guard_confirm` 使用同一 id，因此 Guard 注解和用户确认结果挂到对应子工具行。
 - 主聊天流不渲染完整 params/result，避免频繁展开导致 viewport 重排卡顿。
 - Tool error 必须在主线展示短错误摘要；完整 params/result 只在详情面板展示。
 - Tool detail 使用 overlay 面板，不再插入聊天流；overlay 显示当前类型、当前位置、tool、intent、params/result，并提示 `↑/↓ switch · Ctrl+T/Esc close`。

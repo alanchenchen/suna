@@ -147,7 +147,8 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 		}
 		toolCallsExecuted += len(preparedCalls)
 
-		results := r.executeToolCalls(ctx, preparedCalls)
+		workingSnapshot := req.Working.Messages()
+		results := r.executeToolCalls(ctx, preparedCalls, workingSnapshot)
 		for _, execResult := range results {
 			if r.Sink != nil {
 				r.Sink.ToolResult(ToolResultEvent{ID: execResult.tc.ID, Name: execResult.tc.Name, Result: execResult.result.Content, Error: execResult.result.IsError, Metadata: execResult.result.Metadata})
@@ -264,13 +265,13 @@ func (r *Runner) prepareToolCalls(toolCalls []model.ToolCall, fullContent string
 	return preparedCalls, cleanToolCalls
 }
 
-func (r *Runner) executeToolCalls(ctx context.Context, calls []preparedToolCall) []toolExecResult {
+func (r *Runner) executeToolCalls(ctx context.Context, calls []preparedToolCall, workingSnapshot []model.Message) []toolExecResult {
 	resultCh := make(chan toolExecResult, len(calls))
 	for i, pc := range calls {
 		go func(index int, pc preparedToolCall) {
 			res := tool.ErrorResult("tool executor not configured")
 			if r.Executor != nil {
-				res = r.Executor.ExecuteTool(ctx, ToolExecution{ID: pc.tc.ID, Name: pc.tc.Name, Params: pc.params, Intent: pc.intent, AssistantContext: pc.assistantContext})
+				res = r.Executor.ExecuteTool(ctx, ToolExecution{ID: pc.tc.ID, Name: pc.tc.Name, Params: pc.params, Intent: pc.intent, AssistantContext: pc.assistantContext, WorkingMessages: cloneMessages(workingSnapshot)})
 			}
 			resultCh <- toolExecResult{index: index, tc: pc.tc, result: res}
 		}(i, pc)
@@ -281,6 +282,15 @@ func (r *Runner) executeToolCalls(ctx context.Context, calls []preparedToolCall)
 		results[r.index] = r
 	}
 	return results
+}
+
+func cloneMessages(msgs []model.Message) []model.Message {
+	if len(msgs) == 0 {
+		return nil
+	}
+	cp := make([]model.Message, len(msgs))
+	copy(cp, msgs)
+	return cp
 }
 
 func (r *Runner) contextWindow(modelRef string) int {

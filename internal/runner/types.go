@@ -82,12 +82,14 @@ type UsageEvent struct {
 
 // ToolExecution 是一次具体工具调用的不可变上下文。
 // Intent 与 AssistantContext 专供 smart guard review 判断“为什么要调用”。
+// WorkingMessages 是当前 runner 的上下文快照；main/subtask 各自传入自己的 working，避免 Guard review 串用上下文。
 type ToolExecution struct {
 	ID               string
 	Name             string
 	Params           map[string]any
 	Intent           string
 	AssistantContext string
+	WorkingMessages  []model.Message
 }
 
 type ToolExecutor interface {
