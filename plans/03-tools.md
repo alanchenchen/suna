@@ -1,6 +1,6 @@
 # 03 — 核心工具
 
-Suna 当前对 main agent 暴露 9 个工具定义：7 个 registry tools（readfile/listdir/readhttp/exec/writefile/editfile/writehttp）+ 2 个 agent built-ins（askuser/spawn）。`askuser` 和 `spawn` 依赖 main agent 事件流和动态 schema，由 `internal/agent` 特殊处理，不注册到通用 tool registry。所有更高级的能力通过 skill 系统学习获得。
+Suna 当前对 main agent 暴露 9 个工具定义：7 个 registry tools（readfile/listdir/readhttp/exec/writefile/editfile/writehttp）+ 2 个 agent built-ins（askuser/spawn）。`askuser` 和 `spawn` 依赖 main agent 事件流和动态 schema，由 `internal/agent` 特殊处理，不注册到通用 tool registry。更高级的任务流程通过 Skill 学习/导入，外部工具通过 MCP 接入。
 
 工具返回在实现上统一为 `tool.Result{Content string, IsError bool, Truncated bool, Metadata map[string]any}`。下面的“返回”描述以当前 LLM 实际看到的 `Content` 文本为准；`truncated` 和 `metadata` 是内部结构化标记，不代表每个工具都会返回 JSON 对象，也不会额外进入 LLM 上下文。
 
@@ -233,7 +233,7 @@ metadata:
   - 需要用户确认: "确定要删除 xxx 吗？"
   - 需要额外信息: "请提供数据库连接地址"
   - 选择分支: "有 3 种方案，你倾向哪种？"
-  - 能力学习: "我发现我缺少 XXX 能力，你希望我学习吗？"
+  - Skill authoring: "这像是可复用流程，要我保存成 Skill 吗？"
 
 options 参数:
   提供 options 时，TUI 渲染为选择列表

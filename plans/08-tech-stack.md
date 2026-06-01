@@ -18,9 +18,7 @@
   github.com/anthropics/anthropic-sdk-go      # Anthropic Messages SDK
 
 能力扩展 (待引入):
-  github.com/mark3labs/mcp-go                 # MCP Client (Phase 3)
-  github.com/nicholasgasior/quickjs-wasm-go   # QuickJS (Phase 3, 编译为 WASM)
-  github.com/tetratelabs/wazero               # 纯 Go WASM 运行时 (Phase 3)
+  github.com/mark3labs/mcp-go                 # MCP Client
 
 Local transport (1):
   github.com/Microsoft/go-winio               # Windows Named Pipe (Docker 同款)
@@ -210,8 +208,8 @@ suna/
 	│   │   ├── queue.go             # memory_queue 写入 + pending 恢复
 	│   │   ├── worker.go            # Memory Worker (异步 full compaction)
 	│   │   └── significance.go      # 显著性判断 (规则，零 LLM)
-│   ├── capability/              # 能力管理
-│   │   └── capability.go        # 加载/存储/解析能力目录 + LOAD_SKILL 处理
+│   ├── skill/                   # Skill 管理
+│   │   └── skill.go             # 扫描/check/启用/load 通用 Agent Skills
 │   ├── prompt/                  # 提示词模板
 │   │   ├── loader.go            # go:embed 加载 + 模板渲染
 │   │   └── templates/           # Markdown 模板 (编译进二进制)
@@ -230,7 +228,7 @@ suna/
 │       ├── chat.go              # 对话界面 + 键盘快捷键 + 命令补全
 │       ├── commands.go          # TUI 命令 (/new, /model, /compact 等)
 │       └── statusbar.go         # 状态栏 (模型/tokens/速度)
-├── capabilities/                # 内置示例能力
+├── skills/                      # 内置示例 Skills
 │   └── example/
 │       └── SKILL.md
 └── plans/                       # 设计文档
@@ -249,17 +247,12 @@ suna/
 ├── sunad.sock                   # Unix Socket (macOS/Linux)
 ├── memory.db                    # SQLite (记忆 + 审计 + 触发器)
 ├── tmp/                         # TUI 粘贴图片等短生命周期临时文件
-├── capabilities/                # 已安装能力 (含人格 persona/)
-│   ├── persona/
-│   │   └── SKILL.md             # 人格/沟通风格 (capability 实现)
+├── skills/                      # 已安装/生成的通用 Agent Skills
 │   ├── vue-style/
 │   │   └── SKILL.md
-│   ├── log-parser/
-│   │   ├── SKILL.md
-│   │   └── main.js
-│   └── database/
+│   └── deploy-helper/
 │       ├── SKILL.md
-│       └── mcp.json
+│       └── scripts/
 └── logs/
     ├── app.log                  # 标准库 log 输出 + 默认分类日志
     ├── agent.log                # Agent 运行、工具调用和生命周期日志
@@ -347,6 +340,26 @@ reason = "只读命令直接放行"
 theme = "auto"                    # auto | dark | light
 locale = "en"                    # "en" | "zh" | "zh-CN"
 
+# Skill 信任记录：只记录用户是否启用某个已 check 的内容版本。
+[skills.code-review]
+enabled = true
+hash = "sha256:abc123"
+
+[skills.deploy-helper]
+enabled = false
+hash = "sha256:def456"
+reasons = ["包含脚本", "脚本访问网络"]
+
+# MCP server 独立配置，不写入 Skill 包。
+[mcp.servers.github]
+enabled = true
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+
+[mcp.servers.github.env]
+GITHUB_TOKEN = "${GITHUB_TOKEN}"
+
 # Hooks 当前为预留配置，结构已支持持久化，但执行闭环尚未完成。
 [[hooks]]
 event = "before_tool"
@@ -354,7 +367,7 @@ tool = "exec"
 command = "echo checking"
 ```
 
-上面示例已覆盖 `internal/config.Config` 当前所有会持久化到 `config.toml` 的字段：`active_model`、`max_model_rps`、`[[models]]`、`[guard]`、`[guard].workspace`、`[[guard.blocked]]`、`[[guard.allowed]]`、`[ui]`、`[[hooks]]`。`DataDir` 与模型 `APIKey` 为运行态字段，不会写入 `config.toml`。
+上面示例覆盖 `config.toml` 的主要设计字段：`active_model`、`max_model_rps`、`[[models]]`、`[guard]`、`[ui]`、`[skills.<name>]`、`[mcp.servers.<name>]` 和预留 `[[hooks]]`。`DataDir` 与模型 `APIKey` 为运行态/凭证字段，不会写入 `config.toml`。
 
 ### 字段说明
 
@@ -380,6 +393,15 @@ command = "echo checking"
 | `guard.allowed.reason` | string | 否 | 空 | 放行原因，当前字段可持久化；Guard 决策中暂未使用该 reason。 |
 | `[ui].theme` | string | 否 | `auto` | TUI 主题：`auto` / `dark` / `light`。 |
 | `[ui].locale` | string | 否 | `en` | TUI 语言；当前内置 `en` 和中文。 |
+| `[skills.<name>].enabled` | bool | 否 | `false` | 是否允许加载该 Skill。只有 enabled=true、hash 匹配且 SKILL.md 有效时才进入 active skill index。 |
+| `[skills.<name>].hash` | string | 否 | 空 | 用户 check 过的 Skill 内容版本；当前 hash 不匹配时运行态推导为 needs_review，不加载。 |
+| `[skills.<name>].reasons` | string[] | 否 | 空 | check 发现的风险原因；无明显风险时可省略。 |
+| `[mcp.servers.<name>]` | object | 否 | 空 | MCP server 配置，独立于 Skill；v1 优先支持 stdio。 |
+| `mcp.servers.<name>.enabled` | bool | 否 | `false` | 是否启动该 MCP server。 |
+| `mcp.servers.<name>.transport` | string | 否 | `stdio` | MCP transport，v1 先支持 `stdio`，HTTP/SSE 后续。 |
+| `mcp.servers.<name>.command` | string | stdio 必填 | 空 | stdio server 启动命令。 |
+| `mcp.servers.<name>.args` | string[] | 否 | 空 | stdio server 参数。 |
+| `mcp.servers.<name>.env` | table | 否 | 空 | server 环境变量，可引用 `${ENV_NAME}`。 |
 | `[[hooks]]` | array | 否 | 空 | Hook 配置结构已支持保存；执行链路仍是后续项。 |
 | `hooks.event` | string | 否 | 空 | 预留 hook 事件名。 |
 | `hooks.tool` | string | 否 | 空 | 预留 hook 作用 tool。 |
@@ -439,6 +461,6 @@ api_key = "..."
 | Memory | Usable MVP | SQLite active memory、memory_queue、conversation_state、异步 full compaction、上下文压缩 | 记忆质量评估、用户可编辑记忆 UI |
 | TUI | Usable MVP | Welcome/Chat/Config/Help、模型配置、Workspace 配置、工具记录、AskUser、Guard overlay、compact、active memory list、context-aware help | Provider test、Config 高级项（guard rules/hooks/限速）仍不完整 |
 | Logging | Usable MVP | 分类文本日志和 provider 调用日志已接入；具体文件分类以 `internal/logging` 当前实现为准 | UI 查看日志、导出诊断包 |
-| Capability | Basic | SKILL.md 加载和能力目录结构 | JS/WASM runner、MCP client、能力市场未完成 |
+| Skill / MCP | Design | 通用 Skill + MCP 独立配置方案已定稿 | SkillManager、skill.load、check 流程和 MCP stdio runtime 待实现 |
 
 后续路线以 `plans/00-progress.md` 为准；本文件只记录当前技术选型、目录结构和配置字段。

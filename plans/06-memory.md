@@ -351,7 +351,7 @@ id asc
 system:
   Stable system prompt
   Stable memory policy
-  Runtime/project/capability context
+  Runtime/project/skill context
 
 messages:
   restored/current conversation messages
@@ -535,18 +535,18 @@ compaction prompt 必须要求模型返回严格合法 JSON。字符串内部双
 4. 删除已处理 queue。
 ```
 
-## 与 Capability 的关系
+## 与 Skill 的关系
 
 记忆记录“用户是什么样的人、Suna 应该避免什么”。
 
-Capability 记录“Suna 学会了怎么做某类事”。
+Skill 记录“Suna 学会了怎么做某类事”。
 
 重复失败或稳定操作模式不应该无限塞进 user_memory：
 
 ```
 同类 correction/failure 出现多次
   -> user_memory 记录简短偏好或禁忌
-  -> capability 系统判断是否需要学习新能力
+  -> Skill authoring workflow 判断是否建议生成/更新 Skill
 ```
 
 例如：
@@ -555,7 +555,7 @@ Capability 记录“Suna 学会了怎么做某类事”。
 user_memory:
 - 用户不希望 Suna 在不确认环境的情况下直接执行破坏性命令。
 
-capability:
+Skill:
 - 执行数据库迁移前先检查当前环境、备份状态和 dry-run 结果。
 ```
 

@@ -1,499 +1,356 @@
-# 05 — 能力系统
+# 05 — Skills 与 MCP
 
-Suna 的核心创新：空杯出厂 + 按需学习。能力不是预装的，是使用过程中生长的。
+Suna 使用两个独立机制：
 
-> 当前实现状态: **Basic**
->
-> 已实现的是 declarative `SKILL.md` 加载、能力摘要注入、`[LOAD_SKILL: name]` 后完整内容注入，以及能力目录的基础解析/存储。`main.js` QuickJS/WASM runner、MCP client、lifecycle hooks、skill validate/test 闭环和能力市场仍是目标设计，不能按已运行能力理解。
-
-## 能力的本质
-
-```
-当前实现: 能力 = 知识 (SKILL.md)
-目标设计: 能力 = 知识 (SKILL.md) + 可选的程序 (main.js) + 可选的外部服务 (MCP)
+```text
+Skill = 用户信任后的通用 Agent Skill 包，用来教 Suna 如何完成某类任务
+MCP   = 外部工具 / 资源 / 服务接入层，用 config.toml 配置
 ```
 
-## 能力文件格式
+二者分离：Skill 不内嵌 MCP server 配置；MCP 不承担 Skill 的任务说明职责。
 
-每个能力是一个目录：
+## 设计原则
 
-```
-<data-dir>/capabilities/      # 当前默认 ~/.suna/capabilities/
-├── vue-style/              # 类型 1: 纯知识
-│   └── SKILL.md
-├── log-parser/             # 类型 2: 知识 + 程序
-│   ├── SKILL.md
-│   └── main.js
-├── coding-safety/          # 类型 2: 知识 + 程序 (带 lifecycle hooks)
-│   ├── SKILL.md
-│   └── main.js             # 含 hooks 声明 + execute 函数
-├── database/               # 类型 3: 知识 + MCP
-│   ├── SKILL.md
-│   └── mcp.json
-└── ...
+```text
+1. 兼容主流 Agent Skill 目录结构，不发明 Suna 专属格式。
+2. Skill 操作以自然语言对话为主，TUI `/skills` 只做简单管理入口。
+3. Suna 在导入 / 生成 / 更新 Skill 时做 check，并把风险原因解释给用户。
+4. 用户 enabled 后，Skill 作为用户信任的能力包可被 LLM 使用。
+5. 不做复杂 Skill sandbox，不单独设计 script 权限系统；运行时仍走现有工具与 Guard。
+6. config.toml 只记录用户对某个 Skill 内容版本的信任结果。
+7. MCP 独立放在 config.toml，作为 daemon runtime 的工具接入能力。
 ```
 
-### SKILL.md 格式
+## Skill 目录
 
-宽松 Markdown，兼容 Claude Code / OpenClaw 生态。元数据支持两种位置：
+全局 Skill 目录固定为：
+
+```text
+~/.suna/skills/<skill-name>/SKILL.md
+```
+
+不提供用户可配置的 Skill directory，避免增加普通用户心智负担。
+
+兼容通用目录式 Skill：
+
+```text
+~/.suna/skills/code-review/
+├── SKILL.md
+├── references/     # 可选，参考文档
+├── examples/       # 可选，示例
+├── assets/         # 可选，模板/素材
+└── scripts/        # 可选，辅助脚本
+```
+
+Suna 只要求 `SKILL.md` 存在。其他目录只是辅助资源，不会自动注册为新工具。
+
+## SKILL.md 字段
+
+Suna 只认主流通用字段，核心是：
 
 ```markdown
-# 浏览器自动化
-
-自动化浏览器操作，包括打开网页、点击、提取数据
-
-当需要抓取网页时:
-1. 用 Exec 执行 playwright 脚本
-2. 脚本根据任务动态生成
-3. 解析 JSON 结果
-
-注意: 等待选择器出现后再操作
-
+---
+name: code-review
+description: Use when reviewing code, diffs, pull requests, bugs, security risks, or maintainability concerns.
 ---
 
-tools: exec, readfile, writefile
-type: script
+# Code Review
+
+Review correctness first, then security, then maintainability...
 ```
 
-### 解析规则
+字段策略：
 
-```go
-func ParseSkillMD(content string) *Capability {
-    cap := &Capability{}
-    body := content
-
-    // 优先检查文件开头的 frontmatter (--- 包裹的 YAML 块)
-    if hasFrontmatter(content) {
-        fm, body := splitFrontmatter(content)
-        cap.Name = fm["name"]
-        cap.Tools = fm["tools"]
-        cap.Type = fm["type"]
-    }
-
-    // 其次检查文件末尾的 --- 分隔符后的元数据
-    // (兼容 Claude Code / OpenClaw 格式)
-    if hasFooterMeta(body) {
-        meta, body := splitFooterMeta(body)
-        if cap.Tools == "" { cap.Tools = meta["tools"] }
-        if cap.Type == "" { cap.Type = meta["type"] }
-    }
-
-    // name 从 H1 标题提取 (# 开头的第一行)
-    if cap.Name == "" { cap.Name = extractH1(body) }
-    // 全部内容作为 prompt
-    cap.Prompt = body
-
-    // type 为空 → 默认 declarative
-    // 有 main.js → script
-    // 有 mcp.json → mcp
-
-    return cap
-}
+```text
+name         必需或可从目录名推导
+description 供 LLM 判断何时使用 Skill，强烈建议存在
+其他字段     不作为 Suna 行为依据；可以忽略或仅展示
 ```
 
-## 三种能力类型
+未知字段不报错，但不赋予任何权限。
 
-### 类型 1: declarative (纯知识)
+## config.toml
 
-只有 SKILL.md。覆盖 ~70% 场景。
+`config.toml` 只保存用户信任结果：
 
-```
-例: vue-style/
-  SKILL.md = "使用 Vue3 <script setup> 语法，用 composables 组织逻辑..."
-  agent 读到 → 生成代码时遵循 Vue3 风格
-  不需要任何新工具
-```
+```toml
+[skills.code-review]
+enabled = true
+hash = "sha256:abc123"
 
-### 类型 2: script (知识 + JS 程序)
-
-有 `main.js`，由 QuickJS 引擎（编译为 WASM，wazero 运行）在 agent 进程内执行。覆盖 ~25% 场景。
-
-当前状态：未接入执行链路。Suna 可以解析能力目录和 `SKILL.md`，但不会执行 `main.js`、注册 execute 函数或运行 JS hooks。
-
-QuickJS 支持 ES2024 完整语法，LLM 生成的 JS 代码无需任何转译或约束。WASM sandbox 提供进程级隔离——内存、计算、IO 全部受控。
-
-#### main.js 结构
-
-```javascript
-// 所有 host 函数通过 host.xxx 调用
-// QuickJS 支持完整 ES6+，LLM 可自由使用 const/let/箭头函数/模板字符串等
-
-// 可选: lifecycle hooks
-function beforeToolUse(tool, params) {
-  if (tool === "EditFile" || tool === "WriteFile") {
-    const current = host.readFile(params.path);
-    host.storagePut(`snapshot:${host.getCurrentTurn()}:${params.path}`, current);
-  }
-  return { decision: "allow" };
-}
-
-// 必需: execute 函数（被 LLM 调用时执行）
-function execute(params) {
-  const snapshots = host.storageList("snapshot:");
-  return { snapshots };
-}
-
-module.exports = {
-  hooks: {
-    PreToolUse: { fn: beforeToolUse, scope: "always" }
-  },
-  execute
-};
+[skills.deploy-helper]
+enabled = false
+hash = "sha256:def456"
+reasons = [
+  "包含脚本",
+  "脚本访问网络",
+  "引用 GITHUB_TOKEN"
+]
 ```
 
-没有 module.exports.hooks = 纯知识 skill
-有 module.exports.hooks = 带行为的 skill
+字段含义：
 
-#### Host 函数
-
-```javascript
-// 文件
-host.readFile(path)              → string
-host.writeFile(path, content)    → void
-
-// 执行
-host.exec(command)               → { stdout, stderr, exitCode }
-
-// 持久存储 (skill 隔离的命名空间)
-host.storageGet(key)             → string | null
-host.storagePut(key, value)      → void
-host.storageDelete(key)          → void
-host.storageList(prefix)         → string[]
-
-// 上下文
-host.getConfig(key)              → string | null
-host.getCurrentTurn()            → number
-host.getSessionId()              → string
-host.getWorkingDir()             → string
-
-// 交互
-host.askUser(question)           → string
-host.log(message)                → void
+```text
+enabled  是否允许加载该 Skill
+hash     用户 check 过的 Skill 内容版本
+reasons  check 发现的风险原因；无明显风险时可省略
 ```
 
-所有 host 函数经过 Guard 审查（文件操作和命令执行）。
+不再设计：
 
-#### QuickJS + wazero
-
-```
-架构:
-  QuickJS (Fabrice Bellard 的轻量 JS 引擎)
-  → 编译为 WASM (~500KB)
-  → 嵌入 Suna 二进制
-  → wazero (纯 Go WASM 运行时) 执行
-
-优势:
-  ✅ ES2024 完整支持 — LLM 无需约束，自由生成任意 JS
-  ✅ WASM sandbox 隔离 — 内存/计算/IO 全部受控
-  ✅ 无转译器 — 不存在 ES5.1 兼容性地雷
-  ✅ 纯 Go — wazero 无 CGO，跨平台一致
-  ✅ host 函数通过 WASM import 机制注入 — 安全可控
-
-体积:
-  QuickJS WASM: ~500KB
-  wazero runtime: ~2MB
-  总增量: ~2.5MB
-
-性能:
-  skill 脚本都是微秒级操作 (条件判断 + 调 host 函数)
-  QuickJS WASM 完全够用
+```text
+state / risk / script_policy / blocked / project_trusted / skill directory
 ```
 
-### 类型 3: mcp (知识 + 外部服务)
+运行时状态由 daemon 扫描后推导：
 
-有 `mcp.json`，覆盖 ~5% 场景。
-
-当前状态：未接入 MCP client。`mcp.json` 是目标设计格式，当前不会把 MCP server tools 注册到 agent。
-
-```json
-{
-    "command": "npx",
-    "args": ["-y", "@modelcontextprotocol/server-postgres"],
-    "env": {
-        "DATABASE_URL": "postgresql://user:pass@localhost/mydb"
-    }
-}
+```text
+active        enabled=true 且 hash 匹配且 SKILL.md 有效
+inactive      enabled=false 且 hash 匹配
+unchecked     目录存在但 config 没记录
+needs_review  config 有记录但当前 hash 不匹配
+invalid       SKILL.md 缺失或格式无效
+missing       config 有记录但目录不存在
 ```
 
-加载流程：读 mcp.json → mcp-go 创建 Client → 连接 Server → 获取 tools → 注册到 agent。
+## Skill check
 
-## Lifecycle Hooks
+重型 check 不在每次启动运行，只在这些场景触发：
 
-skill 的 main.js 可以声明 hooks，自动拦截 agent 的操作。
-
-当前状态：未实现。core 目前没有执行 Shell hooks 或 Skill hooks。
-
-### 4 个 Hook 点
-
-```
-Agent Loop 中的决策点:
-
-  1. 感知信号到达 → OnSignal(signal) → {handle, ignore, transform}
-  2. 构建 LLM 请求时 → PreLLM(messages) → messages
-  3. 工具执行前 → PreToolUse(tool, params) → {allow, reject, modify}
-  4. 工具执行后 → PostToolUse(tool, params, result) → void
+```text
+1. 用户通过对话导入远程 repo
+2. 用户通过对话导入本地目录或 zip
+3. Suna 根据用户需求生成 Skill
+4. 已记录 Skill 的内容 hash 变化后，用户要求重新检查
 ```
 
-### Hook Scope
+check 流程：
 
-```
-scope: "always"    → 安装即激活，不经过 LLM 判断 (安全/保护类)
-scope: "matched"   → LLM 加载了该 SKILL.md 后才执行 (增强类)
-```
-
-### 执行顺序
-
-```
-同一个事件多个 hook 时:
-
-1. Shell hooks (config.toml 里定义的) → 先执行
-2. Skill hooks (main.js 里定义的)    → 按注册顺序执行
-
-规则:
-  - 任何 hook 返回 reject → 立即停止，不执行后续 hook 和工具
-  - 任何 hook 返回 modify → 修改后的参数传给下一个 hook
-  - 全部 allow → 执行工具
+```text
+validate 标准格式
+  ↓
+扫描 SKILL.md、references、scripts
+  ↓
+检测明显风险：危险命令、敏感路径、网络访问、prompt injection、混淆/二进制等
+  ↓
+LLM 辅助阅读理解 Skill 和脚本意图
+  ↓
+生成 reasons
+  ↓
+向用户解释并询问是否 enabled
+  ↓
+写入 config.toml
 ```
 
-### Hook 示例
+check 的目标不是证明安全，而是帮助用户理解风险。空 `reasons` 只表示“未发现明显风险”，不表示绝对安全。
 
-```javascript
-// coding-safety skill: 快照 + workspace 边界
-function beforeToolUse(tool, params) {
-  if (tool === "EditFile" || tool === "WriteFile") {
-    const workspace = host.getConfig("workspace.root");
-    if (workspace && !params.path.startsWith(workspace)) {
-      return { decision: "reject", reason: "文件在 workspace 外" };
-    }
-    const current = host.readFile(params.path);
-    host.storagePut(`snapshot:${host.getCurrentTurn()}:${params.path}`, current);
-  }
-  return { decision: "allow" };
-}
+## Skill 加载与使用
 
-// auto-format skill: 写文件后自动格式化
-function afterToolUse(tool, params, result) {
-  if (tool === "WriteFile") {
-    if (params.path.endsWith(".go")) {
-      host.exec(`gofmt -w ${params.path}`);
-    }
-    if (params.path.endsWith(".ts")) {
-      host.exec(`npx prettier --write ${params.path}`);
-    }
-  }
-}
+### 启动时
 
-// cost-guard skill: 预算警告
-function beforeLLM(messages) {
-  const spent = parseFloat(host.storageGet("cost:today") || "0");
-  if (spent > 5.0) {
-    messages.push({ role: "system", content: `警告: 今日已花费 $${spent}` });
-  }
-  return messages;
-}
+Daemon 启动时只做轻量工作：
 
-module.exports = {
-  hooks: {
-    PreToolUse: { fn: beforeToolUse, scope: "always" },
-    PostToolUse: { fn: afterToolUse, scope: "always" },
-    PreLLM: { fn: beforeLLM, scope: "always" }
-  },
-  execute: (params) => { /* ... */ }
-};
+```text
+扫描 ~/.suna/skills
+读取 SKILL.md 的 name / description
+计算内容 hash
+读取 config.toml
+生成 Skill registry
 ```
 
-## 能力加载流程
+不会每次启动都跑 LLM review，也不会要求用户重复确认。
 
-```
-Agent 启动
-  │
-  ▼
-扫描默认数据目录下的 capabilities/
-  │
-  ├── 每个 skill 目录:
-  │   └── 读 SKILL.md → 解析 name 和 prompt 摘要
-  │
-  ├── 每轮对话:
-  │   ├── LLM 看到所有 SKILL.md 摘要 → 自行判断加载哪个
-  │   └── 加载 = 完整 SKILL.md 注入后续 system prompt
-  │
-  └── 用户不配置能力选择，LLM 自主决定
+### Prompt 组装
+
+每轮用户消息前，Suna 只把 active Skill 的索引放入系统上下文：
+
+```text
+Available Skills:
+- code-review: Use when reviewing code, diffs, pull requests...
+- weekly-report: Use when writing weekly reports in the user's format...
 ```
 
-### 能力提示词注入格式
+LLM 根据 `description` 自己判断是否需要某个 Skill。
 
-```
-System Prompt 中的能力部分分两层注入:
+### skill.load
 
-第一层: 摘要列表 (始终注入，让 LLM 知道有哪些能力可用)
+Daemon 提供内部工具：
 
-  ## 可用能力
-  - vue-style: 使用 Vue3 <script setup> 语法，用 composables 组织逻辑...
-  - log-parser: 解析应用日志，提取 ERROR 和关键事件...
-  - database: 通过 MCP 连接 PostgreSQL 数据库...
-
-  格式: "- {name}: {SKILL.md 前 200 字}"
-  位置: System Prompt 的 "当前能力" 部分 (01-architecture.md:367)
-
-第二层: 完整 SKILL.md (LLM 判断需要时注入)
-
-  LLM 在回复中输出特殊标记加载能力:
-    → 当 LLM 判断某个能力与当前任务相关时，在回复中包含:
-       [LOAD_SKILL: skill-name]
-    → 内核拦截此标记 → 将完整 SKILL.md 注入到下一条 system 消息中
-    → 当前只注入 prompt，不激活 hooks
-    → 标记从 LLM 输出中移除，用户不可见
-  已加载的能力在后续轮次中保持注入，不需要重复加载
-
-去重:
-  同一能力只注入一次完整内容
-  如果 system prompt 中已有该能力的完整内容 → 跳过
+```text
+skill.load(name)
 ```
 
-## Skill 验证机制
+只允许加载：
 
-skill 写完后必须通过验证才能上线。验证由 Suna 内核执行，agent 自动闭环。
-
-当前状态：未实现验证命令和自动修复闭环。以下是目标设计。
-
-### 验证流程
-
-```
-1. 语法检查 → QuickJS 解析 main.js，不执行
-   失败: "第 5 行语法错误" → agent 自动修复
-
-2. 导出检查 → module.exports 必须有合法结构
-   失败: "缺少 module.exports" → agent 自动修复
-
-3. host 函数检查 → 调用的 host.xxx 是否存在
-   失败: "host.readFil 不存在，请用 host.readFile" → agent 自动修复
-
-4. 沙箱试运行 → 用模拟输入执行，host 函数返回 mock 值
-   输入: { tool: "EditFile", params: { path: "/tmp/test.go" } }
-   检查: PreToolUse 返回值是否是 { decision: "allow"|"reject"|"modify" }
-   检查: execute 返回值是否是可序列化的对象
-   失败: "PreToolUse 应返回 { decision: 'allow' } 格式" → agent 自动修复
-
-5. 副作用隔离 → 验证阶段 host.storagePut 写临时空间，host.exec 不执行
-   验证完成后清理临时数据
+```text
+enabled=true
+hash match
+SKILL.md valid
 ```
 
-### 验证闭环
+加载后，完整 `SKILL.md` 进入后续上下文。未启用、未检查、hash 变化或无效的 Skill 不进入上下文。
 
-```
-Agent 生成 main.js
-  │
-  ▼
-Suna 内核 ValidateSkill()
-  │
-  ├── 有错误 → 返回错误信息给 agent → agent 修复 → 重新验证
-  │   最多 5 轮，超过则: "这个能力我学不会，请帮我看看"
-  │
-  └── 通过 → "验证通过，能力已就绪" → 用户确认 → 保存
-```
+## Skill scripts
 
-### 用户手动验证
+Suna 不为 Skill scripts 设计单独 sandbox 或 script policy。
 
-```
-/skill validate coding-safety              → 重新验证某个 skill
-/skill test coding-safety --input '...'    → 用指定输入测试
-/skill list                                 → 显示所有 skill + 验证状态
+规则：
 
-/skill test coding-safety --input '{"tool":"EditFile","params":{"path":"/etc/passwd"}}'
-→ { decision: "reject", reason: "outside workspace" }
+```text
+1. enabled=true 表示用户信任整个 Skill 包，包括 scripts/ 中的辅助脚本。
+2. LLM 可以按 SKILL.md 说明，通过现有工具读取 references 或用 exec 运行 scripts。
+3. 运行时仍走现有工具系统和 Guard；Suna 不承诺完全隔离或证明脚本安全。
+4. 风险解释前置到导入 / check / 启用阶段。
 ```
 
-## 能力学习流程
+这避免半吊子的运行时权限系统。Suna 的职责是 check、解释、记录用户选择，而不是伪装成完整 sandbox。
 
-### 触发条件
+## 对话式 Skill 操作
 
-```
-agent 检测到以下信号之一:
-  1. 同类任务连续 3 次以上，且用户每次都在纠正
-  2. 某类任务反复出现，但没有对应能力
-  3. 用户主动说 "你能不能记住这个" / "以后都这样做"
-```
+Skill 的主入口是自然语言，不是复杂 CLI。
 
-### 学习流程
+典型用户表达：
 
-```
-Step 1: Agent 判断是否需要学习
-  "我注意到你经常让我做 XXX，要我把这个总结成能力吗？"
-  AskUser → 用户确认/拒绝
-
-Step 2: Agent 生成能力
-  a) 总结对话中的知识 → 生成 SKILL.md
-  b) 判断是否需要程序:
-     - 纯知识型 → 只生成 SKILL.md
-     - 需要确定性逻辑 → 同时生成 main.js
-  c) LLM 直接输出 Markdown/JS
-
-Step 3: 验证 (有 main.js 时自动执行)
-  Suna 内核 ValidateSkill() → 有错误 → agent 修复 → 重新验证
-  最多 5 轮自动修复，超过则请求用户帮助
-
-Step 4: 用户确认
-  TUI 显示能力摘要 → [确认保存] [修改] [取消]
-  确认 → 保存到默认数据目录下的 capabilities/xxx/
-
-Step 5: 后续优化
-  使用中发现不够好 → 自省检测 → 建议更新 → 用户确认后覆盖
+```text
+帮我导入这个 skill: https://github.com/user/skills
+把 ~/Downloads/report-skill 加进来
+把刚才这个流程保存成 skill
+以后写周报都按这个格式
+有哪些 skill 正在启用？
 ```
 
-### 三条学习路径
+Suna 识别后进入内置 workflow：
 
-```
-路径 A: Agent 自学
-  Agent 从对话中提取知识/程序 → 自动生成 → 验证 → 用户确认
-
-路径 B: 用户教学
-  用户一步步演示: "你先看日志，然后找 ERROR，然后告诉我"
-  agent 观察操作 → 提取模式 → 生成 SKILL.md + main.js
-  验证 → 用户确认
-  非编程用户通过自然语言教 agent
-
-路径 C: 社区获取
-  下载 skill 目录 → 验证 → 安装
-  (远期: 能力市场)
+```text
+import/create
+  ↓
+validate/check
+  ↓
+展示 reasons
+  ↓
+询问是否启用
+  ↓
+写 config.toml
 ```
 
-### 用户教学示例
+TUI 只保留简单入口：
 
-```
-用户: "帮我盯着 app.log，出现 ERROR 就通知我"
-
-Agent: "好的，我需要学一个能力。你能教我怎么做吗？"
-
-用户: "你先看 app.log 最后 10 行"
-Agent: [Exec: tail -n 10 app.log] → 看到日志内容
-
-用户: "找到包含 ERROR 的行"
-Agent: [Exec: grep ERROR app.log] → 找到 3 行
-
-用户: "以后每隔 30 秒检查一次，有 ERROR 就通知我"
-Agent: "我学会了:
-  监控 app.log，每 30 秒检查，发现 ERROR 通知你。
-  对吗？"
-
-用户: "对"
-→ Agent 生成 SKILL.md + main.js
-→ Suna 内核验证通过
-→ 保存到 capabilities/log-monitor/
-→ 用户无感，全程没写代码
+```text
+/skills
 ```
 
-## 能力的共享
+用于查看 active / inactive / unchecked / needs_review，并支持启用、停用、重新检查。复杂 CLI 和 marketplace 后置。
 
+## System Workflows vs User Skills
+
+Suna 内部保留 system workflows，但它们不是普通 Skill：
+
+```text
+skill import flow
+skill authoring flow
+skill check flow
+mcp setup flow
 ```
-能力是一个目录，天然可分享:
-  - 压缩成 .zip/.tar.gz → 发给别人
-  - Git 仓库管理 → 版本控制
-  - 能力市场 (远期)
 
-安装方式:
-  - 解压到默认数据目录下的 capabilities/xxx/
-  - TUI: /skill load ./xxx/
-  - 市场安装后自动验证
+这些 workflow 内置在 Suna 中，用来识别用户意图、生成 Skill、执行检查并引导用户启用。它们不放在 `~/.suna/skills`，不走普通 `skill.load`，也不受 `[skills.<name>]` 配置管理。
+
+普通 User Skills 才是：
+
+```text
+~/.suna/skills/<name>/SKILL.md
 ```
 
-能力根目录由 `internal/config/paths.go` 的 `DefaultCapabilitiesDir()` / `Config.CapabilitiesDir()` 派生，当前默认展开为 `~/.suna/capabilities`。
+需要 check、记录 hash、enabled 后才能被加载。
+
+## MCP
+
+MCP 是外部工具 / 资源 / 服务接入层，独立于 Skill。
+
+MCP server 配置放在 `~/.suna/config.toml`：
+
+```toml
+[mcp.servers.github]
+enabled = true
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+
+[mcp.servers.github.env]
+GITHUB_TOKEN = "${GITHUB_TOKEN}"
+
+[mcp.servers.context7]
+enabled = true
+transport = "http"
+url = "https://mcp.context7.com/mcp"
+```
+
+v1 优先支持：
+
+```text
+stdio
+```
+
+HTTP/SSE 可后续支持。
+
+Daemon 启动流程：
+
+```text
+读取 config.toml
+启动 enabled MCP servers
+获取 tools / resources / prompts
+注册到 Suna tool registry
+在 chat 顶部展示 MCP 状态
+```
+
+MCP 启动失败不阻塞 Suna，只展示状态，例如：
+
+```text
+MCP: github ✓ filesystem ✕
+```
+
+Skill 可以在说明中提到需要某类外部能力，但不能内嵌 MCP server 配置。是否启用 MCP、如何提供 token、连接哪个 server，全部由用户的 `config.toml` 决定。
+
+## Chat 状态展示
+
+TUI 聊天顶部展示轻量状态：
+
+```text
+Skills: 3 active, 1 needs review
+MCP: 2 enabled, 1 failed
+```
+
+正常情况不弹窗、不打断。异常只提示，例如：
+
+```text
+go-tui skill changed since last check and will not be loaded until reviewed.
+```
+
+用户可通过 `/skills` 查看详情。
+
+## 最小实现清单
+
+```text
+SkillManager:
+  - scan ~/.suna/skills
+  - parse SKILL.md name/description
+  - compute hash
+  - validate/check
+  - import from git/local/zip
+  - create generated Skill
+  - enable/disable
+  - load
+
+Agent/Runner:
+  - prompt 注入 active skill index
+  - 支持 skill.load(name)
+  - load 后注入完整 SKILL.md
+
+TUI:
+  - chat 顶部 Skills/MCP 状态
+  - /skills 简单管理页
+
+MCPManager:
+  - 读取 config.toml [mcp.servers.*]
+  - v1 stdio client
+  - 注册 MCP tools/resources/prompts
+```
