@@ -157,6 +157,23 @@ func TestRenderToolEntryShowsGuardSummary(t *testing.T) {
 	}
 }
 
+func TestRenderSubtaskEntryShowsModelInLabel(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
+	te := &toolEntry{
+		rawName:   "spawn",
+		name:      "Spawn",
+		intent:    "Analyze code structure",
+		paramsRaw: map[string]any{"model": "Oio/gpt-5.5"},
+		status:    toolRunning,
+	}
+
+	rendered := tui.renderToolEntry(te, false)
+	plain := stripANSIForTest(rendered)
+	if !strings.Contains(plain, "Subtask [Oio/gpt-5.5] · Analyze code structure") {
+		t.Fatalf("rendered subtask label missing model:\n%s", plain)
+	}
+}
+
 func TestCompactPathKeepsFullPathWhenItFits(t *testing.T) {
 	path := "Users/alanchen/Documents/suna/internal/runner/types.go"
 	if got := compactPath(path, 80); got != path {

@@ -476,9 +476,23 @@ func isSubtaskChild(te *toolEntry) bool {
 func (t *TUI) displayToolIntentLabel(te *toolEntry) string {
 	label := plainToolIntentLabel(te)
 	if isSubtask(te) {
+		if model := subtaskModelLabel(te); model != "" {
+			return fmt.Sprintf("%s [%s] · %s", t.tr("tui.tool.subtask"), model, label)
+		}
 		return t.tr("tui.tool.subtask") + " · " + label
 	}
 	return label
+}
+
+func subtaskModelLabel(te *toolEntry) string {
+	if te == nil || te.paramsRaw == nil {
+		return ""
+	}
+	model, ok := te.paramsRaw["model"]
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprintf("%v", model))
 }
 
 func plainToolIntentLabel(te *toolEntry) string {
