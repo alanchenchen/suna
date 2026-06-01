@@ -202,7 +202,7 @@ func (t *TUI) syncContent() {
 		sb.WriteString(t.renderModelPicker())
 	}
 
-	if t.loading && t.phaseStart.After(time.Time{}) {
+	if t.loading && t.phaseStart.After(time.Time{}) && !t.hasVisibleActiveProgress() {
 		renderSunaHeader()
 		sb.WriteString(t.renderCurrentStatusLine())
 	}
@@ -275,6 +275,22 @@ func reasoningElapsed(running bool, startedAt, endedAt time.Time) time.Duration 
 		return 0
 	}
 	return endedAt.Sub(startedAt).Truncate(100 * time.Millisecond)
+}
+
+func (t *TUI) hasVisibleActiveProgress() bool {
+	if t.hasRunningTools() {
+		return true
+	}
+	for i := len(t.messages) - 1; i >= 0; i-- {
+		msg := t.messages[i]
+		switch msg.role {
+		case "reasoning":
+			return msg.streaming
+		case "assistant", "user", "error", "system", "restore_summary", "panel":
+			return false
+		}
+	}
+	return false
 }
 
 func (t *TUI) renderCurrentStatusLine() string {

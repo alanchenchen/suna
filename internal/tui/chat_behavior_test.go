@@ -72,6 +72,55 @@ func TestSlashCommandForcesScrollToBottom(t *testing.T) {
 	}
 }
 
+func TestActiveReasoningSuppressesDuplicateStatusLine(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
+	tui.initChatComponents()
+	tui.loading = true
+	tui.phase = phaseThinking
+	tui.phaseStart = time.Now().Add(-time.Second)
+	tui.appendNonToolMessage(chatMsg{role: "reasoning", content: "正在分析", streaming: true, startedAt: time.Now().Add(-time.Second)})
+
+	tui.syncContent()
+	view := stripANSIForTest(tui.vp.View())
+	if count := strings.Count(view, "思考"); count != 1 {
+		t.Fatalf("active reasoning should render one visible loading indicator, got %d:\n%s", count, view)
+	}
+	if strings.Contains(view, "Esc 取消") {
+		t.Fatalf("duplicate bottom status line should be hidden while reasoning box is active:\n%s", view)
+	}
+}
+
+func TestWaitingWithoutVisibleProgressShowsStatusLine(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
+	tui.initChatComponents()
+	tui.loading = true
+	tui.phase = phaseFirstLLM
+	tui.phaseStart = time.Now().Add(-time.Second)
+
+	tui.syncContent()
+	view := stripANSIForTest(tui.vp.View())
+	if !strings.Contains(view, "等待模型") || !strings.Contains(view, "Esc 取消") {
+		t.Fatalf("initial wait should still show cancellable status line:\n%s", view)
+	}
+}
+
+func TestRunningToolSuppressesDuplicateStatusLine(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
+	tui.initChatComponents()
+	tui.loading = true
+	tui.phase = phaseTool
+	tui.phaseStart = time.Now().Add(-time.Second)
+	block := tui.ensureToolBlock()
+	block.add(&toolEntry{id: "1", name: "Read", intent: "读取文件", status: toolRunning, startedAt: time.Now().Add(-time.Second)})
+	tui.activeTools = map[string]*toolEntry{"1": block.entries["1"]}
+
+	tui.syncContent()
+	view := stripANSIForTest(tui.vp.View())
+	if strings.Contains(view, "Esc 取消") {
+		t.Fatalf("duplicate bottom status line should be hidden while a running tool row is active:\n%s", view)
+	}
+}
+
 func TestLockedInputShowsStatusPlaceholder(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
 	tui.initChatComponents()
