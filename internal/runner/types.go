@@ -100,16 +100,10 @@ type UsageSink interface {
 	RecordUsage(ctx context.Context, modelID string, usage *model.Usage)
 }
 
-type Capabilities interface {
-	ProcessLoadMarkers(content string) (string, []string)
-	LoadSkill(name string) (string, bool)
-}
-
 type Hooks struct {
 	CleanToolParams func(name string, params map[string]any) (map[string]any, string)
 	OnAssistantText func(ctx context.Context, content string)
 	OnToolResult    func(name string, result tool.Result)
-	Capabilities    Capabilities
 }
 
 type Runner struct {

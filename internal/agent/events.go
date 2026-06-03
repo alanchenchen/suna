@@ -14,6 +14,7 @@ const (
 	EventAskUser
 	EventGuardConfirm
 	EventToolGuard
+	EventSkillLoad
 )
 
 type Event struct {
@@ -30,9 +31,12 @@ type Event struct {
 	ToolError    bool
 	ToolMetadata map[string]any
 
-	Question string
-	Options  []string
-	Reply    chan string
+	SkillName string
+
+	Question    string
+	Options     []string
+	AllowCustom bool
+	Reply       chan string
 
 	GuardToolCallID string
 	GuardTool       string

@@ -340,15 +340,13 @@ reason = "只读命令直接放行"
 theme = "auto"                    # auto | dark | light
 locale = "en"                    # "en" | "zh" | "zh-CN"
 
-# Skill 信任记录：只记录用户是否启用某个已 check 的内容版本。
+# Skill 管理记录：只记录用户是否启用，以及最近一次 check 的提示原因。
 [skills.code-review]
 enabled = true
-hash = "sha256:abc123"
 
 [skills.deploy-helper]
 enabled = false
-hash = "sha256:def456"
-reasons = ["包含脚本", "脚本访问网络"]
+reasons = ["includes scripts/ helper files", "contains network access commands"]
 
 # MCP server 独立配置，不写入 Skill 包。
 [mcp.servers.github]
@@ -383,7 +381,7 @@ command = "echo checking"
 | `models.strengths` | string[] | 否 | 空 | TUI 展示模型擅长项。 |
 | `models.reasoning` | object | 否 | 空 | 思考相关请求字段组。daemon/core 不理解 preset；provider 请求时将顶层字段注入最终 request body，并禁止覆盖已生成字段。TUI preset 负责生成该对象。 |
 | `[guard].mode` | string | 否 | `ask` | `readonly` / `ask` / `auto` / `smart`。具体决策见 `plans/04-guard.md`。 |
-| `[guard].workspace` | string | 否 | 空 | workspace 硬边界；非空时必须是存在目录。除 `askuser`/`spawn` 外所有 tool 都先过 Guard，文件类路径和 `exec.cwd`/明显命令路径解析到 workspace 外会直接 reject；`exec` shell 变量展开无法安全检查时也会 reject。优先级高于 allowed、auto、LLM review 和用户确认。 |
+| `[guard].workspace` | string | 否 | 空 | workspace 硬边界；非空时必须是存在目录。除 `askuser`/`spawn` 外所有 tool 都先过 Guard，文件类路径和 `exec.cwd`/明显命令路径解析到 workspace 外会直接 reject；默认数据目录（当前默认 `~/.suna`，由 config path 派生）允许访问以便排查配置/日志/Skill，但敏感文件规则仍会拦截 credentials；`exec` shell 变量展开无法安全检查时也会 reject。优先级高于 allowed、auto、LLM review 和用户确认。 |
 | `[[guard.blocked]]` | array | 否 | 空 | 用户自定义硬拦截规则，追加到内置 blocked rules 后。 |
 | `guard.blocked.pattern` | string | 是 | 无 | Go regexp，匹配命令、路径或 URL。 |
 | `guard.blocked.reason` | string | 否 | 空 | 拦截原因，显示在 Guard 决策错误信息中。 |
@@ -393,8 +391,7 @@ command = "echo checking"
 | `guard.allowed.reason` | string | 否 | 空 | 放行原因，当前字段可持久化；Guard 决策中暂未使用该 reason。 |
 | `[ui].theme` | string | 否 | `auto` | TUI 主题：`auto` / `dark` / `light`。 |
 | `[ui].locale` | string | 否 | `en` | TUI 语言；当前内置 `en` 和中文。 |
-| `[skills.<name>].enabled` | bool | 否 | `false` | 是否允许加载该 Skill。只有 enabled=true、hash 匹配且 SKILL.md 有效时才进入 active skill index。 |
-| `[skills.<name>].hash` | string | 否 | 空 | 用户 check 过的 Skill 内容版本；当前 hash 不匹配时运行态推导为 needs_review，不加载。 |
+| `[skills.<name>].enabled` | bool | 否 | `false` | 是否允许加载该 Skill。只有 enabled=true 且 SKILL.md 有效时才进入 active skill index。 |
 | `[skills.<name>].reasons` | string[] | 否 | 空 | check 发现的风险原因；无明显风险时可省略。 |
 | `[mcp.servers.<name>]` | object | 否 | 空 | MCP server 配置，独立于 Skill；v1 优先支持 stdio。 |
 | `mcp.servers.<name>.enabled` | bool | 否 | `false` | 是否启动该 MCP server。 |
@@ -461,6 +458,6 @@ api_key = "..."
 | Memory | Usable MVP | SQLite active memory、memory_queue、conversation_state、异步 full compaction、上下文压缩 | 记忆质量评估、用户可编辑记忆 UI |
 | TUI | Usable MVP | Welcome/Chat/Config/Help、模型配置、Workspace 配置、工具记录、AskUser、Guard overlay、compact、active memory list、context-aware help | Provider test、Config 高级项（guard rules/hooks/限速）仍不完整 |
 | Logging | Usable MVP | 分类文本日志和 provider 调用日志已接入；具体文件分类以 `internal/logging` 当前实现为准 | UI 查看日志、导出诊断包 |
-| Skill / MCP | Design | 通用 Skill + MCP 独立配置方案已定稿 | SkillManager、skill.load、check 流程和 MCP stdio runtime 待实现 |
+| Skill / MCP | Skill Usable MVP / MCP Design | Skill runtime 已闭环：`~/.suna/skills`、enabled/reasons、`skill.load`、`skill.start import/check` 固定验收流程、`/skills` overlay；MCP 独立配置方案已定稿 | MCP stdio runtime 待实现 |
 
 后续路线以 `plans/00-progress.md` 为准；本文件只记录当前技术选型、目录结构和配置字段。

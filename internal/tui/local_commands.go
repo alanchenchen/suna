@@ -158,6 +158,18 @@ func (t *TUI) guardReplyCmd(guardID, decision string) tea.Cmd {
 	}
 }
 
+func (t *TUI) listSkillsCmd() tea.Cmd {
+	return func() tea.Msg {
+		if t.localCli == nil {
+			return ipcErrorNotification("config.error", fmt.Errorf("%s", t.tr("error.not_connected")))
+		}
+		if err := t.localCli.ListSkills(); err != nil {
+			return ipcErrorNotification("config.error", err)
+		}
+		return nil
+	}
+}
+
 func (t *TUI) compactCmd() tea.Cmd {
 	return func() tea.Msg {
 		if t.localCli == nil {
@@ -180,6 +192,10 @@ func (t *TUI) listMemoryCmd() tea.Cmd {
 		}
 		return nil
 	}
+}
+
+func errNotConnected(t *TUI) error {
+	return fmt.Errorf("%s", t.tr("error.not_connected"))
 }
 
 func ipcErrorNotification(method string, err error) tea.Msg {

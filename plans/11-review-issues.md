@@ -81,9 +81,9 @@
 - 开放问题: 向量索引标记为已解决
 - "3 层记忆" → "4 层记忆"
 
-### ✅ 05-capability.md 能力加载机制
-- 删除 "AskUser 工具" 引用，明确为 [LOAD_SKILL: name] 文本标记
-- ParseSkillMD 支持 frontmatter + footer meta 双格式
+### ✅ 05-capability.md Skill 加载机制
+- 使用 `skill.load(name)` 内部工具加载已启用且有效的 Skill
+- ParseSkillMD 支持 frontmatter 的 name/description 字段
 - 补充 H1 提取 name 逻辑
 
 ### ✅ 06-memory.md 压缩阈值
@@ -231,15 +231,15 @@
 - 06-memory.md 注入策略 + 压缩策略更新
 
 ### ✅ 移除 SOUL.md
-- 人格定义改为 capability: 默认数据目录下的 capabilities/persona/SKILL.md
-- 不引入额外概念，统一到能力系统
+- 人格定义改为普通 Skill: 默认数据目录下的 skills/persona/SKILL.md
+- 不引入额外概念，统一到 Skill 系统
 - 用户可以让 agent 自己创建/调整人格
 - 01-architecture.md 人格定义节重写
 - 08-tech-stack.md 用户数据目录更新
 
 ### ✅ 09-competitive-review.md 全面重写
 - 新增"架构对比"节 (进程模型/IPC/状态管理/感知/记忆)
-- 功能矩阵更新: 人格 → capability, TUI 命令 → 精简 (5 个)
+- 功能矩阵更新: 人格 → Skill, TUI 命令 → 精简 (5 个)
 - 移除已过时的建议/决策分离格式，直接记录决策
 - 设计完备度评估新增"架构模式"和"TUI 交互"维度
 

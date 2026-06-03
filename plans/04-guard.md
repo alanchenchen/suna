@@ -241,6 +241,7 @@ reason = "允许读取文档"
 
 当前检查范围：
 - `readfile.path`、`listdir.path`、`writefile.path`、`editfile.path` 必须解析到 workspace 内。
+- Suna 默认数据目录（由 `config.DefaultDataDir()` 派生，当前默认 `~/.suna`）始终允许访问；用户经常需要让 Suna 排查配置、日志、附件或 Skill 文件。敏感文件规则仍会单独拦截 credentials 等密钥文件。
 - `exec.cwd` 必须解析到 workspace 内；启用 workspace 后，未传 `cwd` 的 `exec` 会默认使用 workspace 根目录。
 - `exec.command` 中明显的绝对路径、相对路径和重定向目标会按 `cwd` 解析，解析到 workspace 外则直接 reject。
 - `exec.command` 中出现 shell 变量展开（如 `$HOME`、`${VAR}`）时无法可靠证明目标路径，会保守 reject。

@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+
+	"github.com/alanchenchen/suna/internal/config"
 )
 
 var execPathTokenPattern = regexp.MustCompile(`(?:^|[\s=])["']?((?:~|\.\.?|/|[A-Za-z0-9._-]+/)[^"'\s;|&<>]*)`)
@@ -57,6 +59,11 @@ func (g *Guard) checkWorkspacePath(tool string, field string, path string, baseD
 	resolved, err := resolveWorkspaceTarget(path, baseDir)
 	if err != nil {
 		return true, fmt.Sprintf("workspace boundary: cannot resolve %s.%s %q: %v", tool, field, path, err)
+	}
+	// Suna 自有数据目录始终允许访问。用户经常会让 Suna 排查 ~/.suna 下的配置、日志或 Skill；
+	// 默认数据目录由 config paths 统一给出，避免在 Guard 内部硬编码路径字符串。
+	if isPathInside(config.DefaultDataDir(), resolved) {
+		return false, ""
 	}
 	if !isPathInside(g.workspace, resolved) {
 		return true, fmt.Sprintf("workspace boundary: %s.%s %q resolves to %q outside workspace %q", tool, field, path, resolved, g.workspace)

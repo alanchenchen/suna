@@ -49,6 +49,8 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 		t.configFormOpen = false
 		t.configPage = "home"
 		return nil
+	case "/skills":
+		return t.handleSkills(parts)
 	case "/help":
 		t.prevMode = "chat"
 		t.mode = "help"

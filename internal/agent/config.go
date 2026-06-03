@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -58,6 +59,7 @@ func (a *Agent) ReloadConfigFromDiskIfNeeded() (*config.Config, error) {
 		return nil, err
 	}
 	a.guard = a.newGuardForSession(a.sessionID)
+	a.reloadSkillsLocked()
 	return a.cfg.Clone(), nil
 }
 
@@ -155,10 +157,22 @@ func (a *Agent) UpdateConfig(params ConfigSetParams) (*config.Config, error) {
 		return nil, err
 	}
 	a.guard = a.newGuardForSession(a.sessionID)
+	a.reloadSkillsLocked()
 	if info, err := os.Stat(cfg.ConfigPath()); err == nil {
 		a.configModTime = info.ModTime()
 	}
 	return cfg, nil
+}
+
+func (a *Agent) reloadSkillsLocked() {
+	if a.cfg == nil || a.skills == nil {
+		return
+	}
+	a.skills.SetRoot(a.cfg.SkillsDir())
+	a.skills.SetStore(a.cfg)
+	a.skills.SetReviewer(agentSkillReviewer{})
+	a.skills.SetPrompter(agentSkillPrompter{})
+	_ = a.skills.Reload(context.Background())
 }
 
 func providerStillUsed(models []config.ModelConfig, provider string) bool {

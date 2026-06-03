@@ -42,6 +42,7 @@ type TUI struct {
 	pendingInput      string
 	pendingAskID      string
 	pendingAskOptions []string
+	pendingAskCustom  bool
 	pendingAskCursor  int
 	pendingGuard      *guardConfirmView
 	guardQueue        []*guardConfirmView
@@ -109,6 +110,12 @@ type TUI struct {
 	daemonStatus          protocol.DaemonStatusParams
 	configState           protocol.ConfigParams
 	attachmentStatus      protocol.AttachmentStatusResult
+	skills                []protocol.SkillInfo
+	skillsOverlayOpen     bool
+	skillsLoading         bool
+	skillsCursor          int
+	skillsScroll          int
+	skillsError           string
 
 	streamStart      time.Time
 	sessionInputTok  int
@@ -517,6 +524,7 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 		json.Unmarshal(notif.params, &p)
 		t.pendingAskID = p.ID
 		t.pendingAskOptions = p.Options
+		t.pendingAskCustom = p.AllowCustom || len(p.Options) == 0
 		t.pendingAskCursor = 0
 		t.appendNonToolMessage(chatMsg{role: "system", content: "❓ " + p.Question})
 		t.resetPhase()
@@ -657,6 +665,24 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 		}
 		json.Unmarshal(notif.params, &p)
 		t.configError = p.Message
+	case protocol.MethodSkillList:
+		var p protocol.SkillListResult
+		json.Unmarshal(notif.params, &p)
+		t.skills = p.Skills
+		t.skillsLoading = false
+		t.skillsError = ""
+		t.skillsCursor = clampSkillCursor(t.skillsCursor, len(t.skills))
+		if t.skillsCursor < t.skillsScroll {
+			t.skillsScroll = t.skillsCursor
+		}
+		if t.skillsOverlayOpen {
+			return
+		}
+	case protocol.NotifySkillLoad:
+		var p protocol.SkillLoadParams
+		json.Unmarshal(notif.params, &p)
+		t.appendNonToolMessage(chatMsg{role: "skill", content: p})
+		t.scrollToBottomOnNextSync()
 	case protocol.MethodAttachmentStatus:
 		json.Unmarshal(notif.params, &t.attachmentStatus)
 		t.configError = ""

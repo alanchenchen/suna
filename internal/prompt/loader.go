@@ -18,7 +18,7 @@ func New() (*Loader, error) {
 		templates: make(map[string]*template.Template),
 	}
 	files := []string{
-		"system", "guard", "guard_review", "compress", "extract_batch", "subtask_system",
+		"system", "guard", "guard_review", "skill_review", "compress", "extract_batch", "subtask_system",
 	}
 	for _, name := range files {
 		data, err := templatesFS.ReadFile("templates/" + name + ".md")
@@ -54,7 +54,8 @@ func (l *Loader) RenderSystem(data SystemPromptData) (string, error) {
 		"ActiveModel":   data.ActiveModel,
 		"ModelRouting":  data.ModelRouting,
 		"ProjectConfig": data.ProjectConfig,
-		"Capabilities":  data.Capabilities,
+		"Skills":        data.Skills,
+		"SkillsDir":     data.SkillsDir,
 	})
 }
 
@@ -74,6 +75,16 @@ func (l *Loader) RenderGuardReview(data GuardReviewData) (string, error) {
 		"ToolIntent":       data.ToolIntent,
 		"AssistantContext": data.AssistantContext,
 		"RecentContext":    data.RecentContext,
+	})
+}
+
+func (l *Loader) RenderSkillReview(data SkillReviewData) (string, error) {
+	return l.Render("skill_review", map[string]any{
+		"Name":        data.Name,
+		"Description": data.Description,
+		"Reasons":     data.Reasons,
+		"Files":       data.Files,
+		"UserRequest": data.UserRequest,
 	})
 }
 
@@ -109,7 +120,8 @@ type SystemPromptData struct {
 	ActiveModel   string
 	ModelRouting  string
 	ProjectConfig string
-	Capabilities  string
+	Skills        string
+	SkillsDir     string
 }
 
 type GuardReviewData struct {
@@ -130,6 +142,20 @@ type SubtaskPromptData struct {
 	OS      string
 	Arch    string
 	WorkDir string
+}
+
+type SkillReviewData struct {
+	Name        string
+	Description string
+	Reasons     []string
+	Files       []SkillReviewFile
+	UserRequest string
+}
+
+type SkillReviewFile struct {
+	Path      string
+	Content   string
+	Truncated bool
 }
 
 type ExtractInteraction struct {

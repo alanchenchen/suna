@@ -17,7 +17,7 @@ MCP   = 外部工具 / 资源 / 服务接入层，用 config.toml 配置
 3. Suna 在导入 / 生成 / 更新 Skill 时做 check，并把风险原因解释给用户。
 4. 用户 enabled 后，Skill 作为用户信任的能力包可被 LLM 使用。
 5. 不做复杂 Skill sandbox，不单独设计 script 权限系统；运行时仍走现有工具与 Guard。
-6. config.toml 只记录用户对某个 Skill 内容版本的信任结果。
+6. config.toml 只记录用户是否启用 Skill，以及最近一次 workflow check 的提示原因。
 7. MCP 独立放在 config.toml，作为 daemon runtime 的工具接入能力。
 ```
 
@@ -71,20 +71,18 @@ description 供 LLM 判断何时使用 Skill，强烈建议存在
 
 ## config.toml
 
-`config.toml` 只保存用户信任结果：
+`config.toml` 只保存轻量管理信息：
 
 ```toml
 [skills.code-review]
 enabled = true
-hash = "sha256:abc123"
 
 [skills.deploy-helper]
 enabled = false
-hash = "sha256:def456"
 reasons = [
-  "包含脚本",
-  "脚本访问网络",
-  "引用 GITHUB_TOKEN"
+  "includes scripts/ helper files",
+  "contains network access commands",
+  "mentions sensitive environment variables or tokens"
 ]
 ```
 
@@ -92,37 +90,35 @@ reasons = [
 
 ```text
 enabled  是否允许加载该 Skill
-hash     用户 check 过的 Skill 内容版本
 reasons  check 发现的风险原因；无明显风险时可省略
 ```
 
 不再设计：
 
 ```text
-state / risk / script_policy / blocked / project_trusted / skill directory
+state / risk / script_policy / blocked / project_trusted / content hash / skill directory
 ```
 
-运行时状态由 daemon 扫描后推导：
+运行时只面向用户展示简单状态：
 
 ```text
-active        enabled=true 且 hash 匹配且 SKILL.md 有效
-inactive      enabled=false 且 hash 匹配
-unchecked     目录存在但 config 没记录
-needs_review  config 有记录但当前 hash 不匹配
-invalid       SKILL.md 缺失或格式无效
-missing       config 有记录但目录不存在
+enabled      用户允许加载，且 SKILL.md 有效时可被 skill.load
+inactive     用户停用或 Suna 导入/生成后尚未激活
+invalid      SKILL.md 缺失或格式无效，仅作为错误提示
 ```
 
 ## Skill check
 
-重型 check 不在每次启动运行，只在这些场景触发：
+check 只在这些场景触发：
 
 ```text
 1. 用户通过对话导入远程 repo
 2. 用户通过对话导入本地目录或 zip
-3. Suna 根据用户需求生成 Skill
-4. 已记录 Skill 的内容 hash 变化后，用户要求重新检查
+3. Suna 根据用户需求生成 Skill 后执行 skill.start check
+4. 用户明确要求重新验收已有 Skill 时执行 skill.start check
 ```
+
+TUI `/skills` 的启用/禁用只是切换 `enabled`，不会触发 check。
 
 check 流程：
 
@@ -153,7 +149,6 @@ Daemon 启动时只做轻量工作：
 ```text
 扫描 ~/.suna/skills
 读取 SKILL.md 的 name / description
-计算内容 hash
 读取 config.toml
 生成 Skill registry
 ```
@@ -184,11 +179,10 @@ skill.load(name)
 
 ```text
 enabled=true
-hash match
 SKILL.md valid
 ```
 
-加载后，完整 `SKILL.md` 进入后续上下文。未启用、未检查、hash 变化或无效的 Skill 不进入上下文。
+加载后，完整 `SKILL.md` 进入后续上下文。未启用或无效的 Skill 不进入上下文。
 
 ## Skill scripts
 
@@ -222,16 +216,20 @@ Skill 的主入口是自然语言，不是复杂 CLI。
 Suna 识别后进入内置 workflow：
 
 ```text
-import/create
+import existing source
   ↓
-validate/check
+static check
   ↓
-展示 reasons
+询问是否运行 LLM review
+  ↓
+可选 LLM review
   ↓
 询问是否启用
   ↓
-写 config.toml
+写 config.toml enabled/reasons
 ```
+
+新建 Skill 时，main agent 先使用普通文件工具在 `~/.suna/skills/<name>/` 下准备 `SKILL.md` 和可选 `references/`、`examples/`、`assets/`、`scripts/`，然后调用 `skill.start check` 对已存在目录执行同一套验收/激活流程。
 
 TUI 只保留简单入口：
 
@@ -239,7 +237,7 @@ TUI 只保留简单入口：
 /skills
 ```
 
-用于查看 active / inactive / unchecked / needs_review，并支持启用、停用、重新检查。复杂 CLI 和 marketplace 后置。
+用于查看 active / inactive 与 issues，并支持启用、停用。TUI 的启用/停用只是切换 `enabled`，不会触发 check；重新验收通过对话或 `skill.start check` 完成。复杂 CLI 和 marketplace 后置。
 
 ## System Workflows vs User Skills
 
@@ -260,7 +258,7 @@ mcp setup flow
 ~/.suna/skills/<name>/SKILL.md
 ```
 
-需要 check、记录 hash、enabled 后才能被加载。
+需要 check、记录 enabled/reasons 后才能被加载。
 
 ## MCP
 
@@ -312,20 +310,15 @@ Skill 可以在说明中提到需要某类外部能力，但不能内嵌 MCP ser
 
 ## Chat 状态展示
 
-TUI 聊天顶部展示轻量状态：
+TUI 使用 `/skills` 打开 overlay，仅展示：
 
 ```text
-Skills: 3 active, 1 needs review
-MCP: 2 enabled, 1 failed
+Skills: 3 active / 5 total · 1 issue
+● code-review      active
+○ deploy-helper    inactive   2 reasons
 ```
 
-正常情况不弹窗、不打断。异常只提示，例如：
-
-```text
-go-tui skill changed since last check and will not be loaded until reviewed.
-```
-
-用户可通过 `/skills` 查看详情。
+用户可通过方向键选择，并用 Enter/Space 切换激活状态。正常情况不弹窗、不打断。LLM 调用 `skill.load` 时，TUI 显示醒目的 Skill loaded 消息。
 
 ## 最小实现清单
 
@@ -333,7 +326,7 @@ go-tui skill changed since last check and will not be loaded until reviewed.
 SkillManager:
   - scan ~/.suna/skills
   - parse SKILL.md name/description
-  - compute hash
+  - static check / reasons
   - validate/check
   - import from git/local/zip
   - create generated Skill
@@ -342,7 +335,7 @@ SkillManager:
 
 Agent/Runner:
   - prompt 注入 active skill index
-  - 支持 skill.load(name)
+  - 支持 `skill.load(name)` 加载启用 Skill，支持 `skill.start(action)` 对导入或已准备好的 Skill 目录执行固定验收/激活流程
   - load 后注入完整 SKILL.md
 
 TUI:

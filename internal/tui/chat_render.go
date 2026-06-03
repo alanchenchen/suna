@@ -39,6 +39,9 @@ func (t *TUI) viewChat() string {
 	if t.showHelp {
 		content = overlayBlock(content, t.renderHelpOverlay(t.width))
 	}
+	if t.skillsOverlayOpen {
+		content = overlayBlock(content, t.renderSkillsOverlay(t.width))
+	}
 	if t.pendingGuard != nil {
 		content = overlayBlock(content, t.renderGuardOverlay(t.width))
 	}

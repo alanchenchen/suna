@@ -113,6 +113,14 @@ func (c *localClient) ListMemory() error {
 	return c.SendRequestNotify(protocol.MethodMemoryList, nil)
 }
 
+func (c *localClient) ListSkills() error {
+	return c.SendRequestNotify(protocol.MethodSkillList, nil)
+}
+
+func (c *localClient) SetSkill(params protocol.SkillSetParams) error {
+	return c.SendRequestNotify(protocol.MethodSkillSet, params)
+}
+
 func (c *localClient) Compact() error {
 	return c.SendRequestNotify(protocol.MethodCompact, nil)
 }
@@ -155,6 +163,10 @@ func (c *localClient) handleResult(method string, rawResult json.RawMessage) {
 	}
 	if method == protocol.MethodAttachmentStatus || method == protocol.MethodAttachmentClear {
 		c.onNotify(protocol.MethodAttachmentStatus, rawResult)
+		return
+	}
+	if method == protocol.MethodSkillList {
+		c.onNotify(protocol.MethodSkillList, rawResult)
 		return
 	}
 	if looksLikeDaemonStatus(rawResult) {

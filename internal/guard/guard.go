@@ -385,7 +385,7 @@ func (g *Guard) assessRisk(tool string, params map[string]any) RiskLevel {
 	case "readfile", "listdir", "readhttp":
 		return RiskLow
 	default:
-		// Unknown Act tools are never safe-by-default. New capabilities must be explicitly classified.
+		// Unknown Act tools are never safe-by-default. New external tools must be explicitly classified.
 		return RiskMedium
 	}
 }

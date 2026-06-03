@@ -322,9 +322,10 @@ Protocol 数据结构：
 
 ```go
 type AskUserParams struct {
-    Question string   `json:"question"`
-    Options  []string `json:"options,omitempty"`
-    ID       string   `json:"id"`
+    Question    string   `json:"question"`
+    Options     []string `json:"options,omitempty"`
+    ID          string   `json:"id"`
+    AllowCustom bool     `json:"allow_custom"`
 }
 ```
 
@@ -334,8 +335,8 @@ type AskUserParams struct {
 - 如果有 options，在 viewport 中渲染选项列表。
 - `↑↓` 移动选项光标。
 - 输入为空时按 `Enter` 直接选择当前选项。
-- 输入 `1`、`2` 等数字时映射到对应选项。
-- 也允许输入自定义答案。
+- `allow_custom=true` 时允许输入自定义答案；普通 LLM 提问默认保持 true。
+- `allow_custom=false` 时进入 choice-only，输入框锁定，只能用选项回答；用于严格 workflow 确认，例如 Skill workflow 的 review/enable 选择。
 - 回复通过 `agent.askReply` 回传 daemon。
 
 限制：

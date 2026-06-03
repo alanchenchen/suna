@@ -6,12 +6,12 @@ import (
 )
 
 func (t *TUI) inputLocked() bool {
-	return t.loading && t.pendingAskID == "" && t.pendingGuard == nil
+	return t.loading && t.pendingAskID == "" && t.pendingGuard == nil || t.pendingAskID != "" && !t.pendingAskCustom
 }
 
 func (t *TUI) allowLockedInputKey(ks string) bool {
 	switch ks {
-	case "ctrl+c", "?", "esc", "ctrl+t", "ctrl+r", "pgup", "pgdown", "up", "down":
+	case "ctrl+c", "?", "esc", "enter", "ctrl+t", "ctrl+r", "pgup", "pgdown", "up", "down":
 		return true
 	default:
 		return false
@@ -50,6 +50,9 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if t.modelPickerOpen {
 			return t.updateModelPicker(ks)
 		}
+		if t.skillsOverlayOpen {
+			return t.updateSkillsOverlay(ks)
+		}
 		if t.pendingImagePaste != nil {
 			cmd := t.updatePendingImagePaste(ks)
 			t.syncContent()
@@ -87,6 +90,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 					askID := t.pendingAskID
 					t.pendingAskID = ""
 					t.pendingAskOptions = nil
+					t.pendingAskCustom = true
 					t.appendNonToolMessage(chatMsg{role: "user", content: answer})
 					t.scrollToBottomOnNextSync()
 					t.startLLMWait()

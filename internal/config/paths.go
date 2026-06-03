@@ -20,7 +20,7 @@ func DataDirConfigPath(dataDir string) string      { return filepath.Join(dataDi
 func DataDirCredentialsPath(dataDir string) string { return filepath.Join(dataDir, "credentials.toml") }
 func DataDirLogsDir(dataDir string) string         { return filepath.Join(dataDir, "logs") }
 func DataDirLogPath(dataDir string) string         { return filepath.Join(DataDirLogsDir(dataDir), "app.log") }
-func DataDirCapabilitiesDir(dataDir string) string { return filepath.Join(dataDir, "capabilities") }
+func DataDirSkillsDir(dataDir string) string       { return filepath.Join(dataDir, "skills") }
 func DataDirDBPath(dataDir string) string          { return filepath.Join(dataDir, "memory.db") }
 func DataDirPIDPath(dataDir string) string         { return filepath.Join(dataDir, "sunad.pid") }
 func DataDirSocketPath(dataDir string) string      { return filepath.Join(dataDir, "sunad.sock") }
@@ -30,7 +30,7 @@ func DefaultConfigPath() string      { return DataDirConfigPath(DefaultDataDir()
 func DefaultCredentialsPath() string { return DataDirCredentialsPath(DefaultDataDir()) }
 func DefaultLogsDir() string         { return DataDirLogsDir(DefaultDataDir()) }
 func DefaultLogPath() string         { return DataDirLogPath(DefaultDataDir()) }
-func DefaultCapabilitiesDir() string { return DataDirCapabilitiesDir(DefaultDataDir()) }
+func DefaultSkillsDir() string       { return DataDirSkillsDir(DefaultDataDir()) }
 func DefaultDBPath() string          { return DataDirDBPath(DefaultDataDir()) }
 func DefaultPIDPath() string         { return DataDirPIDPath(DefaultDataDir()) }
 func DefaultSocketPath() string      { return DataDirSocketPath(DefaultDataDir()) }
@@ -41,7 +41,7 @@ func (c *Config) ConfigPath() string      { return DataDirConfigPath(c.DataDir) 
 func (c *Config) CredentialsPath() string { return DataDirCredentialsPath(c.DataDir) }
 func (c *Config) LogsDir() string         { return DataDirLogsDir(c.DataDir) }
 func (c *Config) LogPath() string         { return DataDirLogPath(c.DataDir) }
-func (c *Config) CapabilitiesDir() string { return DataDirCapabilitiesDir(c.DataDir) }
+func (c *Config) SkillsDir() string       { return DataDirSkillsDir(c.DataDir) }
 func (c *Config) PIDPath() string         { return DataDirPIDPath(c.DataDir) }
 func (c *Config) SocketPath() string      { return DataDirSocketPath(c.DataDir) }
 func (c *Config) AttachmentsDir() string  { return DataDirAttachmentsDir(c.DataDir) }

@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/tool"
 )
@@ -112,7 +111,6 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 		}
 
 		if fullContent != "" || len(toolCalls) > 0 {
-			fullContent = r.processCapabilities(ctx, req.Working, fullContent)
 			if fullContent != "" && r.Hooks.OnAssistantText != nil {
 				r.Hooks.OnAssistantText(ctx, fullContent)
 			}
@@ -223,23 +221,6 @@ func (r *Runner) readStream(ctx context.Context, ch <-chan model.Chunk, req Requ
 			return fullContent, toolCalls, lastUsage, ctx.Err()
 		}
 	}
-}
-
-func (r *Runner) processCapabilities(ctx context.Context, working *memory.WorkingMemory, content string) string {
-	if r.Hooks.Capabilities == nil || content == "" {
-		return content
-	}
-	cleaned, loaded := r.Hooks.Capabilities.ProcessLoadMarkers(content)
-	if len(loaded) == 0 || cleaned == content {
-		return content
-	}
-	for _, name := range loaded {
-		if prompt, ok := r.Hooks.Capabilities.LoadSkill(name); ok {
-			working.AddMessage(model.NewTextMessage(model.RoleSystem, fmt.Sprintf("[Capability: %s]\n%s", name, prompt)))
-		}
-	}
-	_ = ctx
-	return cleaned
 }
 
 func (r *Runner) prepareToolCalls(toolCalls []model.ToolCall, fullContent string) ([]preparedToolCall, []model.ToolCall) {

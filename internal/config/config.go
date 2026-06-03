@@ -11,18 +11,20 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"github.com/alanchenchen/suna/internal/skill"
 )
 
 // Config 表示 Suna 的持久化配置，对应设计文档中的“单二进制 + daemon/TUI 共享配置”。
 // 这里不保存运行态字段；纯界面设置统一放在 UI，模型密钥统一放在 credentials.toml。
 type Config struct {
-	ActiveModel string        `toml:"active_model"`
-	Models      []ModelConfig `toml:"models"`
-	Guard       GuardConfig   `toml:"guard"`
-	UI          UIConfig      `toml:"ui"`
-	Hooks       []HookConfig  `toml:"hooks"`
-	MaxModelRPS int           `toml:"max_model_rps,omitempty"`
-	DataDir     string        `toml:"-"`
+	ActiveModel string                  `toml:"active_model"`
+	Models      []ModelConfig           `toml:"models"`
+	Guard       GuardConfig             `toml:"guard"`
+	UI          UIConfig                `toml:"ui"`
+	Skills      map[string]skill.Record `toml:"skills"`
+	Hooks       []HookConfig            `toml:"hooks"`
+	MaxModelRPS int                     `toml:"max_model_rps,omitempty"`
+	DataDir     string                  `toml:"-"`
 }
 
 func (c *Config) Clone() *Config {
@@ -36,6 +38,7 @@ func (c *Config) Clone() *Config {
 	}
 	cp.Guard.Blocked = append([]GuardRule(nil), c.Guard.Blocked...)
 	cp.Guard.Allowed = append([]GuardAllowRule(nil), c.Guard.Allowed...)
+	cp.Skills = cloneSkillRecords(c.Skills)
 	cp.Hooks = append([]HookConfig(nil), c.Hooks...)
 	return &cp
 }
@@ -46,6 +49,18 @@ func cloneMap(in map[string]any) map[string]any {
 	}
 	out := make(map[string]any, len(in))
 	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneSkillRecords(in map[string]skill.Record) map[string]skill.Record {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]skill.Record, len(in))
+	for k, v := range in {
+		v.Reasons = append([]string(nil), v.Reasons...)
 		out[k] = v
 	}
 	return out
@@ -72,12 +87,13 @@ type ModelConfig struct {
 }
 
 type configTOML struct {
-	ActiveModel string            `toml:"active_model"`
-	Models      []modelConfigTOML `toml:"models"`
-	Guard       GuardConfig       `toml:"guard"`
-	UI          UIConfig          `toml:"ui"`
-	Hooks       []HookConfig      `toml:"hooks"`
-	MaxModelRPS int               `toml:"max_model_rps,omitzero"`
+	ActiveModel string                  `toml:"active_model"`
+	Models      []modelConfigTOML       `toml:"models"`
+	Guard       GuardConfig             `toml:"guard"`
+	UI          UIConfig                `toml:"ui"`
+	Skills      map[string]skill.Record `toml:"skills,omitempty"`
+	Hooks       []HookConfig            `toml:"hooks"`
+	MaxModelRPS int                     `toml:"max_model_rps,omitzero"`
 }
 
 type modelConfigTOML struct {
@@ -256,6 +272,7 @@ func (c *Config) tomlView() configTOML {
 		Models:      models,
 		Guard:       c.Guard,
 		UI:          c.UI,
+		Skills:      cloneSkillRecords(c.Skills),
 		Hooks:       c.Hooks,
 		MaxModelRPS: c.MaxModelRPS,
 	}
@@ -454,7 +471,7 @@ func (c *Config) ValidateAPIKeys() error {
 }
 
 func (c *Config) EnsureDataDir() error {
-	dirs := []string{c.DataDir, filepath.Join(c.DataDir, "capabilities"), filepath.Join(c.DataDir, "logs")}
+	dirs := []string{c.DataDir, c.SkillsDir(), c.LogsDir()}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			return fmt.Errorf("create dir %s: %w", d, err)
@@ -466,14 +483,23 @@ func (c *Config) EnsureDataDir() error {
 func (c *Config) EnsureDataDirs() error {
 	for _, d := range []string{
 		c.DataDir,
-		filepath.Join(c.DataDir, "logs"),
-		filepath.Join(c.DataDir, "capabilities"),
+		c.LogsDir(),
+		c.SkillsDir(),
 	} {
 		if err := os.MkdirAll(d, 0755); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (c *Config) LoadSkillRecords() map[string]skill.Record {
+	return cloneSkillRecords(c.Skills)
+}
+
+func (c *Config) SaveSkillRecords(trust map[string]skill.Record) error {
+	c.Skills = cloneSkillRecords(trust)
+	return c.Save(c.ConfigPath())
 }
 
 func (c *Config) ModelByRef(ref string) (ModelConfig, bool) {

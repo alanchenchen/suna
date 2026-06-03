@@ -22,13 +22,13 @@ func (a *Agent) buildSystemPrompt(ctx context.Context) (string, error) {
 	if data, err := os.ReadFile(filepath.Join(wd, "AGENTS.md")); err == nil {
 		projectConfig = string(data)
 	}
-	capabilities := ""
-	if a.caps != nil {
-		capabilities = a.caps.Summary()
+	skills := ""
+	if a.skills != nil {
+		skills = a.skills.Summary()
 	}
 	return a.prompts.RenderSystem(prompt.SystemPromptData{
 		OS: env["OS"], Arch: env["Arch"], WorkDir: env["WorkDir"], ActiveModel: a.activeModelSummary(),
-		ModelRouting: a.modelRoutingSummary(), ProjectConfig: projectConfig, Capabilities: capabilities,
+		ModelRouting: a.modelRoutingSummary(), ProjectConfig: projectConfig, Skills: skills, SkillsDir: a.cfg.SkillsDir(),
 	})
 }
 
@@ -109,12 +109,17 @@ func (a *Agent) modelRoutingSummary() string {
 
 func (a *Agent) buildToolDefs() []model.ToolDef {
 	tools := a.registry.All()
-	defs := make([]model.ToolDef, 0, len(tools)+2)
+	defs := make([]model.ToolDef, 0, len(tools)+3)
 	for _, t := range tools {
 		defs = append(defs, model.ToolDef{Name: t.Name(), Description: t.Description(), Parameters: withIntentParameter(t.Parameters())})
 	}
-	defs = append(defs, model.ToolDef{Name: "askuser", Description: "Ask the user for missing information or a decision. Provide several concise options when possible, while still allowing free-form input; use this proactively when user guidance would improve the result.", Parameters: withIntentParameter(map[string]any{
-		"type": "object", "properties": map[string]any{"question": map[string]any{"type": "string", "description": "Question to ask the user"}, "options": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional quick-pick answers for the user"}}, "required": []string{"question"},
+	if a.skills != nil {
+		for _, def := range a.skills.ToolDefs(withIntentParameter) {
+			defs = append(defs, model.ToolDef{Name: def.Name, Description: def.Description, Parameters: def.Parameters})
+		}
+	}
+	defs = append(defs, model.ToolDef{Name: "askuser", Description: "Ask the user for missing information or a decision. Provide several concise options when helpful. Keep allow_custom=true or omit it for normal questions so the user can type freely; use allow_custom=false only for strict system/workflow confirmations that must choose one provided option.", Parameters: withIntentParameter(map[string]any{
+		"type": "object", "properties": map[string]any{"question": map[string]any{"type": "string", "description": "Question to ask the user"}, "options": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional quick-pick answers for the user"}, "allow_custom": map[string]any{"type": "boolean", "description": "Whether the user may type a custom answer. Default true."}}, "required": []string{"question"},
 	})})
 	spawnToolNames := a.availableSpawnTools()
 	defs = append(defs, model.ToolDef{Name: "spawn", Description: "Delegate a self-contained subtask to a selected model for isolated context, model strengths, parallel work, or independent verification. The selected model may be the active main model or another available model. The subtask runs with only the specified tools and returns its result; multimodal image input is supported.", Parameters: withIntentParameter(map[string]any{

@@ -3,12 +3,10 @@ package agent
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
 
-	"github.com/alanchenchen/suna/internal/capability"
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/runner"
@@ -70,21 +68,6 @@ func (a *Agent) ListMemory(ctx context.Context) ([]memory.UserMemory, error) {
 		return nil, nil
 	}
 	return a.memories.List(ctx, memory.DefaultUserID, memory.MaxActiveMemories)
-}
-
-func (a *Agent) ListCapabilities() []capability.Info {
-	if a.caps == nil {
-		return nil
-	}
-	return a.caps.List()
-}
-
-func (a *Agent) ReloadCapabilities() error {
-	if a.caps == nil {
-		a.caps = capability.NewLoader()
-	}
-	capDir := filepath.Join(a.cfg.DataDir, "capabilities")
-	return a.caps.Reload(context.Background(), capDir)
 }
 
 func (a *Agent) Compact(ctx context.Context) (int, int, int, int, int, error) {

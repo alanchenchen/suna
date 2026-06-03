@@ -32,6 +32,7 @@ const (
 const (
 	MethodMemoryList = "memory.list"
 	MethodSkillList  = "skill.list"
+	MethodSkillSet   = "skill.set"
 )
 
 // Reserved for future trigger/skill runtime support. These methods are not handled by daemon service yet.
@@ -39,7 +40,6 @@ const (
 	MethodTriggerList   = "trigger.list"
 	MethodTriggerAdd    = "trigger.add"
 	MethodTriggerRemove = "trigger.remove"
-	MethodSkillValidate = "skill.validate"
 )
 
 const (
@@ -77,6 +77,7 @@ const (
 
 const (
 	NotifyMemoryListResult = "memory.list_result"
+	NotifySkillLoad        = "skill.load"
 )
 
 // Reserved for future perception notifications. It is not emitted by the current runtime.

@@ -14,6 +14,7 @@ import (
 	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/protocol"
+	"github.com/alanchenchen/suna/internal/skill"
 )
 
 const maxToolResultBytes = 16 * 1024
@@ -49,6 +50,12 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 	logging.Info("transport", "request", logging.Event{"conn_id": req.ConnID, "method": req.Method, "request_id": req.ID})
 	sink = s.daemon.sinkFor(req.ConnID, sink)
 	s.ensureConfigLoaded()
+	if skill.IsProtocolMethod(req.Method) {
+		if s.daemon.agent.Skills() == nil {
+			return nil, protocolError{code: -32603, message: "skill runtime is not initialized"}
+		}
+		return s.daemon.agent.Skills().HandleProtocol(ctx, req, sink)
+	}
 	switch req.Method {
 	case protocol.MethodSendMessage:
 		return s.handleSendMessage(ctx, req, sink)
@@ -61,8 +68,6 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 		return s.handleGuardReply(req)
 	case protocol.MethodMemoryList:
 		return s.handleMemoryList(ctx, sink)
-	case protocol.MethodSkillList:
-		return s.daemon.agent.ListCapabilities(), nil
 	case protocol.MethodSessionNew:
 		s.daemon.agent.NewSession()
 		_ = sink.Emit(ctx, protocol.Event{Method: protocol.NotifyDaemonFullStatus, Params: s.buildDaemonStatus(ctx)})
@@ -161,13 +166,16 @@ func (s *service) runAgent(ctx context.Context, connID, inputText string, input 
 				display := limitToolResult(evt.ToolResult)
 				logging.Info("agent", "tool_result", logging.Event{"conn_id": connID, "tool": evt.ToolName, "tool_error": evt.ToolError, "result_chars": len(evt.ToolResult), "display_truncated": display.truncated})
 				emit(ctx, sink, protocol.NotifyToolEnd, protocol.ToolEndParams{ID: evt.ToolCallID, Tool: evt.ToolName, Result: display.text, Error: evt.ToolError, ResultTruncated: display.truncated, ResultBytes: display.bytes, Metadata: evt.ToolMetadata})
+			case agent.EventSkillLoad:
+				flush()
+				emit(ctx, sink, protocol.NotifySkillLoad, protocol.SkillLoadParams{Name: evt.SkillName})
 			case agent.EventAskUser:
 				flush()
 				askID := connID + "_" + fmt.Sprintf("%d", time.Now().UnixNano())
 				if evt.Reply != nil {
 					s.pendingAsks.Store(askID, evt.Reply)
 				}
-				emit(ctx, sink, protocol.NotifyAskUser, protocol.AskUserParams{Question: evt.Question, Options: evt.Options, ID: askID})
+				emit(ctx, sink, protocol.NotifyAskUser, protocol.AskUserParams{Question: evt.Question, Options: evt.Options, ID: askID, AllowCustom: evt.AllowCustom})
 			case agent.EventGuardConfirm:
 				flush()
 				guardID := connID + "_guard_" + fmt.Sprintf("%d", time.Now().UnixNano())
@@ -194,18 +202,16 @@ func (s *service) runAgent(ctx context.Context, connID, inputText string, input 
 }
 
 func (s *service) handleAskReply(req protocol.Request) (any, error) {
-	params, ok := req.Params.(map[string]any)
-	if !ok {
-		return nil, invalidParams("invalid params")
+	var params protocol.AskUserReply
+	if err := decodeParams(req.Params, &params); err != nil {
+		return nil, invalidParams(err.Error())
 	}
-	askID, _ := params["id"].(string)
-	answer, _ := params["answer"].(string)
-	val, ok := s.pendingAsks.LoadAndDelete(askID)
+	val, ok := s.pendingAsks.LoadAndDelete(params.ID)
 	if !ok {
 		return nil, protocolError{code: -32601, message: "ask session not found or expired"}
 	}
 	replyCh := val.(chan string)
-	replyCh <- answer
+	replyCh <- params.Answer
 	close(replyCh)
 	return map[string]string{"status": "ok"}, nil
 }

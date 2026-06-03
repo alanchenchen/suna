@@ -14,6 +14,7 @@ import (
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/prompt"
 	"github.com/alanchenchen/suna/internal/runner"
+	"github.com/alanchenchen/suna/internal/skill"
 	"github.com/alanchenchen/suna/internal/subtask"
 	"github.com/alanchenchen/suna/internal/tool"
 )
@@ -38,6 +39,16 @@ func (a *Agent) executeTool(ctx context.Context, call runner.ToolExecution, even
 	}
 	if name == "spawn" {
 		return a.executeSpawn(ctx, id, params, events)
+	}
+	if a.skills != nil {
+		if res, ok := a.skills.ExecuteTool(contextWithSkillRuntime(ctx, a, events), name, params); ok {
+			if events != nil {
+				if evt, ok := skill.LoadNotificationFromResult(name, params, res); ok {
+					events <- Event{Type: EventSkillLoad, SkillName: evt.Name}
+				}
+			}
+			return res
+		}
 	}
 	t, ok := a.registry.Get(name)
 	if !ok {
@@ -127,8 +138,12 @@ func (a *Agent) executeAskUser(ctx context.Context, params map[string]any, event
 			}
 		}
 	}
+	allowCustom := true
+	if v, ok := params["allow_custom"].(bool); ok {
+		allowCustom = v
+	}
 	replyCh := make(chan string, 1)
-	events <- Event{Type: EventAskUser, Question: question, Options: options, Reply: replyCh}
+	events <- Event{Type: EventAskUser, Question: question, Options: options, AllowCustom: allowCustom, Reply: replyCh}
 	select {
 	case <-ctx.Done():
 		return tool.ErrorResult("cancelled")
@@ -485,9 +500,12 @@ func (a *Agent) toolParamKeys(name string) map[string]bool {
 	if t, ok := a.registry.Get(name); ok {
 		return schemaPropertyKeys(t.Parameters())
 	}
+	if keys := skill.ToolParamKeys(name); keys != nil {
+		return keys
+	}
 	switch name {
 	case "askuser":
-		return map[string]bool{"question": true, "options": true}
+		return map[string]bool{"question": true, "options": true, "allow_custom": true}
 	case "spawn":
 		return map[string]bool{"task": true, "model": true, "system": true, "tools": true, "timeout": true, "context": true, "input_images": true}
 	default:
@@ -555,7 +573,7 @@ func (a *Agent) availableSpawnTools() []string {
 	names := a.registry.Names()
 	filtered := names[:0]
 	for _, name := range names {
-		if name != "spawn" {
+		if name != "spawn" && name != skill.ToolLoad {
 			filtered = append(filtered, name)
 		}
 	}

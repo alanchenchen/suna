@@ -10,6 +10,8 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/alanchenchen/suna/internal/protocol"
 )
 
 const inputMaxHeight = 6
@@ -177,6 +179,11 @@ func (t *TUI) syncContent() {
 			content, _ := msg.content.(string)
 			sb.WriteString("\n" + content + "\n")
 			inSunaBlock = false
+		case "skill":
+			if p, ok := msg.content.(protocol.SkillLoadParams); ok {
+				sb.WriteString("\n" + t.renderSkillLoadMessage(p) + "\n")
+			}
+			inSunaBlock = false
 		default:
 			content, _ := msg.content.(string)
 			sb.WriteString("\n" + styleSysLine.Render("  ◆ "+content) + "\n")
@@ -196,7 +203,11 @@ func (t *TUI) syncContent() {
 					styleSysLine.Render(opt)))
 			}
 		}
-		sb.WriteString(styleDim.Render("  "+t.tr("tui.ask.help")) + "\n\n")
+		helpKey := "tui.ask.help"
+		if !t.pendingAskCustom {
+			helpKey = "tui.ask.choice_help"
+		}
+		sb.WriteString(styleDim.Render("  "+t.tr(helpKey)) + "\n\n")
 	}
 	if t.modelPickerOpen {
 		sb.WriteString(t.renderModelPicker())
@@ -275,6 +286,15 @@ func reasoningElapsed(running bool, startedAt, endedAt time.Time) time.Duration 
 		return 0
 	}
 	return endedAt.Sub(startedAt).Truncate(100 * time.Millisecond)
+}
+
+func (t *TUI) renderSkillLoadMessage(p protocol.SkillLoadParams) string {
+	name := strings.TrimSpace(p.Name)
+	if name == "" {
+		name = "unknown"
+	}
+	body := styleMetaPill.Render(t.tr("tui.skill.loaded")) + " " + styleHL.Render(name)
+	return indentLines(boxStyle.BorderForeground(ColorBrand).Width(max(36, min(72, t.width-6))).Padding(1, 2).Render(body), "  ")
 }
 
 func (t *TUI) hasVisibleActiveProgress() bool {
@@ -492,6 +512,7 @@ func (t *TUI) allCommands() []commandSpec {
 		{"/new", "tui.command.new.desc"},
 		{"/model", "tui.command.model.desc"},
 		{"/memory", "tui.command.memory.desc"},
+		{"/skills", "tui.command.skills.desc"},
 		{"/compact", "tui.command.compact.desc"},
 		{"/config", "tui.command.config.desc"},
 		{"/help", "tui.command.help.desc"},
@@ -551,6 +572,7 @@ func (t *TUI) handleSend() tea.Cmd {
 		t.pendingAskID = ""
 		options := t.pendingAskOptions
 		t.pendingAskOptions = nil
+		t.pendingAskCustom = true
 		answer := input
 		if len(options) > 0 {
 			if idx, ok := parseOptionIndex(input, len(options)); ok {

@@ -82,7 +82,7 @@ func TestActiveReasoningSuppressesDuplicateStatusLine(t *testing.T) {
 
 	tui.syncContent()
 	view := stripANSIForTest(tui.vp.View())
-	if count := strings.Count(view, "思考"); count != 1 {
+	if count := strings.Count(view, "◎ 思考"); count != 1 {
 		t.Fatalf("active reasoning should render one visible loading indicator, got %d:\n%s", count, view)
 	}
 	if strings.Contains(view, "Esc 取消") {
@@ -99,7 +99,7 @@ func TestWaitingWithoutVisibleProgressShowsStatusLine(t *testing.T) {
 
 	tui.syncContent()
 	view := stripANSIForTest(tui.vp.View())
-	if !strings.Contains(view, "等待模型") || !strings.Contains(view, "Esc 取消") {
+	if !strings.Contains(view, "等待 LLM") || !strings.Contains(view, "Esc 取消") {
 		t.Fatalf("initial wait should still show cancellable status line:\n%s", view)
 	}
 }

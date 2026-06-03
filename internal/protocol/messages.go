@@ -52,9 +52,10 @@ type ToolGuardParams struct {
 }
 
 type AskUserParams struct {
-	Question string   `json:"question"`
-	Options  []string `json:"options,omitempty"`
-	ID       string   `json:"id"`
+	Question    string   `json:"question"`
+	Options     []string `json:"options,omitempty"`
+	ID          string   `json:"id"`
+	AllowCustom bool     `json:"allow_custom"`
 }
 
 type GuardConfirmParams struct {
@@ -194,4 +195,31 @@ type AttachmentClearResult struct {
 type AskUserReply struct {
 	ID     string `json:"id"`
 	Answer string `json:"answer"`
+}
+
+type SkillInfo struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Enabled     bool     `json:"enabled"`
+	Valid       bool     `json:"valid"`
+	Reasons     []string `json:"reasons,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	Error       string   `json:"error,omitempty"`
+}
+
+type SkillListResult struct {
+	Skills []SkillInfo `json:"skills"`
+}
+
+type SkillSetParams struct {
+	Name    string `json:"name"`
+	Enabled bool   `json:"enabled"`
+}
+
+type SkillSetResult struct {
+	Status string `json:"status"`
+}
+
+type SkillLoadParams struct {
+	Name string `json:"name"`
 }

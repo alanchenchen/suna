@@ -5,13 +5,11 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
-	"github.com/alanchenchen/suna/internal/capability"
 	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/guard"
 	"github.com/alanchenchen/suna/internal/logging"
@@ -20,6 +18,7 @@ import (
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/prompt"
 	"github.com/alanchenchen/suna/internal/runner"
+	"github.com/alanchenchen/suna/internal/skill"
 	"github.com/alanchenchen/suna/internal/tool"
 )
 
@@ -36,7 +35,7 @@ type Agent struct {
 	compressor   *memory.Compressor
 	prompts      *prompt.Loader
 	store        *memory.Store
-	caps         *capability.Loader
+	skills       *skill.Runtime
 	sessionID    string
 	turnCount    int
 	resumeInput  string
@@ -83,9 +82,10 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 	registry.Register(tool.EditFile{})
 	registry.Register(tool.WriteHTTP{})
 
-	capLoader := capability.NewLoader()
-	capDir := filepath.Join(cfg.DataDir, "capabilities")
-	capLoader.LoadAll(context.Background(), capDir)
+	skillRuntime := skill.NewRuntime(cfg.SkillsDir(), cfg)
+	skillRuntime.SetReviewer(agentSkillReviewer{})
+	skillRuntime.SetPrompter(agentSkillPrompter{})
+	skillRuntime.Reload(context.Background())
 
 	prompts, err := prompt.New()
 	if err != nil {
@@ -113,7 +113,7 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 		compressor:    memory.NewCompressor(extractProvider),
 		prompts:       prompts,
 		store:         store,
-		caps:          capLoader,
+		skills:        skillRuntime,
 		sessionID:     sessionID,
 		extractQueue:  extractQueue,
 		extractWorker: extractWorker,
@@ -226,10 +226,11 @@ func (a *Agent) newRunner(events chan<- Event) *runner.Runner {
 		Hooks: runner.Hooks{
 			CleanToolParams: a.cleanToolParams,
 			OnToolResult:    a.addToolSummary,
-			Capabilities:    a.caps,
 		},
 	}
 }
+
+func (a *Agent) Skills() *skill.Runtime { return a.skills }
 
 func backgroundProvider(router *model.Router) model.Provider {
 	if router == nil {

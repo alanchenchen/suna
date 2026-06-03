@@ -223,7 +223,7 @@ metadata:
 
 ```
 功能: 向用户提问并等待回复
-参数: { question: string, options?: [string] }
+参数: { question: string, options?: [string], allow_custom?: bool }
 返回: { answer: string }
 
 不经过 Guard:
@@ -238,6 +238,11 @@ metadata:
 options 参数:
   提供 options 时，TUI 渲染为选择列表
   不提供时，TUI 渲染为开放式输入框
+
+allow_custom 参数:
+  默认 true，普通问题应省略或保持 true，让用户可以自由输入
+  false 表示 choice-only，只能选择 options 中的一个答案
+  仅用于严格系统/workflow 确认，例如 Skill workflow 的“是否运行 LLM review / 是否启用”
 ```
 
 ### Spawn

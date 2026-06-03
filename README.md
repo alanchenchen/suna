@@ -84,6 +84,7 @@ suna help            # 查看帮助
 /model            打开模型选择器
 /model <ref>      切换模型，例如 /model openai/gpt-4o-mini
 /memory           查看 active memory
+/skills           打开 Skill 面板，查看并切换激活状态
 /compact          手动压缩当前上下文
 /config           打开配置界面
 /help             打开帮助页
@@ -158,7 +159,7 @@ auto      除硬性拦截规则外自动放行
 readonly  只允许只读操作
 ```
 
-Workspace 可选。如果设置了 Workspace，Suna 会把本地文件和命令操作限制在该目录内；留空表示关闭这个边界。
+Workspace 可选。如果设置了 Workspace，Suna 会把本地文件和命令操作限制在该目录内；留空表示关闭这个边界。Suna 自有数据目录（当前默认 `~/.suna`，由统一 path 配置派生）仍允许访问，方便排查配置、日志、附件和 Skill；其中 credentials 等敏感文件仍会被敏感路径规则拦截。
 
 ## Skill
 
@@ -199,7 +200,7 @@ description: Use when generating Vue code.
 生成 Vue 代码时使用 Vue 3、`<script setup>` 和 composables 组织逻辑。
 ```
 
-Skill 主要通过自然语言导入、生成和管理：
+Suna 通过自然语言导入、生成和管理 Skill：
 
 ```text
 帮我导入这个 skill: https://github.com/user/skills
@@ -208,20 +209,20 @@ Skill 主要通过自然语言导入、生成和管理：
 有哪些 skill 正在启用？
 ```
 
-Suna 在导入、生成或内容变化后会执行 check，解释发现的风险原因，并询问是否启用。信任结果记录在 `config.toml`：
+导入 Skill 时，模型只需要调用内置 `skill.start` 导入流程；Suna 会导入、静态检查、询问是否需要 LLM review，并最终询问是否激活。新建 Skill 时，主 Agent 会先按你的需求用普通文件工具准备目录和文件（包括可选 `references/`、`examples/`、`assets/`、`scripts/`），然后调用 `skill.start` 对已存在的 Skill 目录走同一套验收/激活流程。Workspace Guard 会允许 Suna 自有数据目录下的 Skill 文件写入，但具体写入/执行仍经过现有工具和 Guard 规则。
+
+`config.toml` 只记录轻量管理信息：
 
 ```toml
 [skills.vue-style]
 enabled = true
-hash = "sha256:..."
 
 [skills.deploy-helper]
 enabled = false
-hash = "sha256:..."
-reasons = ["包含脚本", "脚本访问网络"]
+reasons = ["includes scripts/ helper files", "contains network access commands"]
 ```
 
-启动时 daemon 扫描 `~/.suna/skills`，只有 `enabled=true` 且 hash 匹配的 Skill 才会进入 active skill index。LLM 根据 Skill 的 `description` 自行判断是否需要加载，必要时通过 `skill.load(name)` 加载完整 `SKILL.md`。
+启动时 daemon 只轻量扫描 `~/.suna/skills` 的目录和 `SKILL.md` 元信息，手动放入的新 Skill 会默认激活；Suna 通过对话导入或生成的 Skill 会先保持未激活，完成 check、可选 LLM review 和用户确认后再激活。LLM 根据 Skill 的 `description` 自行判断是否需要加载，必要时通过 `skill.load(name)` 加载完整 `SKILL.md`。
 
 `scripts/` 中的辅助脚本可由 Agent 按 `SKILL.md` 说明，在现有工具和 Guard 规则下通过 `exec` 使用；Suna 不为 Skill scripts 提供单独 sandbox。MCP server 独立配置在 `config.toml`。
 

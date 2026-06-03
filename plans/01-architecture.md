@@ -626,6 +626,8 @@ client → daemon (请求-响应):
 agent.sendMessage    {client_msg_id?, parts[]} → 事件流返回
 agent.cancel         {}                    → 中断当前生成
 memory.list          {}
+skill.list           {}
+skill.set            {name, enabled}
 session.restore      {}
 session.new          {}
 session.compact      {}
@@ -640,7 +642,6 @@ attachment.clear     {}                    → {root, bytes_removed, count_remov
 
 预留但当前 server 未路由:
 trigger.list/add/remove
-skill.validate
 ```
 
 daemon → client (事件):
@@ -804,13 +805,14 @@ Ctrl+Y                copy mode，临时释放鼠标给终端原生选择
 ? / F1                help overlay
 ```
 
-#### TUI 命令 (只有 5 个)
+#### TUI 命令
 
 ```
 /new                  新建会话 (清空工作记忆，新 session ID)
 /model <name>         切换当前模型
 /compact              手动触发上下文压缩
 /memory               查看 active memory
+/skills               打开 Skill overlay，查看并切换激活状态
 /help                 显示帮助
 ```
 
