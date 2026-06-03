@@ -18,7 +18,7 @@ func New() (*Loader, error) {
 		templates: make(map[string]*template.Template),
 	}
 	files := []string{
-		"system", "guard", "guard_review", "skill_review", "compress", "extract_batch", "subtask_system",
+		"system", "guard_review", "skill_review", "compress", "extract_batch", "subtask_system",
 	}
 	for _, name := range files {
 		data, err := templatesFS.ReadFile("templates/" + name + ".md")
