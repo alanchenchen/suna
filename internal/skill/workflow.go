@@ -58,7 +58,7 @@ func (r *Runtime) Start(ctx context.Context, params map[string]any) (StartResult
 		_ = r.Disable(ctx, name)
 		return r.finishStart(ctx, startResultFromCheck(name, action, check))
 	default:
-		return StartResult{}, fmt.Errorf("invalid skill.start action")
+		return StartResult{}, fmt.Errorf("invalid skill_start action")
 	}
 }
 

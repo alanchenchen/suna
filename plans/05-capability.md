@@ -102,7 +102,7 @@ state / risk / script_policy / blocked / project_trusted / content hash / skill 
 运行时只面向用户展示简单状态：
 
 ```text
-enabled      用户允许加载，且 SKILL.md 有效时可被 skill.load
+enabled      用户允许加载，且 SKILL.md 有效时可被 skill_load
 inactive     用户停用或 Suna 导入/生成后尚未激活
 invalid      SKILL.md 缺失或格式无效，仅作为错误提示
 ```
@@ -114,8 +114,8 @@ check 只在这些场景触发：
 ```text
 1. 用户通过对话导入远程 repo
 2. 用户通过对话导入本地目录或 zip
-3. Suna 根据用户需求生成 Skill 后执行 skill.start check
-4. 用户明确要求重新验收已有 Skill 时执行 skill.start check
+3. Suna 根据用户需求生成 Skill 后执行 skill_start check
+4. 用户明确要求重新验收已有 Skill 时执行 skill_start check
 ```
 
 TUI `/skills` 的启用/禁用只是切换 `enabled`，不会触发 check。
@@ -167,12 +167,12 @@ Available Skills:
 
 LLM 根据 `description` 自己判断是否需要某个 Skill。
 
-### skill.load
+### skill_load
 
 Daemon 提供内部工具：
 
 ```text
-skill.load(name)
+skill_load(name)
 ```
 
 只允许加载：
@@ -229,7 +229,7 @@ static check
 写 config.toml enabled/reasons
 ```
 
-新建 Skill 时，main agent 先使用普通文件工具在 `~/.suna/skills/<name>/` 下准备 `SKILL.md` 和可选 `references/`、`examples/`、`assets/`、`scripts/`，然后调用 `skill.start check` 对已存在目录执行同一套验收/激活流程。
+新建 Skill 时，main agent 先使用普通文件工具在 `~/.suna/skills/<name>/` 下准备 `SKILL.md` 和可选 `references/`、`examples/`、`assets/`、`scripts/`，然后调用 `skill_start check` 对已存在目录执行同一套验收/激活流程。
 
 TUI 只保留简单入口：
 
@@ -237,7 +237,7 @@ TUI 只保留简单入口：
 /skills
 ```
 
-用于查看 active / inactive 与 issues，并支持启用、停用。TUI 的启用/停用只是切换 `enabled`，不会触发 check；重新验收通过对话或 `skill.start check` 完成。复杂 CLI 和 marketplace 后置。
+用于查看 active / inactive 与 issues，并支持启用、停用。TUI 的启用/停用只是切换 `enabled`，不会触发 check；重新验收通过对话或 `skill_start check` 完成。复杂 CLI 和 marketplace 后置。
 
 ## System Workflows vs User Skills
 
@@ -250,7 +250,7 @@ skill check flow
 mcp setup flow
 ```
 
-这些 workflow 内置在 Suna 中，用来识别用户意图、生成 Skill、执行检查并引导用户启用。它们不放在 `~/.suna/skills`，不走普通 `skill.load`，也不受 `[skills.<name>]` 配置管理。
+这些 workflow 内置在 Suna 中，用来识别用户意图、生成 Skill、执行检查并引导用户启用。它们不放在 `~/.suna/skills`，不走普通 `skill_load`，也不受 `[skills.<name>]` 配置管理。
 
 普通 User Skills 才是：
 
@@ -318,7 +318,7 @@ Skills: 3 active / 5 total · 1 issue
 ○ deploy-helper    inactive   2 reasons
 ```
 
-用户可通过方向键选择，并用 Enter/Space 切换激活状态。正常情况不弹窗、不打断。LLM 调用 `skill.load` 时，TUI 显示醒目的 Skill loaded 消息。
+用户可通过方向键选择，并用 Enter/Space 切换激活状态。正常情况不弹窗、不打断。LLM 调用 `skill_load` 时，TUI 显示醒目的 Skill loaded 消息。
 
 ## 最小实现清单
 
@@ -335,7 +335,7 @@ SkillManager:
 
 Agent/Runner:
   - prompt 注入 active skill index
-  - 支持 `skill.load(name)` 加载启用 Skill，支持 `skill.start(action)` 对导入或已准备好的 Skill 目录执行固定验收/激活流程
+  - 支持 `skill_load(name)` 加载启用 Skill，支持 `skill_start(action)` 对导入或已准备好的 Skill 目录执行固定验收/激活流程
   - load 后注入完整 SKILL.md
 
 TUI:

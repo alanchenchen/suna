@@ -82,7 +82,7 @@
 - "3 层记忆" → "4 层记忆"
 
 ### ✅ 05-capability.md Skill 加载机制
-- 使用 `skill.load(name)` 内部工具加载已启用且有效的 Skill
+- 使用 `skill_load(name)` 内部工具加载已启用且有效的 Skill
 - ParseSkillMD 支持 frontmatter 的 name/description 字段
 - 补充 H1 提取 name 逻辑
 

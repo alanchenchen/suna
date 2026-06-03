@@ -209,7 +209,7 @@ Suna 通过自然语言导入、生成和管理 Skill：
 有哪些 skill 正在启用？
 ```
 
-导入 Skill 时，模型只需要调用内置 `skill.start` 导入流程；Suna 会导入、静态检查、询问是否需要 LLM review，并最终询问是否激活。新建 Skill 时，主 Agent 会先按你的需求用普通文件工具准备目录和文件（包括可选 `references/`、`examples/`、`assets/`、`scripts/`），然后调用 `skill.start` 对已存在的 Skill 目录走同一套验收/激活流程。Workspace Guard 会允许 Suna 自有数据目录下的 Skill 文件写入，但具体写入/执行仍经过现有工具和 Guard 规则。
+导入 Skill 时，模型只需要调用内置 `skill_start` 导入流程；Suna 会导入、静态检查、询问是否需要 LLM review，并最终询问是否激活。新建 Skill 时，主 Agent 会先按你的需求用普通文件工具准备目录和文件（包括可选 `references/`、`examples/`、`assets/`、`scripts/`），然后调用 `skill_start` 对已存在的 Skill 目录走同一套验收/激活流程。Workspace Guard 会允许 Suna 自有数据目录下的 Skill 文件写入，但具体写入/执行仍经过现有工具和 Guard 规则。
 
 `config.toml` 只记录轻量管理信息：
 
@@ -222,7 +222,7 @@ enabled = false
 reasons = ["includes scripts/ helper files", "contains network access commands"]
 ```
 
-启动时 daemon 只轻量扫描 `~/.suna/skills` 的目录和 `SKILL.md` 元信息，手动放入的新 Skill 会默认激活；Suna 通过对话导入或生成的 Skill 会先保持未激活，完成 check、可选 LLM review 和用户确认后再激活。LLM 根据 Skill 的 `description` 自行判断是否需要加载，必要时通过 `skill.load(name)` 加载完整 `SKILL.md`。
+启动时 daemon 只轻量扫描 `~/.suna/skills` 的目录和 `SKILL.md` 元信息，手动放入的新 Skill 会默认激活；Suna 通过对话导入或生成的 Skill 会先保持未激活，完成 check、可选 LLM review 和用户确认后再激活。LLM 根据 Skill 的 `description` 自行判断是否需要加载，必要时通过 `skill_load(name)` 加载完整 `SKILL.md`。
 
 `scripts/` 中的辅助脚本可由 Agent 按 `SKILL.md` 说明，在现有工具和 Guard 规则下通过 `exec` 使用；Suna 不为 Skill scripts 提供单独 sandbox。MCP server 独立配置在 `config.toml`。
 

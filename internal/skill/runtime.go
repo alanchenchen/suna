@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	ToolLoad  = "skill.load"
-	ToolStart = "skill.start"
+	ToolLoad  = "skill_load"
+	ToolStart = "skill_start"
 )
 
 // Store 由宿主提供配置读写；skill 包不直接依赖 config，避免包循环。

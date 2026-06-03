@@ -458,6 +458,6 @@ api_key = "..."
 | Memory | Usable MVP | SQLite active memory、memory_queue、conversation_state、异步 full compaction、上下文压缩 | 记忆质量评估、用户可编辑记忆 UI |
 | TUI | Usable MVP | Welcome/Chat/Config/Help、模型配置、Workspace 配置、工具记录、AskUser、Guard overlay、compact、active memory list、context-aware help | Provider test、Config 高级项（guard rules/hooks/限速）仍不完整 |
 | Logging | Usable MVP | 分类文本日志和 provider 调用日志已接入；具体文件分类以 `internal/logging` 当前实现为准 | UI 查看日志、导出诊断包 |
-| Skill / MCP | Skill Usable MVP / MCP Design | Skill runtime 已闭环：`~/.suna/skills`、enabled/reasons、`skill.load`、`skill.start import/check` 固定验收流程、`/skills` overlay；MCP 独立配置方案已定稿 | MCP stdio runtime 待实现 |
+| Skill / MCP | Skill Usable MVP / MCP Design | Skill runtime 已闭环：`~/.suna/skills`、enabled/reasons、`skill_load`、`skill_start import/check` 固定验收流程、`/skills` overlay；MCP 独立配置方案已定稿 | MCP stdio runtime 待实现 |
 
 后续路线以 `plans/00-progress.md` 为准；本文件只记录当前技术选型、目录结构和配置字段。
