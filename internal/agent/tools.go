@@ -214,7 +214,21 @@ func (a *Agent) executeSpawn(ctx context.Context, id string, params map[string]a
 		res.Status = err.Error()
 	}
 	out, _ := json.Marshal(map[string]any{"result": res.Text, "success": res.Success, "status": res.Status})
-	return tool.TextResult(string(out))
+	return spawnToolResult(string(out), res)
+}
+
+func spawnToolResult(content string, res subtask.Result) tool.Result {
+	if res.Success {
+		return tool.TextResult(content)
+	}
+	errText := strings.TrimSpace(res.Status)
+	if errText == "" {
+		errText = strings.TrimSpace(res.Text)
+	}
+	if errText == "" {
+		errText = "subtask failed"
+	}
+	return tool.Result{Content: content, Error: errText, IsError: true}
 }
 
 func (a *Agent) newSubtaskRunner(events chan<- Event, spawnID string, subRegistry *tool.Registry) *runner.Runner {

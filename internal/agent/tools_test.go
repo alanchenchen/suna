@@ -9,6 +9,7 @@ import (
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/runner"
+	"github.com/alanchenchen/suna/internal/subtask"
 	"github.com/alanchenchen/suna/internal/tool"
 )
 
@@ -21,6 +22,20 @@ func TestSubtaskReadFileBlocksSensitivePath(t *testing.T) {
 	result := executor.ExecuteTool(context.Background(), runner.ToolExecution{ID: "call-1", Name: "readfile", Params: map[string]any{"path": ".env"}})
 	if !result.IsError || result.Error == "" {
 		t.Fatalf("subtask readfile .env result = %#v, want error", result)
+	}
+}
+
+func TestSpawnToolResultMarksFailedSubtaskAsToolError(t *testing.T) {
+	res := subtask.Result{Success: false, Text: "context deadline exceeded", Status: "context deadline exceeded"}
+	out := spawnToolResult(`{"result":"context deadline exceeded","success":false,"status":"context deadline exceeded"}`, res)
+	if !out.IsError {
+		t.Fatalf("spawnToolResult IsError = false, want true")
+	}
+	if out.Error != "context deadline exceeded" {
+		t.Fatalf("spawnToolResult Error = %q, want context deadline exceeded", out.Error)
+	}
+	if out.Content == "" || out.Content[0] != '{' {
+		t.Fatalf("spawnToolResult Content = %q, want JSON payload preserved", out.Content)
 	}
 }
 
