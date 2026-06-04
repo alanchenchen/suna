@@ -125,8 +125,6 @@ func (t *TUI) configHelp(rows []configRow) string {
 			return t.tr("tui.config.help_reasoning")
 		case "activate_model":
 			return t.tr("tui.config.help_activate_model")
-		case "check_model":
-			return t.tr("tui.config.help_check_model")
 		case "delete_model":
 			return t.tr("tui.config.help_delete_model")
 		}

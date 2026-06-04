@@ -19,7 +19,7 @@ type configRow struct{ kind, name, label, value string }
 
 func (r configRow) selectable() bool {
 	switch r.kind {
-	case "section", "general_language", "general_theme", "general_guard", "general_workspace", "clear_attachments", "open_config_dir", "add_model", "edit_model", "edit_reasoning", "activate_model", "delete_model", "check_model", "model", "empty":
+	case "section", "general_language", "general_theme", "general_guard", "general_workspace", "clear_attachments", "open_config_dir", "add_model", "edit_model", "edit_reasoning", "activate_model", "delete_model", "model", "empty":
 		return true
 	default:
 		return false
@@ -105,10 +105,6 @@ func (t *TUI) configDetailRows() []configRow {
 	if mc.HasAPIKey {
 		apiKey = t.tr("tui.config.configured")
 	}
-	lastCheck := t.configLastCheck
-	if lastCheck == "" {
-		lastCheck = t.tr("tui.config.not_checked")
-	}
 	rows := []configRow{
 		{"info", "", t.tr("tui.config.status"), status},
 		{"info", "", t.tr("tui.config.provider.type"), mc.Provider},
@@ -117,7 +113,6 @@ func (t *TUI) configDetailRows() []configRow {
 		{"info", "", t.tr("tui.config.provider.model"), modelStatusMark(mc, t.isActiveModelRef(mc.Ref())) + " " + mc.Model},
 		{"info", "", t.tr("tui.config.provider.context_window"), contextDisplay(mc)},
 		{"info", "", t.tr("tui.config.reasoning"), t.reasoningDisplay(mc)},
-		{"info", "", t.tr("tui.config.last_check"), lastCheck},
 		{"info", "", "", ""},
 		{"edit_model", "", "  " + t.tr("tui.config.edit_model"), ""},
 		{"edit_reasoning", "", "  " + t.tr("tui.config.edit_reasoning"), ""},
@@ -126,7 +121,6 @@ func (t *TUI) configDetailRows() []configRow {
 		rows = append(rows, configRow{"activate_model", mc.Ref(), "  " + t.tr("tui.config.activate_model"), ""})
 	}
 	rows = append(rows,
-		configRow{"check_model", "", "  " + t.tr("tui.config.check_model"), ""},
 		configRow{"delete_model", "", "  " + t.tr("tui.config.delete_model"), ""},
 	)
 	return rows
@@ -166,8 +160,6 @@ func (t *TUI) handleConfigAction(rows []configRow) tea.Cmd {
 		}
 	case "activate_model":
 		return t.activateModelRef(row.name)
-	case "check_model":
-		t.configLastCheck = t.tr("tui.config.check_not_implemented")
 	case "delete_model":
 		if t.configDetailRef != "" {
 			t.configDeleteConfirm = t.configDetailRef

@@ -86,7 +86,6 @@ type TUI struct {
 	configProviderKind    string
 	configPage            string
 	configDeleteConfirm   string
-	configLastCheck       string
 	configDetailRef       string
 	configFormTitle       string
 	configInputs          []textinput.Model
