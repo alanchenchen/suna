@@ -45,10 +45,7 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req *CompletionRequest
 		modelName = req.Model
 	}
 
-	maxTokens := 4096
-	if req.MaxTokens > 0 {
-		maxTokens = req.MaxTokens
-	}
+	maxTokens := ResolveMaxTokens(req.MaxTokens)
 
 	go func() {
 		defer close(ch)
@@ -172,7 +169,7 @@ func (p *AnthropicProvider) ContextWindow() int {
 	if p.contextWindow > 0 {
 		return p.contextWindow
 	}
-	return 200000
+	return DefaultContextWindow
 }
 
 func (p *AnthropicProvider) buildMessages(ctx context.Context, req *CompletionRequest) ([]anthropic.MessageParam, error) {

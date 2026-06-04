@@ -67,6 +67,19 @@ func (r *Router) ActiveRef() string {
 	return r.activeRef
 }
 
+func (r *Router) ActiveContextWindow() int {
+	if r == nil {
+		return DefaultContextWindow
+	}
+	r.mu.RLock()
+	p := r.providers[r.activeRef]
+	r.mu.RUnlock()
+	if p == nil {
+		return DefaultContextWindow
+	}
+	return p.ContextWindow()
+}
+
 // Complete 调用指定 provider 的 Complete，自动执行 per-model 速率限制
 func (r *Router) Complete(ctx context.Context, ref string, req *CompletionRequest) (<-chan Chunk, error) {
 	r.mu.RLock()

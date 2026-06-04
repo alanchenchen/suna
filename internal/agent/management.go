@@ -48,6 +48,32 @@ func (a *Agent) ListModels() []string {
 	return a.router.ListProviders()
 }
 
+type ModelRuntime struct {
+	Provider      string
+	Model         string
+	ContextWindow int
+}
+
+func (a *Agent) ActiveModelRuntime() ModelRuntime {
+	a.configMu.RLock()
+	cfg := a.cfg
+	router := a.router
+	a.configMu.RUnlock()
+
+	rt := ModelRuntime{ContextWindow: model.DefaultContextWindow}
+	if cfg != nil {
+		if mc, ok := cfg.ActiveModelConfig(); ok {
+			rt.Provider = mc.Provider
+			rt.Model = mc.Model
+		}
+	}
+	if router != nil {
+		// context window 以 runtime provider 为准；provider 内部统一处理配置值和默认值。
+		rt.ContextWindow = router.ActiveContextWindow()
+	}
+	return rt
+}
+
 func (a *Agent) PopLastUserMessage() {
 	if a.working == nil {
 		return
@@ -76,9 +102,9 @@ func (a *Agent) Compact(ctx context.Context) (int, int, int, int, int, error) {
 	if err != nil {
 		return 0, 0, 0, 0, 0, err
 	}
-	contextWindow := 128000
-	if p, err := a.router.Provider(a.router.ActiveRef()); err == nil && p != nil {
-		contextWindow = p.ContextWindow()
+	contextWindow := model.DefaultContextWindow
+	if a.router != nil {
+		contextWindow = a.router.ActiveContextWindow()
 	}
 	return before, after, contextWindow, turnsCompressed, truncated, nil
 }

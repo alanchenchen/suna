@@ -332,7 +332,7 @@ func (s *service) handleConfigSet(ctx context.Context, req protocol.Request, sin
 
 func (s *service) buildDaemonStatus(ctx context.Context) protocol.DaemonStatusParams {
 	s.ensureConfigLoaded()
-	params := protocol.DaemonStatusParams{PID: os.Getpid(), AgentStatus: "idle", Provider: s.daemon.ProviderName(), Model: s.daemon.ModelName(), Uptime: s.daemon.Uptime().Truncate(time.Second).String(), Connections: s.daemon.ConnectionCount()}
+	params := protocol.DaemonStatusParams{PID: os.Getpid(), AgentStatus: "idle", Uptime: s.daemon.Uptime().Truncate(time.Second).String(), Connections: s.daemon.ConnectionCount()}
 	if s.daemon.agent != nil {
 		activeMem, coreMem, queuedMem := s.daemon.agent.MemoryStats(ctx)
 		params.Memory = &protocol.MemoryStats{Active: activeMem, Core: coreMem, Queued: queuedMem}
@@ -343,24 +343,15 @@ func (s *service) buildDaemonStatus(ctx context.Context) protocol.DaemonStatusPa
 			params.UsageToday = &usage
 		}
 	}
-	if mc, ok := s.daemon.agent.Config().ActiveModelConfig(); ok {
+	if s.daemon.agent != nil {
+		rt := s.daemon.agent.ActiveModelRuntime()
 		if params.Provider == "" {
-			params.Provider = mc.Provider
+			params.Provider = rt.Provider
 		}
 		if params.Model == "" {
-			params.Model = mc.Model
+			params.Model = rt.Model
 		}
-		params.ContextWindow = mc.ContextWindow
-	}
-	if params.ContextWindow <= 0 && s.daemon.agent != nil {
-		if mc, ok := s.daemon.agent.Config().ActiveModelConfig(); ok {
-			switch mc.Provider {
-			case "anthropic":
-				params.ContextWindow = 200000
-			default:
-				params.ContextWindow = 128000
-			}
-		}
+		params.ContextWindow = rt.ContextWindow
 	}
 	return params
 }

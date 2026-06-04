@@ -169,7 +169,7 @@ func (t *TUI) syncContent() {
 			}
 		case "error":
 			content, _ := msg.content.(string)
-			sb.WriteString("\n" + styleErrLine.Render("  ✗ "+content) + "\n")
+			sb.WriteString("\n" + t.renderErrorMessage(content) + "\n")
 			inSunaBlock = false
 		case "restore_summary":
 			content, _ := msg.content.(string)
@@ -224,6 +224,25 @@ func (t *TUI) syncContent() {
 	} else {
 		t.followBottom = t.vp.AtBottom()
 	}
+}
+
+func (t *TUI) renderErrorMessage(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+	width := max(24, t.width-8)
+	bodyWidth := max(20, width-4)
+	wrapped := lipgloss.NewStyle().Width(bodyWidth).Render(content)
+	lines := strings.Split(wrapped, "\n")
+	for i := range lines {
+		if i == 0 {
+			lines[i] = styleErrLine.Render("  ✗ " + lines[i])
+		} else {
+			lines[i] = styleErrLine.Render("    " + lines[i])
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (t *TUI) renderThinkingBox(content string, running bool, startedAt, endedAt time.Time) string {

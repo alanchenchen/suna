@@ -141,7 +141,7 @@ func (p *OpenAIResponsesProvider) ContextWindow() int {
 	if p.contextWindow > 0 {
 		return p.contextWindow
 	}
-	return 128000
+	return DefaultContextWindow
 }
 
 func (p *OpenAIResponsesProvider) resolveModel(m string) string {
@@ -152,10 +152,7 @@ func (p *OpenAIResponsesProvider) resolveModel(m string) string {
 }
 
 func (p *OpenAIResponsesProvider) resolveMaxTokens(m int) int {
-	if m > 0 {
-		return m
-	}
-	return 4096
+	return ResolveMaxTokens(m)
 }
 
 func (p *OpenAIResponsesProvider) resolveTemperature(t float64) float64 {

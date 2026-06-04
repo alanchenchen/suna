@@ -30,9 +30,7 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 	if req.Purpose == "" {
 		req.Purpose = "chat"
 	}
-	if req.MaxTokens <= 0 {
-		req.MaxTokens = 4096
-	}
+	req.MaxTokens = model.ResolveMaxTokens(req.MaxTokens)
 	if req.StreamTimeout <= 0 {
 		req.StreamTimeout = 120 * time.Second
 	}
@@ -276,11 +274,11 @@ func cloneMessages(msgs []model.Message) []model.Message {
 
 func (r *Runner) contextWindow(modelRef string) int {
 	if r.Router == nil {
-		return 128000
+		return model.DefaultContextWindow
 	}
 	p, err := r.Router.Provider(modelRef)
 	if err != nil || p == nil {
-		return 128000
+		return model.DefaultContextWindow
 	}
 	return p.ContextWindow()
 }

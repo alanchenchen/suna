@@ -294,7 +294,7 @@ Subtask 不能创建嵌套 subtask（工具列表不含 Spawn）。
   - active memory / internal context 注入
   - working memory messages
   - tool schemas
-  - max output reserve (请求 MaxTokens，默认 4096)
+  - max output reserve (请求 MaxTokens，默认 8192，由 `model.DefaultMaxTokens` 统一维护)
 
 不触发:
   - 完整请求未超过 80% 安全阈值

@@ -377,7 +377,7 @@ command = "echo checking"
 | `models.provider` | string | 是 | 无 | provider 协议名，也是 `credentials.toml` 里 API key 的分组名。`openai` 表示 OpenAI Responses 协议，`anthropic` 表示 Anthropic Messages 协议，其它名称表示 OpenAI-compatible Chat Completions 协议。 |
 | `models.model` | string | 是 | 无 | 模型 ID。模型 ref 为 `provider/model`。 |
 | `models.base_url` | string | 是 | 无 | 该 provider 协议实际请求的 endpoint。daemon/core 不内置官方 URL，不读取 SDK 默认 endpoint；TUI 只在新建 `openai`/`anthropic` 时预填官方 URL，用户可改为中转站。 |
-| `models.context_window` | int | 否 | `anthropic` 为 `200000`，其它 provider 为 `128000` | 上下文窗口，用于顶栏展示和 compact 判断；TUI 会按 provider 显示默认值/placeholder，但未填写时不会自动写入 `config.toml`。 |
+| `models.context_window` | int | 否 | `200000` | 上下文窗口，用于 daemon status、usage 展示和 compact 判断；运行时默认值由 `model.DefaultContextWindow` 统一维护，provider 的 `ContextWindow()` 是权威来源。TUI 会按 provider 显示默认值/placeholder，但未填写时不会自动写入 `config.toml`。 |
 | `models.strengths` | string[] | 否 | 空 | TUI 展示模型擅长项。 |
 | `models.reasoning` | object | 否 | 空 | 思考相关请求字段组。daemon/core 不理解 preset；provider 请求时将顶层字段注入最终 request body，并禁止覆盖已生成字段。TUI preset 负责生成该对象。 |
 | `[guard].mode` | string | 否 | `ask` | `readonly` / `ask` / `auto` / `smart`。具体决策见 `plans/04-guard.md`。 |
