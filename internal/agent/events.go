@@ -15,6 +15,7 @@ const (
 	EventGuardConfirm
 	EventToolGuard
 	EventSkillLoad
+	EventSkillReview
 )
 
 type Event struct {
@@ -31,7 +32,10 @@ type Event struct {
 	ToolError    bool
 	ToolMetadata map[string]any
 
-	SkillName string
+	SkillName         string
+	SkillLoadStatus   string
+	SkillReview       string
+	SkillReviewStatus string
 
 	Question    string
 	Options     []string

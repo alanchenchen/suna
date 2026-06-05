@@ -92,6 +92,7 @@ func (t *TUI) syncContent() {
 		RenderError:          t.renderErrorMessage,
 		RenderRestoreSummary: t.renderRestoreSummaryBox,
 		RenderSkillLoad:      t.renderSkillLoadMessage,
+		RenderSkillReview:    t.renderSkillReviewMessage,
 		RenderSystem: func(content string) string {
 			return styleSysLine.Render("  ◆ " + content)
 		},

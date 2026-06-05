@@ -68,6 +68,7 @@ type Model struct {
 	Compacting        bool
 	Phase             Phase
 	PhaseStart        time.Time
+	StatusLabel       string
 	StreamStart       time.Time
 	FollowBottom      bool
 	ForceBottom       bool

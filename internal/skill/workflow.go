@@ -142,20 +142,67 @@ func formatCheckQuestion(check CheckResult) string {
 
 func formatEnableQuestion(result StartResult) string {
 	var b strings.Builder
+	if result.Review != nil {
+		b.WriteString("LLM review completed. ")
+	}
 	b.WriteString("Enable Skill ")
 	b.WriteString(result.Name)
 	b.WriteString("?")
-	if result.Review != nil && strings.TrimSpace(result.Review.Review) != "" {
-		b.WriteString("\nLLM review result:\n")
-		b.WriteString(result.Review.Review)
-	}
 	return b.String()
 }
 
 func startJSONResult(v any) string {
+	if result, ok := v.(StartResult); ok {
+		b, err := json.Marshal(summarizeStartResult(result))
+		if err != nil {
+			return err.Error()
+		}
+		return string(b)
+	}
 	b, err := json.Marshal(v)
 	if err != nil {
 		return err.Error()
 	}
 	return string(b)
+}
+
+type startResultSummary struct {
+	Name           string   `json:"name"`
+	Action         string   `json:"action"`
+	Valid          bool     `json:"valid"`
+	Reasons        []string `json:"reasons,omitempty"`
+	ReviewRan      bool     `json:"review_ran,omitempty"`
+	NeedsAttention bool     `json:"needs_attention,omitempty"`
+	ReviewSummary  string   `json:"review_summary,omitempty"`
+	Enabled        bool     `json:"enabled"`
+	ReviewAsk      string   `json:"review_ask,omitempty"`
+	EnableAsk      string   `json:"enable_ask,omitempty"`
+	Error          string   `json:"error,omitempty"`
+	Description    string   `json:"description,omitempty"`
+}
+
+func summarizeStartResult(result StartResult) startResultSummary {
+	s := startResultSummary{Name: result.Name, Action: result.Action, Valid: result.Valid, Reasons: append([]string(nil), result.Reasons...), Enabled: result.Enabled, ReviewAsk: result.ReviewAsk, EnableAsk: result.EnableAsk, Error: result.Error, Description: result.Description}
+	if result.Review != nil {
+		s.ReviewRan = true
+		s.NeedsAttention = result.Review.NeedsAttention
+		s.ReviewSummary = firstReviewLine(result.Review.Review)
+		if result.Review.Error != "" && s.Error == "" {
+			s.Error = result.Review.Error
+		}
+	}
+	return s
+}
+
+func firstReviewLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(strings.Trim(line, "#*- `"))
+		if line != "" {
+			if len(line) > 240 {
+				return line[:240] + "..."
+			}
+			return line
+		}
+	}
+	return ""
 }

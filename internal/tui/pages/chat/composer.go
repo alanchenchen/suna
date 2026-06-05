@@ -44,9 +44,20 @@ func (m Model) SelectedCommandSuggestion() (CommandSpec, bool) {
 	return m.CmdSuggestions[m.CmdSuggestionIdx], true
 }
 
+func (m *Model) SetStatusLabel(label string, now time.Time) {
+	m.StatusLabel = label
+	m.Loading = true
+	m.PhaseStart = now
+}
+
+func (m *Model) ClearStatusLabel() {
+	m.StatusLabel = ""
+}
+
 func (m *Model) ResetPhase() {
 	m.Loading = false
 	m.Phase = PhaseIdle
 	m.PhaseStart = time.Time{}
+	m.StatusLabel = ""
 	m.ResetToolState()
 }

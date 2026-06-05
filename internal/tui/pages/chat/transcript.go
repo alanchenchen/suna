@@ -24,6 +24,7 @@ type TranscriptDeps struct {
 	RenderError          func(string) string
 	RenderRestoreSummary func(string) string
 	RenderSkillLoad      func(protocol.SkillLoadParams) string
+	RenderSkillReview    func(protocol.SkillReviewParams) string
 	RenderSystem         func(string) string
 	RenderAskSelected    func(string) string
 	RenderAskOption      func(string) string
@@ -105,6 +106,11 @@ func (m Model) RenderTranscript(deps TranscriptDeps) string {
 		case "skill":
 			if p, ok := msg.Content.(protocol.SkillLoadParams); ok && deps.RenderSkillLoad != nil {
 				sb.WriteString("\n" + deps.RenderSkillLoad(p) + "\n")
+			}
+			inSunaBlock = false
+		case "skill_review":
+			if p, ok := msg.Content.(protocol.SkillReviewParams); ok && deps.RenderSkillReview != nil {
+				sb.WriteString("\n" + deps.RenderSkillReview(p) + "\n")
 			}
 			inSunaBlock = false
 		default:

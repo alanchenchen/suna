@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -15,9 +16,19 @@ type agentSkillReviewer struct{}
 
 type agentSkillPrompter struct{}
 
+func emitSkillReviewEvent(ctx context.Context, name, status, review, errText string) {
+	events := skillEventsFromContext(ctx)
+	if events == nil {
+		return
+	}
+	events <- Event{Type: EventSkillReview, SkillName: name, SkillReviewStatus: status, SkillReview: review, Content: errText}
+}
+
 func (agentSkillReviewer) ReviewSkill(ctx context.Context, req skill.LLMReviewRequest) (string, error) {
+	emitSkillReviewEvent(ctx, req.Name, "running", "", "")
 	ag := skillAgentFromContext(ctx)
 	if ag == nil || ag.router == nil {
+		emitSkillReviewEvent(ctx, req.Name, "error", "", "skill review requires configured agent model")
 		return "", fmt.Errorf("skill review requires configured agent model")
 	}
 	files := make([]prompt.SkillReviewFile, 0, len(req.Files))
@@ -26,6 +37,7 @@ func (agentSkillReviewer) ReviewSkill(ctx context.Context, req skill.LLMReviewRe
 	}
 	reviewPrompt, err := ag.prompts.RenderSkillReview(prompt.SkillReviewData{Name: req.Name, Description: req.Description, Reasons: req.Reasons, Files: files, UserRequest: ag.working.LastUserText()})
 	if err != nil {
+		emitSkillReviewEvent(ctx, req.Name, "error", "", err.Error())
 		return "", err
 	}
 	modelRef := ag.router.ActiveRef()
@@ -33,15 +45,19 @@ func (agentSkillReviewer) ReviewSkill(ctx context.Context, req skill.LLMReviewRe
 	request := &model.CompletionRequest{Model: modelID, Purpose: "skill_review", RequestID: uuid.New().String(), System: "You are reviewing an Agent Skill. Be concise, practical, and safety-focused.", Messages: []model.Message{model.NewTextMessage(model.RoleUser, reviewPrompt)}, MaxTokens: 700, Temperature: 0}
 	ch, err := ag.router.Complete(ctx, modelRef, request)
 	if err != nil {
+		emitSkillReviewEvent(ctx, req.Name, "error", "", err.Error())
 		return "", err
 	}
 	var out string
 	for chunk := range ch {
 		if chunk.Error != "" {
+			emitSkillReviewEvent(ctx, req.Name, "error", "", chunk.Error)
 			return "", fmt.Errorf("%s", chunk.Error)
 		}
 		out += chunk.Content
 	}
+	out = strings.TrimSpace(out)
+	emitSkillReviewEvent(ctx, req.Name, "done", out, "")
 	return out, nil
 }
 

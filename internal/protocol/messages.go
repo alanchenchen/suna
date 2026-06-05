@@ -221,5 +221,13 @@ type SkillSetResult struct {
 }
 
 type SkillLoadParams struct {
-	Name string `json:"name"`
+	Name   string `json:"name"`
+	Status string `json:"status,omitempty"`
+}
+
+type SkillReviewParams struct {
+	Name   string `json:"name"`
+	Status string `json:"status,omitempty"`
+	Review string `json:"review,omitempty"`
+	Error  string `json:"error,omitempty"`
 }

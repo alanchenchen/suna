@@ -100,8 +100,35 @@ func (t *TUI) renderSkillLoadMessage(p protocol.SkillLoadParams) string {
 	if name == "" {
 		name = "unknown"
 	}
-	body := styleMetaPill.Render(t.tr("tui.skill.loaded")) + " " + styleHL.Render(name)
+	labelKey := "tui.skill.loaded"
+	if strings.TrimSpace(p.Status) == "loading" {
+		labelKey = "tui.skill.loading"
+	}
+	body := styleMetaPill.Render(t.tr(labelKey)) + " " + styleHL.Render(name)
 	return textutil.IndentLines(boxStyle.BorderForeground(ColorBrand).Width(max(36, min(72, t.width-6))).Padding(1, 2).Render(body), "  ")
+}
+func (t *TUI) renderSkillReviewMessage(p protocol.SkillReviewParams) string {
+	name := strings.TrimSpace(p.Name)
+	if name == "" {
+		name = "unknown"
+	}
+	status := strings.TrimSpace(p.Status)
+	title := styleMetaPill.Render(t.tr("tui.skill.review")) + " " + styleHL.Render(name)
+	body := strings.TrimSpace(p.Review)
+	if body == "" && p.Error != "" {
+		body = "Error: " + p.Error
+	}
+	if body == "" {
+		body = status
+	}
+	width := max(36, min(76, t.width-6))
+	inner := max(20, width-8)
+	lines := splitWrapped(body, inner, 18)
+	content := title
+	if len(lines) > 0 {
+		content += "\n" + strings.Join(lines, "\n")
+	}
+	return textutil.IndentLines(boxStyle.BorderForeground(ColorBrand).Width(width).Padding(1, 2).Render(content), "  ")
 }
 func (t *TUI) hasVisibleActiveProgress() bool {
 	if t.hasRunningTools() {
@@ -130,6 +157,9 @@ func (t *TUI) renderCurrentStatusLine() string {
 	return fmt.Sprintf("    %s %s %s\n", t.chat.Spinner.View(), styleDim.Render(label), styleDim.Render(fmt.Sprintf("%.1fs", elapsed)))
 }
 func (t *TUI) currentStatusLabel() string {
+	if t.chat.StatusLabel != "" {
+		return t.chat.StatusLabel
+	}
 	if n := t.runningToolCount(); n > 0 {
 		return fmt.Sprintf("%s · %d running", t.tr("status.exec_tool"), n)
 	}

@@ -8,6 +8,7 @@ import (
 )
 
 func (m *Model) HandleStreamStart(now time.Time) {
+	m.ClearStatusLabel()
 	if m.Phase == PhaseFirstLLM || m.Phase == PhaseThinking || m.Phase == PhaseWaitingAfterTool {
 		m.Phase = PhaseLLM
 		m.PhaseStart = now
@@ -15,6 +16,7 @@ func (m *Model) HandleStreamStart(now time.Time) {
 }
 
 func (m *Model) HandleReasoningStart(now time.Time) {
+	m.ClearStatusLabel()
 	if m.Phase == PhaseFirstLLM || m.Phase == PhaseLLM || m.Phase == PhaseWaitingAfterTool {
 		m.Phase = PhaseThinking
 		m.PhaseStart = now
@@ -37,6 +39,7 @@ func (m *Model) StartTool(p protocol.ToolStartParams, id string, now time.Time) 
 	}
 	m.Phase = PhaseTool
 	m.PhaseStart = now
+	m.StatusLabel = ""
 	m.Loading = true
 	parentID, localID := toolview.ParseSubtaskID(id)
 	m.LastAssistantText = ""

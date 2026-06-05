@@ -31,6 +31,7 @@ type daemonFullStatusMsg = tuievents.DaemonFullStatusMsg
 type configStateMsg = tuievents.ConfigStateMsg
 type skillListMsg = tuievents.SkillListMsg
 type skillLoadMsg = tuievents.SkillLoadMsg
+type skillReviewMsg = tuievents.SkillReviewMsg
 type attachmentStatusMsg = tuievents.AttachmentStatusMsg
 type requestErrorMsg = tuievents.RequestErrorMsg
 
@@ -85,6 +86,8 @@ func (t *TUI) handleNotificationMsg(msg notificationMsg) {
 		t.handleSkillListNotification(m.Params)
 	case skillLoadMsg:
 		t.handleSkillLoadNotification(m.Params)
+	case skillReviewMsg:
+		t.handleSkillReviewNotification(m.Params)
 	case attachmentStatusMsg:
 		t.handleAttachmentStatusNotification(m.Params)
 	case requestErrorMsg:
@@ -290,8 +293,25 @@ func (t *TUI) handleSkillListNotification(p protocol.SkillListResult) {
 }
 
 func (t *TUI) handleSkillLoadNotification(p protocol.SkillLoadParams) {
+	status := strings.TrimSpace(p.Status)
+	if status == "loading" {
+		t.chat.SetStatusLabel(t.i18n.Tf("status.skill_loading", p.Name), time.Now())
+	} else {
+		t.chat.ClearStatusLabel()
+	}
 	t.appendNonToolMessage(chatMsg{Role: "skill", Content: p})
 	t.scrollToBottomOnNextSync()
+}
+
+func (t *TUI) handleSkillReviewNotification(p protocol.SkillReviewParams) {
+	switch strings.TrimSpace(p.Status) {
+	case "running":
+		t.chat.SetStatusLabel(t.i18n.Tf("status.skill_reviewing", p.Name), time.Now())
+	case "done", "error":
+		t.chat.ClearStatusLabel()
+		t.appendNonToolMessage(chatMsg{Role: "skill_review", Content: p})
+		t.scrollToBottomOnNextSync()
+	}
 }
 
 func (t *TUI) handleAttachmentStatusNotification(p protocol.AttachmentStatusResult) {

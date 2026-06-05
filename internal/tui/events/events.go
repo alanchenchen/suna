@@ -47,6 +47,7 @@ type DaemonFullStatusMsg struct{ Params protocol.DaemonStatusParams }
 type ConfigStateMsg struct{ Params protocol.ConfigParams }
 type SkillListMsg struct{ Params protocol.SkillListResult }
 type SkillLoadMsg struct{ Params protocol.SkillLoadParams }
+type SkillReviewMsg struct{ Params protocol.SkillReviewParams }
 type AttachmentStatusMsg struct {
 	Params protocol.AttachmentStatusResult
 }
@@ -73,6 +74,7 @@ func (DaemonFullStatusMsg) isNotificationMsg()      {}
 func (ConfigStateMsg) isNotificationMsg()           {}
 func (SkillListMsg) isNotificationMsg()             {}
 func (SkillLoadMsg) isNotificationMsg()             {}
+func (SkillReviewMsg) isNotificationMsg()           {}
 func (AttachmentStatusMsg) isNotificationMsg()      {}
 func (RequestErrorMsg) isNotificationMsg()          {}
 func (UnknownNotificationMsg) isNotificationMsg()   {}
@@ -119,6 +121,8 @@ func Decode(notif Notification) tea.Msg {
 		return decodeParams[protocol.SkillListResult](notif, func(p protocol.SkillListResult) tea.Msg { return SkillListMsg{Params: p} })
 	case protocol.NotifySkillLoad:
 		return decodeParams[protocol.SkillLoadParams](notif, func(p protocol.SkillLoadParams) tea.Msg { return SkillLoadMsg{Params: p} })
+	case protocol.NotifySkillReview:
+		return decodeParams[protocol.SkillReviewParams](notif, func(p protocol.SkillReviewParams) tea.Msg { return SkillReviewMsg{Params: p} })
 	case protocol.MethodAttachmentStatus:
 		return decodeParams[protocol.AttachmentStatusResult](notif, func(p protocol.AttachmentStatusResult) tea.Msg { return AttachmentStatusMsg{Params: p} })
 	default:

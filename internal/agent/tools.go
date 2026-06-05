@@ -44,11 +44,17 @@ func (a *Agent) executeTool(ctx context.Context, call runner.ToolExecution, even
 	if name == "spawn" {
 		return a.executeSpawn(ctx, id, params, events)
 	}
+	if a.skills != nil && name == skill.ToolLoad && events != nil {
+		skillName, _ := params["name"].(string)
+		if strings.TrimSpace(skillName) != "" {
+			events <- Event{Type: EventSkillLoad, SkillName: strings.TrimSpace(skillName), SkillLoadStatus: "loading"}
+		}
+	}
 	if a.skills != nil {
 		if res, ok := a.skills.ExecuteTool(contextWithSkillRuntime(ctx, a, events), name, params); ok {
 			if events != nil {
 				if evt, ok := skill.LoadNotificationFromResult(name, params, res); ok {
-					events <- Event{Type: EventSkillLoad, SkillName: evt.Name}
+					events <- Event{Type: EventSkillLoad, SkillName: evt.Name, SkillLoadStatus: "loaded"}
 				}
 			}
 			return res

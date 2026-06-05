@@ -168,7 +168,10 @@ func (s *service) runAgent(ctx context.Context, connID, inputText string, input 
 				emit(ctx, sink, protocol.NotifyToolEnd, protocol.ToolEndParams{ID: evt.ToolCallID, Tool: evt.ToolName, Result: display.text, Error: evt.ToolError, ResultTruncated: display.truncated, ResultBytes: display.bytes, Metadata: evt.ToolMetadata})
 			case agent.EventSkillLoad:
 				flush()
-				emit(ctx, sink, protocol.NotifySkillLoad, protocol.SkillLoadParams{Name: evt.SkillName})
+				emit(ctx, sink, protocol.NotifySkillLoad, protocol.SkillLoadParams{Name: evt.SkillName, Status: evt.SkillLoadStatus})
+			case agent.EventSkillReview:
+				flush()
+				emit(ctx, sink, protocol.NotifySkillReview, protocol.SkillReviewParams{Name: evt.SkillName, Status: evt.SkillReviewStatus, Review: evt.SkillReview, Error: evt.Content})
 			case agent.EventAskUser:
 				flush()
 				askID := connID + "_" + fmt.Sprintf("%d", time.Now().UnixNano())

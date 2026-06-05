@@ -78,6 +78,7 @@ const (
 const (
 	NotifyMemoryListResult = "memory.list_result"
 	NotifySkillLoad        = "skill.load"
+	NotifySkillReview      = "skill.review"
 )
 
 // Reserved for future perception notifications. It is not emitted by the current runtime.
