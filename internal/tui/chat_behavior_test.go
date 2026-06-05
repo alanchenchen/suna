@@ -197,6 +197,20 @@ func TestWelcomeNewInitializesChatBeforeResetPhase(t *testing.T) {
 	}
 }
 
+func TestRenderSkillLoadMessageUsesTightHighlightedBox(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80}
+
+	view := stripANSIForTest(tui.renderSkillLoadMessage(protocol.SkillLoadParams{Name: "img", Status: "loaded"}))
+	for _, want := range []string{"╭", "╰", "✓", "已加载 SKILL", "img"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("renderSkillLoadMessage() = %q, want substring %q", view, want)
+		}
+	}
+	if strings.Contains(view, "│  ✓") || strings.Contains(view, "✓ ") && strings.Contains(view, "  │") {
+		t.Fatalf("renderSkillLoadMessage() = %q, want tight box with zero horizontal padding", view)
+	}
+}
+
 func TestRenderAttachmentPanelUsesBox(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
 	tui.chat.Attachments = []attachmentItem{{Type: "image", Name: "ScreenShot_2026-05-29_121010_728.png", Size: 161500}}
