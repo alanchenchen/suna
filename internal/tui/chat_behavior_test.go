@@ -226,3 +226,17 @@ func TestRenderInputAreaSeparatesAttachmentBoxFromComposer(t *testing.T) {
 		t.Fatalf("renderInputArea() = %q, want separator between attachment box and composer", view)
 	}
 }
+
+func TestCtrlJInsertsNewline(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
+	tui.initChatComponents()
+	tui.chat.Textarea.SetValue("第一行")
+
+	_, cmd := tui.updateChatKeyNormal("ctrl+j", tea.KeyPressMsg{})
+	if cmd != nil {
+		t.Fatalf("cmd = %v, want nil", cmd)
+	}
+	if got := tui.chat.Textarea.Value(); got != "第一行\n" {
+		t.Fatalf("textarea value = %q, want newline appended", got)
+	}
+}

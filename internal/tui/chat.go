@@ -112,15 +112,15 @@ func (t *TUI) syncContent() {
 
 func (t *TUI) currentInputPolicy() chatpage.InputPolicy {
 	return chatpage.CurrentInputPolicy(chatpage.InputPolicyState{
-		Compacting:      t.chat.Compacting,
-		Loading:         t.chat.Loading,
+		Compacting:       t.chat.Compacting,
+		Loading:          t.chat.Loading,
 		PendingAskID:     t.chat.PendingAskID,
 		PendingAskCustom: t.chat.PendingAskCustom,
 		PendingGuard:     t.chat.PendingGuard != nil,
-		StatusLabel:     t.currentStatusLabel(),
-		SpinnerView:     t.chat.Spinner.View(),
-		CompactRunning:  t.tr("compact.running"),
-		RespondingLabel: t.tr("status.responding"),
+		StatusLabel:      t.currentStatusLabel(),
+		SpinnerView:      t.chat.Spinner.View(),
+		CompactRunning:   t.tr("compact.running"),
+		RespondingLabel:  t.tr("status.responding"),
 	})
 }
 
@@ -371,7 +371,7 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, nil
 	case ks == "enter":
 		return t.updateChatEnter()
-	case ks == "shift+enter":
+	case ks == "shift+enter" || ks == "ctrl+j":
 		t.chat.InsertNewline()
 		t.layoutChat()
 		return t, nil

@@ -50,7 +50,7 @@ func AllowLockedInputKey(key string, compacting bool) bool {
 		}
 	}
 	switch key {
-	case "ctrl+c", "?", "esc", "enter", "ctrl+t", "ctrl+r", "pgup", "pgdown", "up", "down":
+	case "ctrl+c", "?", "esc", "enter", "ctrl+j", "ctrl+t", "ctrl+r", "pgup", "pgdown", "up", "down":
 		return true
 	default:
 		return false

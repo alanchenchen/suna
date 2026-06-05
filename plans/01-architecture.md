@@ -797,7 +797,7 @@ suna trigger list       # 预留: 查看感知源
 
 ```
 Enter                 发送消息
-Shift+Enter/Alt+Enter 换行
+Shift+Enter/Ctrl+J 换行
 Esc                   取消当前生成 / 清空输入框 / 返回 Welcome
 PgUp/PgDown           viewport 翻页
 Ctrl+T                显示工具和 thinking 细节 (toggle，默认隐藏)
