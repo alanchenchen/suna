@@ -174,7 +174,8 @@ func (p *AnthropicProvider) ContextWindow() int {
 
 func (p *AnthropicProvider) buildMessages(ctx context.Context, req *CompletionRequest) ([]anthropic.MessageParam, error) {
 	msgs := make([]anthropic.MessageParam, 0, len(req.Messages))
-	for _, m := range req.Messages {
+	for i := 0; i < len(req.Messages); i++ {
+		m := req.Messages[i]
 		switch m.Role {
 		case RoleUser:
 			blocks, err := p.buildUserBlocks(ctx, m)
@@ -189,10 +190,15 @@ func (p *AnthropicProvider) buildMessages(ctx context.Context, req *CompletionRe
 			}
 			msgs = append(msgs, anthropic.NewAssistantMessage(blocks...))
 		case RoleTool:
-			content := m.Text()
-			msgs = append(msgs, anthropic.NewUserMessage(
-				anthropic.NewToolResultBlock(m.ToolCallID, content, false),
-			))
+			blocks := []anthropic.ContentBlockParamUnion{
+				anthropic.NewToolResultBlock(m.ToolCallID, m.Text(), false),
+			}
+			for i+1 < len(req.Messages) && req.Messages[i+1].Role == RoleTool {
+				i++
+				tm := req.Messages[i]
+				blocks = append(blocks, anthropic.NewToolResultBlock(tm.ToolCallID, tm.Text(), false))
+			}
+			msgs = append(msgs, anthropic.NewUserMessage(blocks...))
 		}
 	}
 	return msgs, nil
