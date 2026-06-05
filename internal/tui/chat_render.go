@@ -129,11 +129,12 @@ func (t *TUI) renderSkillLoadMessage(p protocol.SkillLoadParams) string {
 		name = "unknown"
 	}
 	labelKey := "tui.skill.loaded"
+	icon := styleToolOk.Render("✓")
 	if strings.TrimSpace(p.Status) == "loading" {
 		labelKey = "tui.skill.loading"
+		icon = styleToolRun.Render("◐")
 	}
-	body := styleMetaPill.Render(t.tr(labelKey)) + " " + styleHL.Render(name)
-	return textutil.IndentLines(boxStyle.BorderForeground(ColorBrand).Width(max(36, min(72, t.width-6))).Padding(1, 2).Render(body), "  ")
+	return "    " + icon + " " + styleDim.Render(t.tr(labelKey)) + " " + styleHL.Render(name)
 }
 func (t *TUI) renderSkillReviewMessage(p protocol.SkillReviewParams) string {
 	name := strings.TrimSpace(p.Name)
