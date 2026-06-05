@@ -17,6 +17,34 @@ import (
 	textutil "github.com/alanchenchen/suna/internal/tui/components/text"
 )
 
+const maxSystemMarkdownBytes = 4000
+
+func (t *TUI) renderSystemMessage(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+	width := max(24, t.width-8)
+	bodyWidth := max(20, width-4)
+	body := content
+	if len(content) <= maxSystemMarkdownBytes {
+		if rendered := strings.TrimSpace(RenderMarkdown(content, bodyWidth)); rendered != "" {
+			body = rendered
+		}
+	} else {
+		body = lipgloss.NewStyle().Width(bodyWidth).Render(content)
+	}
+	lines := strings.Split(body, "\n")
+	for i := range lines {
+		if i == 0 {
+			lines[i] = styleSysLine.Render("  ◆ ") + lines[i]
+		} else {
+			lines[i] = "    " + lines[i]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (t *TUI) renderErrorMessage(content string) string {
 	content = strings.TrimSpace(content)
 	if content == "" {
@@ -123,10 +151,13 @@ func (t *TUI) renderSkillReviewMessage(p protocol.SkillReviewParams) string {
 	}
 	width := max(36, min(76, t.width-6))
 	inner := max(20, width-8)
-	lines := splitWrapped(body, inner, 18)
 	content := title
-	if len(lines) > 0 {
-		content += "\n" + strings.Join(lines, "\n")
+	if body != "" {
+		rendered := strings.TrimSpace(RenderMarkdown(body, inner))
+		if rendered == "" {
+			rendered = body
+		}
+		content += "\n" + rendered
 	}
 	return textutil.IndentLines(boxStyle.BorderForeground(ColorBrand).Width(width).Padding(1, 2).Render(content), "  ")
 }

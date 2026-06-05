@@ -94,7 +94,7 @@ func (t *TUI) syncContent() {
 		RenderSkillLoad:      t.renderSkillLoadMessage,
 		RenderSkillReview:    t.renderSkillReviewMessage,
 		RenderSystem: func(content string) string {
-			return styleSysLine.Render("  ◆ " + content)
+			return t.renderSystemMessage(content)
 		},
 		RenderAskSelected: func(opt string) string {
 			return fmt.Sprintf("  %s %s\n", styleToolOk.Render("●"), styleAgentLine.Render(opt))
@@ -645,7 +645,7 @@ func (t *TUI) updateSkillsOverlay(ks string) (tea.Model, tea.Cmd) {
 	case "down":
 		t.chat.MoveSkillsCursor(1)
 		return t, nil
-	case "enter", " ":
+	case "enter", " ", "space":
 		if action, ok := t.chat.SelectSkill(t.tr("tui.skills.cannot_toggle")); ok {
 			return t, t.setSkillOverlayCmd(action.Name, action.Enabled)
 		}

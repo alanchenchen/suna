@@ -125,18 +125,21 @@ func (r *Runtime) askChoice(ctx context.Context, question string, options []stri
 
 func formatCheckQuestion(check CheckResult) string {
 	var b strings.Builder
-	b.WriteString("Skill static check completed: ")
+	b.WriteString("**Skill static check completed:** `")
 	b.WriteString(check.Name)
+	b.WriteString("`\n\n")
 	if len(check.Reasons) == 0 {
-		b.WriteString("\nNo obvious issues found.")
+		b.WriteString("No obvious issues found.\n\n")
 	} else {
-		b.WriteString("\nPotential issues found:")
+		b.WriteString("**Potential issues:**\n\n")
 		for _, reason := range check.Reasons {
-			b.WriteString("\n- ")
+			b.WriteString("- ")
 			b.WriteString(reason)
+			b.WriteString("\n")
 		}
+		b.WriteString("\n")
 	}
-	b.WriteString("\nDo you want Suna to run an additional LLM review for this Skill?")
+	b.WriteString("Run an additional **LLM review** for this Skill?")
 	return b.String()
 }
 
