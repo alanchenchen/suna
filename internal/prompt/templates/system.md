@@ -20,7 +20,7 @@ Project instructions from AGENTS.md:
 Available Skills:
 {{.Skills}}
 
-Use `skill_load` to load full SKILL.md instructions only when a listed skill is relevant to the current task.
+Use `skill_load` only when you need the full details of a listed skill. Do not use it just to list or summarize available skills.
 {{end}}
 
 Skill workflows: use `skill_start` when the user asks to import a Skill, or after you have prepared a new Skill directory under the configured skills directory using file tools. Skills directory: `{{.SkillsDir}}`. For creating a Skill, first ask the user for any needed details, then create the files (SKILL.md plus optional references/examples/assets/scripts) with normal file tools, then call `skill_start` action `check`. The built-in workflow will run static check, ask the user whether to run LLM review, and ask whether to enable the Skill; do not try to manually perform or bypass those steps.

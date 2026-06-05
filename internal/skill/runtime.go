@@ -295,7 +295,7 @@ func (r *Runtime) ToolDefs(withIntent func(map[string]any) map[string]any) []Too
 		startParams = withIntent(startParams)
 	}
 	return []ToolDef{
-		{Name: ToolLoad, Description: "Load the full SKILL.md instructions for an enabled skill listed in Available Skills. Only use when the skill is relevant to the current task.", Parameters: loadParams},
+		{Name: ToolLoad, Description: "Load full details for an enabled skill. Use only when you need the skill's full instructions; do not use just to list or summarize available skills.", Parameters: loadParams},
 		{Name: ToolStart, Description: "Start the built-in Skill verification workflow. Use import to import a Skill source, or check after you have prepared a new Skill directory with file tools. The workflow runs static check, asks the user whether to run LLM review, and asks whether to enable.", Parameters: startParams},
 	}
 }

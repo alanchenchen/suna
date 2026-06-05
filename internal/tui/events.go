@@ -299,8 +299,35 @@ func (t *TUI) handleSkillLoadNotification(p protocol.SkillLoadParams) {
 	} else {
 		t.chat.ClearStatusLabel()
 	}
+	if t.updateLastSkillLoadMessage(p) {
+		t.scrollToBottomOnNextSync()
+		return
+	}
 	t.appendNonToolMessage(chatMsg{Role: "skill", Content: p})
 	t.scrollToBottomOnNextSync()
+}
+
+func (t *TUI) updateLastSkillLoadMessage(p protocol.SkillLoadParams) bool {
+	name := strings.TrimSpace(p.Name)
+	if name == "" {
+		return false
+	}
+	for i := len(t.chat.Messages) - 1; i >= 0; i-- {
+		msg := &t.chat.Messages[i]
+		switch msg.Role {
+		case "skill":
+			prev, ok := msg.Content.(protocol.SkillLoadParams)
+			if !ok || strings.TrimSpace(prev.Name) != name {
+				return false
+			}
+			msg.Content = p
+			msg.Render = chatMsg{}.Render
+			return true
+		case "assistant", "user", "error", "system", "restore_summary", "panel", "skill_review":
+			return false
+		}
+	}
+	return false
 }
 
 func (t *TUI) handleSkillReviewNotification(p protocol.SkillReviewParams) {
