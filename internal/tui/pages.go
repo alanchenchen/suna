@@ -40,7 +40,7 @@ func (t *TUI) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (t *TUI) initWelcomeList() {
 	if !t.menu.HasItems() {
-		t.menu = welcomepage.New(welcomepage.Deps{Tr: func(key string) string { return t.tr(key) }, Styles: welcomepage.Styles{Cursor: styleCursor, Dim: styleDim, HL: styleHL}})
+		t.menu = welcomepage.New(welcomepage.Deps{Tr: func(key string) string { return t.tr(key) }, Styles: welcomepage.Styles{Cursor: styleCursor, Dim: styleDim, HL: styleHL, Brand: styleBrand}})
 	}
 	t.menu.SetItems(t.welcomeMenuItems(), t.width)
 }

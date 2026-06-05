@@ -32,6 +32,7 @@ type Styles struct {
 	Cursor lipgloss.Style
 	Dim    lipgloss.Style
 	HL     lipgloss.Style
+	Brand  lipgloss.Style
 }
 
 type Deps struct {
@@ -120,7 +121,7 @@ func (d delegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	if index == m.Index() {
 		cursor = d.m.deps.Styles.Cursor.Render("▶ ")
 		if !wi.Disabled {
-			st = d.m.deps.Styles.HL
+			st = d.m.deps.Styles.Brand
 		}
 	}
 	line := cursor + st.Render(d.m.deps.Tr(wi.LabelKey))
