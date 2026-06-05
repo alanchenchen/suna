@@ -45,6 +45,7 @@ func (p *OpenAIChatProvider) Complete(ctx context.Context, req *CompletionReques
 	}
 	if tools := p.buildTools(req.Tools); len(tools) > 0 {
 		params.Tools = tools
+		params.ParallelToolCalls = openai.Bool(true)
 	}
 	opts, err := reasoningRequestOptions(req.Reasoning, chatGeneratedKeys())
 	if err != nil {

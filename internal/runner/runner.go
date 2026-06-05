@@ -144,15 +144,14 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 		toolCallsExecuted += len(preparedCalls)
 
 		workingSnapshot := req.Working.Messages()
-		results := r.executeToolCalls(ctx, preparedCalls, workingSnapshot)
-		for _, execResult := range results {
+		results := r.executeToolCalls(ctx, preparedCalls, workingSnapshot, func(execResult toolExecResult) {
 			if r.Sink != nil {
 				r.Sink.ToolResult(ToolResultEvent{ID: execResult.tc.ID, Name: execResult.tc.Name, Result: execResult.result.Content, Error: execResult.result.IsError, Metadata: execResult.result.Metadata})
 			}
 			if execResult.result.IsError {
 				result.HadToolError = true
 			}
-		}
+		})
 
 		for _, execResult := range results {
 			req.Working.AddMessage(model.Message{
@@ -244,7 +243,7 @@ func (r *Runner) prepareToolCalls(toolCalls []model.ToolCall, fullContent string
 	return preparedCalls, cleanToolCalls
 }
 
-func (r *Runner) executeToolCalls(ctx context.Context, calls []preparedToolCall, workingSnapshot []model.Message) []toolExecResult {
+func (r *Runner) executeToolCalls(ctx context.Context, calls []preparedToolCall, workingSnapshot []model.Message, onResult func(toolExecResult)) []toolExecResult {
 	resultCh := make(chan toolExecResult, len(calls))
 	for i, pc := range calls {
 		go func(index int, pc preparedToolCall) {
@@ -257,8 +256,11 @@ func (r *Runner) executeToolCalls(ctx context.Context, calls []preparedToolCall,
 	}
 	results := make([]toolExecResult, len(calls))
 	for i := 0; i < len(calls); i++ {
-		r := <-resultCh
-		results[r.index] = r
+		execResult := <-resultCh
+		results[execResult.index] = execResult
+		if onResult != nil {
+			onResult(execResult)
+		}
 	}
 	return results
 }
