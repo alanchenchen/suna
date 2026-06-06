@@ -53,6 +53,8 @@ func logLLM(level string, req *CompletionRequest, status string, err error, fiel
 		fields["model"] = req.Model
 		fields["request_messages"] = len(req.Messages)
 		fields["tool_defs"] = len(req.Tools)
+		fields["max_tokens"] = req.MaxTokens
+		fields["temperature"] = req.Temperature
 	}
 	if level == "ERROR" {
 		logging.Error("llm", "request", err, fields)

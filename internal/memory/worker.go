@@ -12,6 +12,7 @@ import (
 	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/prompt"
+	"github.com/google/uuid"
 )
 
 type Worker struct {
@@ -25,8 +26,9 @@ type Worker struct {
 }
 
 const (
-	batchSize    = 5
-	batchTimeout = 60 * time.Second
+	batchSize              = 5
+	batchTimeout           = 60 * time.Second
+	memoryCompactMaxTokens = 1536
 )
 
 func NewWorker(queue *ExtractQueue, memories *MemoryStore, db *sql.DB, provider model.Provider) *Worker {
@@ -120,9 +122,11 @@ func (w *Worker) processPending() {
 		_ = RetryQueueItems(context.Background(), w.db, ids, err)
 		return
 	}
-	newList, err := w.compact(ctx, provider, current, items)
+	requestID := uuid.New().String()
+	logging.Info("memory", "compaction_start", logging.Event{"request_id": requestID, "queue_events": len(items), "queue_ids": compactQueueIDs(items), "attempts": compactAttempts(items), "significance": compactSignificance(items), "active_memories_before": len(current), "max_tokens": memoryCompactMaxTokens})
+	newList, err := w.compact(ctx, provider, current, items, requestID)
 	if err != nil {
-		logging.Error("memory", "compaction_failed", err, logging.Event{"queue_events": len(items), "active_memories_before": len(current)})
+		logging.Error("memory", "compaction_failed", err, logging.Event{"request_id": requestID, "queue_events": len(items), "queue_ids": compactQueueIDs(items), "attempts": compactAttempts(items), "significance": compactSignificance(items), "active_memories_before": len(current), "max_tokens": memoryCompactMaxTokens, "will_retry": true})
 		_ = RetryQueueItems(context.Background(), w.db, ids, err)
 		return
 	}
@@ -136,7 +140,7 @@ func (w *Worker) processPending() {
 		return
 	}
 	_, _ = w.db.ExecContext(ctx, `UPDATE conversation_state SET memory_processed_at = ?, updated_at = ? WHERE user_id = ?`, time.Now(), time.Now(), DefaultUserID)
-	logging.Info("memory", "compaction_success", logging.Event{"queue_events": len(items), "active_memories": len(newList)})
+	logging.Info("memory", "compaction_success", logging.Event{"request_id": requestID, "queue_events": len(items), "active_memories_before": len(current), "active_memories_after": len(newList)})
 }
 
 type compactionMemory struct {
@@ -152,11 +156,11 @@ type compactionResult struct {
 	Memories []compactionMemory `json:"memories"`
 }
 
-func (w *Worker) compact(ctx context.Context, provider model.Provider, current []UserMemory, items []QueueItem) ([]UserMemory, error) {
+func (w *Worker) compact(ctx context.Context, provider model.Provider, current []UserMemory, items []QueueItem, requestID string) ([]UserMemory, error) {
 	systemPrompt := w.renderCompactionPrompt(current, items)
 	// 记忆整理是异步 LLM 调用，一次处理多条 queue event，并要求模型返回完整的新列表。
 	// 主请求链路不会等待这个调用，因此不会影响用户看到回复的延迟。
-	ch, err := provider.Complete(ctx, &model.CompletionRequest{Purpose: "memory_compact", System: systemPrompt, Messages: []model.Message{model.NewTextMessage(model.RoleUser, "Return the new active memory JSON now.")}, MaxTokens: 4096})
+	ch, err := provider.Complete(ctx, &model.CompletionRequest{Purpose: "memory_compact", RequestID: requestID, System: systemPrompt, Messages: []model.Message{model.NewTextMessage(model.RoleUser, "Return the new active memory JSON now.")}, MaxTokens: memoryCompactMaxTokens})
 	if err != nil {
 		return nil, err
 	}
@@ -229,6 +233,42 @@ func parseCompactionResult(raw string) *compactionResult {
 		return nil
 	}
 	return &result
+}
+
+func compactQueueIDs(items []QueueItem) string {
+	parts := make([]string, 0, min(len(items), 8))
+	for i, it := range items {
+		if i >= 8 {
+			parts = append(parts, fmt.Sprintf("+%d", len(items)-i))
+			break
+		}
+		parts = append(parts, it.ID)
+	}
+	return strings.Join(parts, ",")
+}
+
+func compactAttempts(items []QueueItem) string {
+	parts := make([]string, 0, min(len(items), 8))
+	for i, it := range items {
+		if i >= 8 {
+			parts = append(parts, fmt.Sprintf("+%d", len(items)-i))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("%d", it.Attempts))
+	}
+	return strings.Join(parts, ",")
+}
+
+func compactSignificance(items []QueueItem) string {
+	parts := make([]string, 0, min(len(items), 8))
+	for i, it := range items {
+		if i >= 8 {
+			parts = append(parts, fmt.Sprintf("+%d", len(items)-i))
+			break
+		}
+		parts = append(parts, string(it.Significance))
+	}
+	return strings.Join(parts, ",")
 }
 
 func resetTimer(timer *time.Timer) {
