@@ -80,9 +80,6 @@ func (m *Model) ModelRows(deps RowsDeps) []Row {
 		m.Models = append(m.Models, ref)
 		active := deps.IsActive != nil && deps.IsActive(ref)
 		label := ModelStatusMark(mc, active) + " " + ref
-		if active && !ModelNeedsAttention(mc) {
-			label = "● " + deps.Tr("tui.config.activated_status") + "  " + ref
-		}
 		rows = append(rows, Row{"model", ref, label, deps.ModelSummary(mc)})
 	}
 	if len(models) > 0 {

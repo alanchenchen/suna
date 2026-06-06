@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestModelRowsActiveModelIsProminent(t *testing.T) {
+func TestModelRowsActiveModelUsesMarkerWithoutRepeatedActiveText(t *testing.T) {
 	m := &Model{Page: "models"}
 	rows := m.ModelRows(RowsDeps{
 		Tr: func(key string) string {
@@ -17,7 +17,7 @@ func TestModelRowsActiveModelIsProminent(t *testing.T) {
 		Models:   []ModelConfig{{Provider: "openai", Model: "gpt-4o", BaseURL: "https://example.test", HasAPIKey: true}},
 		IsActive: func(ref string) bool { return ref == "openai/gpt-4o" },
 		ModelSummary: func(ModelConfig) string {
-			return "Activated · openai · gpt-4o"
+			return "openai · gpt-4o"
 		},
 	})
 
@@ -25,7 +25,11 @@ func TestModelRowsActiveModelIsProminent(t *testing.T) {
 		t.Fatalf("ModelRows returned no rows")
 	}
 	label := rows[0].Label
-	if !strings.Contains(label, "●") || !strings.Contains(label, "Activated") {
-		t.Fatalf("active model label = %q, want prominent active marker", label)
+	value := rows[0].Value
+	if !strings.HasPrefix(label, "◉ ") {
+		t.Fatalf("active model label = %q, want active marker prefix", label)
+	}
+	if strings.Contains(label, "Activated") || strings.Contains(value, "Activated") {
+		t.Fatalf("active model row = %q / %q, should not repeat active text", label, value)
 	}
 }
