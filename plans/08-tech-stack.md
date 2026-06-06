@@ -98,10 +98,12 @@ internal/guard/
 
 ```
 1. Windows 没有 Unix Socket → Named Pipe (go-winio, 微软官方, Docker 同款)
-2. Socket 残留文件 → daemon 启动时检测+清理 (尝试连接 → 连不上 → 删除残留)
-3. NDJSON 分帧 → 每条 JSON 单行，\n 分隔，JSON 内用 \n 转义
-4. TUI 重连 → daemon 推送 daemon.state 恢复显示
-5. 大消息阻塞 → local conn.Send 带 context timeout
+2. Windows Named Pipe 位于全局命名空间 → 默认 pipe 名带当前用户标识 hash，避免多用户/旧实例冲突
+3. Windows Named Pipe ACL → 使用 go-winio 默认 ACL；不要使用 CO-only SDDL，否则部分环境会 `Access is denied`
+4. Socket 残留文件 → daemon 启动时检测+清理 (尝试连接 → 连不上 → 删除残留)
+5. NDJSON 分帧 → 每条 JSON 单行，\n 分隔，JSON 内用 \n 转义
+6. 连接握手 → OnConnect 只登记 EventSink，不同步推送 full_status；TUI 通过 daemon.status/config.get 主动拉初始状态
+7. 大消息阻塞 → local conn.Send 带 context timeout
 ```
 
 #### Exec 工具 (os/exec)
@@ -166,7 +168,8 @@ suna/
 │   │   ├── client.go            # local protocol client，供 TUI 和 CLI 复用
 │   │   ├── jsonrpc.go           # NDJSON + JSON-RPC framing
 │   │   ├── transport_unix.go    # Unix Socket (//go:build !windows)
-│   │   └── transport_windows.go # Named Pipe  (//go:build windows)
+│   │   ├── transport_windows.go # Named Pipe  (//go:build windows)
+│   │   └── framing_windows.go   # Windows Named Pipe line framing helpers (//go:build windows)
 │   ├── core/                    # Agent 内核
 │   │   ├── agent.go             # Agent struct + Run loop + 管理 API + Guard confirm
 │   │   ├── agent_management.go  # NewSession/RestoreSession/newGuardForSession

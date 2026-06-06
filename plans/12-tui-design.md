@@ -780,8 +780,8 @@ TUI 需要 daemon 提供的展示数据：
 
 | 数据 | 当前用途 |
 |---|---|
-| `daemon.status` | Welcome 状态、active provider/model、context window、usage、memory、last session 是否可恢复 |
-| `daemon.state` | 连接时 provider/model/PID 等轻量状态 |
+| `daemon.status` | Welcome 状态、active provider/model、context window、usage、memory、last session 是否可恢复；TUI 连接后主动拉取初始状态 |
+| `daemon.state` | 轻量 daemon 状态通知；当前不作为连接握手的必需欢迎消息 |
 | `config.get` | Config models、active_model、locale、theme、guard_mode、workspace |
 | `config.set` | upsert/delete/activate model，update general（locale/theme/guard_mode/workspace） |
 | `agent.stream` | assistant chunk、usage、context tokens/window、done |

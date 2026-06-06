@@ -3,9 +3,13 @@
 package local
 
 import (
+	"bufio"
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,14 +32,33 @@ type NamedPipeTransport struct {
 }
 
 type pipeConn struct {
-	id   string
-	conn net.Conn
-	mu   sync.Mutex
+	id     string
+	conn   net.Conn
+	reader *bufio.Reader
+	mu     sync.Mutex
 }
 
 // DefaultEndpoint 返回当前平台 local transport 使用的默认监听地址。
 func DefaultEndpoint() string {
-	return `\\.\pipe\sunad`
+	return `\\.\pipe\sunad-` + currentUserPipeSuffix()
+}
+
+func currentUserPipeSuffix() string {
+	// Windows Named Pipe 位于全局命名空间。把当前用户目录哈希进 pipe 名，
+	// 避免不同用户会话、旧发行版或残留实例抢占同一个 \\.\pipe\sunad；
+	// UserHomeDir 在少数环境不可用时，回退到 Windows 用户相关环境变量。
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		home = os.Getenv("USERPROFILE")
+	}
+	if home == "" {
+		home = os.Getenv("USERNAME")
+	}
+	if home == "" {
+		return "default"
+	}
+	sum := sha1.Sum([]byte(home))
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 func platformDial(endpoint string, timeout time.Duration) (net.Conn, error) {
@@ -52,8 +75,12 @@ func (t *NamedPipeTransport) Name() string { return "local" }
 func (t *NamedPipeTransport) Mount(ctx context.Context, svc protocol.Service) error {
 	t.svc = svc
 	t.ctx, t.cancel = context.WithCancel(ctx)
-	// DACL 仅允许当前用户连接，和 Unix socket 0600 权限保持同一安全语义。
-	listener, err := winio.ListenPipe(t.pipePath, &winio.PipeConfig{SecurityDescriptor: "D:P(A;;GA;;;CO)"})
+	// 使用 go-winio 默认 Named Pipe ACL。此前 CO-only SDDL 在部分 Windows 环境下
+	// 会让同一用户客户端 DialPipe 返回 Access is denied；pipe 名已按用户隔离。
+	listener, err := winio.ListenPipe(t.pipePath, &winio.PipeConfig{
+		InputBufferSize:  64 * 1024,
+		OutputBufferSize: 64 * 1024,
+	})
 	if err != nil {
 		return fmt.Errorf("listen named pipe: %w", err)
 	}
@@ -76,7 +103,7 @@ func (t *NamedPipeTransport) acceptLoop() {
 			}
 			continue
 		}
-		pc := &pipeConn{id: uuid.New().String()[:8], conn: conn}
+		pc := &pipeConn{id: uuid.New().String()[:8], conn: conn, reader: bufio.NewReader(conn)}
 		t.mu.Lock()
 		t.conns[pc.id] = pc
 		t.mu.Unlock()
@@ -117,38 +144,11 @@ func (t *NamedPipeTransport) ConnectionCount() int {
 func (c *pipeConn) ID() string { return c.id }
 
 func (c *pipeConn) Send(ctx context.Context, msg []byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	done := make(chan error, 1)
-	go func() {
-		data := append(msg, '\n')
-		_, err := c.conn.Write(data)
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return sendFrame(ctx, &c.mu, c.conn, msg)
 }
 
 func (c *pipeConn) Receive() ([]byte, error) {
-	var buf [1]byte
-	var line []byte
-	for {
-		_, err := c.conn.Read(buf[:])
-		if err != nil {
-			return nil, err
-		}
-		if buf[0] == '\n' {
-			if len(line) > 0 {
-				return line, nil
-			}
-			continue
-		}
-		line = append(line, buf[0])
-	}
+	return receiveFrame(c.reader)
 }
 
 func (c *pipeConn) Close() error { return c.conn.Close() }

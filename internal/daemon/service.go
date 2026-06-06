@@ -30,16 +30,10 @@ type service struct {
 func newService(d *Daemon) *service { return &service{daemon: d} }
 
 func (s *service) OnConnect(ctx context.Context, connID string, sink protocol.EventSink) {
+	// 连接建立阶段只登记 sink，不同步推送状态。
+	// Windows Named Pipe 上同步写 notification 可能阻塞，从而挡住后续 daemon.status 请求。
+	_ = ctx
 	s.daemon.addConnection(connID, sink)
-	s.ensureConfigLoaded()
-	state := protocol.DaemonStateParams{AgentStatus: "idle"}
-	state.PID = os.Getpid()
-	state.Uptime = s.daemon.Uptime().Truncate(time.Second).String()
-	state.Connections = s.daemon.ConnectionCount()
-	state.ProviderName = s.daemon.ProviderName()
-	state.ModelName = s.daemon.ModelName()
-	_ = sink.Emit(ctx, protocol.Event{Method: protocol.NotifyDaemonState, Params: state})
-	_ = sink.Emit(ctx, protocol.Event{Method: protocol.NotifyDaemonFullStatus, Params: s.buildDaemonStatus(ctx)})
 }
 
 func (s *service) OnDisconnect(ctx context.Context, connID string) {
@@ -83,9 +77,9 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 	case protocol.MethodAttachmentClear:
 		return s.handleAttachmentClear()
 	case protocol.MethodDaemonStatus:
-		status := s.buildDaemonStatus(ctx)
-		_ = sink.Emit(ctx, protocol.Event{Method: protocol.NotifyDaemonFullStatus, Params: status})
-		return status, nil
+		// daemon.status 是 CLI 启动探测和 TUI 初始拉取的快路径：只返回 response，
+		// 不在这里同步 Emit full_status，避免慢 pipe/短连接阻塞响应。
+		return s.buildDaemonStatus(ctx), nil
 	case protocol.MethodConfigGet:
 		return configToParams(s.daemon.agent.Config()), nil
 	case protocol.MethodConfigSet:

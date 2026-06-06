@@ -82,6 +82,28 @@ func ensureDaemonRunning() {
 	startDaemon()
 }
 
+type daemonProbeError struct {
+	DialErr   error
+	InvokeErr error
+}
+
+func (e daemonProbeError) Error() string {
+	if e.InvokeErr != nil {
+		return "invoke daemon status: " + e.InvokeErr.Error()
+	}
+	if e.DialErr != nil {
+		return "dial daemon endpoint: " + e.DialErr.Error()
+	}
+	return "daemon probe failed"
+}
+
+func (e daemonProbeError) Unwrap() error {
+	if e.InvokeErr != nil {
+		return e.InvokeErr
+	}
+	return e.DialErr
+}
+
 func startDaemon() {
 	exe, err := os.Executable()
 	if err != nil {
@@ -103,12 +125,13 @@ func startDaemon() {
 	if waitUntilDaemonAvailable(10 * time.Second) {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "Error: daemon failed to start within 10 seconds (check logs at ~/.suna/logs/app.log)\n")
+	fmt.Fprintf(os.Stderr, "Error: daemon failed to start within 10 seconds (check logs at %s)\n", config.DefaultLogPath())
 	os.Exit(1)
 }
 
 func waitUntilDaemonAvailable(timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
+	var lastErr error
 	for time.Now().Before(deadline) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		_, err := queryDaemonStatus(ctx)
@@ -116,7 +139,11 @@ func waitUntilDaemonAvailable(timeout time.Duration) bool {
 		if err == nil {
 			return true
 		}
+		lastErr = err
 		time.Sleep(200 * time.Millisecond)
+	}
+	if lastErr != nil {
+		fmt.Fprintf(os.Stderr, "sunad: last probe error: %s\n", lastErr)
 	}
 	return false
 }
@@ -155,10 +182,14 @@ func requestDaemonStop(ctx context.Context) error {
 func invokeLocal(ctx context.Context, method string, params any) (json.RawMessage, error) {
 	client, err := local.DialDefault(time.Second)
 	if err != nil {
-		return nil, err
+		return nil, daemonProbeError{DialErr: err}
 	}
 	defer client.Close()
-	return client.InvokeRaw(ctx, method, params)
+	raw, err := client.InvokeRaw(ctx, method, params)
+	if err != nil {
+		return nil, daemonProbeError{InvokeErr: err}
+	}
+	return raw, nil
 }
 
 func readPID() (int, error) {

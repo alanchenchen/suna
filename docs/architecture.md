@@ -55,6 +55,8 @@ internal/tui/transport
 - 接收 daemon notification。
 - 将少量同步查询结果转换为 TUI 可消费的通知。
 
+连接建立本身只注册本地 event sink；TUI 初始展示状态通过 `daemon.status`、`config.get` 等 request 主动拉取，后续运行过程再消费 daemon notification。
+
 ## Daemon
 
 daemon 是长期运行的本地服务，负责协调核心能力：

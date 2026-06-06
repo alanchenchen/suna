@@ -44,6 +44,11 @@ func (a *Agent) ReloadConfigFromDiskIfNeeded() (*config.Config, error) {
 	defer a.configMu.Unlock()
 	info, err := os.Stat(a.cfg.ConfigPath())
 	if err != nil {
+		// 首次启动时 config.toml 可能还不存在，这是正常的配置向导状态；
+		// 保持内存中的空配置即可，不要向上返回错误导致 daemon 状态请求刷 ERROR。
+		if os.IsNotExist(err) {
+			return a.cfg.Clone(), nil
+		}
 		return a.cfg.Clone(), err
 	}
 	if !info.ModTime().After(a.configModTime) && len(a.cfg.Models) > 0 {
