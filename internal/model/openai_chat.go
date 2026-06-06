@@ -22,7 +22,9 @@ type OpenAIChatProvider struct {
 
 func NewOpenAIChatProvider(apiKey, baseURL, model string, contextWindow int, mediaResolver MediaResolver) *OpenAIChatProvider {
 	httpClient := compatibleHTTPClient(&http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}})
-	opts := []option.RequestOption{option.WithAPIKey(apiKey), option.WithHTTPClient(httpClient)}
+	// 关闭 SDK 隐式重试，避免一次 Suna Complete 在上游产生多次不可见请求；
+	// 未来如需重试应由 Suna 自己实现并记录日志。
+	opts := []option.RequestOption{option.WithAPIKey(apiKey), option.WithHTTPClient(httpClient), option.WithMaxRetries(0)}
 	if baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
 	}

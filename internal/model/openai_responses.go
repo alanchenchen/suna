@@ -21,7 +21,9 @@ type OpenAIResponsesProvider struct {
 
 func NewOpenAIResponsesProvider(apiKey, baseURL, model string, contextWindow int, mediaResolver MediaResolver) *OpenAIResponsesProvider {
 	httpClient := compatibleHTTPClient(&http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}})
-	client := openai.NewClient(option.WithAPIKey(apiKey), option.WithBaseURL(baseURL), option.WithHTTPClient(httpClient))
+	// 关闭 SDK 隐式重试，避免一次 Suna Complete 在上游产生多次不可见请求；
+	// 未来如需重试应由 Suna 自己实现并记录日志。
+	client := openai.NewClient(option.WithAPIKey(apiKey), option.WithBaseURL(baseURL), option.WithHTTPClient(httpClient), option.WithMaxRetries(0))
 	return &OpenAIResponsesProvider{client: client, model: model, contextWindow: contextWindow, media: mediaResolver}
 }
 
