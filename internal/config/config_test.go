@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alanchenchen/suna/internal/skill"
 )
 
 func TestGuardWorkspaceNormalizesExistingDirectory(t *testing.T) {
@@ -142,6 +144,51 @@ func TestConfigReasoningSavesInlineThinkingTable(t *testing.T) {
 	}
 	if got := thinking["type"]; got != "disabled" {
 		t.Fatalf("thinking.type = %#v, want %q", got, "disabled")
+	}
+}
+
+func TestConfigSaveWritesSkillsAsFlatObjectMap(t *testing.T) {
+	dir := t.TempDir()
+	workspace := mkdir(t, filepath.Join(dir, "workspace"))
+	cfg := &Config{
+		ActiveModel: "test/model",
+		Models:      []ModelConfig{{Provider: "test", Model: "model"}},
+		Guard:       GuardConfig{Mode: "ask", Workspace: workspace},
+		UI:          UIConfig{Theme: "auto", Locale: "en"},
+		Skills: map[string]skill.Record{
+			"img":         {Enabled: true, Reasons: []string{"contains binary or obfuscated content", "includes scripts/ helper files"}},
+			"code-review": {Enabled: true},
+			"needs.quote": {Enabled: false, Reasons: []string{"mentions sensitive environment variables or tokens"}},
+		},
+		DataDir: dir,
+	}
+	path := filepath.Join(dir, "config.toml")
+
+	if err := cfg.Save(path); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	data := readFile(t, path)
+	if strings.Contains(data, "[skills]\n") {
+		t.Fatalf("saved config = %q, should not contain standalone [skills] table", data)
+	}
+	for _, section := range []string{"[skills.code-review]", "[skills.img]", "[skills.\"needs.quote\"]"} {
+		if !strings.Contains(data, section) {
+			t.Fatalf("saved config = %q, want section %s", data, section)
+		}
+	}
+	if !strings.Contains(data, `reasons = ["contains binary or obfuscated content", "includes scripts/ helper files"]`) {
+		t.Fatalf("saved config = %q, want inline reasons array", data)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !loaded.Skills["img"].Enabled || len(loaded.Skills["img"].Reasons) != 2 {
+		t.Fatalf("loaded img skill = %#v, want enabled with reasons", loaded.Skills["img"])
+	}
+	if loaded.Skills["needs.quote"].Enabled {
+		t.Fatalf("loaded needs.quote skill = %#v, want disabled", loaded.Skills["needs.quote"])
 	}
 }
 

@@ -67,7 +67,7 @@ func cloneSkillRecords(in map[string]skill.Record) map[string]skill.Record {
 }
 
 // DefaultMaxModelRPS 是每个模型 ref 的默认请求限速，避免 subtask 并发打爆供应商。
-const DefaultMaxModelRPS = 15
+const DefaultMaxModelRPS = 10
 
 func (c *Config) GetMaxModelRPS() int {
 	if c.MaxModelRPS <= 0 {
@@ -87,13 +87,12 @@ type ModelConfig struct {
 }
 
 type configTOML struct {
-	ActiveModel string                  `toml:"active_model"`
-	Models      []modelConfigTOML       `toml:"models"`
-	Guard       GuardConfig             `toml:"guard"`
-	UI          UIConfig                `toml:"ui"`
-	Skills      map[string]skill.Record `toml:"skills,omitempty"`
-	Hooks       []HookConfig            `toml:"hooks"`
-	MaxModelRPS int                     `toml:"max_model_rps,omitzero"`
+	ActiveModel string            `toml:"active_model"`
+	Models      []modelConfigTOML `toml:"models"`
+	Guard       GuardConfig       `toml:"guard"`
+	UI          UIConfig          `toml:"ui"`
+	Hooks       []HookConfig      `toml:"hooks"`
+	MaxModelRPS int               `toml:"max_model_rps,omitzero"`
 }
 
 type modelConfigTOML struct {
@@ -252,6 +251,7 @@ func (c *Config) Save(path string) error {
 	if err := toml.NewEncoder(&buf).Encode(c.tomlView()); err != nil {
 		return fmt.Errorf("encode config: %w", err)
 	}
+	writeSkillRecordsTOML(&buf, c.Skills)
 	return os.WriteFile(path, buf.Bytes(), 0644)
 }
 
@@ -272,9 +272,35 @@ func (c *Config) tomlView() configTOML {
 		Models:      models,
 		Guard:       c.Guard,
 		UI:          c.UI,
-		Skills:      cloneSkillRecords(c.Skills),
 		Hooks:       c.Hooks,
 		MaxModelRPS: c.MaxModelRPS,
+	}
+}
+
+func writeSkillRecordsTOML(buf *bytes.Buffer, records map[string]skill.Record) {
+	if len(records) == 0 {
+		return
+	}
+	names := make([]string, 0, len(records))
+	for name := range records {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	if buf.Len() > 0 && !strings.HasSuffix(buf.String(), "\n\n") {
+		buf.WriteString("\n")
+	}
+	for _, name := range names {
+		record := records[name]
+		buf.WriteString("[skills.")
+		buf.WriteString(formatTOMLKey(name))
+		buf.WriteString("]\n")
+		buf.WriteString(fmt.Sprintf("enabled = %t\n", record.Enabled))
+		if len(record.Reasons) > 0 {
+			buf.WriteString("reasons = ")
+			buf.WriteString(formatInlineTOMLValue(record.Reasons))
+			buf.WriteString("\n")
+		}
+		buf.WriteString("\n")
 	}
 }
 

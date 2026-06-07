@@ -277,8 +277,8 @@ Suna 当前只读取默认数据目录下的 `config.toml` 和 `credentials.toml
 # 主代理使用的模型 (必填，格式为 "provider/model")
 active_model = "glm/glm-4"
 
-# 每个模型 ref 的默认请求限速。<= 0 时使用默认值 15。
-max_model_rps = 15
+# 每个模型 ref 的默认请求限速。<= 0 时使用默认值 10。
+max_model_rps = 10
 
 # 模型列表，每个模型平级
 [[models]]
@@ -375,7 +375,7 @@ command = "echo checking"
 | 字段 | 类型 | 必填 | 默认值 | 当前用途 |
 |---|---|---|---|---|
 | `active_model` | string | 否 | 第一个 `[[models]]` | 当前 daemon 默认模型，格式为 `provider/model`，必须能匹配某个模型配置。 |
-| `max_model_rps` | int | 否 | `15` | 每个模型 ref 的请求限速，用于避免 subtask 并发打爆供应商。 |
+| `max_model_rps` | int | 否 | `10` | 每个模型 ref 的请求限速，用于避免 subtask 并发打爆供应商。 |
 | `[[models]]` | array | 是 | 无 | 至少需要一个模型，否则 daemon/TUI 进入配置向导。 |
 | `models.provider` | string | 是 | 无 | provider 协议名，也是 `credentials.toml` 里 API key 的分组名。`openai` 表示 OpenAI Responses 协议，`anthropic` 表示 Anthropic Messages 协议，其它名称表示 OpenAI-compatible Chat Completions 协议。 |
 | `models.model` | string | 是 | 无 | 模型 ID。模型 ref 为 `provider/model`。 |

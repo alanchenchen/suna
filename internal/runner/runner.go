@@ -13,6 +13,8 @@ import (
 	"github.com/alanchenchen/suna/internal/tools"
 )
 
+const defaultStreamTimeout = 10 * time.Minute
+
 func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 	var result Result
 	if r.Router == nil {
@@ -32,7 +34,7 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 	}
 	req.MaxTokens = model.ResolveMaxTokens(req.MaxTokens)
 	if req.StreamTimeout <= 0 {
-		req.StreamTimeout = 120 * time.Second
+		req.StreamTimeout = defaultStreamTimeout
 	}
 
 	turns := 0
@@ -213,7 +215,7 @@ func (r *Runner) readStream(ctx context.Context, ch <-chan model.Chunk, req Requ
 				return fullContent, toolCalls, lastUsage, nil
 			}
 		case <-timer.C:
-			return fullContent, toolCalls, lastUsage, fmt.Errorf("LLM stream timeout (120s), try Esc to cancel")
+			return fullContent, toolCalls, lastUsage, fmt.Errorf("LLM stream idle timeout (%s). The model may still be thinking; continue or retry if needed", req.StreamTimeout)
 		case <-ctx.Done():
 			return fullContent, toolCalls, lastUsage, ctx.Err()
 		}
