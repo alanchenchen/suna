@@ -107,7 +107,7 @@ func (m Message) Text() string {
 	return ""
 }
 
-// ToolDef 是暴露给模型的工具 schema，来自 internal/tool.Registry。
+// ToolDef 是暴露给模型的工具 schema，来自 internal/tools.Manager。
 type ToolDef struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`

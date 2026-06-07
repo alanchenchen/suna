@@ -1,9 +1,10 @@
-package tool
+package builtin
 
 import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"github.com/alanchenchen/suna/internal/tools"
 	"io"
 	"net/http"
 	"strings"
@@ -18,13 +19,8 @@ const (
 
 type ReadHTTP struct{}
 
-func (ReadHTTP) Name() string { return "readhttp" }
-func (ReadHTTP) Description() string {
-	return "Send an HTTP GET request and return response status, headers, and body."
-}
-func (ReadHTTP) Category() Category { return Perceive }
-func (ReadHTTP) Parameters() map[string]any {
-	return map[string]any{
+func (ReadHTTP) Spec() tools.Spec {
+	return builtinSpec("readhttp", "Send an HTTP GET request and return response status, headers, and body.", tools.Perceive, map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"url":     map[string]any{"type": "string", "description": "Request URL"},
@@ -32,13 +28,13 @@ func (ReadHTTP) Parameters() map[string]any {
 			"timeout": map[string]any{"type": "integer", "description": "Timeout in seconds, default 30"},
 		},
 		"required": []string{"url"},
-	}
+	})
 }
 
-func (ReadHTTP) Execute(ctx context.Context, params map[string]any) Result {
+func (ReadHTTP) Execute(ctx context.Context, params map[string]any) tools.Result {
 	url, _ := params["url"].(string)
 	if url == "" {
-		return ErrorResult("url is required")
+		return tools.ErrorResult("url is required")
 	}
 
 	timeout := httpTimeout
@@ -70,7 +66,7 @@ func (ReadHTTP) Execute(ctx context.Context, params map[string]any) Result {
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("create request: %s", err))
+		return tools.ErrorResult(fmt.Sprintf("create request: %s", err))
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -81,13 +77,13 @@ func (ReadHTTP) Execute(ctx context.Context, params map[string]any) Result {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("request failed: %s", err))
+		return tools.ErrorResult(fmt.Sprintf("request failed: %s", err))
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxHTTPBodySize+1))
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("read body: %s", err))
+		return tools.ErrorResult(fmt.Sprintf("read body: %s", err))
 	}
 
 	truncated := len(body) > maxHTTPBodySize
@@ -108,5 +104,5 @@ func (ReadHTTP) Execute(ctx context.Context, params map[string]any) Result {
 		sb.WriteString("\n... (truncated at 100KB)")
 	}
 
-	return Result{Content: sb.String(), Truncated: truncated}
+	return tools.Result{Content: sb.String(), Truncated: truncated}
 }

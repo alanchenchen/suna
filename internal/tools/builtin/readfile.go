@@ -1,10 +1,11 @@
-package tool
+package builtin
 
 import (
 	"bufio"
 	"context"
 	"encoding/base64"
 	"fmt"
+	"github.com/alanchenchen/suna/internal/tools"
 	"io"
 	"os"
 	"path/filepath"
@@ -21,13 +22,8 @@ const (
 
 type ReadFile struct{}
 
-func (ReadFile) Name() string { return "readfile" }
-func (ReadFile) Description() string {
-	return "Read file contents. Text mode streams large files by line with offset/limit pagination; binary files can be returned as base64."
-}
-func (ReadFile) Category() Category { return Perceive }
-func (ReadFile) Parameters() map[string]any {
-	return map[string]any{
+func (ReadFile) Spec() tools.Spec {
+	return builtinSpec("readfile", "Read file contents. Text mode streams large files by line with offset/limit pagination; binary files can be returned as base64.", tools.Perceive, map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"path":     map[string]any{"type": "string", "description": "File path"},
@@ -36,13 +32,13 @@ func (ReadFile) Parameters() map[string]any {
 			"encoding": map[string]any{"type": "string", "enum": []string{"text", "base64"}, "description": "Output encoding"},
 		},
 		"required": []string{"path"},
-	}
+	})
 }
 
-func (ReadFile) Execute(ctx context.Context, params map[string]any) Result {
+func (ReadFile) Execute(ctx context.Context, params map[string]any) tools.Result {
 	path, _ := params["path"].(string)
 	if path == "" {
-		return ErrorResult("path is required")
+		return tools.ErrorResult("path is required")
 	}
 	path = expandPath(path)
 
@@ -54,13 +50,13 @@ func (ReadFile) Execute(ctx context.Context, params map[string]any) Result {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return ErrorResult(fmt.Sprintf("file not found: %s", path))
+			return tools.ErrorResult(fmt.Sprintf("file not found: %s", path))
 		}
-		return ErrorResult(fmt.Sprintf("stat file: %s", err))
+		return tools.ErrorResult(fmt.Sprintf("stat file: %s", err))
 	}
 
 	if info.IsDir() {
-		return ErrorResult(fmt.Sprintf("path is a directory: %s", path))
+		return tools.ErrorResult(fmt.Sprintf("path is a directory: %s", path))
 	}
 
 	if encoding == "base64" {
@@ -69,21 +65,21 @@ func (ReadFile) Execute(ctx context.Context, params map[string]any) Result {
 	return readText(path, params)
 }
 
-func readBase64(path string, size int64) Result {
+func readBase64(path string, size int64) tools.Result {
 	if size > maxBase64Size {
-		return ErrorResult(fmt.Sprintf("file too large for base64: %d bytes (max %d)", size, maxBase64Size))
+		return tools.ErrorResult(fmt.Sprintf("file too large for base64: %d bytes (max %d)", size, maxBase64Size))
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("read file: %s", err))
+		return tools.ErrorResult(fmt.Sprintf("read file: %s", err))
 	}
-	return TextResult(base64.StdEncoding.EncodeToString(data))
+	return tools.TextResult(base64.StdEncoding.EncodeToString(data))
 }
 
-func readText(path string, params map[string]any) Result {
+func readText(path string, params map[string]any) tools.Result {
 	file, err := os.Open(path)
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("open file: %s", err))
+		return tools.ErrorResult(fmt.Sprintf("open file: %s", err))
 	}
 	defer file.Close()
 
@@ -108,7 +104,7 @@ func readText(path string, params map[string]any) Result {
 	for {
 		line, readErr := readLogicalLine(reader)
 		if readErr != nil && readErr != io.EOF {
-			return ErrorResult(fmt.Sprintf("read file: %s", readErr))
+			return tools.ErrorResult(fmt.Sprintf("read file: %s", readErr))
 		}
 		if readErr == io.EOF && line == "" {
 			break
@@ -136,7 +132,7 @@ func readText(path string, params map[string]any) Result {
 
 	content := sb.String()
 	if returned == 0 && !truncated {
-		return TextResult(fmt.Sprintf("offset %d exceeds total lines %d", offset, lineNo))
+		return tools.TextResult(fmt.Sprintf("offset %d exceeds total lines %d", offset, lineNo))
 	}
 	if truncated {
 		if nextOffset == 0 {
@@ -145,7 +141,7 @@ func readText(path string, params map[string]any) Result {
 		content += fmt.Sprintf("\n... (truncated. Use offset=%d to read more; limit capped at %d lines and %d bytes per result)", nextOffset, maxReadLineLimit, maxReadResultBytes)
 	}
 
-	return Result{Content: content, Truncated: truncated}
+	return tools.Result{Content: content, Truncated: truncated}
 }
 
 func readLogicalLine(r *bufio.Reader) (string, error) {

@@ -14,16 +14,17 @@ import (
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/prompt"
 	"github.com/alanchenchen/suna/internal/runner"
-	"github.com/alanchenchen/suna/internal/skill"
 	"github.com/alanchenchen/suna/internal/subtask"
-	"github.com/alanchenchen/suna/internal/tool"
+	"github.com/alanchenchen/suna/internal/tools"
+	"github.com/alanchenchen/suna/internal/tools/agenttools"
+	"github.com/alanchenchen/suna/internal/tools/skilltools"
 )
 
 const defaultGuardReviewStreamTimeout = 60 * time.Second
 
 var guardReviewStreamTimeout = defaultGuardReviewStreamTimeout
 
-func (a *Agent) ExecuteTool(ctx context.Context, id string, name string, params map[string]any) tool.Result {
+func (a *Agent) ExecuteTool(ctx context.Context, id string, name string, params map[string]any) tools.Result {
 	return a.executeTool(ctx, runner.ToolExecution{ID: id, Name: name, Params: params}, nil)
 }
 
@@ -32,65 +33,63 @@ type mainExecutor struct {
 	events chan<- Event
 }
 
-func (e mainExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecution) tool.Result {
+func (e mainExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecution) tools.Result {
 	return e.agent.executeTool(ctx, call, e.events)
 }
 
-func (a *Agent) executeTool(ctx context.Context, call runner.ToolExecution, events chan<- Event) tool.Result {
+func (a *Agent) executeTool(ctx context.Context, call runner.ToolExecution, events chan<- Event) tools.Result {
 	id, name, params := call.ID, call.Name, call.Params
-	if name == "askuser" {
-		return a.executeAskUser(ctx, params, events)
+	if _, ok := a.tools.Get(name); !ok {
+		return tools.ErrorResult(fmt.Sprintf("tool %q not found", name))
 	}
-	if name == "spawn" {
-		return a.executeSpawn(ctx, id, params, events)
-	}
-	if a.skills != nil && name == skill.ToolLoad && events != nil {
+	if name == skilltools.ToolLoad && events != nil {
 		skillName, _ := params["name"].(string)
 		if strings.TrimSpace(skillName) != "" {
 			events <- Event{Type: EventSkillLoad, SkillName: strings.TrimSpace(skillName), SkillLoadStatus: "loading"}
 		}
-	}
-	if a.skills != nil {
-		if res, ok := a.skills.ExecuteTool(contextWithSkillRuntime(ctx, a, events), name, params); ok {
-			if events != nil {
-				if evt, ok := skill.LoadNotificationFromResult(name, params, res); ok {
-					events <- Event{Type: EventSkillLoad, SkillName: evt.Name, SkillLoadStatus: "loaded"}
-				}
-			}
-			return res
-		}
-	}
-	t, ok := a.registry.Get(name)
-	if !ok {
-		return tool.ErrorResult(fmt.Sprintf("tool %q not found", name))
 	}
 	if a.shouldGuardTool(name) {
 		a.prepareWorkspaceParams(name, params)
 		result := a.guard.Check(ctx, name, params, a.buildGuardReviewContext(call))
 		a.emitToolGuard(events, id, name, result)
 		if result.Decision == guard.Reject {
-			return tool.ErrorResult("blocked: " + result.Reason)
+			return tools.ErrorResult("blocked: " + result.Reason)
 		}
 		if result.Decision == guard.Modify {
 			return guardModifyResult(result)
 		}
 		if result.Decision == guard.Confirm {
 			if !a.confirmGuard(ctx, id, name, params, result, events) {
-				return tool.ErrorResult("blocked: user rejected guard confirmation")
+				return tools.ErrorResult("blocked: user rejected guard confirmation")
 			}
 		}
 	}
 	if err := sensitiveReadError(name, params); err != "" {
-		return tool.ErrorResult(err)
+		return tools.ErrorResult(err)
 	}
-	result := t.Execute(ctx, params)
+	execCtx := ctx
+	if name == skilltools.ToolLoad || name == skilltools.ToolStart {
+		execCtx = contextWithSkillRuntime(ctx, a, events)
+	}
+	if name == agenttools.ToolAskUser || name == agenttools.ToolSpawn {
+		execCtx = agenttools.WithEvents(ctx, events)
+	}
+	result := a.tools.Execute(execCtx, tools.Call{ID: id, Name: name, Params: params, Intent: call.Intent, AssistantContext: call.AssistantContext})
+	if events != nil {
+		if skillName, ok := skilltools.LoadNotificationFromResult(name, params, result); ok {
+			events <- Event{Type: EventSkillLoad, SkillName: skillName, SkillLoadStatus: "loaded"}
+		}
+	}
+	if name == agenttools.ToolAskUser || name == agenttools.ToolSpawn || name == skilltools.ToolLoad || name == skilltools.ToolStart {
+		return result
+	}
 	if !result.IsError {
 		result.Content = guard.MaskSensitiveContent(result.Content)
 	}
 	return result
 }
 
-func guardModifyResult(result *guard.GuardResult) tool.Result {
+func guardModifyResult(result *guard.GuardResult) tools.Result {
 	msg := "guard requested a safer modified tool call"
 	if strings.TrimSpace(result.Reason) != "" {
 		msg += ": " + result.Reason
@@ -98,7 +97,7 @@ func guardModifyResult(result *guard.GuardResult) tool.Result {
 	if strings.TrimSpace(result.Suggestion) != "" {
 		msg += "\nsuggestion: " + result.Suggestion
 	}
-	return tool.ErrorResult(msg)
+	return tools.ErrorResult(msg)
 }
 
 func (a *Agent) emitToolGuard(events chan<- Event, id string, name string, result *guard.GuardResult) {
@@ -132,13 +131,14 @@ func (a *Agent) confirmGuard(ctx context.Context, id string, name string, params
 	}
 }
 
-func (a *Agent) executeAskUser(ctx context.Context, params map[string]any, events chan<- Event) tool.Result {
+func (a *Agent) ExecuteAskUserTool(ctx context.Context, params map[string]any) tools.Result {
+	events, _ := agenttools.Events(ctx).(chan<- Event)
 	if events == nil {
-		return tool.ErrorResult("askuser requires main agent event stream")
+		return tools.ErrorResult("askuser requires main agent event stream")
 	}
 	question, _ := params["question"].(string)
 	if question == "" {
-		return tool.ErrorResult("question is required")
+		return tools.ErrorResult("question is required")
 	}
 	var options []string
 	if o, ok := params["options"].([]any); ok {
@@ -156,34 +156,35 @@ func (a *Agent) executeAskUser(ctx context.Context, params map[string]any, event
 	events <- Event{Type: EventAskUser, Question: question, Options: options, AllowCustom: allowCustom, Reply: replyCh}
 	select {
 	case <-ctx.Done():
-		return tool.ErrorResult("cancelled")
+		return tools.ErrorResult("cancelled")
 	case answer := <-replyCh:
 		b, _ := json.Marshal(map[string]string{"answer": answer})
-		return tool.TextResult(string(b))
+		return tools.TextResult(string(b))
 	}
 }
 
-func (a *Agent) executeSpawn(ctx context.Context, id string, params map[string]any, events chan<- Event) tool.Result {
+func (a *Agent) ExecuteSpawnTool(ctx context.Context, id string, params map[string]any) tools.Result {
+	events, _ := agenttools.Events(ctx).(chan<- Event)
 	if events == nil {
-		return tool.ErrorResult("spawn requires main agent event stream")
+		return tools.ErrorResult("spawn requires main agent event stream")
 	}
 	task, _ := params["task"].(string)
 	task = strings.TrimSpace(task)
 	if task == "" {
-		return tool.ErrorResult("task is required")
+		return tools.ErrorResult("task is required")
 	}
 	modelRef, _ := params["model"].(string)
 	modelRef = strings.TrimSpace(modelRef)
 	if modelRef == "" {
-		return tool.ErrorResult("spawn requires explicit model. Choose one of: " + strings.Join(a.availableModelRefs(), ", "))
+		return tools.ErrorResult("spawn requires explicit model. Choose one of: " + strings.Join(a.availableModelRefs(), ", "))
 	}
 	if a.router == nil {
-		return tool.ErrorResult("spawn requires configured models, but no model router is available")
+		return tools.ErrorResult("spawn requires configured models, but no model router is available")
 	}
 	if _, err := a.router.Provider(modelRef); err != nil {
-		return tool.ErrorResult(fmt.Sprintf("invalid spawn model %q. Choose one of: %s", modelRef, strings.Join(a.availableModelRefs(), ", ")))
+		return tools.ErrorResult(fmt.Sprintf("invalid spawn model %q. Choose one of: %s", modelRef, strings.Join(a.availableModelRefs(), ", ")))
 	}
-	subRegistry, errResult := a.buildSubtaskRegistry(params["tools"])
+	allowedTools, toolNames, errResult := a.buildSubtaskAllowedTools(params["tools"])
 	if errResult.IsError {
 		return errResult
 	}
@@ -194,7 +195,7 @@ func (a *Agent) executeSpawn(ctx context.Context, id string, params map[string]a
 
 	extraCtx, _ := params["context"].(string)
 	env := getEnvInfo()
-	toolsSummary := strings.Join(subRegistry.Names(), ", ")
+	toolsSummary := strings.Join(toolNames, ", ")
 	if toolsSummary == "" {
 		toolsSummary = "none"
 	}
@@ -212,8 +213,8 @@ func (a *Agent) executeSpawn(ctx context.Context, id string, params map[string]a
 	if spawnID == "" {
 		spawnID = uuid.New().String()
 	}
-	r := a.newSubtaskRunner(events, spawnID, subRegistry)
-	st := subtask.New(subtask.Request{ID: spawnID, Task: task, Input: inputBlocks, ModelRef: modelRef, ModelID: resolveModelID(a.cfg, modelRef), System: subtaskPrompt, Tools: subRegistry})
+	r := a.newSubtaskRunner(events, spawnID, allowedTools)
+	st := subtask.New(subtask.Request{ID: spawnID, Task: task, Input: inputBlocks, ModelRef: modelRef, ModelID: resolveModelID(a.cfg, modelRef), System: subtaskPrompt})
 	res, err := st.Run(ctx, r)
 	if err != nil && res.Text == "" {
 		res.Text = err.Error()
@@ -223,9 +224,9 @@ func (a *Agent) executeSpawn(ctx context.Context, id string, params map[string]a
 	return spawnToolResult(string(out), res)
 }
 
-func spawnToolResult(content string, res subtask.Result) tool.Result {
+func spawnToolResult(content string, res subtask.Result) tools.Result {
 	if res.Success {
-		return tool.TextResult(content)
+		return tools.TextResult(content)
 	}
 	errText := strings.TrimSpace(res.Status)
 	if errText == "" {
@@ -234,28 +235,30 @@ func spawnToolResult(content string, res subtask.Result) tool.Result {
 	if errText == "" {
 		errText = "subtask failed"
 	}
-	return tool.Result{Content: content, Error: errText, IsError: true}
+	return tools.Result{Content: content, Error: errText, IsError: true}
 }
 
-func (a *Agent) newSubtaskRunner(events chan<- Event, spawnID string, subRegistry *tool.Registry) *runner.Runner {
-	return &runner.Runner{Router: a.router, Compressor: a.compressor, Executor: subtaskExecutor{agent: a, events: events, registry: subRegistry, spawnID: spawnID}, Sink: subtaskSink{events: events, spawnID: spawnID}, UsageSink: a, Hooks: runner.Hooks{CleanToolParams: cleanParamsForRegistry(subRegistry)}}
+func (a *Agent) newSubtaskRunner(events chan<- Event, spawnID string, allowedTools map[string]bool) *runner.Runner {
+	return &runner.Runner{Router: a.router, Compressor: a.compressor, Executor: subtaskExecutor{agent: a, events: events, allowedTools: allowedTools, spawnID: spawnID}, Sink: subtaskSink{events: events, spawnID: spawnID}, UsageSink: a, Hooks: runner.Hooks{CleanToolParams: a.cleanToolParams}}
 }
 
 type subtaskExecutor struct {
-	agent    *Agent
-	events   chan<- Event
-	registry *tool.Registry
-	spawnID  string
+	agent        *Agent
+	events       chan<- Event
+	allowedTools map[string]bool
+	spawnID      string
 }
 
-func (e subtaskExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecution) tool.Result {
+func (e subtaskExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecution) tools.Result {
 	name, params := call.Name, call.Params
 	if name == "askuser" || name == "spawn" {
-		return tool.ErrorResult("subtask cannot use " + name)
+		return tools.ErrorResult("subtask cannot use " + name)
 	}
-	t, ok := e.registry.Get(name)
-	if !ok {
-		return tool.ErrorResult(fmt.Sprintf("tool %q not allowed for subtask", name))
+	if !e.allowedTools[name] {
+		return tools.ErrorResult(fmt.Sprintf("tool %q not allowed for subtask", name))
+	}
+	if _, ok := e.agent.tools.Get(name); !ok {
+		return tools.ErrorResult(fmt.Sprintf("tool %q not found", name))
 	}
 	if e.agent.shouldGuardTool(name) {
 		e.agent.prepareWorkspaceParams(name, params)
@@ -263,21 +266,21 @@ func (e subtaskExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecut
 		eventID := e.namespaced(call.ID)
 		e.agent.emitToolGuard(e.events, eventID, name, result)
 		if result.Decision == guard.Reject {
-			return tool.ErrorResult("blocked: " + result.Reason)
+			return tools.ErrorResult("blocked: " + result.Reason)
 		}
 		if result.Decision == guard.Modify {
 			return guardModifyResult(result)
 		}
 		if result.Decision == guard.Confirm {
 			if !e.agent.confirmGuard(ctx, eventID, name, params, result, e.events) {
-				return tool.ErrorResult("blocked: user rejected guard confirmation")
+				return tools.ErrorResult("blocked: user rejected guard confirmation")
 			}
 		}
 	}
 	if err := sensitiveReadError(name, params); err != "" {
-		return tool.ErrorResult(err)
+		return tools.ErrorResult(err)
 	}
-	res := t.Execute(ctx, params)
+	res := e.agent.tools.Execute(ctx, tools.Call{ID: call.ID, Name: name, Params: params, Intent: call.Intent, AssistantContext: call.AssistantContext})
 	if !res.IsError {
 		res.Content = guard.MaskSensitiveContent(res.Content)
 	}
@@ -351,7 +354,15 @@ func trimForGuard(s string, max int) string {
 }
 
 func (a *Agent) shouldGuardTool(name string) bool {
-	return name != "askuser" && name != "spawn"
+	if a == nil || a.tools == nil {
+		// 工具目录不可用时保持保守：未知工具默认需要 Guard。
+		return true
+	}
+	spec, ok := a.tools.Get(name)
+	if !ok {
+		return true
+	}
+	return tools.ShouldGuard(spec)
 }
 
 func (a *Agent) prepareWorkspaceParams(name string, params map[string]any) {
@@ -396,48 +407,48 @@ func (s subtaskSink) namespaced(id string) string {
 	return "spawn:" + s.spawnID + ":" + id
 }
 
-func (a *Agent) buildSubtaskRegistry(value any) (*tool.Registry, tool.Result) {
+func (a *Agent) buildSubtaskAllowedTools(value any) (map[string]bool, []string, tools.Result) {
 	toolNames := parseStringList(value)
-	subRegistry := tool.NewRegistry()
-	seen := make(map[string]bool, len(toolNames))
+	allowed := make(map[string]bool, len(toolNames))
+	ordered := make([]string, 0, len(toolNames))
 	for _, name := range toolNames {
 		name = strings.TrimSpace(name)
-		if name == "" || seen[name] {
+		if name == "" || allowed[name] {
 			continue
 		}
-		seen[name] = true
-		if name == "spawn" {
-			return nil, tool.ErrorResult("subtask cannot spawn (nesting not allowed)")
+		if name == agenttools.ToolSpawn {
+			return nil, nil, tools.ErrorResult("subtask cannot spawn (nesting not allowed)")
 		}
-		if name == "askuser" {
-			return nil, tool.ErrorResult("askuser is not available to subtasks; the main agent should ask the user directly")
+		if name == agenttools.ToolAskUser {
+			return nil, nil, tools.ErrorResult("askuser is not available to subtasks; the main agent should ask the user directly")
 		}
-		if t, ok := a.registry.Get(name); ok {
-			subRegistry.Register(t)
-			continue
+		if _, ok := a.tools.Get(name); !ok {
+			return nil, nil, tools.ErrorResult(fmt.Sprintf("invalid spawn tool %q. Choose from: %s", name, strings.Join(a.availableSpawnTools(), ", ")))
 		}
-		return nil, tool.ErrorResult(fmt.Sprintf("invalid spawn tool %q. Choose from: %s", name, strings.Join(a.availableSpawnTools(), ", ")))
+		allowed[name] = true
+		ordered = append(ordered, name)
 	}
-	return subRegistry, tool.Result{}
+	sort.Strings(ordered)
+	return allowed, ordered, tools.Result{}
 }
 
-func (a *Agent) buildSubtaskInput(task string, value any) ([]model.ContentBlock, tool.Result) {
+func (a *Agent) buildSubtaskInput(task string, value any) ([]model.ContentBlock, tools.Result) {
 	blocks := []model.ContentBlock{{Type: model.ContentText, Text: task}}
 	indexes, err := parseImageIndexes(value)
 	if err != nil {
-		return nil, tool.ErrorResult(err.Error())
+		return nil, tools.ErrorResult(err.Error())
 	}
 	if len(indexes) == 0 {
-		return blocks, tool.Result{}
+		return blocks, tools.Result{}
 	}
 	images := a.currentInputImages()
 	for _, idx := range indexes {
 		if idx < 0 || idx >= len(images) {
-			return nil, tool.ErrorResult(fmt.Sprintf("invalid input image index %d; current user message has %d image(s)", idx, len(images)))
+			return nil, tools.ErrorResult(fmt.Sprintf("invalid input image index %d; current user message has %d image(s)", idx, len(images)))
 		}
 		blocks = append(blocks, images[idx])
 	}
-	return blocks, tool.Result{}
+	return blocks, tools.Result{}
 }
 
 func (a *Agent) currentInputImages() []model.ContentBlock {
@@ -483,20 +494,6 @@ func numericIndex(v any) (int, bool) {
 	}
 }
 
-func cleanParamsForRegistry(registry *tool.Registry) func(string, map[string]any) (map[string]any, string) {
-	return func(name string, params map[string]any) (map[string]any, string) {
-		intent := consumeToolIntent(params)
-		if registry == nil {
-			return params, intent
-		}
-		t, ok := registry.Get(name)
-		if !ok {
-			return params, intent
-		}
-		return filterParams(params, schemaPropertyKeys(t.Parameters())), intent
-	}
-}
-
 func (a *Agent) cleanToolParams(name string, params map[string]any) (map[string]any, string) {
 	intent := consumeToolIntent(params)
 	allowed := a.toolParamKeys(name)
@@ -517,20 +514,10 @@ func filterParams(params map[string]any, allowed map[string]bool) map[string]any
 }
 
 func (a *Agent) toolParamKeys(name string) map[string]bool {
-	if t, ok := a.registry.Get(name); ok {
-		return schemaPropertyKeys(t.Parameters())
+	if spec, ok := a.tools.Get(name); ok {
+		return schemaPropertyKeys(spec.Parameters)
 	}
-	if keys := skill.ToolParamKeys(name); keys != nil {
-		return keys
-	}
-	switch name {
-	case "askuser":
-		return map[string]bool{"question": true, "options": true, "allow_custom": true}
-	case "spawn":
-		return map[string]bool{"task": true, "model": true, "system": true, "tools": true, "context": true, "input_images": true}
-	default:
-		return nil
-	}
+	return nil
 }
 
 func schemaPropertyKeys(schema map[string]any) map[string]bool {
@@ -587,13 +574,13 @@ func (a *Agent) availableModelRefs() []string {
 }
 
 func (a *Agent) availableSpawnTools() []string {
-	if a.registry == nil {
+	if a.tools == nil {
 		return nil
 	}
-	names := a.registry.Names()
+	names := a.tools.Names()
 	filtered := names[:0]
 	for _, name := range names {
-		if name != "spawn" && name != skill.ToolLoad {
+		if name != agenttools.ToolSpawn && name != agenttools.ToolAskUser && name != skilltools.ToolLoad && name != skilltools.ToolStart {
 			filtered = append(filtered, name)
 		}
 	}

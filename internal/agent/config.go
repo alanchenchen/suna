@@ -65,6 +65,11 @@ func (a *Agent) ReloadConfigFromDiskIfNeeded() (*config.Config, error) {
 	}
 	a.guard = a.newGuardForSession(a.sessionID)
 	a.reloadSkillsLocked()
+	if a.tools != nil {
+		if err := a.tools.Reload(context.Background()); err != nil {
+			return a.cfg.Clone(), err
+		}
+	}
 	return a.cfg.Clone(), nil
 }
 
@@ -163,6 +168,11 @@ func (a *Agent) UpdateConfig(params ConfigSetParams) (*config.Config, error) {
 	}
 	a.guard = a.newGuardForSession(a.sessionID)
 	a.reloadSkillsLocked()
+	if a.tools != nil {
+		if err := a.tools.Reload(context.Background()); err != nil {
+			return nil, err
+		}
+	}
 	if info, err := os.Stat(cfg.ConfigPath()); err == nil {
 		a.configModTime = info.ModTime()
 	}

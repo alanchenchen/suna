@@ -6,7 +6,7 @@ import (
 
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
-	"github.com/alanchenchen/suna/internal/tool"
+	"github.com/alanchenchen/suna/internal/tools"
 )
 
 func (a *Agent) enqueueMemoryEvent(ctx context.Context, role model.Role, content string, hadToolCall, toolFailed, guardBlocked, userCorrection bool) {
@@ -39,7 +39,7 @@ func (a *Agent) saveConversationState(ctx context.Context) {
 	_ = a.conversation.Save(ctx, memory.DefaultUserID, memory.BuildResumeSummary(msgs), msgs, a.toolSummary)
 }
 
-func (a *Agent) addToolSummary(name string, result tool.Result) {
+func (a *Agent) addToolSummary(name string, result tools.Result) {
 	if name == "" {
 		return
 	}

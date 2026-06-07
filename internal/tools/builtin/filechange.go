@@ -1,7 +1,8 @@
-package tool
+package builtin
 
 import (
 	"fmt"
+	"github.com/alanchenchen/suna/internal/tools"
 	"strings"
 )
 
@@ -17,7 +18,7 @@ type fileChange struct {
 	Replacements int
 }
 
-func fileChangeResult(change fileChange) Result {
+func fileChangeResult(change fileChange) tools.Result {
 	added, removed := lineDelta(change.OldContent, change.NewContent)
 	before := len(change.OldContent)
 	after := len(change.NewContent)
@@ -38,7 +39,7 @@ func fileChangeResult(change fileChange) Result {
 		metadata["replacements"] = change.Replacements
 	}
 
-	return Result{Content: fileChangeContent(change, added, removed, before, after), Metadata: metadata}
+	return tools.Result{Content: fileChangeContent(change, added, removed, before, after), Metadata: metadata}
 }
 
 func fileChangeContent(change fileChange, added, removed, before, after int) string {

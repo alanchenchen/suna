@@ -8,20 +8,20 @@ import (
 	"time"
 
 	"github.com/alanchenchen/suna/internal/model"
-	"github.com/alanchenchen/suna/internal/tool"
+	"github.com/alanchenchen/suna/internal/tools"
 )
 
 type delayedExecutor struct {
 	delays map[string]time.Duration
 }
 
-func (e delayedExecutor) ExecuteTool(ctx context.Context, call ToolExecution) tool.Result {
+func (e delayedExecutor) ExecuteTool(ctx context.Context, call ToolExecution) tools.Result {
 	select {
 	case <-time.After(e.delays[call.ID]):
 	case <-ctx.Done():
-		return tool.ErrorResult(ctx.Err().Error())
+		return tools.ErrorResult(ctx.Err().Error())
 	}
-	return tool.TextResult(call.ID + " done")
+	return tools.TextResult(call.ID + " done")
 }
 
 func TestExecuteToolCallsNotifiesResultsByCompletionAndReturnsOriginalOrder(t *testing.T) {

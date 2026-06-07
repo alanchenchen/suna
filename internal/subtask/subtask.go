@@ -6,7 +6,6 @@ import (
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/runner"
-	"github.com/alanchenchen/suna/internal/tool"
 )
 
 type Request struct {
@@ -16,7 +15,6 @@ type Request struct {
 	ModelRef string
 	ModelID  string
 	System   string
-	Tools    *tool.Registry
 
 	MaxTurns     int
 	MaxToolCalls int
@@ -48,7 +46,6 @@ func (s *Subtask) Run(ctx context.Context, r *runner.Runner) (Result, error) {
 		ModelRef:      s.req.ModelRef,
 		ModelID:       s.req.ModelID,
 		Working:       working,
-		Tools:         s.req.Tools,
 		EmitStream:    false,
 		EmitReasoning: false,
 		AutoCompress:  true,

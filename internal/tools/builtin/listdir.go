@@ -1,8 +1,9 @@
-package tool
+package builtin
 
 import (
 	"context"
 	"fmt"
+	"github.com/alanchenchen/suna/internal/tools"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,13 +18,8 @@ const (
 
 type ListDir struct{}
 
-func (ListDir) Name() string { return "listdir" }
-func (ListDir) Description() string {
-	return "List directory contents as structured entries. Supports offset/limit pagination and recursive listing up to depth 3."
-}
-func (ListDir) Category() Category { return Perceive }
-func (ListDir) Parameters() map[string]any {
-	return map[string]any{
+func (ListDir) Spec() tools.Spec {
+	return builtinSpec("listdir", "List directory contents as structured entries. Supports offset/limit pagination and recursive listing up to depth 3.", tools.Perceive, map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"path":      map[string]any{"type": "string", "description": "Directory path"},
@@ -33,13 +29,13 @@ func (ListDir) Parameters() map[string]any {
 			"limit":     map[string]any{"type": "integer", "description": "Maximum entries to return, default 500, max 1000"},
 		},
 		"required": []string{"path"},
-	}
+	})
 }
 
-func (ListDir) Execute(ctx context.Context, params map[string]any) Result {
+func (ListDir) Execute(ctx context.Context, params map[string]any) tools.Result {
 	path, _ := params["path"].(string)
 	if path == "" {
-		return ErrorResult("path is required")
+		return tools.ErrorResult("path is required")
 	}
 	path = expandPath(path)
 
@@ -69,12 +65,12 @@ func (ListDir) Execute(ctx context.Context, params map[string]any) Result {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return ErrorResult(fmt.Sprintf("directory not found: %s", path))
+			return tools.ErrorResult(fmt.Sprintf("directory not found: %s", path))
 		}
-		return ErrorResult(fmt.Sprintf("stat directory: %s", err))
+		return tools.ErrorResult(fmt.Sprintf("stat directory: %s", err))
 	}
 	if !info.IsDir() {
-		return ErrorResult(fmt.Sprintf("path is not a directory: %s", path))
+		return tools.ErrorResult(fmt.Sprintf("path is not a directory: %s", path))
 	}
 
 	page := listPage{offset: offset, limit: limit}
@@ -85,17 +81,17 @@ func (ListDir) Execute(ctx context.Context, params map[string]any) Result {
 	}
 
 	if page.seen == 0 {
-		return TextResult("(empty directory)")
+		return tools.TextResult("(empty directory)")
 	}
 	if len(page.entries) == 0 {
-		return TextResult(fmt.Sprintf("offset %d exceeds scanned entries %d", offset, page.seen))
+		return tools.TextResult(fmt.Sprintf("offset %d exceeds scanned entries %d", offset, page.seen))
 	}
 	content := formatEntries(page.entries)
 	truncated := page.hasMore || page.stoppedEarly
 	if truncated {
 		content += fmt.Sprintf("\n... (truncated, at least %d entries. Use offset=%d to list more; limit capped at %d)", page.seen, page.nextOffset(), maxListLimit)
 	}
-	return Result{Content: content, Truncated: truncated}
+	return tools.Result{Content: content, Truncated: truncated}
 }
 
 type entry struct {

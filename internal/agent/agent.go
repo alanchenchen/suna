@@ -19,13 +19,16 @@ import (
 	"github.com/alanchenchen/suna/internal/prompt"
 	"github.com/alanchenchen/suna/internal/runner"
 	"github.com/alanchenchen/suna/internal/skill"
-	"github.com/alanchenchen/suna/internal/tool"
+	"github.com/alanchenchen/suna/internal/tools"
+	"github.com/alanchenchen/suna/internal/tools/agenttools"
+	"github.com/alanchenchen/suna/internal/tools/builtin"
+	"github.com/alanchenchen/suna/internal/tools/skilltools"
 )
 
 type Agent struct {
 	cfg          *config.Config
 	router       *model.Router
-	registry     *tool.Registry
+	tools        *tools.Manager
 	guard        *guard.Guard
 	working      *memory.WorkingMemory
 	sessions     *memory.SessionStore
@@ -73,20 +76,14 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 	}
 
 	sessionID := uuid.New().String()
-	registry := tool.NewRegistry()
-	registry.Register(tool.ReadFile{})
-	registry.Register(tool.ListDir{})
-	registry.Register(tool.ReadHTTP{})
-	registry.Register(tool.Exec{})
-	registry.Register(tool.WriteFile{})
-	registry.Register(tool.EditFile{})
-	registry.Register(tool.WriteHTTP{})
-
 	skillRuntime := skill.NewRuntime(cfg.SkillsDir(), cfg)
 	skillRuntime.SetReviewer(agentSkillReviewer{})
 	skillRuntime.SetPrompter(agentSkillPrompter{})
 	skillRuntime.Reload(context.Background())
 
+	toolManager := tools.NewManager()
+	toolManager.RegisterProvider(builtin.NewProvider())
+	toolManager.RegisterProvider(skilltools.NewProvider(skillRuntime))
 	prompts, err := prompt.New()
 	if err != nil {
 		return nil, fmt.Errorf("init prompts: %w", err)
@@ -104,7 +101,7 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 	agent := &Agent{
 		cfg:           cfg,
 		router:        router,
-		registry:      registry,
+		tools:         toolManager,
 		working:       memory.NewWorkingMemory(),
 		sessions:      sessions,
 		memories:      memories,
@@ -117,6 +114,10 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 		sessionID:     sessionID,
 		extractQueue:  extractQueue,
 		extractWorker: extractWorker,
+	}
+	toolManager.RegisterProvider(agenttools.NewProvider(agent))
+	if err := toolManager.Reload(context.Background()); err != nil {
+		return nil, fmt.Errorf("init agent tools: %w", err)
 	}
 	agent.guard = agent.newGuardForSession(sessionID)
 	if info, err := os.Stat(cfg.ConfigPath()); err == nil {

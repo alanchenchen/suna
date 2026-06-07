@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/alanchenchen/suna/internal/model"
-	"github.com/alanchenchen/suna/internal/tool"
+	"github.com/alanchenchen/suna/internal/tools"
 )
 
 func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
@@ -247,7 +247,7 @@ func (r *Runner) executeToolCalls(ctx context.Context, calls []preparedToolCall,
 	resultCh := make(chan toolExecResult, len(calls))
 	for i, pc := range calls {
 		go func(index int, pc preparedToolCall) {
-			res := tool.ErrorResult("tool executor not configured")
+			res := tools.ErrorResult("tool executor not configured")
 			if r.Executor != nil {
 				res = r.Executor.ExecuteTool(ctx, ToolExecution{ID: pc.tc.ID, Name: pc.tc.Name, Params: pc.params, Intent: pc.intent, AssistantContext: pc.assistantContext, WorkingMessages: cloneMessages(workingSnapshot)})
 			}
@@ -289,28 +289,7 @@ func buildToolDefs(req Request) []model.ToolDef {
 	if req.ToolDefs != nil {
 		return req.ToolDefs()
 	}
-	if req.Tools == nil {
-		return nil
-	}
-	tools := req.Tools.All()
-	defs := make([]model.ToolDef, 0, len(tools))
-	for _, t := range tools {
-		defs = append(defs, model.ToolDef{Name: t.Name(), Description: t.Description(), Parameters: withIntentParameter(t.Parameters())})
-	}
-	return defs
-}
-
-func withIntentParameter(params map[string]any) map[string]any {
-	props, ok := params["properties"].(map[string]any)
-	if !ok {
-		props = map[string]any{}
-		params["properties"] = props
-	}
-	props["intent"] = map[string]any{
-		"type":        "string",
-		"description": "Natural-language reason for this tool call. Explain what you are trying to accomplish for the user. Do not put file contents, secrets, or raw parameters here.",
-	}
-	return params
+	return nil
 }
 
 func extractToolIntent(fullContent string) string {

@@ -154,7 +154,7 @@ func formatEnableQuestion(result StartResult) string {
 	return b.String()
 }
 
-func startJSONResult(v any) string {
+func StartJSONResult(v any) string {
 	if result, ok := v.(StartResult); ok {
 		b, err := json.Marshal(summarizeStartResult(result))
 		if err != nil {

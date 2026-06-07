@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-
-	"github.com/alanchenchen/suna/internal/tool"
 )
 
 const (
@@ -54,25 +52,6 @@ type ReviewFile struct {
 	Path      string
 	Content   string
 	Truncated bool
-}
-
-type LoadNotification struct {
-	Name string
-}
-
-func LoadNotificationFromResult(toolName string, params map[string]any, result tool.Result) (LoadNotification, bool) {
-	if toolName != ToolLoad || result.IsError {
-		return LoadNotification{}, false
-	}
-	name, _ := result.Metadata["skill_name"].(string)
-	if name == "" {
-		name, _ = params["name"].(string)
-	}
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return LoadNotification{}, false
-	}
-	return LoadNotification{Name: name}, true
 }
 
 type Runtime struct {
@@ -277,76 +256,24 @@ func (r *Runtime) saveRecordsLocked(ctx context.Context, records map[string]Reco
 	return r.manager.Reload(ctx)
 }
 
-type ToolDef struct {
-	Name        string
-	Description string
-	Parameters  map[string]any
-}
-
-func (r *Runtime) ToolDefs(withIntent func(map[string]any) map[string]any) []ToolDef {
-	loadParams := map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string", "description": "Exact skill name from Available Skills"}}, "required": []string{"name"}}
-	startParams := map[string]any{"type": "object", "properties": map[string]any{
-		"action": map[string]any{"type": "string", "enum": []string{"import", "check"}, "description": "Skill workflow action. Use import for a source path/URL, check after you prepared files under the skills directory."},
-		"name":   map[string]any{"type": "string", "description": "Skill name. Required for check; optional for import."},
-		"source": map[string]any{"type": "string", "description": "Local directory path, zip path, or git/http/ssh URL for import."},
-	}, "required": []string{"action"}}
-	if withIntent != nil {
-		loadParams = withIntent(loadParams)
-		startParams = withIntent(startParams)
-	}
-	return []ToolDef{
-		{Name: ToolLoad, Description: "Load full details for an enabled skill. Use only when you need the skill's full instructions; do not use just to list or summarize available skills.", Parameters: loadParams},
-		{Name: ToolStart, Description: "Start the built-in Skill verification workflow. Use import to import a Skill source, or check after you have prepared a new Skill directory with file tools. The workflow runs static check, asks the user whether to run LLM review, and asks whether to enable.", Parameters: startParams},
-	}
-}
-
-func (r *Runtime) ExecuteTool(ctx context.Context, name string, params map[string]any) (tool.Result, bool) {
-	switch name {
-	case ToolLoad:
-		return r.executeLoad(params), true
-	case ToolStart:
-		res, err := r.Start(ctx, params)
-		if err != nil {
-			return tool.ErrorResult(err.Error()), true
-		}
-		return tool.TextResult(startJSONResult(res)), true
-	default:
-		return tool.Result{}, false
-	}
-}
-
-func (r *Runtime) executeLoad(params map[string]any) tool.Result {
+func (r *Runtime) LoadContent(name string) (string, error) {
 	if r == nil {
-		return tool.ErrorResult("skill runtime is not initialized")
+		return "", fmt.Errorf("skill runtime is not initialized")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.manager == nil {
-		return tool.ErrorResult("skill runtime is not initialized")
+		return "", fmt.Errorf("skill runtime is not initialized")
 	}
-	skillName, _ := params["name"].(string)
-	skillName = strings.TrimSpace(skillName)
-	if skillName == "" {
-		return tool.ErrorResult("name is required")
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", fmt.Errorf("name is required")
 	}
-	content, ok, reason := r.manager.Load(skillName)
+	content, ok, reason := r.manager.Load(name)
 	if !ok {
-		return tool.ErrorResult(reason)
+		return "", fmt.Errorf("%s", reason)
 	}
-	res := tool.TextResult(fmt.Sprintf("[Skill: %s]\n%s", skillName, content))
-	res.Metadata = map[string]any{"skill_name": skillName}
-	return res
-}
-
-func ToolParamKeys(name string) map[string]bool {
-	switch name {
-	case ToolLoad:
-		return map[string]bool{"name": true}
-	case ToolStart:
-		return map[string]bool{"action": true, "name": true, "source": true}
-	default:
-		return nil
-	}
+	return content, nil
 }
 
 func (r *Runtime) loadRecords() map[string]Record {

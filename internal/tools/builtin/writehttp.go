@@ -1,10 +1,11 @@
-package tool
+package builtin
 
 import (
 	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
+	"github.com/alanchenchen/suna/internal/tools"
 	"io"
 	"net/http"
 	"strings"
@@ -13,13 +14,8 @@ import (
 
 type WriteHTTP struct{}
 
-func (WriteHTTP) Name() string { return "writehttp" }
-func (WriteHTTP) Description() string {
-	return "Send an HTTP POST, PUT, DELETE, or PATCH request."
-}
-func (WriteHTTP) Category() Category { return Act }
-func (WriteHTTP) Parameters() map[string]any {
-	return map[string]any{
+func (WriteHTTP) Spec() tools.Spec {
+	return builtinSpec("writehttp", "Send an HTTP POST, PUT, DELETE, or PATCH request.", tools.Act, map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"method":  map[string]any{"type": "string", "description": "HTTP method", "enum": []string{"POST", "PUT", "DELETE", "PATCH"}},
@@ -29,17 +25,17 @@ func (WriteHTTP) Parameters() map[string]any {
 			"timeout": map[string]any{"type": "integer", "description": "Timeout in seconds, default 30"},
 		},
 		"required": []string{"method", "url"},
-	}
+	})
 }
 
-func (WriteHTTP) Execute(ctx context.Context, params map[string]any) Result {
+func (WriteHTTP) Execute(ctx context.Context, params map[string]any) tools.Result {
 	method, _ := params["method"].(string)
 	url, _ := params["url"].(string)
 	if method == "" {
-		return ErrorResult("method is required")
+		return tools.ErrorResult("method is required")
 	}
 	if url == "" {
-		return ErrorResult("url is required")
+		return tools.ErrorResult("url is required")
 	}
 	method = strings.ToUpper(method)
 
@@ -72,7 +68,7 @@ func (WriteHTTP) Execute(ctx context.Context, params map[string]any) Result {
 
 	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("create request: %s", err))
+		return tools.ErrorResult(fmt.Sprintf("create request: %s", err))
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -83,13 +79,13 @@ func (WriteHTTP) Execute(ctx context.Context, params map[string]any) Result {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("request failed: %s", err))
+		return tools.ErrorResult(fmt.Sprintf("request failed: %s", err))
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxHTTPBodySize+1))
 	if err != nil {
-		return ErrorResult(fmt.Sprintf("read body: %s", err))
+		return tools.ErrorResult(fmt.Sprintf("read body: %s", err))
 	}
 
 	truncated := len(respBody) > maxHTTPBodySize
@@ -104,5 +100,5 @@ func (WriteHTTP) Execute(ctx context.Context, params map[string]any) Result {
 		sb.WriteString("\n... (truncated at 100KB)")
 	}
 
-	return Result{Content: sb.String(), Truncated: truncated}
+	return tools.Result{Content: sb.String(), Truncated: truncated}
 }

@@ -10,10 +10,10 @@ import (
 )
 
 const (
-	compressThreshold   = 0.8
-	KeepRecentTurns     = 10
-	maxToolOutputLines  = 500
-	maxToolOutputBytes  = 50 * 1024
+	compressThreshold  = 0.8
+	KeepRecentTurns    = 10
+	maxToolOutputLines = 500
+	maxToolOutputBytes = 50 * 1024
 )
 
 type Compressor struct {

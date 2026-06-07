@@ -108,24 +108,10 @@ func (a *Agent) modelRoutingSummary() string {
 }
 
 func (a *Agent) buildToolDefs() []model.ToolDef {
-	tools := a.registry.All()
-	defs := make([]model.ToolDef, 0, len(tools)+3)
-	for _, t := range tools {
-		defs = append(defs, model.ToolDef{Name: t.Name(), Description: t.Description(), Parameters: withIntentParameter(t.Parameters())})
+	if a.tools == nil {
+		return nil
 	}
-	if a.skills != nil {
-		for _, def := range a.skills.ToolDefs(withIntentParameter) {
-			defs = append(defs, model.ToolDef{Name: def.Name, Description: def.Description, Parameters: def.Parameters})
-		}
-	}
-	defs = append(defs, model.ToolDef{Name: "askuser", Description: "Ask the user for missing information or a decision. Provide several concise options when helpful. Keep allow_custom=true or omit it for normal questions so the user can type freely; use allow_custom=false only for strict system/workflow confirmations that must choose one provided option.", Parameters: withIntentParameter(map[string]any{
-		"type": "object", "properties": map[string]any{"question": map[string]any{"type": "string", "description": "Question to ask the user"}, "options": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Optional quick-pick answers for the user"}, "allow_custom": map[string]any{"type": "boolean", "description": "Whether the user may type a custom answer. Default true."}}, "required": []string{"question"},
-	})})
-	spawnToolNames := a.availableSpawnTools()
-	defs = append(defs, model.ToolDef{Name: "spawn", Description: "Delegate an isolated subtask to a selected model. It sees only task/context, allowed tools, and images explicitly passed with input_images; it does not inherit main history or images.", Parameters: withIntentParameter(map[string]any{
-		"type": "object", "properties": map[string]any{"task": map[string]any{"type": "string", "description": "Self-contained task for the subtask"}, "model": map[string]any{"type": "string", "description": "Exact model ref from Available subtask models"}, "system": map[string]any{"type": "string", "description": "Optional subtask system prompt"}, "tools": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": spawnToolNames}, "description": "Allowed tools for the isolated subtask; use [] for model-only tasks"}, "input_images": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "Indexes of images attached to the current user message only, e.g. [0]. Not prior-turn/restored image summaries; spawn does not inherit images unless listed."}, "context": map[string]any{"type": "string", "description": "Extra context"}}, "required": []string{"task", "model", "tools"},
-	})})
-	return defs
+	return a.tools.ToolDefs(withIntentParameter)
 }
 
 func withIntentParameter(params map[string]any) map[string]any {

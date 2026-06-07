@@ -1,8 +1,9 @@
-package tool
+package builtin
 
 import (
 	"context"
 	"fmt"
+	"github.com/alanchenchen/suna/internal/tools"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,13 +19,8 @@ const (
 
 type Exec struct{}
 
-func (Exec) Name() string { return "exec" }
-func (Exec) Description() string {
-	return "Run a shell command. Use for diagnostics, tests, builds, and other system operations."
-}
-func (Exec) Category() Category { return Act }
-func (Exec) Parameters() map[string]any {
-	return map[string]any{
+func (Exec) Spec() tools.Spec {
+	return builtinSpec("exec", "Run a shell command. Use for diagnostics, tests, builds, and other system operations.", tools.Act, map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"command": map[string]any{"type": "string", "description": "Command to execute"},
@@ -34,13 +30,13 @@ func (Exec) Parameters() map[string]any {
 			"shell":   map[string]any{"type": "string", "description": "Shell type: auto|bash|powershell|cmd"},
 		},
 		"required": []string{"command"},
-	}
+	})
 }
 
-func (Exec) Execute(ctx context.Context, params map[string]any) Result {
+func (Exec) Execute(ctx context.Context, params map[string]any) tools.Result {
 	command, _ := params["command"].(string)
 	if command == "" {
-		return ErrorResult("command is required")
+		return tools.ErrorResult("command is required")
 	}
 
 	timeout := execTimeout
@@ -71,7 +67,7 @@ func (Exec) Execute(ctx context.Context, params map[string]any) Result {
 
 	shellCmd, shellUsed := resolveShell(shell)
 	if shellCmd == "" {
-		return ErrorResult("cannot determine shell, please specify shell parameter")
+		return tools.ErrorResult("cannot determine shell, please specify shell parameter")
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -102,7 +98,7 @@ func (Exec) Execute(ctx context.Context, params map[string]any) Result {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
-			return ErrorResult(fmt.Sprintf("exec error: %s", err))
+			return tools.ErrorResult(fmt.Sprintf("exec error: %s", err))
 		}
 	}
 
@@ -119,10 +115,10 @@ func (Exec) Execute(ctx context.Context, params map[string]any) Result {
 	}
 	if exitCode != 0 {
 		sb.WriteString(fmt.Sprintf("\n[exit code: %d]", exitCode))
-		return Result{Content: sb.String(), Error: fmt.Sprintf("command exited with code %d", exitCode), IsError: true, Truncated: truncated}
+		return tools.Result{Content: sb.String(), Error: fmt.Sprintf("command exited with code %d", exitCode), IsError: true, Truncated: truncated}
 	}
 
-	return Result{Content: sb.String(), Truncated: truncated}
+	return tools.Result{Content: sb.String(), Truncated: truncated}
 }
 
 type limitedBuffer struct {

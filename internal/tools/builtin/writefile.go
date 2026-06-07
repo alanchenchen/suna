@@ -1,8 +1,9 @@
-package tool
+package builtin
 
 import (
 	"context"
 	"fmt"
+	"github.com/alanchenchen/suna/internal/tools"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,13 +11,8 @@ import (
 
 type WriteFile struct{}
 
-func (WriteFile) Name() string { return "writefile" }
-func (WriteFile) Description() string {
-	return "Create or overwrite a file, optionally creating parent directories."
-}
-func (WriteFile) Category() Category { return Act }
-func (WriteFile) Parameters() map[string]any {
-	return map[string]any{
+func (WriteFile) Spec() tools.Spec {
+	return builtinSpec("writefile", "Create or overwrite a file, optionally creating parent directories.", tools.Act, map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"path":        map[string]any{"type": "string", "description": "File path"},
@@ -24,14 +20,14 @@ func (WriteFile) Parameters() map[string]any {
 			"create_dirs": map[string]any{"type": "boolean", "description": "Whether to create parent directories automatically"},
 		},
 		"required": []string{"path", "content"},
-	}
+	})
 }
 
-func (WriteFile) Execute(ctx context.Context, params map[string]any) Result {
+func (WriteFile) Execute(ctx context.Context, params map[string]any) tools.Result {
 	path, _ := params["path"].(string)
 	content, _ := params["content"].(string)
 	if path == "" {
-		return ErrorResult("path is required")
+		return tools.ErrorResult("path is required")
 	}
 	path = expandPath(path)
 
@@ -41,7 +37,7 @@ func (WriteFile) Execute(ctx context.Context, params map[string]any) Result {
 	}
 
 	if isSystemPath(path) {
-		return ErrorResult(fmt.Sprintf("cannot write to system directory: %s", path))
+		return tools.ErrorResult(fmt.Sprintf("cannot write to system directory: %s", path))
 	}
 	oldData, err := os.ReadFile(path)
 	oldExists := true
@@ -49,19 +45,19 @@ func (WriteFile) Execute(ctx context.Context, params map[string]any) Result {
 		if os.IsNotExist(err) {
 			oldExists = false
 		} else {
-			return ErrorResult(fmt.Sprintf("read existing file: %s", err))
+			return tools.ErrorResult(fmt.Sprintf("read existing file: %s", err))
 		}
 	}
 
 	if createDirs {
 		dir := filepath.Dir(path)
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			return ErrorResult(fmt.Sprintf("create directories: %s", err))
+			return tools.ErrorResult(fmt.Sprintf("create directories: %s", err))
 		}
 	}
 
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		return ErrorResult(fmt.Sprintf("write file: %s", err))
+		return tools.ErrorResult(fmt.Sprintf("write file: %s", err))
 	}
 
 	operation := "created"

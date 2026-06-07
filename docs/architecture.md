@@ -36,7 +36,7 @@ TUI 是用户交互层，职责包括：
 - 将用户操作转换成 protocol request。
 - 将 daemon notification 转成 Bubble Tea 消息并更新 UI 状态。
 
-TUI 不应直接调用 runner、agent、tool、memory、guard 等业务包。
+TUI 不应直接调用 runner、agent、tools、memory、guard 等业务包。
 
 ## Protocol 与 local transport
 
@@ -70,12 +70,15 @@ daemon 是长期运行的本地服务，负责协调核心能力：
 
 TUI 重构或 UI 交互调整不应改变 daemon 的业务语义。
 
-## Agent / Runner / Tool / Guard
+## Agent / Runner / Tools / Guard
 
-- Agent 负责任务决策和模型交互编排。
-- Runner 执行模型流式调用和工具调用循环。
-- Tool 包提供具体工具实现。
-- Guard 对写文件、执行命令、HTTP 写请求等行动类操作做风险控制。
+- Agent 负责任务决策、上下文管理、Guard 编排和工具执行入口。
+- Runner 执行模型流式调用和工具调用循环，只依赖 Agent 提供的 tool schema 与 executor。
+- `internal/tools` 是统一工具目录和执行路由，所有模型可见工具都应通过 Provider 注册到 `tools.Manager`。
+- `internal/tools/builtin` 提供本地内置工具，`internal/tools/skilltools` 适配 Skill Runtime，`internal/tools/agenttools` 适配 `askuser` / `spawn` 这类 Agent runtime 工具。
+- Guard 对写文件、执行命令、HTTP 写请求等行动类操作做风险控制；工具是否跳过 Guard 由工具 `Spec` 的 Guard policy 声明，默认应走 Guard。
+
+`tools.Manager` 只维护工具目录、稳定 schema 和执行路由，不应做安全决策；Guard 仍由 Agent 持有当前会话上下文后统一处理。工具 schema 应保持稳定顺序，避免影响模型前缀缓存命中。
 
 这些模块的默认值、超时、权限边界应在各自所属层或统一配置处维护，避免由 TUI 猜测或层层透传。
 

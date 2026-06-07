@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -11,14 +13,19 @@ import (
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/runner"
 	"github.com/alanchenchen/suna/internal/subtask"
-	"github.com/alanchenchen/suna/internal/tool"
+	"github.com/alanchenchen/suna/internal/tools"
+	"github.com/alanchenchen/suna/internal/tools/agenttools"
+	"github.com/alanchenchen/suna/internal/tools/builtin"
 )
 
 func TestSubtaskReadFileBlocksSensitivePath(t *testing.T) {
-	registry := tool.NewRegistry()
-	registry.Register(tool.ReadFile{})
-	a := &Agent{guard: guard.NewGuardWithMode(nil, "test", guard.ModeAuto)}
-	executor := subtaskExecutor{agent: a, registry: registry}
+	mgr := tools.NewManager()
+	mgr.RegisterProvider(builtin.NewProvider())
+	if err := mgr.Reload(context.Background()); err != nil {
+		t.Fatalf("Reload tools: %v", err)
+	}
+	a := &Agent{guard: guard.NewGuardWithMode(nil, "test", guard.ModeAuto), tools: mgr}
+	executor := subtaskExecutor{agent: a, allowedTools: map[string]bool{"readfile": true}}
 
 	result := executor.ExecuteTool(context.Background(), runner.ToolExecution{ID: "call-1", Name: "readfile", Params: map[string]any{"path": ".env"}})
 	if !result.IsError || result.Error == "" {
@@ -41,8 +48,13 @@ func TestSpawnToolResultMarksFailedSubtaskAsToolError(t *testing.T) {
 }
 
 func TestSpawnToolSchemaDoesNotExposeTimeout(t *testing.T) {
-	a := &Agent{registry: tool.NewRegistry()}
-	a.registry.Register(tool.ReadFile{})
+	mgr := tools.NewManager()
+	a := &Agent{tools: mgr}
+	mgr.RegisterProvider(builtin.NewProvider())
+	mgr.RegisterProvider(agenttools.NewProvider(a))
+	if err := mgr.Reload(context.Background()); err != nil {
+		t.Fatalf("Reload tools: %v", err)
+	}
 
 	var spawnDef *model.ToolDef
 	for _, def := range a.buildToolDefs() {
@@ -104,14 +116,17 @@ func TestBuildGuardReviewContextUsesToolExecutionWorkingMessages(t *testing.T) {
 }
 
 func TestSubtaskGuardEventsUseNamespacedToolID(t *testing.T) {
-	registry := tool.NewRegistry()
-	registry.Register(tool.WriteFile{})
-	a := &Agent{guard: guard.NewGuardWithMode(nil, "test", guard.ModeSmart)}
+	mgr := tools.NewManager()
+	mgr.RegisterProvider(builtin.NewProvider())
+	if err := mgr.Reload(context.Background()); err != nil {
+		t.Fatalf("Reload tools: %v", err)
+	}
+	a := &Agent{guard: guard.NewGuardWithMode(nil, "test", guard.ModeSmart), tools: mgr}
 	a.guard.SetLLMReviewer(func(ctx context.Context, req guard.ReviewRequest) (string, error) {
 		return `{"decision":"modify","reason":"too broad","suggestion":"narrow it"}`, nil
 	})
 	events := make(chan Event, 2)
-	executor := subtaskExecutor{agent: a, events: events, registry: registry, spawnID: "spawn-1"}
+	executor := subtaskExecutor{agent: a, events: events, allowedTools: map[string]bool{"writefile": true}, spawnID: "spawn-1"}
 
 	result := executor.ExecuteTool(context.Background(), runner.ToolExecution{ID: "call-1", Name: "writefile", Params: map[string]any{"path": "out.txt", "content": "hello"}})
 	if !result.IsError || result.Error == "" {
@@ -127,6 +142,33 @@ func TestSubtaskGuardEventsUseNamespacedToolID(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("guard event received = false, want true")
+	}
+}
+
+func TestBuildToolDefsStableAndIncludesAgentTools(t *testing.T) {
+	mgr := tools.NewManager()
+	a := &Agent{tools: mgr}
+	mgr.RegisterProvider(builtin.NewProvider())
+	mgr.RegisterProvider(agenttools.NewProvider(a))
+	if err := mgr.Reload(context.Background()); err != nil {
+		t.Fatalf("Reload tools: %v", err)
+	}
+
+	defs := a.buildToolDefs()
+	names := make([]string, 0, len(defs))
+	for _, def := range defs {
+		names = append(names, def.Name)
+	}
+	want := []string{"askuser", "editfile", "exec", "listdir", "readfile", "readhttp", "spawn", "writefile", "writehttp"}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("tool schema order = %#v, want %#v", names, want)
+	}
+
+	again := a.buildToolDefs()
+	firstJSON, _ := json.Marshal(defs)
+	secondJSON, _ := json.Marshal(again)
+	if string(firstJSON) != string(secondJSON) {
+		t.Fatalf("tool schema is not stable across builds")
 	}
 }
 

@@ -5,8 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/alanchenchen/suna/internal/tool"
 )
 
 func TestRuntimeManualSkillDefaultsEnabled(t *testing.T) {
@@ -24,12 +22,9 @@ func TestRuntimeManualSkillDefaultsEnabled(t *testing.T) {
 	if !infos[0].Enabled || !infos[0].Valid {
 		t.Fatalf("infos[0] = %#v, want enabled and valid", infos[0])
 	}
-	res, handled := rt.ExecuteTool(context.Background(), ToolLoad, map[string]any{"name": "writer"})
-	if !handled {
-		t.Fatalf("ExecuteTool(%q) handled = false, want true", ToolLoad)
-	}
-	if res.IsError || res.Content == "" {
-		t.Fatalf("ExecuteTool(%q) result = %#v, want loaded content", ToolLoad, res)
+	content, err := rt.LoadContent("writer")
+	if err != nil || content == "" {
+		t.Fatalf("LoadContent() content = %q, err = %v, want loaded content", content, err)
 	}
 }
 
@@ -40,16 +35,11 @@ func TestRuntimeStartCheckExistingSkillRequiresExplicitEnable(t *testing.T) {
 	prompter := &fakePrompter{answers: []string{optionReviewNo, optionEnableYes}}
 	rt := newRuntimeWithPrompter(root, store, prompter)
 
-	res, handled := rt.ExecuteTool(context.Background(), ToolStart, map[string]any{"action": StartCheck, "name": "report"})
-	if !handled {
-		t.Fatalf("ExecuteTool(%q) handled = false, want true", ToolStart)
+	if _, err := rt.Start(context.Background(), map[string]any{"action": StartCheck, "name": "report"}); err != nil {
+		t.Fatalf("Start(check) error = %v, want success", err)
 	}
-	if res.IsError {
-		t.Fatalf("ExecuteTool(%q) result = %#v, want success", ToolStart, res)
-	}
-	load, _ := rt.ExecuteTool(context.Background(), ToolLoad, map[string]any{"name": "report"})
-	if load.IsError || load.Content == "" {
-		t.Fatalf("ExecuteTool(%q) result = %#v, want enabled skill content", ToolLoad, load)
+	if content, err := rt.LoadContent("report"); err != nil || content == "" {
+		t.Fatalf("LoadContent() content = %q, err = %v, want enabled skill content", content, err)
 	}
 	if !store.trust["report"].Enabled {
 		t.Fatalf("store.trust[report].Enabled = false, want true")
@@ -72,9 +62,8 @@ func TestRuntimeImportLocalSkillRequiresExplicitEnable(t *testing.T) {
 		t.Fatalf("Import() check = %#v, want valid", res.Check)
 	}
 	assertFileExists(t, filepath.Join(root, "imported", "SKILL.md"))
-	load, _ := rt.ExecuteTool(context.Background(), ToolLoad, map[string]any{"name": "imported"})
-	if !load.IsError {
-		t.Fatalf("ExecuteTool(%q) result = %#v, want error before explicit enable", ToolLoad, load)
+	if content, err := rt.LoadContent("imported"); err == nil {
+		t.Fatalf("LoadContent() content = %q, err = nil, want error before explicit enable", content)
 	}
 }
 
@@ -85,12 +74,8 @@ func TestRuntimeStartImportRunsWorkflow(t *testing.T) {
 	prompter := &fakePrompter{answers: []string{optionReviewNo, optionEnableYes}}
 	rt := newRuntimeWithPrompter(root, store, prompter)
 
-	res, handled := rt.ExecuteTool(context.Background(), ToolStart, map[string]any{"action": StartImport, "source": source})
-	if !handled {
-		t.Fatalf("ExecuteTool(%q) handled = false, want true", ToolStart)
-	}
-	if res.IsError {
-		t.Fatalf("ExecuteTool(%q) result = %#v, want success", ToolStart, res)
+	if _, err := rt.Start(context.Background(), map[string]any{"action": StartImport, "source": source}); err != nil {
+		t.Fatalf("Start(import) error = %v, want success", err)
 	}
 	if !store.trust["imported"].Enabled {
 		t.Fatalf("store.trust[imported].Enabled = false, want true")
@@ -106,12 +91,8 @@ func TestRuntimeStartChoiceRetry(t *testing.T) {
 	prompter := &fakePrompter{answers: []string{"anything", optionReviewNo, "not sure", optionEnableNo}}
 	rt := newRuntimeWithPrompter(root, &memoryStore{trust: map[string]Record{"retry": {Enabled: false}}}, prompter)
 
-	res, handled := rt.ExecuteTool(context.Background(), ToolStart, map[string]any{"action": StartCheck, "name": "retry"})
-	if !handled {
-		t.Fatalf("ExecuteTool(%q) handled = false, want true", ToolStart)
-	}
-	if res.IsError {
-		t.Fatalf("ExecuteTool(%q) result = %#v, want success after choice retry", ToolStart, res)
+	if _, err := rt.Start(context.Background(), map[string]any{"action": StartCheck, "name": "retry"}); err != nil {
+		t.Fatalf("Start(check) error = %v, want success after choice retry", err)
 	}
 	if got := len(prompter.questions); got != 4 {
 		t.Fatalf("len(prompter.questions) = %d, want %d", got, 4)
@@ -143,12 +124,8 @@ func TestRuntimeStartEnableUsesExistingWorkflowCheck(t *testing.T) {
 	prompter := &fakePrompter{answers: []string{optionReviewNo, optionEnableYes}}
 	rt := newRuntimeWithPrompter(root, store, prompter)
 
-	res, handled := rt.ExecuteTool(context.Background(), ToolStart, map[string]any{"action": StartCheck, "name": "flow-skill"})
-	if !handled {
-		t.Fatalf("ExecuteTool(%q) handled = false, want true", ToolStart)
-	}
-	if res.IsError {
-		t.Fatalf("ExecuteTool(%q) result = %#v, want success", ToolStart, res)
+	if _, err := rt.Start(context.Background(), map[string]any{"action": StartCheck, "name": "flow-skill"}); err != nil {
+		t.Fatalf("Start(check) error = %v, want success", err)
 	}
 	writeFile(t, filepath.Join(root, "flow", "scripts", "late.sh"), "curl https://example.com\n")
 	if got := store.trust["flow-skill"].Reasons; len(got) != 0 {
@@ -198,19 +175,6 @@ func TestRuntimeImportRejectsInstalledSource(t *testing.T) {
 		t.Fatalf("Import() error = nil, want non-nil for installed source")
 	}
 	assertFileExists(t, filepath.Join(installed, "SKILL.md"))
-}
-
-func TestLoadNotificationFromResult(t *testing.T) {
-	res := tool.TextResult("loaded")
-	res.Metadata = map[string]any{"skill_name": "writer"}
-
-	evt, ok := LoadNotificationFromResult(ToolLoad, map[string]any{}, res)
-	if !ok {
-		t.Fatalf("LoadNotificationFromResult() ok = false, want true")
-	}
-	if evt.Name != "writer" {
-		t.Fatalf("event.Name = %q, want %q", evt.Name, "writer")
-	}
 }
 
 func TestRuntimeOptionalLLMReview(t *testing.T) {

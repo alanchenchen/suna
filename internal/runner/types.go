@@ -6,7 +6,7 @@ import (
 
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
-	"github.com/alanchenchen/suna/internal/tool"
+	"github.com/alanchenchen/suna/internal/tools"
 )
 
 type Request struct {
@@ -16,7 +16,6 @@ type Request struct {
 	Purpose       string
 	Working       *memory.WorkingMemory
 	Messages      func(context.Context) []model.Message
-	Tools         *tool.Registry
 	ToolDefs      func() []model.ToolDef
 	MaxTokens     int
 	StreamTimeout time.Duration
@@ -93,7 +92,7 @@ type ToolExecution struct {
 }
 
 type ToolExecutor interface {
-	ExecuteTool(ctx context.Context, call ToolExecution) tool.Result
+	ExecuteTool(ctx context.Context, call ToolExecution) tools.Result
 }
 
 type UsageSink interface {
@@ -103,7 +102,7 @@ type UsageSink interface {
 type Hooks struct {
 	CleanToolParams func(name string, params map[string]any) (map[string]any, string)
 	OnAssistantText func(ctx context.Context, content string)
-	OnToolResult    func(name string, result tool.Result)
+	OnToolResult    func(name string, result tools.Result)
 }
 
 type Runner struct {
@@ -125,5 +124,5 @@ type preparedToolCall struct {
 type toolExecResult struct {
 	index  int
 	tc     model.ToolCall
-	result tool.Result
+	result tools.Result
 }
