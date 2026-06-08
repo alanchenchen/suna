@@ -65,7 +65,14 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			MaxTokens: req.MaxTokens,
 		}
 		if req.AutoCompress {
+			needCompact := shouldCompactRequest(completionReq, contextWindow)
+			if needCompact && r.Sink != nil {
+				r.Sink.Status("compact_running")
+			}
 			r.compactForRequest(ctx, req.Working, completionReq, contextWindow)
+			if needCompact && r.Sink != nil {
+				r.Sink.Status("compact_done")
+			}
 			messages = req.Working.Messages()
 			if req.Messages != nil {
 				messages = req.Messages(ctx)

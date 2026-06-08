@@ -210,7 +210,13 @@ func (s *service) runAgent(ctx context.Context, connID, inputText string, input 
 				emit(ctx, sink, protocol.NotifyGuardConfirm, protocol.GuardConfirmParams{ID: guardID, ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, Params: evt.GuardParams, Risk: evt.GuardRisk, Reason: evt.GuardReason, Suggestion: evt.GuardSuggestion})
 			case agent.EventStatus:
 				flush()
-				if strings.HasPrefix(evt.Content, "error:") || evt.Content == "cancelled" {
+				if evt.Content == "compact_running" {
+					running := true
+					emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running})
+				} else if evt.Content == "compact_done" {
+					running := false
+					emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running})
+				} else if strings.HasPrefix(evt.Content, "error:") || evt.Content == "cancelled" {
 					logging.Error("agent", "run_failed", fmt.Errorf("%s", evt.Content), logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()})
 					emit(ctx, sink, protocol.NotifyStream, protocol.StreamParams{Chunk: evt.Content, Done: true})
 					emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))

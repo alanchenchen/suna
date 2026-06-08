@@ -169,13 +169,14 @@ type UsagePeriod struct {
 }
 
 type CompactResult struct {
-	BeforeTokens     int  `json:"before_tokens"`
-	AfterTokens      int  `json:"after_tokens"`
-	ContextWindow    int  `json:"context_window"`
-	TurnsCompressed  int  `json:"turns_compressed"`
-	SummaryTokens    int  `json:"summary_tokens"`
-	TruncatedOutputs int  `json:"truncated_outputs"`
-	Noop             bool `json:"noop,omitempty"`
+	BeforeTokens     int   `json:"before_tokens"`
+	AfterTokens      int   `json:"after_tokens"`
+	ContextWindow    int   `json:"context_window"`
+	TurnsCompressed  int   `json:"turns_compressed"`
+	SummaryTokens    int   `json:"summary_tokens"`
+	TruncatedOutputs int   `json:"truncated_outputs"`
+	Noop             bool  `json:"noop,omitempty"`
+	Running          *bool `json:"running,omitempty"`
 }
 
 type AttachmentStatusResult struct {

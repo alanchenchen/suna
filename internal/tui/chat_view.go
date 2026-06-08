@@ -152,7 +152,11 @@ func (t *TUI) chatTopMeta() string {
 	if ctxTokens > 0 {
 		ctx = fmtTok(ctxTokens)
 	}
-	return styleHL.Render(textutil.TruncateRunes(modelRef, max(10, t.width/3))) + strings.Repeat(" ", 4) + styleDim.Render("ctx "+ctx+"/"+fmtTok(t.contextWindow))
+	pct := int(float64(ctxTokens) / float64(t.contextWindow) * 100)
+	if ctxTokens <= 0 {
+		pct = 0
+	}
+	return styleHL.Render(textutil.TruncateRunes(modelRef, max(10, t.width/3))) + strings.Repeat(" ", 4) + styleDim.Render(fmt.Sprintf("ctx %s/%s · %d%%", ctx, fmtTok(t.contextWindow), pct))
 }
 
 func (t *TUI) mouseInComposer(msg tea.MouseMsg) bool {

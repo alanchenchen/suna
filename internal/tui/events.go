@@ -109,6 +109,7 @@ func (t *TUI) handleStreamNotification(p protocol.StreamParams) {
 		t.applyContextStats(p.ContextTokens, p.ContextWindow)
 		return
 	}
+	t.chat.Compacting = false
 	t.chat.HandleStreamStart(time.Now())
 	if p.Chunk != "" {
 		t.chat.LastAssistantText += p.Chunk
@@ -117,6 +118,7 @@ func (t *TUI) handleStreamNotification(p protocol.StreamParams) {
 }
 
 func (t *TUI) handleReasoningNotification(p protocol.StreamParams) {
+	t.chat.Compacting = false
 	t.chat.HandleReasoningStart(time.Now())
 	t.appendStreamMessage("reasoning", p.Chunk)
 }
@@ -150,6 +152,7 @@ func (t *TUI) handleGuardConfirmNotification(p protocol.GuardConfirmParams) {
 
 func (t *TUI) handleToolStartNotification(p protocol.ToolStartParams) {
 	t.finishStreamingMessages()
+	t.chat.Compacting = false
 	t.chat.Textarea.Blur()
 	id := p.ID
 	if id == "" {
@@ -183,7 +186,21 @@ func (t *TUI) handleDaemonStateNotification(p protocol.DaemonStateParams) {
 }
 
 func (t *TUI) handleCompactResultNotification(p protocol.CompactResult) {
+	if p.Running != nil {
+		if *p.Running {
+			t.finishStreamingMessages()
+			t.chat.Compacting = true
+			t.chat.Textarea.Blur()
+			t.appendNonToolMessage(chatMsg{Role: "system", Content: t.i18n.T("compact.running")})
+			_ = t.syncInputFocus()
+			return
+		}
+		t.chat.Compacting = false
+		_ = t.syncInputFocus()
+		return
+	}
 	t.chat.Compacting = false
+	t.applyContextStats(p.AfterTokens, p.ContextWindow)
 	t.appendNonToolMessage(chatMsg{Role: "system", Content: t.renderCompactPanel(p)})
 	_ = t.syncInputFocus()
 }

@@ -91,6 +91,51 @@ func TestCompactLocksInputWithoutCancelHint(t *testing.T) {
 	}
 }
 
+func TestAutoCompactNotificationShowsRunning(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
+	tui.initChatComponents()
+
+	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: []byte(`{"running":true}`)})
+	if !tui.chat.Compacting {
+		t.Fatalf("compacting = false after compact running result, want true")
+	}
+	if !tui.inputLocked() {
+		t.Fatalf("inputLocked() = false during compact, want true")
+	}
+	if len(tui.chat.Messages) != 1 {
+		t.Fatalf("messages = %d after compact running result, want 1", len(tui.chat.Messages))
+	}
+	view := stripANSIForTest(tui.chat.Messages[0].Content.(string))
+	if !strings.Contains(view, "正在压缩上下文") {
+		t.Fatalf("compact running message = %q, want compact loading", view)
+	}
+}
+
+func TestAutoCompactRunningFalseClearsLoading(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
+	tui.initChatComponents()
+	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: []byte(`{"running":true}`)})
+
+	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: []byte(`{"running":false}`)})
+	if tui.chat.Compacting {
+		t.Fatalf("compacting = true after compact running false, want false")
+	}
+	if len(tui.chat.Messages) != 1 {
+		t.Fatalf("messages = %d after compact running false, want only loading message", len(tui.chat.Messages))
+	}
+}
+
+func TestAutoCompactRunningClearsWhenStreamStarts(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
+	tui.initChatComponents()
+	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: []byte(`{"running":true}`)})
+
+	tui.handleLocalNotification(localNotification{method: protocol.NotifyStream, params: []byte(`{"chunk":"hello"}`)})
+	if tui.chat.Compacting {
+		t.Fatalf("compacting = true after stream starts, want false")
+	}
+}
+
 func TestCompactResultUnlocksInput(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
 	tui.initChatComponents()
