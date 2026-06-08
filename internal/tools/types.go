@@ -90,6 +90,18 @@ type CatalogProvider interface {
 	SpecsWithCatalog(ctx context.Context, catalog []Spec) ([]Spec, error)
 }
 
+// CanGrantToSubtask returns whether a tool may be explicitly granted to an isolated subtask.
+// Subtasks can use concrete work tools from builtin providers and trusted MCP servers; agent
+// runtime tools and skill workflow/context tools stay under main-agent control.
+func CanGrantToSubtask(spec Spec) bool {
+	switch spec.Source.Kind {
+	case SourceBuiltin, SourceMCP:
+		return true
+	default:
+		return false
+	}
+}
+
 // Provider 表示一组同源工具。MCP、Skill、内置工具都可以通过 Provider 接入。
 type Provider interface {
 	Specs(ctx context.Context) ([]Spec, error)

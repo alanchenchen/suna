@@ -188,6 +188,7 @@ func (a *Agent) ExecuteSpawnTool(ctx context.Context, id string, params map[stri
 	if errResult.IsError {
 		return errResult
 	}
+	toolDefs := a.buildSubtaskToolDefs(allowedTools)
 	inputBlocks, errResult := a.buildSubtaskInput(task, params["input_images"])
 	if errResult.IsError {
 		return errResult
@@ -214,7 +215,7 @@ func (a *Agent) ExecuteSpawnTool(ctx context.Context, id string, params map[stri
 		spawnID = uuid.New().String()
 	}
 	r := a.newSubtaskRunner(events, spawnID, allowedTools)
-	st := subtask.New(subtask.Request{ID: spawnID, Task: task, Input: inputBlocks, ModelRef: modelRef, ModelID: resolveModelID(a.cfg, modelRef), System: subtaskPrompt})
+	st := subtask.New(subtask.Request{ID: spawnID, Task: task, Input: inputBlocks, ModelRef: modelRef, ModelID: resolveModelID(a.cfg, modelRef), System: subtaskPrompt, ToolDefs: toolDefs})
 	res, err := st.Run(ctx, r)
 	if err != nil && res.Text == "" {
 		res.Text = err.Error()
@@ -251,14 +252,15 @@ type subtaskExecutor struct {
 
 func (e subtaskExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecution) tools.Result {
 	name, params := call.Name, call.Params
-	if name == "askuser" || name == "spawn" {
-		return tools.ErrorResult("subtask cannot use " + name)
+	spec, ok := e.agent.tools.Get(name)
+	if !ok {
+		return tools.ErrorResult(fmt.Sprintf("tool %q not found", name))
+	}
+	if !tools.CanGrantToSubtask(spec) {
+		return tools.ErrorResult(fmt.Sprintf("tool %q is not available to subtasks", name))
 	}
 	if !e.allowedTools[name] {
 		return tools.ErrorResult(fmt.Sprintf("tool %q not allowed for subtask", name))
-	}
-	if _, ok := e.agent.tools.Get(name); !ok {
-		return tools.ErrorResult(fmt.Sprintf("tool %q not found", name))
 	}
 	if e.agent.shouldGuardTool(name) {
 		e.agent.prepareWorkspaceParams(name, params)
@@ -416,13 +418,8 @@ func (a *Agent) buildSubtaskAllowedTools(value any) (map[string]bool, []string, 
 		if name == "" || allowed[name] {
 			continue
 		}
-		if name == agenttools.ToolSpawn {
-			return nil, nil, tools.ErrorResult("subtask cannot spawn (nesting not allowed)")
-		}
-		if name == agenttools.ToolAskUser {
-			return nil, nil, tools.ErrorResult("askuser is not available to subtasks; the main agent should ask the user directly")
-		}
-		if _, ok := a.tools.Get(name); !ok {
+		spec, ok := a.tools.Get(name)
+		if !ok || !tools.CanGrantToSubtask(spec) {
 			return nil, nil, tools.ErrorResult(fmt.Sprintf("invalid spawn tool %q. Choose from: %s", name, strings.Join(a.availableSpawnTools(), ", ")))
 		}
 		allowed[name] = true
@@ -430,6 +427,20 @@ func (a *Agent) buildSubtaskAllowedTools(value any) (map[string]bool, []string, 
 	}
 	sort.Strings(ordered)
 	return allowed, ordered, tools.Result{}
+}
+
+func (a *Agent) buildSubtaskToolDefs(allowed map[string]bool) []model.ToolDef {
+	if len(allowed) == 0 || a == nil || a.tools == nil {
+		return nil
+	}
+	all := a.tools.ToolDefs(withIntentParameter)
+	defs := make([]model.ToolDef, 0, len(allowed))
+	for _, def := range all {
+		if allowed[def.Name] {
+			defs = append(defs, def)
+		}
+	}
+	return defs
 }
 
 func (a *Agent) buildSubtaskInput(task string, value any) ([]model.ContentBlock, tools.Result) {
@@ -577,11 +588,11 @@ func (a *Agent) availableSpawnTools() []string {
 	if a.tools == nil {
 		return nil
 	}
-	names := a.tools.Names()
-	filtered := names[:0]
-	for _, name := range names {
-		if name != agenttools.ToolSpawn && name != agenttools.ToolAskUser && name != skilltools.ToolLoad && name != skilltools.ToolStart {
-			filtered = append(filtered, name)
+	specs := a.tools.Specs()
+	filtered := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		if tools.CanGrantToSubtask(spec) {
+			filtered = append(filtered, spec.Name)
 		}
 	}
 	sort.Strings(filtered)

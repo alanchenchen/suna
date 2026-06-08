@@ -145,6 +145,33 @@ func TestSubtaskGuardEventsUseNamespacedToolID(t *testing.T) {
 	}
 }
 
+func TestBuildSubtaskToolDefsIncludesOnlyAllowedTools(t *testing.T) {
+	mgr := tools.NewManager()
+	a := &Agent{tools: mgr}
+	mgr.RegisterProvider(builtin.NewProvider())
+	mgr.RegisterProvider(agenttools.NewProvider(a))
+	if err := mgr.Reload(context.Background()); err != nil {
+		t.Fatalf("Reload tools: %v", err)
+	}
+
+	defs := a.buildSubtaskToolDefs(map[string]bool{"readfile": true})
+	if len(defs) != 1 || defs[0].Name != "readfile" {
+		t.Fatalf("subtask tool defs = %#v, want only readfile", defs)
+	}
+	props, ok := defs[0].Parameters["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("readfile properties missing")
+	}
+	if _, ok := props["intent"]; !ok {
+		t.Fatalf("readfile schema missing intent parameter")
+	}
+
+	defs = a.buildSubtaskToolDefs(map[string]bool{})
+	if len(defs) != 0 {
+		t.Fatalf("empty allowed tools produced defs = %#v", defs)
+	}
+}
+
 func TestBuildToolDefsStableAndIncludesAgentTools(t *testing.T) {
 	mgr := tools.NewManager()
 	a := &Agent{tools: mgr}

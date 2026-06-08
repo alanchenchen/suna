@@ -6,6 +6,7 @@ import (
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/runner"
+	"github.com/alanchenchen/suna/internal/tools"
 )
 
 type Request struct {
@@ -15,6 +16,7 @@ type Request struct {
 	ModelRef string
 	ModelID  string
 	System   string
+	ToolDefs []model.ToolDef
 
 	MaxTurns     int
 	MaxToolCalls int
@@ -34,6 +36,17 @@ func New(req Request) *Subtask {
 	return &Subtask{req: req}
 }
 
+func (s *Subtask) toolDefs() []model.ToolDef {
+	if len(s.req.ToolDefs) == 0 {
+		return nil
+	}
+	defs := make([]model.ToolDef, len(s.req.ToolDefs))
+	for i, def := range s.req.ToolDefs {
+		defs[i] = model.ToolDef{Name: def.Name, Description: def.Description, Parameters: tools.CloneParameters(def.Parameters)}
+	}
+	return defs
+}
+
 func (s *Subtask) Run(ctx context.Context, r *runner.Runner) (Result, error) {
 	working := memory.NewWorkingMemory()
 	blocks := s.req.Input
@@ -46,6 +59,7 @@ func (s *Subtask) Run(ctx context.Context, r *runner.Runner) (Result, error) {
 		ModelRef:      s.req.ModelRef,
 		ModelID:       s.req.ModelID,
 		Working:       working,
+		ToolDefs:      s.toolDefs,
 		EmitStream:    false,
 		EmitReasoning: false,
 		AutoCompress:  true,

@@ -99,7 +99,7 @@ func (m *Manager) ToolDefs(withParams func(map[string]any) map[string]any) []mod
 	specs := m.Specs()
 	defs := make([]model.ToolDef, 0, len(specs))
 	for _, spec := range specs {
-		params := spec.Parameters
+		params := CloneParameters(spec.Parameters)
 		if withParams != nil {
 			params = withParams(params)
 		}

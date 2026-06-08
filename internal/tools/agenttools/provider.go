@@ -99,7 +99,7 @@ func spawnSpec(toolNames []string) tools.Spec {
 func spawnToolNames(catalog []tools.Spec) []string {
 	names := make([]string, 0, len(catalog))
 	for _, spec := range catalog {
-		if spec.Source.Kind == tools.SourceAgent || spec.Source.Kind == tools.SourceSkill {
+		if !tools.CanGrantToSubtask(spec) {
 			continue
 		}
 		names = append(names, spec.Name)
