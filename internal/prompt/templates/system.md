@@ -12,7 +12,7 @@ Spawnable models:
 {{.ModelRouting}}
 
 {{if .ProjectConfig}}
-Project instructions from AGENTS.md:
+Project instructions from {{.ProjectConfigSource}}:
 {{.ProjectConfig}}
 {{end}}
 

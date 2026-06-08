@@ -48,14 +48,15 @@ func (l *Loader) Render(name string, data map[string]any) (string, error) {
 
 func (l *Loader) RenderSystem(data SystemPromptData) (string, error) {
 	return l.Render("system", map[string]any{
-		"OS":            data.OS,
-		"Arch":          data.Arch,
-		"WorkDir":       data.WorkDir,
-		"ActiveModel":   data.ActiveModel,
-		"ModelRouting":  data.ModelRouting,
-		"ProjectConfig": data.ProjectConfig,
-		"Skills":        data.Skills,
-		"SkillsDir":     data.SkillsDir,
+		"OS":                  data.OS,
+		"Arch":                data.Arch,
+		"WorkDir":             data.WorkDir,
+		"ActiveModel":         data.ActiveModel,
+		"ModelRouting":        data.ModelRouting,
+		"ProjectConfig":       data.ProjectConfig,
+		"ProjectConfigSource": data.ProjectConfigSource,
+		"Skills":              data.Skills,
+		"SkillsDir":           data.SkillsDir,
 	})
 }
 
@@ -114,14 +115,15 @@ func (l *Loader) RenderSubtaskSystem(data SubtaskPromptData) (string, error) {
 }
 
 type SystemPromptData struct {
-	OS            string
-	Arch          string
-	WorkDir       string
-	ActiveModel   string
-	ModelRouting  string
-	ProjectConfig string
-	Skills        string
-	SkillsDir     string
+	OS                  string
+	Arch                string
+	WorkDir             string
+	ActiveModel         string
+	ModelRouting        string
+	ProjectConfig       string
+	ProjectConfigSource string
+	Skills              string
+	SkillsDir           string
 }
 
 type GuardReviewData struct {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -17,18 +16,16 @@ import (
 
 func (a *Agent) buildSystemPrompt(ctx context.Context) (string, error) {
 	env := getEnvInfo()
-	projectConfig := ""
+	projectConfig := projectInstructions{}
 	wd, _ := os.Getwd()
-	if data, err := os.ReadFile(filepath.Join(wd, "AGENTS.md")); err == nil {
-		projectConfig = string(data)
-	}
+	projectConfig = loadProjectInstructions(wd)
 	skills := ""
 	if a.skills != nil {
 		skills = a.skills.Summary()
 	}
 	return a.prompts.RenderSystem(prompt.SystemPromptData{
 		OS: env["OS"], Arch: env["Arch"], WorkDir: env["WorkDir"], ActiveModel: a.activeModelSummary(),
-		ModelRouting: a.modelRoutingSummary(), ProjectConfig: projectConfig, Skills: skills, SkillsDir: a.cfg.SkillsDir(),
+		ModelRouting: a.modelRoutingSummary(), ProjectConfig: projectConfig.Content, ProjectConfigSource: projectConfig.Source, Skills: skills, SkillsDir: a.cfg.SkillsDir(),
 	})
 }
 
