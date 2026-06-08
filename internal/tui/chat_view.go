@@ -33,6 +33,10 @@ func (t *TUI) viewChat() string {
 	if t.chat.SkillsOverlayOpen {
 		skillsOverlay = t.renderSkillsOverlay(t.width)
 	}
+	mcpOverlay := ""
+	if t.chat.MCPOverlayOpen {
+		mcpOverlay = t.renderMCPOverlay(t.width)
+	}
 	guardOverlay := ""
 	if t.chat.PendingGuard != nil {
 		guardOverlay = t.renderGuardOverlay(t.width)
@@ -54,6 +58,7 @@ func (t *TUI) viewChat() string {
 		ToolDetailOverlay:  toolOverlay,
 		HelpOverlay:        helpOverlay,
 		SkillsOverlay:      skillsOverlay,
+		MCPOverlay:         mcpOverlay,
 		GuardOverlay:       guardOverlay,
 		Overlay:            overlay.OverlayBlock,
 	})
@@ -87,17 +92,37 @@ func (t *TUI) chatPetState() petState {
 }
 
 func (t *TUI) chatConnectionDot(state petState) string {
+	badge := t.mcpBadge()
+	conn := ""
 	if t.localCli == nil || !t.localCli.Connected() {
-		return styleDim.Render("○")
+		conn = styleDim.Render("○")
+	} else {
+		switch state {
+		case petWorking:
+			conn = styleToolRun.Render("●")
+		case petThinking:
+			conn = styleBrand.Render("●")
+		default:
+			conn = styleAgent.Render("●")
+		}
 	}
-	switch state {
-	case petWorking:
-		return styleToolRun.Render("●")
-	case petThinking:
-		return styleBrand.Render("●")
-	default:
-		return styleAgent.Render("●")
+	if badge != "" {
+		return badge + styleDim.Render(" · ") + conn
 	}
+	return conn
+}
+
+func (t *TUI) mcpBadge() string {
+	active, _, _ := chatpage.MCPSummaryCounts(t.chat.MCPServers)
+	total := len(t.chat.MCPServers)
+	if total == 0 {
+		return styleDim.Render("MCP 0")
+	}
+	style := styleToolOk
+	if active == 0 {
+		style = styleDim
+	}
+	return style.Render(fmt.Sprintf("MCP %d/%d", active, total))
 }
 
 func (t *TUI) chatTopMeta() string {

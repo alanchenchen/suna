@@ -12,6 +12,7 @@ func (m *Model) OpenSkillsOverlay() {
 	m.SkillsLoading = true
 	m.SkillsError = ""
 	m.SkillsCursor = ClampSkillCursor(m.SkillsCursor, len(m.Skills))
+	m.MCPOverlayOpen = false
 }
 
 func (m *Model) CloseSkillsOverlay() {

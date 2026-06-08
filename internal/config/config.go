@@ -22,6 +22,7 @@ type Config struct {
 	Guard       GuardConfig             `toml:"guard"`
 	UI          UIConfig                `toml:"ui"`
 	Skills      map[string]skill.Record `toml:"skills"`
+	MCP         MCPConfig               `toml:"mcp"`
 	Hooks       []HookConfig            `toml:"hooks"`
 	MaxModelRPS int                     `toml:"max_model_rps,omitempty"`
 	DataDir     string                  `toml:"-"`
@@ -39,6 +40,7 @@ func (c *Config) Clone() *Config {
 	cp.Guard.Blocked = append([]GuardRule(nil), c.Guard.Blocked...)
 	cp.Guard.Allowed = append([]GuardAllowRule(nil), c.Guard.Allowed...)
 	cp.Skills = cloneSkillRecords(c.Skills)
+	cp.MCP.Servers = cloneMCPServers(c.MCP.Servers)
 	cp.Hooks = append([]HookConfig(nil), c.Hooks...)
 	return &cp
 }
@@ -66,6 +68,48 @@ func cloneSkillRecords(in map[string]skill.Record) map[string]skill.Record {
 	return out
 }
 
+func cloneMCPServers(in map[string]MCPServerConfig) map[string]MCPServerConfig {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]MCPServerConfig, len(in))
+	for k, v := range in {
+		v.Args = append([]string(nil), v.Args...)
+		v.Env = cloneStringMap(v.Env)
+		v.Headers = cloneStringMap(v.Headers)
+		out[k] = v
+	}
+	return out
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// MCPConfig 保存外部 MCP server 连接配置；server id 来自 [mcp.servers.<id>]。
+type MCPConfig struct {
+	Servers map[string]MCPServerConfig `toml:"servers,omitempty"`
+}
+
+type MCPServerConfig struct {
+	Enabled        bool              `toml:"enabled"`
+	Transport      string            `toml:"transport,omitempty"`
+	Command        string            `toml:"command,omitempty"`
+	Args           []string          `toml:"args,omitempty"`
+	Env            map[string]string `toml:"env,omitempty"`
+	CWD            string            `toml:"cwd,omitempty"`
+	URL            string            `toml:"url,omitempty"`
+	Headers        map[string]string `toml:"headers,omitempty"`
+	TimeoutSeconds int               `toml:"timeout_seconds,omitempty"`
+}
+
 // DefaultMaxModelRPS 是每个模型 ref 的默认请求限速，避免 subtask 并发打爆供应商。
 const DefaultMaxModelRPS = 10
 
@@ -91,6 +135,7 @@ type configTOML struct {
 	Models      []modelConfigTOML `toml:"models"`
 	Guard       GuardConfig       `toml:"guard"`
 	UI          UIConfig          `toml:"ui"`
+	MCP         MCPConfig         `toml:"mcp,omitempty"`
 	Hooks       []HookConfig      `toml:"hooks"`
 	MaxModelRPS int               `toml:"max_model_rps,omitzero"`
 }
@@ -272,6 +317,7 @@ func (c *Config) tomlView() configTOML {
 		Models:      models,
 		Guard:       c.Guard,
 		UI:          c.UI,
+		MCP:         c.MCP,
 		Hooks:       c.Hooks,
 		MaxModelRPS: c.MaxModelRPS,
 	}

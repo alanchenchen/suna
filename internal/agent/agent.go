@@ -13,6 +13,7 @@ import (
 	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/guard"
 	"github.com/alanchenchen/suna/internal/logging"
+	"github.com/alanchenchen/suna/internal/mcp"
 	"github.com/alanchenchen/suna/internal/media"
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
@@ -22,6 +23,7 @@ import (
 	"github.com/alanchenchen/suna/internal/tools"
 	"github.com/alanchenchen/suna/internal/tools/agenttools"
 	"github.com/alanchenchen/suna/internal/tools/builtin"
+	"github.com/alanchenchen/suna/internal/tools/mcptools"
 	"github.com/alanchenchen/suna/internal/tools/skilltools"
 )
 
@@ -39,6 +41,7 @@ type Agent struct {
 	prompts      *prompt.Loader
 	store        *memory.Store
 	skills       *skill.Runtime
+	mcp          *mcp.Runtime
 	sessionID    string
 	turnCount    int
 	resumeInput  string
@@ -84,6 +87,11 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 	toolManager := tools.NewManager()
 	toolManager.RegisterProvider(builtin.NewProvider())
 	toolManager.RegisterProvider(skilltools.NewProvider(skillRuntime))
+	mcpRuntime := mcp.NewRuntime(cfg.MCP)
+	if err := mcpRuntime.Start(context.Background()); err != nil {
+		return nil, fmt.Errorf("init mcp: %w", err)
+	}
+	toolManager.RegisterProvider(mcptools.NewProvider(mcpRuntime, cfg.AttachmentsDir()))
 	prompts, err := prompt.New()
 	if err != nil {
 		return nil, fmt.Errorf("init prompts: %w", err)
@@ -111,6 +119,7 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 		prompts:       prompts,
 		store:         store,
 		skills:        skillRuntime,
+		mcp:           mcpRuntime,
 		sessionID:     sessionID,
 		extractQueue:  extractQueue,
 		extractWorker: extractWorker,
@@ -232,6 +241,16 @@ func (a *Agent) newRunner(events chan<- Event) *runner.Runner {
 }
 
 func (a *Agent) Skills() *skill.Runtime { return a.skills }
+func (a *Agent) MCP() *mcp.Runtime      { return a.mcp }
+
+// ReloadTools 刷新 agent 暴露给模型的工具目录；MCP 运行态启停/重载后必须调用，
+// 否则下一轮请求仍可能使用旧的 tool schema。
+func (a *Agent) ReloadTools(ctx context.Context) error {
+	if a == nil || a.tools == nil {
+		return nil
+	}
+	return a.tools.Reload(ctx)
+}
 
 func backgroundProvider(router *model.Router) model.Provider {
 	if router == nil {

@@ -204,6 +204,18 @@ func (t *TUI) listSkillsCmd() tea.Cmd {
 	}
 }
 
+func (t *TUI) listMCPCmd() tea.Cmd {
+	return func() tea.Msg {
+		if t.localCli == nil {
+			return ipcErrorNotification(notifyMCPError, fmt.Errorf("%s", t.tr("error.not_connected")))
+		}
+		if err := t.localCli.ListMCP(); err != nil {
+			return ipcErrorNotification(notifyMCPError, err)
+		}
+		return nil
+	}
+}
+
 func (t *TUI) compactCmd() tea.Cmd {
 	return func() tea.Msg {
 		if t.localCli == nil {

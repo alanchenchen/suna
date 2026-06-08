@@ -347,6 +347,8 @@ func (t *TUI) updateChatKey(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t.updateModelPicker(ks)
 	case chatpage.KeyTargetSkills:
 		return t.updateSkillsOverlay(ks)
+	case chatpage.KeyTargetMCP:
+		return t.updateMCPOverlay(ks)
 	case chatpage.KeyTargetPendingImagePaste:
 		cmd := t.updatePendingImagePaste(ks)
 		t.syncContent()
@@ -565,6 +567,8 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 		return nil
 	case "/skills":
 		return t.handleSkills(parts)
+	case "/mcp":
+		return t.handleMCP(parts)
 	case "/help":
 		t.prevMode = uipage.Chat
 		t.mode = uipage.Help
@@ -667,6 +671,161 @@ func (t *TUI) setSkillOverlayCmd(name string, enabled bool) tea.Cmd {
 		}
 		return nil
 	}
+}
+
+func (t *TUI) handleMCP(parts []string) tea.Cmd {
+	if len(parts) != 1 {
+		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.tr("tui.mcp.usage")})
+		return nil
+	}
+	t.chat.OpenMCPOverlay()
+	return t.listMCPCmd()
+}
+
+func (t *TUI) updateMCPOverlay(ks string) (tea.Model, tea.Cmd) {
+	switch ks {
+	case "esc":
+		t.chat.CloseMCPOverlay()
+		return t, t.syncInputFocus()
+	case "up":
+		t.chat.MoveMCPCursor(-1)
+		return t, nil
+	case "down":
+		t.chat.MoveMCPCursor(1)
+		return t, nil
+	case " ", "space":
+		if action, ok := t.chat.SelectMCPForToggle(); ok {
+			t.chat.SetMCPActionServer(action.Name)
+			return t, t.setMCPOverlayCmd(action.Name, action.Active)
+		}
+		return t, nil
+	case "enter":
+		if name, ok := t.chat.SelectMCPForReload(); ok {
+			t.chat.SetMCPActionServer(name)
+			return t, t.reloadMCPOverlayCmd(name)
+		}
+		return t, nil
+	}
+	return t, nil
+}
+
+func (t *TUI) setMCPOverlayCmd(name string, active bool) tea.Cmd {
+	return func() tea.Msg {
+		if t.localCli == nil {
+			return ipcErrorNotification(notifyMCPError, errNotConnected(t))
+		}
+		if err := t.localCli.ToggleMCP(protocol.MCPSetParams{Name: strings.TrimSpace(name), Active: active}); err != nil {
+			return ipcErrorNotification(notifyMCPError, err)
+		}
+		if err := t.localCli.ListMCP(); err != nil {
+			return ipcErrorNotification(notifyMCPError, err)
+		}
+		return nil
+	}
+}
+
+func (t *TUI) reloadMCPOverlayCmd(name string) tea.Cmd {
+	return func() tea.Msg {
+		if t.localCli == nil {
+			return ipcErrorNotification(notifyMCPError, errNotConnected(t))
+		}
+		if err := t.localCli.ReloadMCP(protocol.MCPReloadParams{Name: strings.TrimSpace(name)}); err != nil {
+			return ipcErrorNotification(notifyMCPError, err)
+		}
+		if err := t.localCli.ListMCP(); err != nil {
+			return ipcErrorNotification(notifyMCPError, err)
+		}
+		return nil
+	}
+}
+
+func (t *TUI) renderMCPOverlay(width int) string {
+	view := t.chat.MCPOverlayView(width, t.overlayMaxHeight())
+	var body []string
+	if view.Loading {
+		body = append(body, styleDim.Render(t.tr("tui.mcp.loading")))
+	} else if view.Empty {
+		body = append(body, styleDim.Render(t.tr("tui.mcp.empty")))
+	} else {
+		for _, row := range view.Rows {
+			body = append(body, t.renderMCPRowView(row, view.Inner))
+		}
+	}
+	body, start, total := scrollWindow(body, view.Height, &t.chat.MCPScroll)
+	title := t.tr("tui.mcp.title", view.Active, view.Total, view.Tools, view.Issues)
+	lines := []string{styleHL.Render(title), ""}
+	lines = append(lines, body...)
+	if view.Error != "" {
+		lines = append(lines, "", styleError.Render(view.Error))
+	}
+	lines = append(lines, "", styleDim.Render(t.mcpHelpText(start, view.Height, total)))
+	return boxStyle.Width(view.Width).Padding(1, 2).Render(strings.Join(lines, "\n"))
+}
+
+func (t *TUI) renderMCPRowView(row chatpage.MCPRowView, width int) string {
+	cursor := "  "
+	nameStyle := lipgloss.NewStyle()
+	if row.Selected {
+		cursor = styleCursor.Render("▶ ")
+		nameStyle = styleHL
+	}
+	mark := mcpActiveMark(row)
+	name := truncateDisplay(row.Server.Name, max(12, width/3))
+	transport := strings.TrimSpace(row.Server.Transport)
+	if transport == "" {
+		transport = "stdio"
+	}
+	status := fmt.Sprintf("%s · %s %d", transport, t.tr("tui.mcp.tools"), row.Server.ToolCount)
+	if row.Loading {
+		status = t.tr("tui.mcp.reloading")
+	} else if row.Issue {
+		status = t.tr("tui.mcp.error")
+	} else if !row.Active {
+		status = t.tr("tui.mcp.inactive")
+	}
+	line := fmt.Sprintf("%s%s %-22s %s", cursor, mark, nameStyle.Render(name), mcpStatusStyle(row).Render(truncateDisplay(status, max(10, width-30))))
+	cmd := strings.TrimSpace(row.Server.Command)
+	if cmd != "" {
+		line += "  " + styleToolDim.Render(truncateDisplay(cmd, max(8, width-lipgloss.Width(line)-2)))
+	}
+	if row.Issue && row.Server.Error != "" {
+		line += "  " + styleToolErr.Render(truncateDisplay(row.Server.Error, max(8, width-lipgloss.Width(line)-2)))
+	}
+	return line
+}
+
+func (t *TUI) mcpHelpText(start, height, total int) string {
+	text := t.tr("tui.mcp.help")
+	if total > height {
+		text += fmt.Sprintf(" · %d-%d/%d", start+1, min(total, start+height), total)
+	}
+	return text
+}
+
+func mcpActiveMark(row chatpage.MCPRowView) string {
+	if row.Loading {
+		return styleToolRun.Render("◌")
+	}
+	if row.Issue {
+		return styleToolErr.Render("!")
+	}
+	if row.Active {
+		return styleToolOk.Render("●")
+	}
+	return styleDim.Render("○")
+}
+
+func mcpStatusStyle(row chatpage.MCPRowView) lipgloss.Style {
+	if row.Loading {
+		return styleToolRun
+	}
+	if row.Issue {
+		return styleToolErr
+	}
+	if row.Active {
+		return styleToolOk
+	}
+	return styleDim
 }
 
 func (t *TUI) renderSkillsOverlay(width int) string {

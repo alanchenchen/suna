@@ -22,6 +22,7 @@ type ViewDeps struct {
 	ToolDetailOverlay string
 	HelpOverlay       string
 	SkillsOverlay     string
+	MCPOverlay        string
 	GuardOverlay      string
 	Overlay           func(base, overlay string) string
 }
@@ -55,6 +56,9 @@ func (m Model) View(deps ViewDeps) string {
 	}
 	if m.SkillsOverlayOpen && deps.SkillsOverlay != "" {
 		content = overlay(content, deps.SkillsOverlay, deps.Overlay)
+	}
+	if m.MCPOverlayOpen && deps.MCPOverlay != "" {
+		content = overlay(content, deps.MCPOverlay, deps.Overlay)
 	}
 	if m.PendingGuard != nil && deps.GuardOverlay != "" {
 		content = overlay(content, deps.GuardOverlay, deps.Overlay)

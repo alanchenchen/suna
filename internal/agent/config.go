@@ -65,6 +65,9 @@ func (a *Agent) ReloadConfigFromDiskIfNeeded() (*config.Config, error) {
 	}
 	a.guard = a.newGuardForSession(a.sessionID)
 	a.reloadSkillsLocked()
+	if a.mcp != nil {
+		a.mcp.SetConfig(loaded.MCP)
+	}
 	if a.tools != nil {
 		if err := a.tools.Reload(context.Background()); err != nil {
 			return a.cfg.Clone(), err

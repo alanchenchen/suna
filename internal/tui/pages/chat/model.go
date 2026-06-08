@@ -111,4 +111,12 @@ type Model struct {
 	SkillsCursor      int
 	SkillsScroll      int
 	SkillsError       string
+
+	MCPServers      []protocol.MCPServerInfo
+	MCPOverlayOpen  bool
+	MCPLoading      bool
+	MCPCursor       int
+	MCPScroll       int
+	MCPError        string
+	MCPActionServer string
 }

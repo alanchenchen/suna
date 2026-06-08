@@ -30,6 +30,7 @@ type sessionRestoreInputMsg = tuievents.SessionRestoreInputMsg
 type daemonFullStatusMsg = tuievents.DaemonFullStatusMsg
 type configStateMsg = tuievents.ConfigStateMsg
 type skillListMsg = tuievents.SkillListMsg
+type mcpListMsg = tuievents.MCPListMsg
 type skillLoadMsg = tuievents.SkillLoadMsg
 type skillReviewMsg = tuievents.SkillReviewMsg
 type attachmentStatusMsg = tuievents.AttachmentStatusMsg
@@ -38,6 +39,7 @@ type requestErrorMsg = tuievents.RequestErrorMsg
 const (
 	notifyCompactError = tuievents.NotifyCompactError
 	notifyConfigError  = tuievents.NotifyConfigError
+	notifyMCPError     = tuievents.NotifyMCPError
 )
 
 func decodeLocalNotification(notif localNotification) any {
@@ -84,6 +86,8 @@ func (t *TUI) handleNotificationMsg(msg notificationMsg) {
 		t.handleConfigStateNotification(m.Params)
 	case skillListMsg:
 		t.handleSkillListNotification(m.Params)
+	case mcpListMsg:
+		t.handleMCPListNotification(m.Params)
 	case skillLoadMsg:
 		t.handleSkillLoadNotification(m.Params)
 	case skillReviewMsg:
@@ -292,6 +296,10 @@ func (t *TUI) handleSkillListNotification(p protocol.SkillListResult) {
 	t.chat.SetSkills(p.Skills)
 }
 
+func (t *TUI) handleMCPListNotification(p protocol.MCPListResult) {
+	t.chat.SetMCPServers(p.Servers)
+}
+
 func (t *TUI) handleSkillLoadNotification(p protocol.SkillLoadParams) {
 	status := strings.TrimSpace(p.Status)
 	if status == "loading" {
@@ -351,6 +359,10 @@ func (t *TUI) handleRequestErrorNotification(p requestErrorMsg) {
 		t.chat.Compacting = false
 		t.appendNonToolMessage(chatMsg{Role: "error", Content: p.Message})
 		_ = t.syncInputFocus()
+		return
+	}
+	if p.Scope == notifyMCPError {
+		t.chat.SetMCPError(p.Message)
 		return
 	}
 	t.config.Error = p.Message

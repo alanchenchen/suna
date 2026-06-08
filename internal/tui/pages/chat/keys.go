@@ -9,6 +9,7 @@ const (
 	KeyTargetGuard
 	KeyTargetModelPicker
 	KeyTargetSkills
+	KeyTargetMCP
 	KeyTargetPendingImagePaste
 	KeyTargetAttachment
 	KeyTargetBlocked
@@ -27,6 +28,9 @@ func (m Model) RouteKey(key string, inputLocked bool, compacting bool) KeyTarget
 	}
 	if m.SkillsOverlayOpen {
 		return KeyTargetSkills
+	}
+	if m.MCPOverlayOpen {
+		return KeyTargetMCP
 	}
 	if m.PendingImagePaste != nil {
 		return KeyTargetPendingImagePaste

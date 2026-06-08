@@ -12,6 +12,7 @@ import (
 	"github.com/alanchenchen/suna/internal/agent"
 	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/logging"
+	"github.com/alanchenchen/suna/internal/mcp"
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/protocol"
 	"github.com/alanchenchen/suna/internal/skill"
@@ -49,6 +50,23 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 			return nil, protocolError{code: -32603, message: "skill runtime is not initialized"}
 		}
 		return s.daemon.agent.Skills().HandleProtocol(ctx, req, sink)
+	}
+	if mcp.IsProtocolMethod(req.Method) {
+		if s.daemon.agent.MCP() == nil {
+			return nil, protocolError{code: -32603, message: "mcp runtime is not initialized"}
+		}
+		result, err := s.daemon.agent.MCP().HandleProtocol(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		// MCP toggle/reload 会改变运行态可用工具集合；协议处理成功后刷新 tools manager，
+		// 让下一轮模型请求看到最新 tool schema。mcp.list 只读，不触发刷新。
+		if req.Method == protocol.MethodMCPToggle || req.Method == protocol.MethodMCPReload {
+			if err := s.daemon.agent.ReloadTools(ctx); err != nil {
+				return nil, protocolError{code: -32603, message: err.Error()}
+			}
+		}
+		return result, nil
 	}
 	switch req.Method {
 	case protocol.MethodSendMessage:

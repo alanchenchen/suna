@@ -33,7 +33,7 @@ func (t *TUI) doQuit() {
 
 func (t *TUI) Init() tea.Cmd {
 	return func() tea.Msg {
-		return tea.Batch(t.daemonStatusCmd(), t.configGetCmd(), t.attachmentStatusCmd())()
+		return tea.Batch(t.daemonStatusCmd(), t.configGetCmd(), t.attachmentStatusCmd(), t.listMCPCmd())()
 	}
 }
 

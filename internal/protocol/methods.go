@@ -33,6 +33,9 @@ const (
 	MethodMemoryList = "memory.list"
 	MethodSkillList  = "skill.list"
 	MethodSkillSet   = "skill.set"
+	MethodMCPList    = "mcp.list"
+	MethodMCPToggle  = "mcp.toggle"
+	MethodMCPReload  = "mcp.reload"
 )
 
 // Reserved for future trigger/skill runtime support. These methods are not handled by daemon service yet.

@@ -201,6 +201,9 @@ func (a *Agent) Close() {
 		if a.extractWorker != nil {
 			a.extractWorker.Wait()
 		}
+		if a.tools != nil {
+			_ = a.tools.Close(context.Background())
+		}
 		if a.store != nil {
 			a.store.Close()
 		}

@@ -12,6 +12,7 @@ import (
 const (
 	NotifyCompactError = "compact.error"
 	NotifyConfigError  = "config.error"
+	NotifyMCPError     = "mcp.error"
 )
 
 // Notification 是 local transport 推给 TUI event pump 的原始 daemon 事件。
@@ -46,6 +47,7 @@ type SessionRestoreInputMsg struct {
 type DaemonFullStatusMsg struct{ Params protocol.DaemonStatusParams }
 type ConfigStateMsg struct{ Params protocol.ConfigParams }
 type SkillListMsg struct{ Params protocol.SkillListResult }
+type MCPListMsg struct{ Params protocol.MCPListResult }
 type SkillLoadMsg struct{ Params protocol.SkillLoadParams }
 type SkillReviewMsg struct{ Params protocol.SkillReviewParams }
 type AttachmentStatusMsg struct {
@@ -73,6 +75,7 @@ func (SessionRestoreInputMsg) isNotificationMsg()   {}
 func (DaemonFullStatusMsg) isNotificationMsg()      {}
 func (ConfigStateMsg) isNotificationMsg()           {}
 func (SkillListMsg) isNotificationMsg()             {}
+func (MCPListMsg) isNotificationMsg()               {}
 func (SkillLoadMsg) isNotificationMsg()             {}
 func (SkillReviewMsg) isNotificationMsg()           {}
 func (AttachmentStatusMsg) isNotificationMsg()      {}
@@ -101,7 +104,7 @@ func Decode(notif Notification) tea.Msg {
 		return decodeParams[protocol.DaemonStateParams](notif, func(p protocol.DaemonStateParams) tea.Msg { return DaemonStateMsg{Params: p} })
 	case protocol.NotifyCompactResult:
 		return decodeParams[protocol.CompactResult](notif, func(p protocol.CompactResult) tea.Msg { return CompactResultMsg{Params: p} })
-	case NotifyCompactError, NotifyConfigError:
+	case NotifyCompactError, NotifyConfigError, NotifyMCPError:
 		var p struct {
 			Message string `json:"message"`
 		}
@@ -119,6 +122,8 @@ func Decode(notif Notification) tea.Msg {
 		return decodeParams[protocol.ConfigParams](notif, func(p protocol.ConfigParams) tea.Msg { return ConfigStateMsg{Params: p} })
 	case protocol.MethodSkillList:
 		return decodeParams[protocol.SkillListResult](notif, func(p protocol.SkillListResult) tea.Msg { return SkillListMsg{Params: p} })
+	case protocol.MethodMCPList:
+		return decodeParams[protocol.MCPListResult](notif, func(p protocol.MCPListResult) tea.Msg { return MCPListMsg{Params: p} })
 	case protocol.NotifySkillLoad:
 		return decodeParams[protocol.SkillLoadParams](notif, func(p protocol.SkillLoadParams) tea.Msg { return SkillLoadMsg{Params: p} })
 	case protocol.NotifySkillReview:

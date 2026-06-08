@@ -106,6 +106,13 @@ func (c *Client) ListSkills() error { return c.SendRequestNotify(protocol.Method
 func (c *Client) SetSkill(params protocol.SkillSetParams) error {
 	return c.SendRequestNotify(protocol.MethodSkillSet, params)
 }
+func (c *Client) ListMCP() error { return c.SendRequestNotify(protocol.MethodMCPList, nil) }
+func (c *Client) ToggleMCP(params protocol.MCPSetParams) error {
+	return c.SendRequestNotify(protocol.MethodMCPToggle, params)
+}
+func (c *Client) ReloadMCP(params protocol.MCPReloadParams) error {
+	return c.SendRequestNotify(protocol.MethodMCPReload, params)
+}
 func (c *Client) Compact() error      { return c.SendRequestNotify(protocol.MethodCompact, nil) }
 func (c *Client) DaemonStatus() error { return c.SendRequestNotify(protocol.MethodDaemonStatus, nil) }
 func (c *Client) ConfigGet() error    { return c.SendRequestNotify(protocol.MethodConfigGet, nil) }
@@ -129,6 +136,10 @@ func (c *Client) handleResult(method string, rawResult json.RawMessage) {
 	}
 	if method == protocol.MethodSkillList {
 		c.onNotify(protocol.MethodSkillList, rawResult)
+		return
+	}
+	if method == protocol.MethodMCPList {
+		c.onNotify(protocol.MethodMCPList, rawResult)
 		return
 	}
 	if looksLikeDaemonStatus(rawResult) {

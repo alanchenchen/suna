@@ -197,6 +197,38 @@ type AskUserReply struct {
 	Answer string `json:"answer"`
 }
 
+type MCPServerInfo struct {
+	ID         string `json:"id,omitempty"`
+	Name       string `json:"name"`
+	Transport  string `json:"transport,omitempty"`
+	Command    string `json:"command,omitempty"`
+	Active     bool   `json:"active"`
+	Configured bool   `json:"configured"`
+	ToolCount  int    `json:"tool_count"`
+	Error      string `json:"error,omitempty"`
+}
+
+type MCPListResult struct {
+	Servers []MCPServerInfo `json:"servers"`
+}
+
+type MCPSetParams struct {
+	Name   string `json:"name"`
+	Active bool   `json:"active"`
+}
+
+type MCPSetResult struct {
+	Status string `json:"status"`
+}
+
+type MCPReloadParams struct {
+	Name string `json:"name"`
+}
+
+type MCPReloadResult struct {
+	Status string `json:"status"`
+}
+
 type SkillInfo struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
