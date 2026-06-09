@@ -20,6 +20,8 @@ const chatMaxCommandSuggestions = chatpage.MaxCommandSuggestions
 
 type phase = chatpage.Phase
 
+type manualCompactRequestMsg struct{}
+
 const (
 	phaseIdle             = chatpage.PhaseIdle
 	phaseFirstLLM         = chatpage.PhaseFirstLLM
@@ -162,6 +164,9 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, cmd
 		}
 		return t, nil
+
+	case manualCompactRequestMsg:
+		return t, t.compactCmd()
 
 	case tea.PasteMsg:
 		if t.inputLocked() {
@@ -564,7 +569,7 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 		t.chat.PhaseStart = time.Now()
 		t.chat.Textarea.Blur()
 		t.syncContent()
-		return tea.Batch(t.compactCmd(), t.chat.Spinner.Tick)
+		return tea.Batch(deferManualCompactRequestCmd(), t.chat.Spinner.Tick)
 	case "/config":
 		t.mode = uipage.Config
 		t.config.FromMode = uipage.Chat

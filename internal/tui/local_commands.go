@@ -228,6 +228,12 @@ func (t *TUI) compactCmd() tea.Cmd {
 	}
 }
 
+func deferManualCompactRequestCmd() tea.Cmd {
+	return func() tea.Msg {
+		return manualCompactRequestMsg{}
+	}
+}
+
 func (t *TUI) listMemoryCmd() tea.Cmd {
 	return func() tea.Msg {
 		if t.localCli == nil {

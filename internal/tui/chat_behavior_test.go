@@ -9,6 +9,7 @@ import (
 
 	"github.com/alanchenchen/suna/internal/protocol"
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
+	tuitransport "github.com/alanchenchen/suna/internal/tui/transport"
 )
 
 func TestThinkingBoxCollapsedWhileStreamingAndStopsElapsed(t *testing.T) {
@@ -155,6 +156,50 @@ func TestAutoCompactRunningClearsWhenStreamStarts(t *testing.T) {
 	tui.handleLocalNotification(localNotification{method: protocol.NotifyStream, params: []byte(`{"chunk":"hello"}`)})
 	if tui.chat.Compacting {
 		t.Fatalf("compacting = true after stream starts, want false")
+	}
+}
+
+func TestManualCompactCommandShowsLoadingBeforeDeferredRequest(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24, ready: true, localCli: tuitransport.NewClient()}
+	tui.initChatComponents()
+	tui.chat.Textarea.SetValue("/compact")
+
+	_, cmd := tui.updateChatKey("enter", tea.KeyPressMsg{})
+	if cmd == nil {
+		t.Fatal("updateChatKey() returned nil, want deferred compact command")
+	}
+	if !tui.chat.Compacting {
+		t.Fatalf("compacting = false immediately after /compact, want true")
+	}
+	if !tui.chat.Loading {
+		t.Fatalf("loading = false immediately after /compact, want true")
+	}
+	if !tui.inputLocked() {
+		t.Fatalf("inputLocked() = false immediately after /compact, want true")
+	}
+	tui.syncContent()
+	view := stripANSIForTest(tui.chat.Viewport.View())
+	if !strings.Contains(view, "正在压缩上下文") {
+		t.Fatalf("viewport = %q, want manual compact loading before result", view)
+	}
+}
+
+func TestManualCompactResultPanelClearsLoading(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
+	tui.initChatComponents()
+	tui.chat.Compacting = true
+	tui.chat.Loading = true
+	tui.chat.Phase = phaseFirstLLM
+
+	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: []byte(`{"before_tokens":100,"after_tokens":50,"context_window":1000}`)})
+	if tui.chat.Compacting || tui.chat.Loading {
+		t.Fatalf("compacting/loading = %v/%v after manual compact result, want false/false", tui.chat.Compacting, tui.chat.Loading)
+	}
+	if len(tui.chat.Messages) != 1 {
+		t.Fatalf("messages = %d after manual compact result, want 1 panel", len(tui.chat.Messages))
+	}
+	if got := tui.chat.Messages[0].Role; got != "panel" {
+		t.Fatalf("message role = %q, want panel", got)
 	}
 }
 
