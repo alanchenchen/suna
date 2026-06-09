@@ -27,8 +27,6 @@ func main() {
 		runTUI()
 	case "help":
 		printHelp()
-	case "start":
-		startDaemonCommand()
 	case "stop":
 		stopDaemonCommand()
 	case "status":
@@ -57,8 +55,6 @@ func parseCLI(args []string) string {
 	switch fs.Arg(0) {
 	case "help":
 		return "help"
-	case "start":
-		return "start"
 	case "stop":
 		return "stop"
 	case "status":
@@ -73,7 +69,6 @@ func printHelp() {
 
 Usage:
   suna                 Open the TUI. Starts the daemon if needed.
-  suna start           Start the daemon in the background.
   suna stop            Stop the running daemon.
   suna status          Show daemon status.
   suna help            Show this help.

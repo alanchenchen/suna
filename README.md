@@ -2,7 +2,7 @@
 
 Suna 是一个运行在本地终端里的通用 AI Agent。它以 TUI 形式与你对话，能读取和修改本地文件、执行命令、访问 HTTP、处理图片输入、在需要时向你确认，并通过记忆和 Skill 逐步适应你的工作方式。
 
-Suna 通过后台 daemon 处理模型、工具、配置和本地状态。TUI 退出后 daemon 会继续驻留一段时间；当前实现会在无客户端连接约 30 分钟后自动退出。
+Suna 通过后台 daemon 处理模型、工具、配置和本地状态。当前版本不做长期常驻；最后一个客户端断开后，daemon 会短暂等待重连，然后自动收尾并退出。
 
 > 当前版本更接近一个可用的本地 Agent MVP：对话、工具调用、模型配置、Guard 安全确认、记忆、上下文压缩、图片输入、Skill、基础 MCP tools-only runtime 和 subtask 委派已经可用；Trigger、完整 MCP 运行时、插件市场、复杂权限 UI、完整 sandbox 等能力仍不应视为已完成。
 
@@ -47,7 +47,7 @@ Suna 通过后台 daemon 处理模型、工具、配置和本地状态。TUI 退
 - **Skill 检测流程**：Skill 导入/生成后会先静态检查，可选 LLM review，再由你确认是否启用。
 - **Skill 能力目录**：支持目录式 Skill：一个目录内包含 `SKILL.md`，并可附带 `references/`、`scripts/`、`examples/`、`assets/` 等辅助文件。
 - **基础 MCP tools-only runtime**：可在 `config.toml` 配置 stdio MCP server，连接后将 MCP tools 暴露给模型，并通过 `/mcp` 查看状态、启停和 reload。
-- **本地 daemon 生命周期**：TUI 退出后 daemon 不会立即结束，会短时驻留以便快速恢复；当前实现会在无客户端连接约 30 分钟后自动退出，也可通过 `suna start/status/stop` 手动管理。
+- **本地 daemon 生命周期**：TUI 退出后 daemon 会短暂等待重连；若没有客户端连接，会取消当前运行、保留未处理的记忆队列并自动退出，也可通过 `suna status/stop` 查看或停止。
 
 ## 安装与启动
 
@@ -82,7 +82,6 @@ go run .
 
 ```bash
 suna                 # 打开 TUI；如 daemon 未启动会自动启动
-suna start           # 后台启动 daemon
 suna status          # 查看 daemon 状态
 suna stop            # 停止 daemon
 suna help            # 查看帮助
@@ -549,7 +548,6 @@ C:\Users\<你>\.suna\logs\app.log
 Suna 使用后台 daemon 管理本地状态。`suna` / `suna.exe` 是前台 CLI/TUI 入口；后台进程负责模型调用、工具执行、配置、记忆、Skill 和会话状态。
 
 ```bash
-suna start     # 启动 daemon；如果已运行，通常直接复用现有 daemon
 suna status    # 查看 daemon 是否可达、PID、uptime、连接数
 suna stop      # 请求当前用户的 daemon 正常停止
 ```
@@ -557,10 +555,9 @@ suna stop      # 请求当前用户的 daemon 正常停止
 当前生命周期实现：
 
 - 打开 TUI 时，如果 daemon 未运行，Suna 会自动启动 daemon。
-- 退出 TUI 不等于立即停止 daemon；TUI 断开后，daemon 会继续驻留一段时间。
-- 生命周期监控每 5 分钟检查一次连接数；当没有任何 CLI/TUI 连接时开始计时。
-- 如果持续约 30 分钟没有客户端连接，daemon 会自动优雅退出。
-- 只要在这段时间内重新打开 TUI 或执行 CLI 请求，连接数变为非零，空闲计时会被清空。
+- 当前版本没有 trigger/cowork 等长期后台任务；daemon 只在有客户端连接时保持运行。
+- 最后一个客户端断开后，daemon 会进入约 2 秒宽限期；如果期间没有新客户端连接，会取消当前 agent run 并自动退出。
+- 未开始处理的 `memory_queue` 会保留在 SQLite 中，不会因为退出而强制触发记忆提取；下次启动后按记忆 worker 的批量策略恢复处理。
 - `suna stop` 会向 daemon 发送停止请求，是推荐的手动停止方式。
 - 如果 daemon 不可达但 PID 文件还在，`suna stop` 会尝试按 PID 结束旧进程并清理 PID 文件。
 - 收到 `SIGTERM` / `SIGINT`、系统重启、用户注销、手动杀进程也会结束 daemon。

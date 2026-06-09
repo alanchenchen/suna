@@ -92,7 +92,6 @@ Daemon 解决了这些问题：记忆异步批量提取、状态持久化和 age
 ```bash
 suna                    # 自动检测: daemon 未运行 → 启动 daemon → 启动 TUI
 suna                    # daemon 已运行 → 只启动 TUI
-suna start              # 后台启动 daemon
 suna stop               # 停止 daemon
 suna status             # 查看 daemon 状态
 suna help               # 查看 CLI 帮助

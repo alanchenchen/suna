@@ -10,14 +10,15 @@ import (
 /*
 Lifecycle 管理 daemon 的自动退出策略。
 
-设计原则（01-architecture.md Daemon 生命周期）：
-  - 最后一个客户端断开 → 等 30 分钟
-  - 30 分钟内无客户端重连 → 优雅退出
-  - 但有活跃感知源 (已注册的 Timer/Webhook 等) → 不退出
-  - 无活跃感知源也无客户端 → 退出
+当前产品形态是单 agent、单会话，daemon 不承担长期 trigger/cowork 任务；
+因此 daemon 只在有客户端连接时保持运行。最后一个客户端断开后进入短暂宽限期，
+若没有新连接则停止 daemon。未开始的记忆提取保留在 SQLite 队列中，等待下次启动恢复。
 */
 
-const idleShutdownDelay = 30 * time.Minute
+const (
+	noClientShutdownDelay = 2 * time.Second
+	lifecycleTick         = 500 * time.Millisecond
+)
 
 type Lifecycle struct {
 	daemon *Daemon
@@ -27,12 +28,12 @@ func NewLifecycle(d *Daemon) *Lifecycle {
 	return &Lifecycle{daemon: d}
 }
 
-// Watch 启动生命周期监控 goroutine
+// Watch 启动生命周期监控 goroutine。
 func (l *Lifecycle) Watch(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(lifecycleTick)
 	defer ticker.Stop()
 
-	var idleSince time.Time
+	var noClientSince time.Time
 
 	for {
 		select {
@@ -40,20 +41,21 @@ func (l *Lifecycle) Watch(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if l.daemon.ConnectionCount() > 0 {
-				idleSince = time.Time{}
+				if !noClientSince.IsZero() {
+					logging.Info("agent", "no_client_shutdown_cancelled", nil)
+				}
+				noClientSince = time.Time{}
 				continue
 			}
 
-			// 无客户端连接
-			if idleSince.IsZero() {
-				idleSince = time.Now()
-				logging.Info("agent", "idle_timer_started", nil)
+			if noClientSince.IsZero() {
+				noClientSince = time.Now()
+				logging.Info("agent", "no_client_shutdown_timer_started", logging.Event{"grace": noClientShutdownDelay.String()})
 				continue
 			}
 
-			// 等待超时
-			if time.Since(idleSince) >= idleShutdownDelay {
-				logging.Info("agent", "idle_shutdown", logging.Event{"idle_for": idleShutdownDelay.String()})
+			if time.Since(noClientSince) >= noClientShutdownDelay {
+				logging.Info("agent", "no_client_shutdown", logging.Event{"idle_for": time.Since(noClientSince).Truncate(time.Millisecond).String()})
 				l.daemon.Stop()
 				return
 			}

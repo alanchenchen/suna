@@ -59,7 +59,7 @@ func (w *Worker) Run() {
 		select {
 		case _, ok := <-w.queue.Ch():
 			if !ok {
-				w.processPending()
+				// 关闭 worker 只负责停止后台循环，不启动新的记忆整理；pending queue 已持久化在 SQLite，等待下次启动恢复。
 				return
 			}
 			// 普通事件攒批处理；high significance 事件尽快处理，减少“用户刚纠正但记忆还没更新”的窗口。

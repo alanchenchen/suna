@@ -570,12 +570,11 @@ Daemon 模式将核心逻辑与 UI 完全解耦，解决以上所有问题。
 ```bash
 suna              # 自动: daemon 未运行 → 后台启动 → 连接 → 进入 TUI
 suna              # 自动: daemon 已运行 → 直接连接 → 进入 TUI
-suna start        # 后台启动 daemon
 suna stop         # 通过 protocol 请求 daemon 优雅退出，失败时走本机进程 fallback
 suna status       # 查看 daemon 状态
 ```
 
-实现方式：`suna start` 是用户可见的后台启动命令。父进程通过 `SUNA_RUN_DAEMON=1 exec.Command(os.Args[0])` 拉起同一个二进制作为 daemon 子进程；这个环境变量是内部实现细节，不出现在 CLI help。
+实现方式：TUI 启动前会按需后台拉起 daemon。父进程通过 `SUNA_RUN_DAEMON=1 exec.Command(os.Args[0])` 拉起同一个二进制作为 daemon 子进程；这个环境变量是内部实现细节，不出现在 CLI help。
 
 ### Daemon 生命周期
 
@@ -587,18 +586,17 @@ suna status       # 查看 daemon 状态
   4. PID 文件只作为 fallback/debug 信号，不作为首要运行态判断
 
 运行中:
-  - 无客户端连接时: 记忆 worker 继续处理 pending memory_queue
   - 有客户端连接: 正常交互
-  - agent loop 正在执行: 不接受退出信号
+  - 无客户端连接时: 进入短暂宽限期，未开始的 memory_queue 不会被强制处理
+  - agent loop 正在执行: 退出流程会先取消当前 run，再释放资源
 
 自动退出:
-  - 最后一个客户端断开 → 等 30 分钟
-  - 30 分钟内无客户端重连 → 优雅退出
-  - 当前没有已接入的活跃感知源判断；触发器保留为后续设计
-  - 无客户端且满足退出策略 → 退出
+  - 最后一个客户端断开 → 短暂等待重连
+  - 宽限期内无客户端重连 → 取消当前 run 并退出
+  - 当前没有 trigger/cowork/perception 等长期后台任务；后续如接入，应通过显式 activity/drain 机制扩展生命周期
+  - pending memory_queue 持久化在 SQLite 中，下次启动后按 worker 批量策略恢复处理
 
 手动管理 (通过 CLI，非 TUI 命令):
-   suna start        → 后台启动 daemon
    suna status       → 优先通过 daemon.status 显示 PID、运行时间、连接数
    suna stop         → 优先通过 daemon.stop 请求优雅退出；不可达时才使用本机进程 fallback
 ```
@@ -791,7 +789,6 @@ TUI (Bubble Tea):
 ```
 suna                    # 启动 TUI (自动检测/启动 daemon)
 suna "帮我分析日志"      # 单次执行模式 (非交互，连 daemon 执行后退出)
-suna start              # 后台启动 daemon
 suna stop               # 停止 daemon
 suna status             # 查看 daemon 状态
 suna help               # 查看 CLI 帮助

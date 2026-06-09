@@ -16,17 +16,6 @@ import (
 
 const daemonEnvName = "SUNA_RUN_DAEMON"
 
-func startDaemonCommand() {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if status, err := queryDaemonStatus(ctx); err == nil {
-		fmt.Printf("sunad is already running (pid %d)\n", status.PID)
-		return
-	}
-	startDaemon()
-	fmt.Println("sunad started")
-}
-
 func showStatus() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

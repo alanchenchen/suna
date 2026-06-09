@@ -18,16 +18,16 @@ import (
 /*
 Daemon 是 sunad 守护进程的核心结构。
 
-设计原则（01-architecture.md Daemon 架构）：
-  - 核心逻辑与客户端进程生命周期完全解耦
-  - 感知源 24/7 运行，不依赖 TUI 或未来 Web UI
-  - 记忆异步批量提取，不受 UI 生命周期约束
+设计原则：
+  - TUI 只负责交互与渲染，核心业务由 daemon 持有
+  - 当前阶段 daemon 不做长期常驻任务；无客户端连接后短暂宽限并退出
+  - 记忆提取队列持久化到 SQLite，未开始的后台记忆整理可留到下次启动恢复
   - 只挂载 protocol.Transport，不关心 local/web 等具体通信实现
 
 生命周期：
  1. 启动 → 创建 PID 文件 → 挂载 transports
  2. 运行 → protocol.Service 处理请求 → 驱动 Agent Loop
- 3. 退出 → 无客户端 + 无感知源 → 等 30 分钟 → 退出
+ 3. 退出 → 无客户端短暂宽限 / stop 请求 / 系统信号 → 关闭 Agent 与 transports
 */
 type Daemon struct {
 	cfg     *config.Config
@@ -97,7 +97,8 @@ func (d *Daemon) Run() error {
 	// 阻塞等待退出
 	<-ctx.Done()
 
-	// 优雅关闭
+	// 优雅关闭：无客户端或停止请求进入退出流程后，先取消当前 run，再释放资源。
+	d.agent.CancelCurrentRun()
 	d.agent.Close()
 	return nil
 }

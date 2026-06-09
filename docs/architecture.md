@@ -21,7 +21,6 @@ Agent / Runner / Model / Tools / Guard / Memory / Skill / MCP
 `main.go` 负责命令分发：
 
 - `suna`：启动 TUI，必要时自动拉起 daemon。
-- `suna start`：后台启动 daemon。
 - `suna status`：查询 daemon 状态。
 - `suna stop`：停止 daemon。
 
@@ -59,7 +58,7 @@ internal/tui/transport
 
 ## Daemon
 
-daemon 是长期运行的本地服务，负责协调核心能力：
+daemon 是按需运行的本地后台服务，负责协调核心能力：
 
 - 会话生命周期。
 - 模型配置和状态。
@@ -69,6 +68,19 @@ daemon 是长期运行的本地服务，负责协调核心能力：
 - 记忆、Skill、附件、用量等本地状态。
 
 TUI 重构或 UI 交互调整不应改变 daemon 的业务语义。
+
+## Daemon 生命周期
+
+当前版本是单 agent、单会话形态，没有 trigger/cowork/perception 等长期后台任务。daemon 生命周期按客户端连接驱动：
+
+- 打开 TUI 或执行需要 daemon 的 CLI 命令时，如果 daemon 未运行，会自动后台启动。
+- 每个 local transport 连接建立时注册 event sink，断开时注销；连接数是 daemon 是否继续运行的主要依据。
+- 最后一个客户端断开后，daemon 进入短暂宽限期；如果没有新连接，会取消当前 agent run 并退出。
+- `Close` 语义只释放资源，不启动新的业务工作；记忆整理需要由 worker 正常批量策略或未来显式 drain 流程触发。
+- 未开始处理的 `memory_queue` 持久化在 SQLite 中，daemon 退出时不强制 compaction，下次启动后通过 recover signal 继续按批量策略处理。
+- `suna stop`、`SIGTERM`、`SIGINT` 也会进入同一类关闭流程。
+
+未来如果引入 trigger/cowork/perception，再通过明确的 activity/drain 机制扩展生命周期，不应把业务收尾隐式塞进资源 `Close`。
 
 ## Agent / Runner / Tools / Guard
 
@@ -106,7 +118,7 @@ Suna 当前是单用户单当前会话形态，不提供多会话管理或完整
 - `conversation_state.session_state`：当前会话的 Session State，由 compact 生成/更新，保存 active context、完成任务/话题账本、用户要求、关键决策、tool facts 和 open threads。
 - `conversation_state.last_messages`：TUI 恢复展示用的真实可见 user/assistant 对话；不保存 system state、原始 tool call/result 或 raw 结构。
 - `conversation_state.tool_summary`：TUI-only 的工具摘要，恢复时展示给用户，不作为原始 tool 上下文注入模型。
-- `memory_queue`：active memory 的临时提取队列，daemon worker 批量处理后删除。
+- `memory_queue`：active memory 的临时提取队列，daemon worker 按批量策略处理后删除；daemon 退出不会为未开始的队列强制触发记忆提取，pending item 会留在 SQLite 中等待下次启动恢复。
 
 模型请求的缓存友好结构为：稳定 system/project/skill/tool schema 前缀 + 低频变化的 Session State + append-only recent messages + 靠近 latest user 的 active memory。Session State 不拼进 system prompt；active memory 也不放在 prior conversation 前面。
 

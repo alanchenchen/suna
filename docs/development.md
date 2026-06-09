@@ -25,7 +25,6 @@ go run .
 
 ```bash
 ./suna              # 打开 TUI，必要时自动启动 daemon
-./suna start        # 后台启动 daemon
 ./suna status       # 查看 daemon 状态
 ./suna stop         # 停止 daemon
 ```
