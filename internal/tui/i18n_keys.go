@@ -311,6 +311,7 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 
 		"compact.done":         {LocaleEN: "Context compression completed", LocaleZH: "上下文压缩完成"},
 		"compact.running":      {LocaleEN: "Compacting context...", LocaleZH: "正在压缩上下文..."},
+		"compact.auto_running": {LocaleEN: "Auto-compacting context; model will continue automatically...", LocaleZH: "正在自动压缩上下文，完成后模型会自动继续..."},
 		"compact.before":       {LocaleEN: "Before", LocaleZH: "压缩前"},
 		"compact.after":        {LocaleEN: "After", LocaleZH: "压缩后"},
 		"compact.retained":     {LocaleEN: "Retained", LocaleZH: "保留"},

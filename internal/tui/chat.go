@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
@@ -120,7 +121,7 @@ func (t *TUI) currentInputPolicy() chatpage.InputPolicy {
 		PendingGuard:     t.chat.PendingGuard != nil,
 		StatusLabel:      t.currentStatusLabel(),
 		SpinnerView:      t.chat.Spinner.View(),
-		CompactRunning:   t.tr("compact.running"),
+		CompactRunning:   t.compactRunningLabel(),
 		RespondingLabel:  t.tr("status.responding"),
 	})
 }
@@ -289,6 +290,7 @@ func (t *TUI) discardDraft() {
 func (t *TUI) resetPhase() {
 	t.finishStreamingMessages()
 	t.chat.Compacting = false
+	t.compactAuto = false
 	t.chat.ResetPhase()
 	_ = t.syncInputFocus()
 }
@@ -555,9 +557,13 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 	case "/memory":
 		return t.handleMemory(parts)
 	case "/compact":
+		t.compactAuto = false
 		t.chat.Compacting = true
+		t.chat.Loading = true
+		t.chat.Phase = phaseFirstLLM
+		t.chat.PhaseStart = time.Now()
 		t.chat.Textarea.Blur()
-		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.i18n.T("compact.running")})
+		t.syncContent()
 		return tea.Batch(t.compactCmd(), t.chat.Spinner.Tick)
 	case "/config":
 		t.mode = uipage.Config

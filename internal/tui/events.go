@@ -110,6 +110,7 @@ func (t *TUI) handleStreamNotification(p protocol.StreamParams) {
 		return
 	}
 	t.chat.Compacting = false
+	t.compactAuto = false
 	t.chat.HandleStreamStart(time.Now())
 	if p.Chunk != "" {
 		t.chat.LastAssistantText += p.Chunk
@@ -119,6 +120,7 @@ func (t *TUI) handleStreamNotification(p protocol.StreamParams) {
 
 func (t *TUI) handleReasoningNotification(p protocol.StreamParams) {
 	t.chat.Compacting = false
+	t.compactAuto = false
 	t.chat.HandleReasoningStart(time.Now())
 	t.appendStreamMessage("reasoning", p.Chunk)
 }
@@ -153,6 +155,7 @@ func (t *TUI) handleGuardConfirmNotification(p protocol.GuardConfirmParams) {
 func (t *TUI) handleToolStartNotification(p protocol.ToolStartParams) {
 	t.finishStreamingMessages()
 	t.chat.Compacting = false
+	t.compactAuto = false
 	t.chat.Textarea.Blur()
 	id := p.ID
 	if id == "" {
@@ -189,14 +192,20 @@ func (t *TUI) handleCompactResultNotification(p protocol.CompactResult) {
 	if p.Running != nil {
 		if *p.Running {
 			t.finishStreamingMessages()
+			t.compactAuto = true
 			t.chat.Compacting = true
+			t.chat.Loading = true
+			t.chat.Phase = phaseFirstLLM
+			t.chat.PhaseStart = time.Now()
 			t.chat.Textarea.Blur()
-			t.appendNonToolMessage(chatMsg{Role: "system", Content: t.i18n.T("compact.running")})
+			t.scrollToBottomOnNextSync()
 			_ = t.syncInputFocus()
 			return
 		}
 		t.chat.Compacting = false
+		t.compactAuto = false
 		if strings.TrimSpace(p.Error) != "" {
+			t.resetPhase()
 			t.appendNonToolMessage(chatMsg{Role: "error", Content: p.Error})
 		}
 		_ = t.syncInputFocus()
@@ -204,13 +213,14 @@ func (t *TUI) handleCompactResultNotification(p protocol.CompactResult) {
 	}
 	if strings.TrimSpace(p.Error) != "" {
 		t.chat.Compacting = false
+		t.compactAuto = false
 		t.appendNonToolMessage(chatMsg{Role: "error", Content: p.Error})
 		_ = t.syncInputFocus()
 		return
 	}
-	t.chat.Compacting = false
+	t.resetPhase()
 	t.applyContextStats(p.AfterTokens, p.ContextWindow)
-	t.appendNonToolMessage(chatMsg{Role: "system", Content: t.renderCompactPanel(p)})
+	t.appendNonToolMessage(chatMsg{Role: "panel", Content: t.renderCompactPanel(p)})
 	_ = t.syncInputFocus()
 }
 
@@ -383,6 +393,7 @@ func (t *TUI) handleAttachmentStatusNotification(p protocol.AttachmentStatusResu
 func (t *TUI) handleRequestErrorNotification(p requestErrorMsg) {
 	if p.Scope == notifyCompactError {
 		t.chat.Compacting = false
+		t.compactAuto = false
 		t.appendNonToolMessage(chatMsg{Role: "error", Content: p.Message})
 		_ = t.syncInputFocus()
 		return

@@ -99,15 +99,19 @@ func TestAutoCompactNotificationShowsRunning(t *testing.T) {
 	if !tui.chat.Compacting {
 		t.Fatalf("compacting = false after compact running result, want true")
 	}
+	if !tui.chat.Loading {
+		t.Fatalf("loading = false after compact running result, want true")
+	}
 	if !tui.inputLocked() {
 		t.Fatalf("inputLocked() = false during compact, want true")
 	}
-	if len(tui.chat.Messages) != 1 {
-		t.Fatalf("messages = %d after compact running result, want 1", len(tui.chat.Messages))
+	if len(tui.chat.Messages) != 0 {
+		t.Fatalf("messages = %d after compact running result, want no transient message", len(tui.chat.Messages))
 	}
-	view := stripANSIForTest(tui.chat.Messages[0].Content.(string))
-	if !strings.Contains(view, "正在压缩上下文") {
-		t.Fatalf("compact running message = %q, want compact loading", view)
+	tui.syncContent()
+	view := stripANSIForTest(tui.chat.Viewport.View())
+	if !strings.Contains(view, "正在自动压缩上下文") || !strings.Contains(view, "完成后模型会自动继续") {
+		t.Fatalf("compact status line = %q, want compact loading", view)
 	}
 }
 
@@ -120,8 +124,8 @@ func TestAutoCompactRunningFalseClearsLoading(t *testing.T) {
 	if tui.chat.Compacting {
 		t.Fatalf("compacting = true after compact running false, want false")
 	}
-	if len(tui.chat.Messages) != 1 {
-		t.Fatalf("messages = %d after compact running false, want only loading message", len(tui.chat.Messages))
+	if len(tui.chat.Messages) != 0 {
+		t.Fatalf("messages = %d after compact running false, want no transient message", len(tui.chat.Messages))
 	}
 }
 
@@ -134,10 +138,10 @@ func TestAutoCompactErrorClearsLoadingAndShowsError(t *testing.T) {
 	if tui.chat.Compacting {
 		t.Fatalf("compacting = true after compact error, want false")
 	}
-	if len(tui.chat.Messages) != 2 {
-		t.Fatalf("messages = %d after compact error, want loading and error", len(tui.chat.Messages))
+	if len(tui.chat.Messages) != 1 {
+		t.Fatalf("messages = %d after compact error, want only error", len(tui.chat.Messages))
 	}
-	view := stripANSIForTest(tui.chat.Messages[1].Content.(string))
+	view := stripANSIForTest(tui.chat.Messages[0].Content.(string))
 	if !strings.Contains(view, "自动上下文压缩失败") {
 		t.Fatalf("error message = %q, want compact error", view)
 	}

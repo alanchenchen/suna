@@ -63,6 +63,9 @@ type TUI struct {
 	// Help overlay 状态。
 	showHelp bool
 
+	// Compact UI mode: auto compact should say model will continue; manual /compact should not.
+	compactAuto bool
+
 	// Usage/context 统计，只用于状态栏展示。
 	sessionInputTok  int
 	sessionOutputTok int

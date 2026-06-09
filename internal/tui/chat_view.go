@@ -107,7 +107,7 @@ func (t *TUI) chatConnectionDot(state petState) string {
 		}
 	}
 	if badge != "" {
-		return badge + styleDim.Render(" · ") + conn
+		return badge + styleDim.Render("·") + conn
 	}
 	return conn
 }
@@ -142,7 +142,7 @@ func (t *TUI) chatTopMeta() string {
 		reasoning = t.reasoningDisplay(mc)
 	}
 	if reasoning != "" {
-		modelRef += " · " + reasoning
+		modelRef += "·" + strings.ReplaceAll(reasoning, " / ", "/")
 	}
 	if t.contextWindow <= 0 {
 		return styleHL.Render(modelRef)
@@ -156,7 +156,7 @@ func (t *TUI) chatTopMeta() string {
 	if ctxTokens <= 0 {
 		pct = 0
 	}
-	return styleHL.Render(textutil.TruncateRunes(modelRef, max(10, t.width/3))) + strings.Repeat(" ", 4) + styleDim.Render(fmt.Sprintf("ctx %s/%s · %d%%", ctx, fmtTok(t.contextWindow), pct))
+	return styleHL.Render(textutil.TruncateRunes(modelRef, max(10, t.width/3))) + strings.Repeat(" ", 2) + styleDim.Render(fmt.Sprintf("ctx(%d%%) %s/%s", pct, ctx, fmtTok(t.contextWindow)))
 }
 
 func (t *TUI) mouseInComposer(msg tea.MouseMsg) bool {

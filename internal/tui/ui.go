@@ -108,5 +108,5 @@ func (t *TUI) renderCompactPanel(r protocol.CompactResult) string {
 	lines = append(lines, "", fmt.Sprintf("  %s", t.i18n.T("compact.original")))
 
 	body := strings.Join(lines, "\n")
-	return "\n" + boxStyle.Width(56).Padding(1, 2).Render(body)
+	return boxStyle.Width(56).Padding(1, 2).Render(body)
 }

@@ -196,6 +196,12 @@ func (t *TUI) hasVisibleActiveProgress() bool {
 	}
 	return false
 }
+func (t *TUI) compactRunningLabel() string {
+	if t.compactAuto {
+		return t.tr("compact.auto_running")
+	}
+	return t.tr("compact.running")
+}
 func (t *TUI) renderCurrentStatusLine() string {
 	label := t.currentStatusLabel()
 	if label == "" {
@@ -208,6 +214,9 @@ func (t *TUI) renderCurrentStatusLine() string {
 	return fmt.Sprintf("    %s %s %s\n", t.chat.Spinner.View(), styleDim.Render(label), styleDim.Render(fmt.Sprintf("%.1fs", elapsed)))
 }
 func (t *TUI) currentStatusLabel() string {
+	if t.chat.Compacting {
+		return t.compactRunningLabel()
+	}
 	if t.chat.StatusLabel != "" {
 		return t.chat.StatusLabel
 	}
