@@ -18,10 +18,21 @@ const (
 	EventSkillReview
 )
 
+type EventStatusKind string
+
+const (
+	StatusCompactRunning EventStatusKind = "compact_running"
+	StatusCompactDone    EventStatusKind = "compact_done"
+	StatusCompactError   EventStatusKind = "compact_error"
+	StatusDone           EventStatusKind = "done"
+)
+
 type Event struct {
 	Type EventType
 
 	Content string
+	Error   bool
+	Status  EventStatusKind
 
 	ToolName   string
 	ToolCallID string
@@ -57,4 +68,6 @@ type Event struct {
 	ContextTokens int
 	ContextWindow int
 	DurationMs    int64
+
+	ResumeAvailable bool
 }

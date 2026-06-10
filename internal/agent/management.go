@@ -165,13 +165,18 @@ func (a *Agent) ClearAttachments() (root string, removedBytes int64, removedCoun
 	return root, removedBytes, removedCount, bytes, count, err
 }
 
-func (a *Agent) RestoreSession(ctx context.Context) int {
+type RestoreSessionResult struct {
+	Messages  int
+	Compacted bool
+}
+
+func (a *Agent) RestoreSession(ctx context.Context) RestoreSessionResult {
 	if a.conversation == nil {
-		return 0
+		return RestoreSessionResult{}
 	}
 	st, err := a.conversation.Load(ctx, memory.DefaultUserID)
 	if err != nil || st == nil || len(st.LastMessages) == 0 {
-		return 0
+		return RestoreSessionResult{}
 	}
 	a.sessionID = uuid.New().String()
 	a.turnCount = 0
@@ -182,7 +187,7 @@ func (a *Agent) RestoreSession(ctx context.Context) int {
 	for _, m := range st.LastMessages {
 		a.working.AddMessage(m)
 	}
-	return len(st.LastMessages)
+	return RestoreSessionResult{Messages: len(st.LastMessages), Compacted: a.sessionState != ""}
 }
 
 func (a *Agent) RestoreToolSummary(ctx context.Context) string {

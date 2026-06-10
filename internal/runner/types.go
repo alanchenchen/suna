@@ -48,8 +48,22 @@ type RetryPolicy struct {
 	Jitter      bool
 }
 
+type StatusKind string
+
+const (
+	StatusCompactRunning StatusKind = "compact_running"
+	StatusCompactDone    StatusKind = "compact_done"
+	StatusCompactError   StatusKind = "compact_error"
+	StatusWaitingLLM     StatusKind = "waiting_llm"
+)
+
+type StatusEvent struct {
+	Kind    StatusKind
+	Message string
+}
+
 type EventSink interface {
-	Status(content string)
+	Status(status StatusEvent)
 	Stream(content string)
 	Reasoning(content string)
 	Usage(usage UsageEvent)

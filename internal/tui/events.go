@@ -25,6 +25,7 @@ type toolEndMsg = tuievents.ToolEndMsg
 type daemonStateMsg = tuievents.DaemonStateMsg
 type compactResultMsg = tuievents.CompactResultMsg
 type memoryListMsg = tuievents.MemoryListMsg
+type sessionRestoreStatusMsg = tuievents.SessionRestoreStatusMsg
 type sessionRestoreMessageMsg = tuievents.SessionRestoreMessageMsg
 type daemonFullStatusMsg = tuievents.DaemonFullStatusMsg
 type configStateMsg = tuievents.ConfigStateMsg
@@ -77,6 +78,8 @@ func (t *TUI) handleNotificationMsg(msg notificationMsg) {
 		t.handleMemoryListNotification(m.Params)
 	case sessionRestoreMessageMsg:
 		t.handleSessionRestoreMessageNotification(m)
+	case sessionRestoreStatusMsg:
+		t.handleSessionRestoreStatusNotification(m.Params)
 	case daemonFullStatusMsg:
 		t.handleDaemonFullStatusNotification(m.Params)
 	case configStateMsg:
@@ -99,8 +102,11 @@ func (t *TUI) handleNotificationMsg(msg notificationMsg) {
 func (t *TUI) handleStreamNotification(p protocol.StreamParams) {
 	if p.Done {
 		t.finishStreamingMessages()
-		if strings.HasPrefix(p.Chunk, "error:") || p.Chunk == "cancelled" {
+		if p.Error {
 			t.appendNonToolMessage(chatMsg{Role: "error", Content: p.Chunk})
+			t.chat.ResumeAvailable = p.ResumeAvailable
+		} else {
+			t.chat.ResumeAvailable = false
 		}
 		t.resetPhase()
 		t.applyContextStats(p.ContextTokens, p.ContextWindow)
@@ -108,6 +114,7 @@ func (t *TUI) handleStreamNotification(p protocol.StreamParams) {
 	}
 	t.chat.Compacting = false
 	t.compactAuto = false
+	t.chat.ResumeAvailable = false
 	t.chat.HandleStreamStart(time.Now())
 	if p.Chunk != "" {
 		t.chat.LastAssistantText += p.Chunk
@@ -233,6 +240,14 @@ func (t *TUI) handleSessionRestoreMessageNotification(p sessionRestoreMessageMsg
 	if p.Content != "" {
 		t.appendNonToolMessage(chatMsg{Role: p.Role, Content: p.Content})
 	}
+}
+
+func (t *TUI) handleSessionRestoreStatusNotification(p protocol.SessionRestoreStatus) {
+	if p.Compacted {
+		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.tr("session.restore_compacted")})
+	}
+	t.chat.ResumeAvailable = false
+	t.scrollToBottomOnNextSync()
 }
 
 func (t *TUI) handleDaemonFullStatusNotification(p protocol.DaemonStatusParams) {

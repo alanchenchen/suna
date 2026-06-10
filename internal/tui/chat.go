@@ -245,6 +245,10 @@ func (t *TUI) updateDiscardDraftConfirm(ks string, msg tea.Msg) (tea.Model, tea.
 func (t *TUI) handleSend() tea.Cmd {
 	input := strings.TrimSpace(t.chat.Textarea.Value())
 	attachments := append([]attachmentItem(nil), t.chat.Attachments...)
+	if input == "" && len(attachments) == 0 && t.chat.ResumeAvailable {
+		t.chat.Textarea.Reset()
+		return t.resumeAgent()
+	}
 	t.chat.Textarea.Reset()
 	if input == "" && len(attachments) == 0 {
 		return t.syncInputFocus()
@@ -548,6 +552,7 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 	case "/new":
 		t.chat.Messages = []chatMsg{}
 		t.chat.Attachments = nil
+		t.chat.ResumeAvailable = false
 		t.resetConversationStats()
 		t.resetPhase()
 		t.chat.LastAssistantText = ""

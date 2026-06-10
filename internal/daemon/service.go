@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -81,6 +80,8 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 	switch req.Method {
 	case protocol.MethodSendMessage:
 		return s.handleSendMessage(ctx, req, sink)
+	case protocol.MethodResumeRun:
+		return s.handleResumeRun(ctx, req, sink)
 	case protocol.MethodCancel:
 		s.daemon.agent.CancelCurrentRun()
 		return map[string]string{"status": "cancelled"}, nil
@@ -141,10 +142,18 @@ func (s *service) handleSendMessage(ctx context.Context, req protocol.Request, s
 	return map[string]string{"status": "processing"}, nil
 }
 
+func (s *service) handleResumeRun(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
+	go s.runAgentEvents(ctx, req.ConnID, "resume", s.daemon.agent.ResumeRun(ctx), sink)
+	return map[string]string{"status": "processing"}, nil
+}
+
 func (s *service) runAgent(ctx context.Context, connID, inputText string, input agent.Input, sink protocol.EventSink) {
+	s.runAgentEvents(ctx, connID, inputText, s.daemon.agent.Run(ctx, input), sink)
+}
+
+func (s *service) runAgentEvents(ctx context.Context, connID, inputLabel string, events <-chan agent.Event, sink protocol.EventSink) {
 	started := time.Now()
-	logging.Info("agent", "run_start", logging.Event{"conn_id": connID, "input_chars": len(inputText)})
-	events := s.daemon.agent.Run(ctx, input)
+	logging.Info("agent", "run_start", logging.Event{"conn_id": connID, "input_chars": len(inputLabel)})
 	batcher := &streamBatcher{}
 	ticker := time.NewTicker(streamBatchInterval)
 	defer ticker.Stop()
@@ -210,25 +219,29 @@ func (s *service) runAgent(ctx context.Context, connID, inputText string, input 
 				emit(ctx, sink, protocol.NotifyGuardConfirm, protocol.GuardConfirmParams{ID: guardID, ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, Params: evt.GuardParams, Risk: evt.GuardRisk, Reason: evt.GuardReason, Suggestion: evt.GuardSuggestion})
 			case agent.EventStatus:
 				flush()
-				if evt.Content == "compact_running" {
+				switch evt.Status {
+				case agent.StatusCompactRunning:
 					running := true
 					emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running})
-				} else if evt.Content == "compact_done" {
+				case agent.StatusCompactDone:
 					running := false
 					emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running})
-				} else if strings.HasPrefix(evt.Content, "compact_error:") {
+				case agent.StatusCompactError:
 					running := false
-					emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running, Error: strings.TrimSpace(strings.TrimPrefix(evt.Content, "compact_error:"))})
+					emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running, Error: evt.Content})
 					// compact 失败已经通过专用通知展示；不要再发送通用 stream error，避免 TUI 重复报错。
 					return
-				} else if strings.HasPrefix(evt.Content, "error:") || evt.Content == "cancelled" {
-					logging.Error("agent", "run_failed", fmt.Errorf("%s", evt.Content), logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()})
-					emit(ctx, sink, protocol.NotifyStream, protocol.StreamParams{Chunk: evt.Content, Done: true})
-					emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
-				} else if evt.Content == "done" {
+				case agent.StatusDone:
 					logging.Info("agent", "run_done", logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()})
 					emit(ctx, sink, protocol.NotifyStream, protocol.StreamParams{Done: true, ContextWindow: evt.ContextWindow})
 					emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
+				default:
+					if evt.Error {
+						resumeAvailable := evt.ResumeAvailable
+						logging.Error("agent", "run_failed", fmt.Errorf("%s", evt.Content), logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()})
+						emit(ctx, sink, protocol.NotifyStream, protocol.StreamParams{Chunk: evt.Content, Done: true, Error: true, ResumeAvailable: resumeAvailable})
+						emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
+					}
 				}
 			}
 		case <-ticker.C:
@@ -281,8 +294,8 @@ func (s *service) handleMemoryList(ctx context.Context, sink protocol.EventSink)
 }
 
 func (s *service) handleSessionRestore(ctx context.Context, sink protocol.EventSink) (any, error) {
-	count := s.daemon.agent.RestoreSession(ctx)
-	if count > 0 {
+	result := s.daemon.agent.RestoreSession(ctx)
+	if result.Messages > 0 {
 		for _, m := range s.daemon.agent.WorkingMessages() {
 			content := m.Text()
 			if content == "" {
@@ -299,7 +312,8 @@ func (s *service) handleSessionRestore(ctx context.Context, sink protocol.EventS
 			emit(ctx, sink, protocol.NotifySessionRestoreMsg, map[string]string{"role": "restore_summary", "content": summary})
 		}
 	}
-	return map[string]int{"messages": count}, nil
+	emit(ctx, sink, protocol.NotifySessionRestoreStatus, protocol.SessionRestoreStatus{Messages: result.Messages, Compacted: result.Compacted})
+	return map[string]int{"messages": result.Messages}, nil
 }
 
 func (s *service) handleCompact(ctx context.Context, sink protocol.EventSink) (any, error) {

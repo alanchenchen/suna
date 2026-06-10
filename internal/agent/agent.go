@@ -146,7 +146,7 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 	events := make(chan Event, eventBuffer)
 	if !a.runMu.TryLock() {
-		events <- Event{Type: EventStatus, Content: "error: agent is already running"}
+		events <- Event{Type: EventStatus, Content: "agent is already running", Error: true}
 		close(events)
 		return events
 	}
@@ -157,17 +157,10 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 	a.cancelMu.Unlock()
 
 	go func() {
-		defer a.runMu.Unlock()
-		defer close(events)
-		defer cancel()
-		defer func() {
-			a.cancelMu.Lock()
-			a.cancelFn = nil
-			a.cancelMu.Unlock()
-		}()
+		defer a.finishRun(events, cancel)
 
 		if a.router == nil {
-			events <- Event{Type: EventStatus, Content: "error: no model configured, please add a model in config"}
+			events <- Event{Type: EventStatus, Content: "no model configured, please add a model in config", Error: true}
 			return
 		}
 
@@ -175,7 +168,7 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 		storedUserMessage := input.StoredMessage(model.RoleUser)
 		inputText := userMessage.Text()
 		if len(userMessage.Content) == 0 {
-			events <- Event{Type: EventStatus, Content: "error: input is required"}
+			events <- Event{Type: EventStatus, Content: "input is required", Error: true}
 			return
 		}
 
@@ -190,42 +183,120 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 		a.turnCount++
 		a.enqueueMemoryEvent(runCtx, model.RoleUser, inputText, false, false, false, false)
 
-		_, modelRef, err := a.router.Route(runCtx, inputText)
-		if err != nil {
-			logging.Error("agent", "route_failed", err, logging.Event{"session_id": a.sessionID})
-			events <- Event{Type: EventStatus, Content: "error: " + err.Error()}
-			return
-		}
-		systemPrompt, _ := a.buildSystemPrompt(runCtx)
-		modelID := resolveModelID(a.cfg, modelRef)
-
-		r := a.newRunner(events)
-		res, err := r.Run(runCtx, runner.Request{
-			System:        systemPrompt,
-			ModelRef:      modelRef,
-			ModelID:       modelID,
-			Working:       a.working,
-			Messages:      a.buildRequestMessages,
-			ToolDefs:      a.buildToolDefs,
-			EmitStream:    true,
-			EmitReasoning: true,
-			AutoCompress:  true,
-			SessionState:  a.sessionState,
-		})
-		if err != nil {
-			content := "error: " + err.Error()
-			if runCtx.Err() != nil {
-				content = "cancelled"
-			}
-			events <- Event{Type: EventStatus, Content: content}
-			return
-		}
-
-		a.sessionState = res.SessionState
-		a.enqueueMemoryEvent(runCtx, model.RoleAssistant, res.FinalText, res.HadToolCall, res.HadToolError, false, false)
-		events <- Event{Type: EventStatus, Content: "done", ContextWindow: res.ContextWindow}
+		a.runCurrentWorking(runCtx, inputText, events)
 	}()
 	return events
+}
+
+func (a *Agent) ResumeRun(ctx context.Context) <-chan Event {
+	// resume 只恢复未完成的当前 turn，不新增 user message；用于模型/服务中断后的干净重试。
+	events := make(chan Event, eventBuffer)
+	if !a.runMu.TryLock() {
+		events <- Event{Type: EventStatus, Content: "agent is already running", Error: true}
+		close(events)
+		return events
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	a.cancelMu.Lock()
+	a.cancelFn = cancel
+	a.cancelMu.Unlock()
+
+	go func() {
+		defer a.finishRun(events, cancel)
+		defer a.saveConversationState(runCtx)
+
+		if a.router == nil {
+			events <- Event{Type: EventStatus, Content: "no model configured, please add a model in config", Error: true}
+			return
+		}
+		if !a.canResumeRunLocked() {
+			events <- Event{Type: EventStatus, Content: "no resumable run", Error: true}
+			return
+		}
+
+		inputText := a.lastUserTextLocked()
+		a.runCurrentWorking(runCtx, inputText, events)
+	}()
+	return events
+}
+
+func (a *Agent) finishRun(events chan Event, cancel context.CancelFunc) {
+	a.cancelMu.Lock()
+	a.cancelFn = nil
+	a.cancelMu.Unlock()
+	cancel()
+	close(events)
+	a.runMu.Unlock()
+}
+
+func (a *Agent) runCurrentWorking(runCtx context.Context, inputText string, events chan<- Event) {
+	_, modelRef, err := a.router.Route(runCtx, inputText)
+	if err != nil {
+		logging.Error("agent", "route_failed", err, logging.Event{"session_id": a.sessionID})
+		events <- Event{Type: EventStatus, Content: err.Error(), Error: true}
+		return
+	}
+	systemPrompt, _ := a.buildSystemPrompt(runCtx)
+	modelID := resolveModelID(a.cfg, modelRef)
+
+	r := a.newRunner(events)
+	res, err := r.Run(runCtx, runner.Request{
+		System:        systemPrompt,
+		ModelRef:      modelRef,
+		ModelID:       modelID,
+		Working:       a.working,
+		Messages:      a.buildRequestMessages,
+		ToolDefs:      a.buildToolDefs,
+		EmitStream:    true,
+		EmitReasoning: true,
+		AutoCompress:  true,
+		SessionState:  a.sessionState,
+	})
+	if err != nil {
+		content := err.Error()
+		resumeAvailable := a.canResumeRunLocked()
+		if runCtx.Err() != nil {
+			content = "cancelled"
+			resumeAvailable = false
+		}
+		events <- Event{Type: EventStatus, Content: content, Error: true, ResumeAvailable: resumeAvailable}
+		return
+	}
+
+	a.sessionState = res.SessionState
+	a.enqueueMemoryEvent(runCtx, model.RoleAssistant, res.FinalText, res.HadToolCall, res.HadToolError, false, false)
+	events <- Event{Type: EventStatus, Status: StatusDone, ContextWindow: res.ContextWindow}
+}
+
+func (a *Agent) CanResumeRun() bool {
+	if a == nil || a.working == nil {
+		return false
+	}
+	return a.canResumeRunLocked()
+}
+
+func (a *Agent) canResumeRunLocked() bool {
+	msgs := a.working.Messages()
+	if len(msgs) == 0 {
+		return false
+	}
+	switch msgs[len(msgs)-1].Role {
+	case model.RoleUser, model.RoleTool:
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *Agent) lastUserTextLocked() string {
+	msgs := a.working.Messages()
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == model.RoleUser {
+			return msgs[i].Text()
+		}
+	}
+	return ""
 }
 
 func (a *Agent) newRunner(events chan<- Event) *runner.Runner {
@@ -302,7 +373,17 @@ type eventSink struct {
 	events chan<- Event
 }
 
-func (s eventSink) Status(content string) { s.events <- Event{Type: EventStatus, Content: content} }
+func (s eventSink) Status(status runner.StatusEvent) {
+	// runner 只描述模型循环内部状态；agent 在这里转换成自身事件，避免 daemon 越过 agent 依赖 runner 细节。
+	switch status.Kind {
+	case runner.StatusCompactRunning:
+		s.events <- Event{Type: EventStatus, Status: StatusCompactRunning}
+	case runner.StatusCompactDone:
+		s.events <- Event{Type: EventStatus, Status: StatusCompactDone}
+	case runner.StatusCompactError:
+		s.events <- Event{Type: EventStatus, Status: StatusCompactError, Content: status.Message}
+	}
+}
 func (s eventSink) Stream(content string) { s.events <- Event{Type: EventStream, Content: content} }
 func (s eventSink) Reasoning(content string) {
 	s.events <- Event{Type: EventReasoning, Content: content}

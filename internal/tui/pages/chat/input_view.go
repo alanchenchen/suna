@@ -8,6 +8,7 @@ type InputAreaView struct {
 	Locked            bool
 	HasDraft          bool
 	Confirm           string
+	Hint              string
 	AttachmentPanel   string
 	Separator         string
 }
@@ -22,13 +23,20 @@ func (m Model) InputArea(view InputAreaView) string {
 		text = "> " + view.LockedPlaceholder
 	}
 	if view.AttachmentPanel != "" {
-		body := indentLines(view.AttachmentPanel, "  ") + "\n" + view.Separator + "\n" + "  " + strings.ReplaceAll(text, "\n", "\n  ")
+		body := indentLines(view.AttachmentPanel, "  ") + "\n" + view.Separator + "\n"
+		if view.Hint != "" {
+			body += "  " + view.Hint + "\n"
+		}
+		body += "  " + strings.ReplaceAll(text, "\n", "\n  ")
 		if view.Confirm != "" {
 			body += "\n  " + view.Confirm
 		}
 		return body
 	}
 	body := "  " + strings.ReplaceAll(text, "\n", "\n  ")
+	if view.Hint != "" {
+		body = "  " + view.Hint + "\n" + body
+	}
 	if view.Confirm != "" {
 		body += "\n  " + view.Confirm
 	}

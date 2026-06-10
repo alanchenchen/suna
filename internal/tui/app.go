@@ -43,8 +43,16 @@ func (t *TUI) refreshDaemonStatusCmd() tea.Cmd {
 
 func (t *TUI) runAgent(input string, attachments []attachmentItem) tea.Cmd {
 	t.startLLMWait()
+	t.chat.ResumeAvailable = false
 	t.chat.ResetToolState()
 	return tea.Batch(t.sendMessageCmd(input, attachments), t.chat.Spinner.Tick)
+}
+
+func (t *TUI) resumeAgent() tea.Cmd {
+	t.startLLMWait()
+	t.chat.ResumeAvailable = false
+	t.chat.ResetToolState()
+	return tea.Batch(t.resumeRunCmd(), t.chat.Spinner.Tick)
 }
 
 func (t *TUI) startLLMWait() {

@@ -37,6 +37,7 @@ type ToolEndMsg struct{ Params protocol.ToolEndParams }
 type DaemonStateMsg struct{ Params protocol.DaemonStateParams }
 type CompactResultMsg struct{ Params protocol.CompactResult }
 type MemoryListMsg struct{ Params protocol.MemoryListResult }
+type SessionRestoreStatusMsg struct{ Params protocol.SessionRestoreStatus }
 type SessionRestoreMessageMsg struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -67,6 +68,7 @@ func (ToolEndMsg) isNotificationMsg()               {}
 func (DaemonStateMsg) isNotificationMsg()           {}
 func (CompactResultMsg) isNotificationMsg()         {}
 func (MemoryListMsg) isNotificationMsg()            {}
+func (SessionRestoreStatusMsg) isNotificationMsg()  {}
 func (SessionRestoreMessageMsg) isNotificationMsg() {}
 func (DaemonFullStatusMsg) isNotificationMsg()      {}
 func (ConfigStateMsg) isNotificationMsg()           {}
@@ -110,6 +112,8 @@ func Decode(notif Notification) tea.Msg {
 		return decodeParams[protocol.MemoryListResult](notif, func(p protocol.MemoryListResult) tea.Msg { return MemoryListMsg{Params: p} })
 	case protocol.NotifySessionRestoreMsg:
 		return decodeParams[SessionRestoreMessageMsg](notif, func(p SessionRestoreMessageMsg) tea.Msg { return p })
+	case protocol.NotifySessionRestoreStatus:
+		return decodeParams[protocol.SessionRestoreStatus](notif, func(p protocol.SessionRestoreStatus) tea.Msg { return SessionRestoreStatusMsg{Params: p} })
 	case protocol.NotifyDaemonFullStatus:
 		return decodeParams[protocol.DaemonStatusParams](notif, func(p protocol.DaemonStatusParams) tea.Msg { return DaemonFullStatusMsg{Params: p} })
 	case protocol.NotifyConfigState:

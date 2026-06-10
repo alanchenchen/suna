@@ -87,6 +87,8 @@ func (c *Client) SendMessage(content string, attachments []attachment.Item) erro
 	return c.SendRequestNotify(protocol.MethodSendMessage, protocol.SendMessageParams{Parts: parts})
 }
 
+func (c *Client) ResumeRun() error { return c.SendRequestNotify(protocol.MethodResumeRun, nil) }
+
 func (c *Client) Cancel() error { return c.SendRequestNotify(protocol.MethodCancel, nil) }
 
 func (c *Client) AskReply(askID, answer string) error {

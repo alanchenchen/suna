@@ -70,19 +70,19 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			completionReq.Messages = trimToolResultsForContext(completionReq.Messages)
 			needCompact := shouldCompactRequest(completionReq, contextWindow)
 			if needCompact && r.Sink != nil {
-				r.Sink.Status("compact_running")
+				r.Sink.Status(StatusEvent{Kind: StatusCompactRunning})
 			}
 			var compactErr error
 			if needCompact {
 				req.SessionState, compactErr = r.compactForRequest(ctx, req.Working, completionReq, contextWindow, req.SessionState)
 				if compactErr != nil {
 					if r.Sink != nil {
-						r.Sink.Status("compact_error: automatic context compression failed: " + compactErr.Error())
+						r.Sink.Status(StatusEvent{Kind: StatusCompactError, Message: "automatic context compression failed: " + compactErr.Error()})
 					}
 					return result, fmt.Errorf("automatic context compression failed: %w", compactErr)
 				}
 				if r.Sink != nil {
-					r.Sink.Status("compact_done")
+					r.Sink.Status(StatusEvent{Kind: StatusCompactDone})
 				}
 			}
 			messages = req.Working.Messages()
@@ -95,7 +95,7 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 				safeLimit := int(float64(contextWindow) * contextSafetyThreshold)
 				logging.Error("memory", "session_compact_still_oversized", nil, logging.Event{"mode": "auto", "purpose": req.Purpose, "model": req.ModelID, "context_window": contextWindow, "request_tokens": estimated, "safe_limit": safeLimit, "compacted": needCompact})
 				if needCompact && r.Sink != nil {
-					r.Sink.Status("compact_error: automatic context compression could not reduce the request enough; try /compact manually, reduce the current input, or start a new session")
+					r.Sink.Status(StatusEvent{Kind: StatusCompactError, Message: "automatic context compression could not reduce the request enough; try /compact manually, reduce the current input, or start a new session"})
 				}
 				return result, fmt.Errorf("context remains too large after compaction (%d tokens estimated, %d token safe limit); start a new session or reduce the current input", estimated, safeLimit)
 			}
@@ -106,7 +106,7 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 		}
 
 		if r.Sink != nil {
-			r.Sink.Status("waiting_llm")
+			r.Sink.Status(StatusEvent{Kind: StatusWaitingLLM})
 		}
 		requestStarted := time.Now()
 		ch, err := r.Router.Complete(ctx, req.ModelRef, completionReq)

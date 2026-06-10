@@ -66,6 +66,7 @@ type Model struct {
 	LastAssistantText string
 	Loading           bool
 	Compacting        bool
+	ResumeAvailable   bool
 	Phase             Phase
 	PhaseStart        time.Time
 	StatusLabel       string

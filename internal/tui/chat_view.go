@@ -257,6 +257,7 @@ func (t *TUI) renderInputArea() string {
 		Locked:            t.inputLocked(),
 		HasDraft:          t.hasDraft(),
 		Confirm:           confirm,
+		Hint:              t.resumeHint(),
 		AttachmentPanel:   t.renderAttachmentPanel(),
 		Separator:         separator,
 	})
@@ -264,6 +265,13 @@ func (t *TUI) renderInputArea() string {
 
 func (t *TUI) lockedInputPlaceholder() string {
 	return t.currentInputPolicy().DisplayPlaceholder(t.tr("status.responding"), t.tr("tui.key.cancel"))
+}
+
+func (t *TUI) resumeHint() string {
+	if !t.chat.ResumeAvailable || t.inputLocked() {
+		return ""
+	}
+	return styleDim.Render(t.tr("session.resume_hint"))
 }
 
 func (t *TUI) updateGuardConfirm(ks string) (tea.Model, tea.Cmd) {

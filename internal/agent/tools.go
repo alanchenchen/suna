@@ -393,9 +393,9 @@ type subtaskSink struct {
 	spawnID string
 }
 
-func (s subtaskSink) Status(content string)    {}
-func (s subtaskSink) Stream(content string)    {}
-func (s subtaskSink) Reasoning(content string) {}
+func (s subtaskSink) Status(status runner.StatusEvent) {}
+func (s subtaskSink) Stream(content string)            {}
+func (s subtaskSink) Reasoning(content string)         {}
 
 // subtask 的 usage 只需要落库，不进入主 TUI token 展示。
 func (s subtaskSink) Usage(usage runner.UsageEvent) {}

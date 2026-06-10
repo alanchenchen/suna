@@ -132,6 +132,18 @@ func (t *TUI) sendMessageCmd(input string, attachments []attachmentItem) tea.Cmd
 	}
 }
 
+func (t *TUI) resumeRunCmd() tea.Cmd {
+	return func() tea.Msg {
+		if t.localCli == nil {
+			return ipcErrorNotification(notifyConfigError, fmt.Errorf("%s", t.tr("error.not_connected")))
+		}
+		if err := t.localCli.ResumeRun(); err != nil {
+			return ipcErrorNotification(notifyConfigError, err)
+		}
+		return nil
+	}
+}
+
 func (t *TUI) cancelCmd() tea.Cmd {
 	return func() tea.Msg {
 		if t.localCli == nil {

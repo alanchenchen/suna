@@ -2,6 +2,7 @@ package protocol
 
 const (
 	MethodSendMessage = "agent.sendMessage"
+	MethodResumeRun   = "agent.resumeRun"
 	MethodCancel      = "agent.cancel"
 	MethodAskReply    = "agent.askReply"
 	MethodGuardReply  = "agent.guardReply"
@@ -73,8 +74,9 @@ const (
 )
 
 const (
-	NotifyCompactResult     = "session.compact_result"
-	NotifySessionRestoreMsg = "session.restore_message"
+	NotifyCompactResult        = "session.compact_result"
+	NotifySessionRestoreMsg    = "session.restore_message"
+	NotifySessionRestoreStatus = "session.restore_status"
 )
 
 const (

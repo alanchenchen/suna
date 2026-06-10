@@ -7,11 +7,19 @@ type SendMessageParams struct {
 }
 
 type StreamParams struct {
-	Chunk         string `json:"chunk"`
-	ID            string `json:"id"`
-	Done          bool   `json:"done,omitempty"`
-	ContextTokens int    `json:"context_tokens,omitempty"`
-	ContextWindow int    `json:"context_window,omitempty"`
+	Chunk string `json:"chunk"`
+	ID    string `json:"id"`
+	Done  bool   `json:"done,omitempty"`
+	// Error / ResumeAvailable 是结构化运行结果；TUI 不解析 Chunk 文本来判断错误或重试能力。
+	Error           bool `json:"error,omitempty"`
+	ResumeAvailable bool `json:"resume_available,omitempty"`
+	ContextTokens   int  `json:"context_tokens,omitempty"`
+	ContextWindow   int  `json:"context_window,omitempty"`
+}
+
+type SessionRestoreStatus struct {
+	Messages  int  `json:"messages"`
+	Compacted bool `json:"compacted"`
 }
 
 type UsageParams struct {
