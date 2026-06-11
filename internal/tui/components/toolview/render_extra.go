@@ -11,7 +11,6 @@ func RenderFSChangeSummary(metadata map[string]any, prefix string, deps RenderDe
 	if action == "" || path == "" {
 		return ""
 	}
-	dst, _ := metadata["destination"].(string)
 	entryKind, _ := metadata["entry_kind"].(string)
 	recursive, _ := metadata["recursive"].(bool)
 	overwritten, _ := metadata["overwritten"].(bool)
@@ -19,12 +18,9 @@ func RenderFSChangeSummary(metadata map[string]any, prefix string, deps RenderDe
 	size := MetadataInt(metadata["size"])
 
 	s := deps.Styles
-	parts := []string{s.MetaPill.Render(defaultLabel(deps.Labels.FSBadge, "FS"))}
-	pathText := CompactPath(path, maxInt(10, deps.width()/3))
-	if dst != "" {
-		pathText += " → " + CompactPath(dst, maxInt(10, deps.width()/3))
-	}
-	parts = append(parts, s.FilePath.Render(pathText), renderFSAction(action, deps.Labels, s))
+	// 文件系统操作的主行已经展示了 action/path/destination，这里沿用文件变更摘要的紧凑样式，
+	// 避免在下一行重复长路径；保留 kind、recursive、entries、size 等关键结果信息。
+	parts := []string{s.Dim.Render(defaultLabel(deps.Labels.FSBadge, "FS")), renderFSAction(action, deps.Labels, s)}
 	if entryKind != "" && entryKind != "missing" {
 		parts = append(parts, s.ToolDim.Render(entryKind))
 	}

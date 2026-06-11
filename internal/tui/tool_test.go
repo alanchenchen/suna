@@ -178,10 +178,13 @@ func TestRenderToolEntryShowsFSChangeSummary(t *testing.T) {
 
 	rendered := tui.renderToolEntry(te, false)
 	plain := stripANSIForTest(rendered)
-	for _, want := range []string{"FS remove dist", "Clean generated build output", "PERMANENTLY DELETED", "recursive", "248 entries"} {
+	for _, want := range []string{"FS remove dist", "Clean generated build output", "FS", "PERMANENTLY DELETED", "recursive", "248 entries"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("renderToolEntry() = %q, want fs summary substring %q", plain, want)
 		}
+	}
+	if strings.Count(plain, "dist") != 1 {
+		t.Fatalf("renderToolEntry() = %q, want fs path shown only in main line", plain)
 	}
 }
 
