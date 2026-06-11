@@ -291,9 +291,8 @@ func renderMetadataSummary(te *Entry, prefix string, deps RenderDeps) string {
 
 // RenderFileChangeSummary 渲染 file_change metadata；不解析 tool result 文本，避免 UI 绑定 LLM 文案。
 func RenderFileChangeSummary(metadata map[string]any, prefix string, deps RenderDeps) string {
-	path, _ := metadata["path"].(string)
 	operation, _ := metadata["operation"].(string)
-	if path == "" || operation == "" {
+	if operation == "" {
 		return ""
 	}
 	added := MetadataInt(metadata["added_lines"])
@@ -304,11 +303,7 @@ func RenderFileChangeSummary(metadata map[string]any, prefix string, deps Render
 
 	s := deps.Styles
 	arrow := s.Dim.Render("↳ ")
-	parts := []string{s.MetaPill.Render(deps.Labels.FileBadge)}
-	maxWidth := maxInt(24, deps.width()-lipgloss.Width(stripANSI(prefix))-8)
-	pathBudget := maxInt(10, maxWidth-34)
-	pathText := s.FilePath.Render(CompactPath(path, pathBudget))
-	parts = append(parts, pathText, renderFileChangeStatus(operation, s), renderLineDelta("+", added, true, s), renderLineDelta("-", removed, false, s))
+	parts := []string{s.Dim.Render(deps.Labels.FileBadge), renderFileChangeStatus(operation, s), renderLineDelta("+", added, true, s), renderLineDelta("-", removed, false, s)}
 	if replacements > 0 {
 		parts = append(parts, s.GuardWarn.Render(fmt.Sprintf("%d repl", replacements)))
 	}
@@ -320,13 +315,7 @@ func RenderFileChangeSummary(metadata map[string]any, prefix string, deps Render
 		}
 	}
 
-	line := prefix + "  " + arrow + strings.Join(parts, "  ")
-	if lipgloss.Width(stripANSI(line)) > deps.width()-2 {
-		allowed := maxInt(10, pathBudget-(lipgloss.Width(stripANSI(line))-(deps.width()-2)))
-		parts[1] = s.FilePath.Render(CompactPath(path, allowed))
-		line = prefix + "  " + arrow + strings.Join(parts, "  ")
-	}
-	return line
+	return prefix + "  " + arrow + strings.Join(parts, "  ")
 }
 
 func renderFileChangeStatus(operation string, s RenderStyles) string {
