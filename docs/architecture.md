@@ -126,7 +126,13 @@ Suna 当前是单用户单当前会话形态，不提供多会话管理或完整
 
 ## 文档分工
 
-- `README.md`：用户入口、功能说明、安装和常用操作。
-- `docs/`：稳定的开发和架构文档。
-- `plans/`：规划、调研、历史设计和阶段性记录。
+- `README.md`：项目门面，突出亮点、快速开始、常用操作、安全提醒和 docs 入口。
+- `docs/README.md`：文档索引和推荐阅读路径。
+- `docs/design.md`：关键设计和取舍，包括架构、安全、上下文、性能、记忆、Skill、MCP 等。
+- `docs/architecture.md`：稳定架构、模块边界和 daemon 生命周期。
+- `docs/code-map.md`：功能到代码位置、主要包职责和核心流程。
+- `docs/current-implementation.md`：当前实现事实和未完成边界。
+- `docs/configuration.md`：配置字段和示例。
+- `docs/development.md`：构建、测试和维护约定。
+- `plans/`：规划、调研、历史设计和阶段性记录，不作为当前实现依据。
 - 子包 README：仅当某个包足够复杂且必须贴近代码维护时再新增。
