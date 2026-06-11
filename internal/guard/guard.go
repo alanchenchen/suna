@@ -190,7 +190,7 @@ func (g *Guard) Check(ctx context.Context, tool string, params map[string]any, r
 	}
 
 	if g.Mode() == ModeReadonly {
-		if risk == RiskLow && isReadOnlyTool(tool) {
+		if risk == RiskLow && isReadOnlyCall(tool, params) {
 			g.audit(ctx, tool, params, risk, "auto_approve", "readonly low risk")
 			return &GuardResult{Decision: Approve, Reason: "readonly low risk", Risk: risk, Source: "static", Audit: "auto_approve"}
 		}
@@ -310,12 +310,24 @@ func guardTarget(tool string, params map[string]any) string {
 	case "exec":
 		target, _ := params["command"].(string)
 		return target
-	case "writefile", "editfile", "readfile", "listdir":
+	case "writefile", "editfile", "readfile", "listdir", "search":
 		target, _ := params["path"].(string)
 		return target
-	case "writehttp", "readhttp":
+	case "filesystem":
+		action, _ := params["action"].(string)
+		path, _ := params["path"].(string)
+		dst, _ := params["destination"].(string)
+		if dst != "" {
+			return fmt.Sprintf("%s %s -> %s", action, path, dst)
+		}
+		return fmt.Sprintf("%s %s", action, path)
+	case "http":
+		method, _ := params["method"].(string)
+		if method == "" {
+			method = "GET"
+		}
 		target, _ := params["url"].(string)
-		return target
+		return strings.ToUpper(method) + " " + target
 	default:
 		return ""
 	}
@@ -376,14 +388,14 @@ func (g *Guard) assessRisk(tool string, params map[string]any) RiskLevel {
 			return RiskHigh
 		}
 		return RiskMedium
-	case "writehttp":
-		method, _ := params["method"].(string)
-		if strings.EqualFold(method, "DELETE") {
-			return RiskHigh
-		}
-		return RiskMedium
-	case "readfile", "listdir", "readhttp":
+	case "filesystem":
+		return assessFilesystemRisk(params)
+	case "http":
+		return assessHTTPRisk(params)
+	case "readfile", "listdir":
 		return RiskLow
+	case "search":
+		return assessSearchRisk(params)
 	default:
 		// Unknown Act tools are never safe-by-default. New external tools must be explicitly classified.
 		return RiskMedium
@@ -401,10 +413,17 @@ func RiskString(risk RiskLevel) string {
 	}
 }
 
-func isReadOnlyTool(tool string) bool {
+func isReadOnlyCall(tool string, params map[string]any) bool {
 	switch tool {
-	case "readfile", "listdir", "readhttp", "exec":
+	case "readfile", "listdir", "search", "exec":
 		return true
+	case "filesystem":
+		action, _ := params["action"].(string)
+		return action == "stat"
+	case "http":
+		method, _ := params["method"].(string)
+		method = strings.ToUpper(strings.TrimSpace(method))
+		return method == "" || method == "GET" || method == "HEAD"
 	default:
 		return false
 	}

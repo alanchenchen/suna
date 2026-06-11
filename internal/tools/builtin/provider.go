@@ -15,11 +15,12 @@ func NewProvider(extra ...Tool) *Provider {
 	items := []Tool{
 		EditFile{},
 		Exec{},
+		FileSystem{},
+		HTTP{},
 		ListDir{},
 		ReadFile{},
-		ReadHTTP{},
+		Search{},
 		WriteFile{},
-		WriteHTTP{},
 	}
 	items = append(items, extra...)
 	return &Provider{tools: items}

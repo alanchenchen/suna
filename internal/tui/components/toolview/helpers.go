@@ -15,14 +15,16 @@ func DisplayName(name string) string {
 		return "Read"
 	case "listdir":
 		return "List"
-	case "readhttp":
+	case "search":
+		return "Search"
+	case "filesystem":
+		return "FS"
+	case "http":
 		return "HTTP"
 	case "writefile":
 		return "Write"
 	case "editfile":
 		return "Edit"
-	case "writehttp":
-		return "POST"
 	case "exec":
 		return "Exec"
 	case "askuser":
@@ -63,10 +65,27 @@ func ParamSummary(name string, params map[string]any) string {
 	switch name {
 	case "readfile", "writefile", "editfile", "listdir":
 		return pick("path")
+	case "search":
+		if q := pick("query"); q != "" {
+			return q + " in " + pick("path")
+		}
+		return pick("path")
+	case "filesystem":
+		action := pick("action")
+		path := pick("path")
+		dst := pick("destination")
+		if dst != "" {
+			return action + " " + path + " → " + dst
+		}
+		return action + " " + path
 	case "exec":
 		return pick("command")
-	case "readhttp", "writehttp":
-		return pick("url")
+	case "http":
+		method := pick("method")
+		if method == "" {
+			method = "GET"
+		}
+		return method + " " + pick("url")
 	case "spawn":
 		return pick("task")
 	case "askuser":

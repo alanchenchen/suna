@@ -59,10 +59,12 @@ Guard 决策顺序固定如下：
 | Tool | Low Risk | Medium Risk | High Risk |
 |---|---|---|---|
 | `exec` | 轻量 shell analyzer 能证明所有命令片段都是只读 | 有副作用、复杂语法、动态执行、嵌套 shell、无法证明只读 | 删除/格式化/权限/系统配置/远程脚本执行等高危模式 |
-| `writefile` | 当前无 low 分支 | 普通文件写入（含新建和覆盖） | 敏感路径、系统路径、profile、启动项、CI、git hooks、高影响配置 |
+| `readfile` / `listdir` | 只读本地感知工具 | 当前无 medium 分支 | 当前无 high 分支 |
+| `search` | 普通文件名搜索，或非宽泛路径的内容搜索 | 宽泛路径的内容搜索 | 敏感路径搜索 |
+| `writefile` | 当前无 low 分支 | 普通文件写入（含新建、覆盖、追加） | 敏感路径、系统路径、profile、启动项、CI、git hooks、高影响配置 |
 | `editfile` | 当前无 low 分支 | 普通文件修改 | 敏感路径、系统路径、profile、启动项、CI、git hooks、高影响配置 |
-| `writehttp` | 当前无 low 分支 | 非 DELETE 写请求 | method 为 `DELETE` |
-| `readfile` / `listdir` / `readhttp` | 只读感知工具 | 当前无 medium 分支 | 当前无 high 分支 |
+| `filesystem` | `stat` | `mkdir` / `move` / `copy` / 非递归 `remove` | 递归删除、敏感/系统/profile/启动项/CI/git hooks 等高影响路径 |
+| `http` | `GET` / `HEAD` 公网 URL | `GET` / `HEAD` localhost/私网/link-local URL；`POST` / `PUT` / `PATCH` | `DELETE` |
 | 其他 Act 工具 | 当前无 low 分支 | 未显式分类的 Act 工具默认 medium | 当前无 high 分支 |
 
 `RiskLow` 被刻意收窄，只代表“可证明只读”。除 `readonly` mode 外，low risk 会自动放行，因此不能把“不确定但看起来还好”的操作归为 low。轻量 shell analyzer 的原则是：
@@ -113,7 +115,7 @@ Suna: 硬规则兜底 + LLM 理解意图后动态决策
 ## 审查流程
 
 ```text
-Tool 请求 (ReadFile / ListDir / ReadHTTP / WriteFile / EditFile / Exec / WriteHTTP)
+Tool 请求 (ReadFile / ListDir / Search / WriteFile / EditFile / FileSystem / Exec / HTTP)
   │
   ▼
 Stage 0: Workspace 检查
@@ -192,10 +194,11 @@ reason = "读文件直接放行"
 | `exec` | `command` | `git status --short` |
 | `readfile` | `path` | `docs/plan.md` |
 | `listdir` | `path` | `/Users/me/project/private-notes` |
+| `search` | `path` | `/Users/me/project/private-notes` |
 | `writefile` | `path` | `src/generated.ts` |
 | `editfile` | `path` | `internal/guard/guard.go` |
-| `readhttp` | `url` | `http://169.254.169.254/latest/meta-data` |
-| `writehttp` | `url` | `https://api.example.com/items/1` |
+| `filesystem` | `action path` 或 `action path -> destination` | `copy a.txt -> b.txt` |
+| `http` | `METHOD url` | `GET http://169.254.169.254/latest/meta-data` |
 
 常用写法：
 
@@ -210,7 +213,7 @@ reason = "禁止发布 npm 包"
 pattern = "(^|/)private-notes(/|$)"
 reason = "禁止读取私人笔记目录"
 
-# 禁止访问云 metadata 和本机 HTTP 服务，适用于 readhttp/writehttp 的 url。
+# 禁止访问云 metadata 和本机 HTTP 服务，适用于 http 的 METHOD url target。
 [[guard.blocked]]
 pattern = "169\\.254\\.169\\.254|localhost|127\\.0\\.0\\.1"
 reason = "禁止访问 metadata/local HTTP 服务"
@@ -233,7 +236,7 @@ reason = "允许读取文档"
 - `tool` 为空表示匹配所有 guard target；建议给 `allowed` rule 显式写 `tool`，避免误放行其它工具。
 - `blocked` 优先于 `allowed`。如果同一个 target 同时命中 blocked 和 allowed，最终是 reject。
 - `allowed` 不能绕过 workspace、内置 blocked rule、用户 blocked rule。
-- `readfile`、`listdir`、`readhttp` 通过 workspace 和 blocked 后通常是 low risk，会自动放行；需要额外限制时使用 `[[guard.blocked]]`。
+- `readfile`、`listdir`、`search` 和 `http` 的只读低风险调用通过 workspace 和 blocked 后通常会自动放行；需要额外限制时使用 `[[guard.blocked]]`。
 
 ### Workspace 边界
 
@@ -245,7 +248,7 @@ reason = "允许读取文档"
 - `exec.cwd` 必须解析到 workspace 内；启用 workspace 后，未传 `cwd` 的 `exec` 会默认使用 workspace 根目录。
 - `exec.command` 中明显的绝对路径、相对路径和重定向目标会按 `cwd` 解析，解析到 workspace 外则直接 reject。
 - `exec.command` 中出现 shell 变量展开（如 `$HOME`、`${VAR}`）时无法可靠证明目标路径，会保守 reject。
-- `readhttp`/`writehttp` 仍会经过 Guard，但 workspace 对 URL 不适用。
+- `http` 仍会经过 Guard，但 workspace 对 URL 不适用。
 
 路径解析会处理 `~`、相对路径、绝对路径和 symlink；新建文件会解析最近存在的父目录，避免通过 workspace 内 symlink 写到外部。该机制是 Guard 级预执行检查，不是 OS sandbox，不能完全阻止程序运行后内部访问 workspace 外文件。
 

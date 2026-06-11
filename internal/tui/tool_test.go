@@ -157,6 +157,61 @@ func TestRenderToolEntryShowsGuardSummary(t *testing.T) {
 	}
 }
 
+func TestRenderToolEntryShowsFSChangeSummary(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 120}
+	te := &toolEntry{
+		RawName:   "filesystem",
+		Name:      "FS",
+		Intent:    "Clean generated build output",
+		ParamsRaw: map[string]any{"action": "remove", "path": "dist", "recursive": true, "expected_kind": "dir"},
+		Status:    toolDone,
+		Metadata: map[string]any{
+			"kind":       "fs_change",
+			"action":     "remove",
+			"path":       "dist",
+			"entry_kind": "dir",
+			"recursive":  true,
+			"entries":    248,
+			"size":       12400,
+		},
+	}
+
+	rendered := tui.renderToolEntry(te, false)
+	plain := stripANSIForTest(rendered)
+	for _, want := range []string{"FS remove dist", "Clean generated build output", "PERMANENTLY DELETED", "recursive", "248 entries"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("renderToolEntry() = %q, want fs summary substring %q", plain, want)
+		}
+	}
+}
+
+func TestRenderToolEntryShowsSearchAndHTTPSummaries(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 120}
+	search := &toolEntry{
+		RawName:   "search",
+		Name:      "Search",
+		Intent:    "Find guard rendering",
+		ParamsRaw: map[string]any{"mode": "content", "query": "Guard", "path": "internal"},
+		Status:    toolDone,
+		Metadata:  map[string]any{"kind": "search_result", "matches": 18, "files_matched": 6, "files_scanned": 214},
+	}
+	httpEntry := &toolEntry{
+		RawName:   "http",
+		Name:      "HTTP",
+		Intent:    "Check service health",
+		ParamsRaw: map[string]any{"method": "GET", "url": "https://example.com/status"},
+		Status:    toolDone,
+		Metadata:  map[string]any{"kind": "http_response", "method": "GET", "status": 200, "body_bytes": 1200},
+	}
+
+	plain := stripANSIForTest(tui.renderToolEntry(search, false) + tui.renderToolEntry(httpEntry, false))
+	for _, want := range []string{"Search content \"Guard\" in internal", "18 matches in 6 files", "HTTP GET https://example.com/status", "HTTP GET  200"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered tools = %q, want substring %q", plain, want)
+		}
+	}
+}
+
 func TestRenderSubtaskEntryShowsModelInLabel(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
 	te := &toolEntry{

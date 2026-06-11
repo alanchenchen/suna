@@ -50,7 +50,7 @@ func TestEditFileReturnsFileChangeMetadata(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.txt")
 	writeFileForToolTest(t, path, "alpha\nbeta\ngamma\n")
 
-	res := EditFile{}.Execute(context.Background(), map[string]any{"path": path, "old_string": "beta\n", "new_string": "beta2\ndelta\n"})
+	res := EditFile{}.Execute(context.Background(), map[string]any{"path": path, "edits": []any{map[string]any{"old_string": "beta\n", "new_string": "beta2\ndelta\n"}}})
 	if res.IsError {
 		t.Fatalf("EditFile.Execute() error = %s", res.Error)
 	}

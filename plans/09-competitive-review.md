@@ -34,16 +34,16 @@
 | **人格** | CLAUDE.md | SOUL.md | active memory + user Skill | ✅ 不引入额外人格文件 |
 | **TUI 命令** | 丰富 (~15+) | 丰富 | 精简 (5 个命令 + 快捷键) | ✅ 降低学习成本 |
 | **Browser** | 无内置 (MCP) | browser 工具 (Chromium) | 无 | ⚠️ MCP 或 skill |
-| **搜索** | 无内置 | web_search / web_fetch | ReadHTTP (原始) | ⚠️ skill 覆盖 |
+| **搜索** | Grep/Glob | web_search / web_fetch | 内置 Search（文件名/内容）+ HTTP（原始请求） | ✅ 本地搜索已补齐，Web 搜索仍靠 skill/MCP |
 | **Sandbox** | 无 | Docker/SSH sandbox | Guard (LLM 审查) | ⚠️ 不同路线 |
 
 ## 已识别差距
 
-### 1. 缺少 Grep/Glob 原生工具
+### 1. 本地搜索能力
 
 Claude Code 内置 `Grep` 和 `Glob` 工具用于代码搜索。Suna 设计中明确说"能用 Exec 做的事不单独加工具"，但代码搜索是 agent 高频操作。
 
-**决策**: 维持 9 工具设计。Exec 中可证明只读的命令通过轻量 shell analyzer 自动归为 RiskLow，不经过 LLM 审查；复杂/动态/未知命令至少归为 RiskMedium。
+**决策**: 已增加内置 `search`，覆盖本地文件名和内容搜索，默认排除依赖/构建目录和常见凭据文件。Web 搜索仍不作为 MVP 内置能力，通过 skill 或 MCP 封装。
 
 ### 2. 缺少 Web 搜索结构化工具
 

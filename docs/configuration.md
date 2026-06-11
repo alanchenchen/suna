@@ -267,8 +267,11 @@ reasoning = { model = "other-model" }
 | Tool | Pattern 匹配对象 |
 |---|---|
 | `exec` | `command` |
-| `readfile` / `listdir` / `writefile` / `editfile` | `path` |
-| `readhttp` / `writehttp` | `url` |
+| `readfile` / `listdir` / `writefile` / `editfile` / `search` | `path` |
+| `filesystem` | `action path`；`move` / `copy` 带 destination 时为 `action path -> destination` |
+| `http` | `METHOD url`，未传 method 时默认为 `GET` |
+
+例如 `http` 的 target 可能是 `GET https://example.com` 或 `DELETE https://api.example.com/items/1`。旧的 `readhttp` / `writehttp` 已合并为 `http`，如果规则依赖 URL 开头匹配，需要考虑 method 前缀。
 
 TOML 字符串中的反斜杠需要转义，例如 regexp 的 `\s` 要写成 `\\s`，字面量 `.` 要写成 `\\.`。
 

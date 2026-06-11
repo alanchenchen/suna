@@ -187,17 +187,18 @@ API Key 不写入 `config.toml`，而是保存在 `credentials.toml`。完整配
 
 ## 工具、安全与 Workspace
 
-Suna 内置工具分为两类：
+Suna 内置工具分为感知类和行动类；所有工具调用仍由 Agent 统一经过 Guard 判断，低风险只读调用会自动放行：
 
 | 类型 | 工具 | 用途 |
 |---|---|---|
-| 只读 | `readfile` | 读取本地文件 |
-| 只读 | `listdir` | 列目录 |
-| 只读 | `readhttp` | HTTP GET |
-| 行动 | `exec` | 执行 shell 命令 |
-| 行动 | `writefile` | 创建或覆盖文件 |
-| 行动 | `editfile` | 精确字符串替换编辑文件 |
-| 行动 | `writehttp` | POST / PUT / DELETE / PATCH |
+| 感知 | `readfile` | 按行范围、tail 或 base64 读取本地文件 |
+| 感知 | `listdir` | 列目录，支持递归、分页和 include/exclude 过滤 |
+| 感知 | `search` | 按文件名或内容搜索目录 |
+| 行动 | `exec` | 执行 shell 命令；可证明只读的命令会被 Guard 归为低风险 |
+| 行动 | `writefile` | 创建、覆盖或追加文件 |
+| 行动 | `editfile` | 对单个文件原子应用一个或多个精确文本替换 |
+| 行动 | `filesystem` | `stat` / `mkdir` / `move` / `copy` / `remove` 文件系统路径；`stat` 是低风险只读调用 |
+| 行动 | `http` | 统一 HTTP 请求工具；`GET` / `HEAD` 是只读调用，`POST` / `PUT` / `PATCH` / `DELETE` 按风险审查 |
 
 Guard Mode 可在 `/config` 中切换：
 

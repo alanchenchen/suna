@@ -142,6 +142,7 @@ func applyTheme(name string) {
 	styleToolErr = lipgloss.NewStyle().Foreground(ColorError).Bold(true)
 	styleToolRun = lipgloss.NewStyle().Foreground(ColorBrand).Bold(true)
 	styleToolDim = lipgloss.NewStyle().Foreground(ColorDim)
+	styleToolIntent = lipgloss.NewStyle().Foreground(currentTheme.MutedText)
 	styleToolAdd = lipgloss.NewStyle().Foreground(ColorAgent).Bold(true)
 	styleToolDel = lipgloss.NewStyle().Foreground(ColorError).Bold(true)
 	styleMetaPill = lipgloss.NewStyle().Foreground(p.ToolText).Background(ColorBrand).Padding(0, 1).Bold(true)

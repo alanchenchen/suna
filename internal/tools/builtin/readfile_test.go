@@ -12,7 +12,7 @@ import (
 func TestReadFileStreamsPastInitialByteWindow(t *testing.T) {
 	path := writeTempFile(t, buildLines(7000, 40))
 
-	res := ReadFile{}.Execute(context.Background(), map[string]any{"path": path, "offset": float64(6500), "limit": float64(3)})
+	res := ReadFile{}.Execute(context.Background(), map[string]any{"path": path, "start_line": float64(6500), "line_count": float64(3)})
 	if res.IsError {
 		t.Fatalf("ReadFile.Execute() error = %s", res.Error)
 	}
@@ -27,7 +27,7 @@ func TestReadFileStreamsPastInitialByteWindow(t *testing.T) {
 func TestReadFileTruncatesByResultBytesWithNextOffset(t *testing.T) {
 	path := writeTempFile(t, buildLines(1000, 300))
 
-	res := ReadFile{}.Execute(context.Background(), map[string]any{"path": path, "offset": float64(1), "limit": float64(1000)})
+	res := ReadFile{}.Execute(context.Background(), map[string]any{"path": path, "start_line": float64(1), "line_count": float64(1000)})
 	if res.IsError {
 		t.Fatalf("ReadFile.Execute() error = %s", res.Error)
 	}
@@ -37,7 +37,7 @@ func TestReadFileTruncatesByResultBytesWithNextOffset(t *testing.T) {
 	if got, wantMax := len(res.Content), maxReadResultBytes+200; got > wantMax {
 		t.Fatalf("len(ReadFile.Execute().Content) = %d, want <= %d", got, wantMax)
 	}
-	if !strings.Contains(res.Content, "Use offset=") {
+	if !strings.Contains(res.Content, "Use start_line=") {
 		t.Fatalf("ReadFile.Execute() content = %q, want continuation hint", res.Content)
 	}
 }
@@ -45,7 +45,7 @@ func TestReadFileTruncatesByResultBytesWithNextOffset(t *testing.T) {
 func TestReadFileTruncatesVeryLongLine(t *testing.T) {
 	path := writeTempFile(t, strings.Repeat("x", maxReadLineBytes*2)+"\nsecond\n")
 
-	res := ReadFile{}.Execute(context.Background(), map[string]any{"path": path, "offset": float64(1), "limit": float64(2)})
+	res := ReadFile{}.Execute(context.Background(), map[string]any{"path": path, "start_line": float64(1), "line_count": float64(2)})
 	if res.IsError {
 		t.Fatalf("ReadFile.Execute() error = %s", res.Error)
 	}

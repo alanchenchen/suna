@@ -22,11 +22,14 @@ func (ListDir) Spec() tools.Spec {
 	return builtinSpec("listdir", "List directory contents as structured entries. Supports offset/limit pagination and recursive listing up to depth 3.", tools.Perceive, map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"path":      map[string]any{"type": "string", "description": "Directory path"},
-			"recursive": map[string]any{"type": "boolean", "description": "Whether to recursively list subdirectories"},
-			"max_depth": map[string]any{"type": "integer", "description": "Maximum recursion depth, default 3"},
-			"offset":    map[string]any{"type": "integer", "description": "Starting entry index, 1-indexed, for continuing large directory listings"},
-			"limit":     map[string]any{"type": "integer", "description": "Maximum entries to return, default 500, max 1000"},
+			"path":           map[string]any{"type": "string", "description": "Directory path"},
+			"recursive":      map[string]any{"type": "boolean", "description": "Whether to recursively list subdirectories"},
+			"max_depth":      map[string]any{"type": "integer", "description": "Maximum recursion depth, default 3"},
+			"offset":         map[string]any{"type": "integer", "description": "Starting entry index, 1-indexed, for continuing large directory listings"},
+			"limit":          map[string]any{"type": "integer", "description": "Maximum entries to return, default 500, max 1000"},
+			"include":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Glob patterns to include"},
+			"exclude":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Glob patterns to exclude"},
+			"include_hidden": map[string]any{"type": "boolean", "description": "Whether to include hidden entries"},
 		},
 		"required": []string{"path"},
 	})
@@ -74,10 +77,14 @@ func (ListDir) Execute(ctx context.Context, params map[string]any) tools.Result 
 	}
 
 	page := listPage{offset: offset, limit: limit}
+	filter := listFilter{include: stringListParam(params["include"]), exclude: stringListParam(params["exclude"])}
+	if h, ok := params["include_hidden"].(bool); ok {
+		filter.includeHidden = h
+	}
 	if recursive {
-		walkDirPage(path, path, 0, maxDepth, &page)
+		walkDirPage(path, path, 0, maxDepth, &page, filter)
 	} else {
-		readDirPage(path, &page)
+		readDirPage(path, &page, filter)
 	}
 
 	if page.seen == 0 {
@@ -126,7 +133,7 @@ func (p *listPage) add(e entry) bool {
 
 func (p *listPage) nextOffset() int { return p.offset + len(p.entries) }
 
-func readDirPage(path string, page *listPage) {
+func readDirPage(path string, page *listPage, filter listFilter) {
 	entries, err := os.ReadDir(path)
 	if err != nil {
 		return
@@ -140,9 +147,13 @@ func readDirPage(path string, page *listPage) {
 		if e.IsDir() {
 			typ = "dir"
 		}
+		rel := e.Name()
+		if !filter.allow(rel, e.Name()) {
+			continue
+		}
 		if !page.add(entry{
 			Name:     e.Name(),
-			RelPath:  e.Name(),
+			RelPath:  rel,
 			Type:     typ,
 			Size:     info.Size(),
 			Modified: info.ModTime(),
@@ -152,7 +163,7 @@ func readDirPage(path string, page *listPage) {
 	}
 }
 
-func walkDirPage(root, current string, depth, maxDepth int, page *listPage) {
+func walkDirPage(root, current string, depth, maxDepth int, page *listPage, filter listFilter) {
 	if depth > maxDepth {
 		return
 	}
@@ -177,6 +188,9 @@ func walkDirPage(root, current string, depth, maxDepth int, page *listPage) {
 			typ = "dir"
 		}
 		rel, _ := filepath.Rel(root, filepath.Join(current, e.Name()))
+		if !filter.allow(rel, e.Name()) {
+			continue
+		}
 		if !page.add(entry{
 			Name:     e.Name(),
 			RelPath:  rel,
@@ -187,7 +201,7 @@ func walkDirPage(root, current string, depth, maxDepth int, page *listPage) {
 			return
 		}
 		if e.IsDir() && depth < maxDepth {
-			walkDirPage(root, filepath.Join(current, e.Name()), depth+1, maxDepth, page)
+			walkDirPage(root, filepath.Join(current, e.Name()), depth+1, maxDepth, page, filter)
 			if page.hasMore || page.stoppedEarly {
 				return
 			}
@@ -206,4 +220,23 @@ func formatEntries(entries []entry) string {
 		sb.WriteString(fmt.Sprintf("%s  %s%s  %s\n", e.Type[:1], e.RelPath, size, mod))
 	}
 	return sb.String()
+}
+
+type listFilter struct {
+	include       []string
+	exclude       []string
+	includeHidden bool
+}
+
+func (f listFilter) allow(rel string, name string) bool {
+	if !f.includeHidden && strings.HasPrefix(name, ".") {
+		return false
+	}
+	if len(f.include) > 0 && !matchAnyGlob(rel, f.include) {
+		return false
+	}
+	if len(f.exclude) > 0 && matchAnyGlob(rel, f.exclude) {
+		return false
+	}
+	return true
 }

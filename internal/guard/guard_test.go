@@ -46,6 +46,53 @@ func TestGuardRiskLowOnlyForStrictReadOnlyExec(t *testing.T) {
 	}
 }
 
+func TestGuardNewStructuredToolRisks(t *testing.T) {
+	g := NewGuard(nil, "test")
+
+	tests := []struct {
+		name   string
+		tool   string
+		params map[string]any
+		risk   RiskLevel
+	}{
+		{name: "filesystem stat", tool: "filesystem", params: map[string]any{"action": "stat", "path": "out.txt"}, risk: RiskLow},
+		{name: "filesystem recursive remove", tool: "filesystem", params: map[string]any{"action": "remove", "path": "dist", "recursive": true}, risk: RiskHigh},
+		{name: "http delete", tool: "http", params: map[string]any{"method": "DELETE", "url": "https://example.com/item"}, risk: RiskHigh},
+		{name: "http localhost get", tool: "http", params: map[string]any{"url": "http://127.0.0.1:8080/status"}, risk: RiskMedium},
+		{name: "broad content search", tool: "search", params: map[string]any{"path": "/", "query": "secret"}, risk: RiskMedium},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			result := g.Check(context.Background(), tt.tool, tt.params)
+			if result.Risk != tt.risk {
+				t.Fatalf("risk = %s, want %s; decision=%s reason=%q", RiskString(result.Risk), RiskString(tt.risk), result.Decision, result.Reason)
+			}
+		})
+	}
+}
+
+func TestReadonlyAllowsStructuredReadOnlyCalls(t *testing.T) {
+	g := NewGuardWithMode(nil, "test", ModeReadonly)
+
+	for _, tt := range []struct {
+		name   string
+		tool   string
+		params map[string]any
+	}{
+		{name: "filesystem stat", tool: "filesystem", params: map[string]any{"action": "stat", "path": "out.txt"}},
+		{name: "http get", tool: "http", params: map[string]any{"method": "GET", "url": "https://example.com"}},
+	} {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			result := g.Check(context.Background(), tt.tool, tt.params)
+			if result.Decision != Approve {
+				t.Fatalf("decision = %s, want approve; risk=%s reason=%q", result.Decision, RiskString(result.Risk), result.Reason)
+			}
+		})
+	}
+}
+
 func TestGuardConservativeFallbacks(t *testing.T) {
 	g := NewGuard(nil, "test")
 
@@ -144,7 +191,7 @@ func TestGuardBlockedRulesApplyToReadToolsAndHTTP(t *testing.T) {
 	}{
 		{name: "readfile", tool: "readfile", params: map[string]any{"path": "secret.txt"}},
 		{name: "listdir", tool: "listdir", params: map[string]any{"path": "secret-dir"}},
-		{name: "readhttp", tool: "readhttp", params: map[string]any{"url": "http://169.254.169.254/latest/meta-data"}},
+		{name: "http", tool: "http", params: map[string]any{"url": "http://169.254.169.254/latest/meta-data"}},
 	}
 	for _, tt := range tests {
 		tt := tt

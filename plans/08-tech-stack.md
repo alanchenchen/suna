@@ -185,19 +185,22 @@ suna/
 │   │   └── token.go             # token 估算
 │   ├── media/                   # 图片 MediaRef 校验、attachment 落盘、provider 请求前 resolve
 │   │   └── store.go
-│   ├── tool/                    # 7 个 registry tools；askuser/spawn 由 core 特殊处理
-│   │   ├── tool.go              # Tool 接口 + 注册
-│   │   ├── readfile.go
-│   │   ├── listdir.go
-│   │   ├── readhttp.go
-│   │   ├── exec.go              # Exec 工具主体
-│   │   ├── shell_unix.go        # Shell 检测: 默认 bash (//go:build !windows)
-│   │   ├── shell_windows.go     # Shell 检测: Git Bash → PS → cmd (//go:build windows)
-│   │   ├── writefile.go
-│   │   ├── editfile.go
-│   │   ├── writehttp.go
+│   ├── tools/                   # 统一工具目录与 builtin/agent/skill/MCP provider
+│   │   ├── builtin/              # 8 个 builtin tools
+│   │   │   ├── readfile.go
+│   │   │   ├── readtail.go
+│   │   │   ├── listdir.go
+│   │   │   ├── search.go
+│   │   │   ├── http.go
+│   │   │   ├── exec.go            # Exec 工具主体
+│   │   │   ├── shell_unix.go      # Shell 检测: 默认 bash (//go:build !windows)
+│   │   │   ├── shell_windows.go   # Shell 检测: Git Bash → PS → cmd (//go:build windows)
+│   │   │   ├── writefile.go
+│   │   │   ├── editfile.go
+│   │   │   └── filesystem*.go
 │   ├── guard/                   # LLM 权限守卫
-│   │   ├── guard.go             # Guard mode policy + Check() + checkAllowed/isReadOnlyTool
+│   │   ├── guard.go             # Guard mode policy + Check() + checkAllowed/isReadOnlyCall
+│   │   ├── tool_risk.go         # structured tool 风险分类
 │   │   ├── rules_unix.go        # Unix 硬规则 (//go:build !windows)
 │   │   ├── rules_windows.go     # Windows 硬规则 (//go:build windows)
 │   │   └── sensitive.go         # 敏感信息检测
@@ -456,7 +459,7 @@ api_key = "..."
 | Daemon / Protocol/Transport | Usable MVP | protocol schema、local transport、stream/config/session/guard 事件 | 多客户端边界和错误恢复仍需加强 |
 | Model | Usable MVP | OpenAI Responses、OpenAI-compatible Chat 与 Anthropic provider；图片输入、tool calling、usage/context 透传；OpenAI/OpenAI-compatible 支持 streaming，并注册兼容 SSE decoder 跳过中转 heartbeat/empty event；`models.reasoning` 支持 TUI preset 与自定义注入；Anthropic 当前非 streaming | provider ping 和高级路由策略不完整 |
 | Core Agent | Usable MVP | agent loop、provider-dependent streaming、tool call 并发执行、AskUser、Spawn、session 管理 | 更细的取消/并发边界和长期任务恢复 |
-| Tools | Usable MVP | read/list/readhttp/exec/write/edit/writehttp/askuser/spawn | Windows 命令翻译层仍是后续项 |
+| Tools | Usable MVP | read/list/search/exec/write/edit/filesystem/http/askuser/spawn；文件变更和 filesystem/search/http metadata 已用于 TUI 摘要 | Windows 命令翻译层仍是后续项 |
 | Guard | Usable MVP | `readonly` / `ask` / `auto` / `smart`、硬拦截、风险分级、TUI confirm、LLM review | rules 编辑 UI、modify 参数改写、渐进信任未完成 |
 | Memory | Usable MVP | SQLite active memory、memory_queue、conversation_state、异步 full compaction、上下文压缩 | 记忆质量评估、用户可编辑记忆 UI |
 | TUI | Usable MVP | Welcome/Chat/Config/Help、模型配置、Workspace 配置、工具记录、AskUser、Guard overlay、compact、active memory list、context-aware help | Provider test、Config 高级项（guard rules/hooks/限速）仍不完整 |

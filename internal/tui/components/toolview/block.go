@@ -55,12 +55,28 @@ func ChangedFilePath(te *Entry) string {
 	return strings.TrimSpace(path)
 }
 
+func ChangedFSPath(te *Entry) string {
+	if !HasFSChange(te) {
+		return ""
+	}
+	path, _ := te.Metadata["path"].(string)
+	return strings.TrimSpace(path)
+}
+
 func HasFileChange(te *Entry) bool {
 	if te == nil || te.Metadata == nil {
 		return false
 	}
 	kind, _ := te.Metadata["kind"].(string)
 	return kind == "file_change"
+}
+
+func HasFSChange(te *Entry) bool {
+	if te == nil || te.Metadata == nil {
+		return false
+	}
+	kind, _ := te.Metadata["kind"].(string)
+	return kind == "fs_change"
 }
 
 func ShouldShowGuardSummary(info *GuardInfo) bool {
@@ -81,26 +97,44 @@ func IsSubtaskChild(te *Entry) bool {
 	return te != nil && te.ParentID != ""
 }
 
-func BlockTitle(entries []*Entry, title string) string {
-	parts := []string{title}
+func BlockTitle(entries []*Entry, labels RenderLabels) string {
+	parts := []string{labels.Tools}
 	if len(entries) > 0 {
-		parts = append(parts, fmt.Sprintf("%d actions", len(entries)))
+		parts = append(parts, countLabel(len(entries), labels.Actions))
 	}
 	changedFiles := make(map[string]struct{})
+	fsChanges := 0
 	guards := 0
 	for _, te := range entries {
 		if path := ChangedFilePath(te); path != "" {
 			changedFiles[path] = struct{}{}
+		}
+		if path := ChangedFSPath(te); path != "" {
+			fsChanges++
 		}
 		if ShouldShowGuardSummary(te.Guard) {
 			guards++
 		}
 	}
 	if len(changedFiles) > 0 {
-		parts = append(parts, fmt.Sprintf("%d files changed", len(changedFiles)))
+		parts = append(parts, countLabel(len(changedFiles), labels.FilesChanged))
+	}
+	if fsChanges > 0 {
+		parts = append(parts, countLabel(fsChanges, labels.FSChanges))
 	}
 	if guards > 0 {
-		parts = append(parts, fmt.Sprintf("%d guarded", guards))
+		parts = append(parts, countLabel(guards, labels.Guarded))
 	}
 	return strings.Join(parts, " · ")
+}
+
+func countLabel(n int, label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return fmt.Sprintf("%d", n)
+	}
+	if strings.HasPrefix(label, "个") {
+		return fmt.Sprintf("%d%s", n, label)
+	}
+	return fmt.Sprintf("%d %s", n, label)
 }

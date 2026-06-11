@@ -23,13 +23,14 @@ const (
 type ReadFile struct{}
 
 func (ReadFile) Spec() tools.Spec {
-	return builtinSpec("readfile", "Read file contents. Text mode streams large files by line with offset/limit pagination; binary files can be returned as base64.", tools.Perceive, map[string]any{
+	return builtinSpec("readfile", "Read file contents with line ranges, tail, and base64 support.", tools.Perceive, map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"path":     map[string]any{"type": "string", "description": "File path"},
-			"offset":   map[string]any{"type": "integer", "description": "Starting line number, 1-indexed, for continuing large file reads"},
-			"limit":    map[string]any{"type": "integer", "description": "Maximum lines to return, default 2000, max 5000; result is still capped at 100KB"},
-			"encoding": map[string]any{"type": "string", "enum": []string{"text", "base64"}, "description": "Output encoding"},
+			"path":       map[string]any{"type": "string", "description": "File path"},
+			"start_line": map[string]any{"type": "integer", "description": "Starting line number, 1-indexed"},
+			"line_count": map[string]any{"type": "integer", "description": "Maximum lines to return, default 2000, max 5000"},
+			"tail_lines": map[string]any{"type": "integer", "description": "Read the last N lines"},
+			"encoding":   map[string]any{"type": "string", "enum": []string{"text", "base64"}, "description": "Output encoding"},
 		},
 		"required": []string{"path"},
 	})
@@ -84,15 +85,18 @@ func readText(path string, params map[string]any) tools.Result {
 	defer file.Close()
 
 	offset := 1
-	if o, ok := params["offset"].(float64); ok && int(o) > 0 {
+	if o, ok := params["start_line"].(float64); ok && int(o) > 0 {
 		offset = int(o)
 	}
 	limit := defaultReadLineLimit
-	if l, ok := params["limit"].(float64); ok && int(l) > 0 {
+	if l, ok := params["line_count"].(float64); ok && int(l) > 0 {
 		limit = int(l)
 	}
 	if limit > maxReadLineLimit {
 		limit = maxReadLineLimit
+	}
+	if tail, ok := params["tail_lines"].(float64); ok && int(tail) > 0 {
+		return readTailText(path, int(tail))
 	}
 
 	reader := bufio.NewReader(file)
@@ -138,7 +142,7 @@ func readText(path string, params map[string]any) tools.Result {
 		if nextOffset == 0 {
 			nextOffset = lineNo + 1
 		}
-		content += fmt.Sprintf("\n... (truncated. Use offset=%d to read more; limit capped at %d lines and %d bytes per result)", nextOffset, maxReadLineLimit, maxReadResultBytes)
+		content += fmt.Sprintf("\n... (truncated. Use start_line=%d to read more; limit capped at %d lines and %d bytes per result)", nextOffset, maxReadLineLimit, maxReadResultBytes)
 	}
 
 	return tools.Result{Content: content, Truncated: truncated}

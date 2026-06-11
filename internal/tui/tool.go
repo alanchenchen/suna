@@ -24,11 +24,27 @@ func (t *TUI) toolRenderDeps() toolview.RenderDeps {
 	return toolview.RenderDeps{
 		Width: t.width,
 		Labels: toolview.RenderLabels{
-			Tools:        t.tr("tui.tool.tools"),
-			Subtask:      t.tr("tui.tool.subtask"),
-			GuardBadge:   t.tr("tui.tool.guard.badge"),
-			GuardUnknown: t.tr("tui.tool.guard.unknown"),
-			FileBadge:    t.tr("tui.tool.file.badge"),
+			Tools:                t.tr("tui.tool.tools"),
+			Subtask:              t.tr("tui.tool.subtask"),
+			GuardBadge:           t.tr("tui.tool.guard.badge"),
+			GuardUnknown:         t.tr("tui.tool.guard.unknown"),
+			FileBadge:            t.tr("tui.tool.file.badge"),
+			Actions:              t.tr("tui.tool.actions"),
+			FilesChanged:         t.tr("tui.tool.files_changed"),
+			FSChanges:            t.tr("tui.tool.fs_changes"),
+			Guarded:              t.tr("tui.tool.guarded"),
+			FSBadge:              t.tr("tui.tool.fs.badge"),
+			FSDeleted:            t.tr("tui.tool.fs.deleted"),
+			FSCreatedDir:         t.tr("tui.tool.fs.created_dir"),
+			FSMoved:              t.tr("tui.tool.fs.moved"),
+			FSCopied:             t.tr("tui.tool.fs.copied"),
+			Recursive:            t.tr("tui.tool.fs.recursive"),
+			Overwrote:            t.tr("tui.tool.fs.overwrote"),
+			Entries:              t.tr("tui.tool.fs.entries"),
+			SearchMatchesInFiles: t.tr("tui.tool.search.matches_in_files"),
+			SearchScanned:        t.tr("tui.tool.search.scanned"),
+			SearchTruncated:      t.tr("tui.tool.search.truncated"),
+			ModeContent:          t.tr("tui.tool.mode.content"),
 		},
 		Styles:             toolviewStyles(),
 		GuardDecisionLabel: t.guardDecisionLabel,
@@ -82,6 +98,7 @@ func toolviewStyles() toolview.RenderStyles {
 		Err:       styleToolErr,
 		Run:       styleToolRun,
 		ToolDim:   styleToolDim,
+		Intent:    styleToolIntent,
 		MetaPill:  styleMetaPill,
 		GuardOK:   styleGuardOK,
 		GuardWarn: styleGuardWarn,
@@ -95,7 +112,7 @@ func (t *TUI) visibleToolEntries(block *toolBlock) []*toolEntry {
 }
 
 func (t *TUI) toolBlockTitle(entries []*toolEntry) string {
-	return toolview.BlockTitle(entries, t.tr("tui.tool.tools"))
+	return toolview.BlockTitle(entries, t.toolRenderDeps().Labels)
 }
 
 func (t *TUI) moveSelectedTool(delta int) { t.chat.MoveSelectedTool(delta) }

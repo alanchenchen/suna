@@ -18,6 +18,7 @@ type RenderStyles struct {
 	Err       lipgloss.Style
 	Run       lipgloss.Style
 	ToolDim   lipgloss.Style
+	Intent    lipgloss.Style
 	MetaPill  lipgloss.Style
 	GuardOK   lipgloss.Style
 	GuardWarn lipgloss.Style
@@ -27,11 +28,27 @@ type RenderStyles struct {
 
 // RenderLabels 是工具组件展示文案。i18n 留在 root/page，组件只消费最终字符串。
 type RenderLabels struct {
-	Tools        string
-	Subtask      string
-	GuardBadge   string
-	GuardUnknown string
-	FileBadge    string
+	Tools                string
+	Subtask              string
+	GuardBadge           string
+	GuardUnknown         string
+	FileBadge            string
+	Actions              string
+	FilesChanged         string
+	FSChanges            string
+	Guarded              string
+	FSBadge              string
+	FSDeleted            string
+	FSCreatedDir         string
+	FSMoved              string
+	FSCopied             string
+	Recursive            string
+	Overwrote            string
+	Entries              string
+	SearchMatchesInFiles string
+	SearchScanned        string
+	SearchTruncated      string
+	ModeContent          string
 }
 
 // RenderDeps 汇总工具块渲染所需依赖。
@@ -58,7 +75,7 @@ func RenderBlock(block *Block, deps RenderDeps) string {
 	}
 	entries := VisibleEntries(block)
 	var sb strings.Builder
-	sb.WriteString("    " + deps.Styles.Dim.Render(BlockTitle(entries, deps.Labels.Tools)) + "\n")
+	sb.WriteString("    " + deps.Styles.Dim.Render(BlockTitle(entries, deps.Labels)) + "\n")
 	for _, te := range entries {
 		sb.WriteString(RenderEntry(te, te.ParentID != "", deps))
 	}
@@ -106,7 +123,7 @@ func RenderEntry(te *Entry, nested bool, deps RenderDeps) string {
 		line += "\n" + prefix + "  " + s.HL.Render(extra)
 	}
 	if detailLabel != "" {
-		for _, detail := range splitWrapped(detailLabel, maxWidth, 2, s) {
+		for _, detail := range splitWrappedStyle(detailLabel, maxWidth, 2, s.Intent, s) {
 			line += "\n" + prefix + "  " + detail
 		}
 	}
@@ -136,6 +153,13 @@ func entryLabels(te *Entry, maxWidth int, deps RenderDeps) (string, string) {
 			}
 			return main, ""
 		}
+	}
+	if summary := SemanticSummary(te, maxWidth, deps.Labels); summary != "" {
+		main := te.Name + " " + summary
+		if strings.TrimSpace(label) != "" && strings.TrimSpace(label) != main {
+			return main, label
+		}
+		return main, ""
 	}
 	return label, ""
 }
@@ -246,6 +270,15 @@ func renderMetadataSummary(te *Entry, prefix string, deps RenderDeps) string {
 	if kind, _ := te.Metadata["kind"].(string); kind == "file_change" {
 		return RenderFileChangeSummary(te.Metadata, prefix, deps)
 	}
+	if kind, _ := te.Metadata["kind"].(string); kind == "fs_change" {
+		return RenderFSChangeSummary(te.Metadata, prefix, deps)
+	}
+	if kind, _ := te.Metadata["kind"].(string); kind == "search_result" {
+		return RenderSearchSummary(te.Metadata, prefix, deps)
+	}
+	if kind, _ := te.Metadata["kind"].(string); kind == "http_response" {
+		return RenderHTTPSummary(te.Metadata, prefix, deps)
+	}
 	return ""
 }
 
@@ -317,6 +350,10 @@ func renderLineDelta(prefix string, n int, added bool, s RenderStyles) string {
 }
 
 func splitWrapped(content string, width int, maxLines int, s RenderStyles) []string {
+	return splitWrappedStyle(content, width, maxLines, s.ToolDim, s)
+}
+
+func splitWrappedStyle(content string, width int, maxLines int, style lipgloss.Style, s RenderStyles) []string {
 	var out []string
 	for _, line := range strings.Split(strings.TrimRight(content, "\n"), "\n") {
 		remaining := 0
@@ -327,7 +364,7 @@ func splitWrapped(content string, width int, maxLines int, s RenderStyles) []str
 			}
 		}
 		for _, wrapped := range textutil.WrapLineLimit(line, width, remaining) {
-			out = append(out, s.ToolDim.Render(wrapped))
+			out = append(out, style.Render(wrapped))
 			if maxLines > 0 && len(out) >= maxLines {
 				return append(out, s.Dim.Render("..."))
 			}

@@ -33,9 +33,18 @@ func (g *Guard) checkWorkspace(tool string, params map[string]any) (bool, string
 		return false, ""
 	}
 	switch tool {
-	case "readfile", "listdir", "writefile", "editfile":
+	case "readfile", "listdir", "writefile", "editfile", "search":
 		path, _ := params["path"].(string)
 		return g.checkWorkspacePath(tool, "path", path, g.workspace)
+	case "filesystem":
+		path, _ := params["path"].(string)
+		if blocked, reason := g.checkWorkspacePath(tool, "path", path, g.workspace); blocked {
+			return true, reason
+		}
+		if dst, _ := params["destination"].(string); strings.TrimSpace(dst) != "" {
+			return g.checkWorkspacePath(tool, "destination", dst, g.workspace)
+		}
+		return false, ""
 	case "exec":
 		cwd, _ := params["cwd"].(string)
 		if cwd == "" {

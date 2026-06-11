@@ -409,7 +409,7 @@ Main: 测试通过 → 通知用户完成
   - Exec: exit_code != 0 → 失败
   - ReadFile: content 为空且文件应该有内容 → 异常
   - WriteFile: 写入字节数为 0 → 异常
-  - WriteHTTP: status 4xx/5xx → 失败
+  - HTTP: status 4xx/5xx → 保留状态和响应内容，不作为 transport/tool 执行错误
   - Spawn: success=false → subtask 失败
 
 快速检查命中率: ~80% 的失败场景

@@ -1,7 +1,5 @@
 package chat
 
-import "github.com/alanchenchen/suna/internal/tui/components/toolview"
-
 type GuardOverlayLabels struct {
 	Title      string
 	Tool       string
@@ -34,13 +32,6 @@ func (m Model) GuardOverlayView(width, overlayMaxHeight int, labels GuardOverlay
 		BodyHeight: maxInt(0, minInt(12, overlayMaxHeight-12)),
 		Labels:     labels,
 	}
-}
-
-func GuardBodyParams(g *GuardConfirmView) string {
-	if g == nil {
-		return ""
-	}
-	return toolview.FormatParams(g.Params)
 }
 
 func GuardHelpText(start, height, total int, labels GuardOverlayLabels) string {
