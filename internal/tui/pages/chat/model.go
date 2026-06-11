@@ -80,6 +80,7 @@ type Model struct {
 	ResponseNavAvailable   bool
 	ResponseNavJumped      bool
 	ResponseNavDismissed   bool
+	LastWaitingTool        string
 
 	PendingAskID      string
 	PendingAskOptions []string

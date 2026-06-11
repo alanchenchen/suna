@@ -258,6 +258,21 @@ func TestWaitingWithoutVisibleProgressShowsStatusLine(t *testing.T) {
 	}
 }
 
+func TestWaitingAfterSubtaskShowsSpecificStatusLine(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
+	tui.initChatComponents()
+	tui.chat.Loading = true
+	tui.chat.Phase = phaseWaitingAfterTool
+	tui.chat.LastWaitingTool = "spawn"
+	tui.chat.PhaseStart = time.Now().Add(-time.Second)
+
+	tui.syncContent()
+	view := stripANSIForTest(tui.chat.Viewport.View())
+	if !strings.Contains(view, "子任务已完成，等待主模型继续") {
+		t.Fatalf("view = %q, want subtask waiting status line", view)
+	}
+}
+
 func TestRunningToolSuppressesDuplicateStatusLine(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
 	tui.initChatComponents()

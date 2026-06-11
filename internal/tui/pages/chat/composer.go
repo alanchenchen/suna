@@ -59,5 +59,6 @@ func (m *Model) ResetPhase() {
 	m.Phase = PhaseIdle
 	m.PhaseStart = time.Time{}
 	m.StatusLabel = ""
+	m.LastWaitingTool = ""
 	m.ResetToolState()
 }

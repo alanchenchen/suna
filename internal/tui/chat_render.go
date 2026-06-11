@@ -236,6 +236,9 @@ func (t *TUI) currentStatusLabel() string {
 	case phaseTool:
 		return t.tr("status.exec_tool")
 	case phaseWaitingAfterTool:
+		if t.chat.LastWaitingTool == "spawn" {
+			return t.tr("status.waiting_after_subtask")
+		}
 		return t.tr("status.waiting_after_tool")
 	default:
 		return ""

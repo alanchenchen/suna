@@ -19,6 +19,7 @@ func (m *Model) StartLLMWait(now time.Time) {
 	m.PhaseStart = now
 	m.StreamStart = now
 	m.FollowBottom = true
+	m.LastWaitingTool = ""
 }
 
 func (m *Model) AppendMessage(msg Msg) {

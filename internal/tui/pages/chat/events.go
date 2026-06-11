@@ -9,6 +9,7 @@ import (
 
 func (m *Model) HandleStreamStart(now time.Time) {
 	m.ClearStatusLabel()
+	m.LastWaitingTool = ""
 	if m.Phase == PhaseFirstLLM || m.Phase == PhaseThinking || m.Phase == PhaseWaitingAfterTool {
 		m.Phase = PhaseLLM
 		m.PhaseStart = now
@@ -17,6 +18,7 @@ func (m *Model) HandleStreamStart(now time.Time) {
 
 func (m *Model) HandleReasoningStart(now time.Time) {
 	m.ClearStatusLabel()
+	m.LastWaitingTool = ""
 	if m.Phase == PhaseFirstLLM || m.Phase == PhaseLLM || m.Phase == PhaseWaitingAfterTool {
 		m.Phase = PhaseThinking
 		m.PhaseStart = now
@@ -40,6 +42,7 @@ func (m *Model) StartTool(p protocol.ToolStartParams, id string, now time.Time) 
 	m.Phase = PhaseTool
 	m.PhaseStart = now
 	m.StatusLabel = ""
+	m.LastWaitingTool = ""
 	m.Loading = true
 	parentID, localID := toolview.ParseSubtaskID(id)
 	m.LastAssistantText = ""
@@ -102,5 +105,9 @@ func (m *Model) EndTool(p protocol.ToolEndParams, id string, now time.Time) {
 		m.Phase = PhaseWaitingAfterTool
 		m.PhaseStart = now
 		m.LastAssistantText = ""
+		m.LastWaitingTool = ""
+		if te != nil && toolview.IsSubtask(te) {
+			m.LastWaitingTool = "spawn"
+		}
 	}
 }

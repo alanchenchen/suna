@@ -49,6 +49,7 @@ type RenderLabels struct {
 	SearchScanned        string
 	SearchTruncated      string
 	ModeContent          string
+	SubtaskWaiting       string
 }
 
 // RenderDeps 汇总工具块渲染所需依赖。
@@ -76,8 +77,14 @@ func RenderBlock(block *Block, deps RenderDeps) string {
 	entries := VisibleEntries(block)
 	var sb strings.Builder
 	sb.WriteString("    " + deps.Styles.Dim.Render(BlockTitle(entries, deps.Labels)) + "\n")
-	for _, te := range entries {
-		sb.WriteString(RenderEntry(te, te.ParentID != "", deps))
+	for _, te := range topLevelEntries(block) {
+		sb.WriteString(RenderEntry(te, false, deps))
+		for _, child := range childEntries(block, te.ID) {
+			sb.WriteString(RenderEntry(child, true, deps))
+		}
+		if shouldRenderSubtaskWaiting(block, te) {
+			sb.WriteString(renderSubtaskWaitingLine(deps))
+		}
 	}
 	return sb.String()
 }
@@ -380,4 +387,63 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func topLevelEntries(block *Block) []*Entry {
+	if block == nil {
+		return nil
+	}
+	entries := make([]*Entry, 0, len(block.Order))
+	for _, id := range block.Order {
+		te := block.Entries[id]
+		if te == nil || te.ParentID != "" {
+			continue
+		}
+		entries = append(entries, te)
+	}
+	for _, id := range block.Order {
+		te := block.Entries[id]
+		if te == nil || te.ParentID == "" || block.Entries[te.ParentID] != nil {
+			continue
+		}
+		entries = append(entries, te)
+	}
+	return entries
+}
+
+func childEntries(block *Block, parentID string) []*Entry {
+	if block == nil || parentID == "" {
+		return nil
+	}
+	entries := make([]*Entry, 0)
+	for _, childID := range block.Order {
+		child := block.Entries[childID]
+		if child == nil || child.ParentID != parentID {
+			continue
+		}
+		entries = append(entries, child)
+	}
+	return entries
+}
+
+func shouldRenderSubtaskWaiting(block *Block, te *Entry) bool {
+	if !IsSubtask(te) || te.Status != StatusRunning {
+		return false
+	}
+	for _, child := range childEntries(block, te.ID) {
+		if child.Status == StatusRunning {
+			return false
+		}
+	}
+	return true
+}
+
+func renderSubtaskWaitingLine(deps RenderDeps) string {
+	label := strings.TrimSpace(deps.Labels.SubtaskWaiting)
+	if label == "" {
+		label = "Waiting for subtask model..."
+	}
+	s := deps.Styles
+	prefix := "      " + s.Dim.Render("└─ ")
+	return fmt.Sprintf("%s%s %s\n", prefix, s.Run.Render("◐"), s.ToolDim.Render(label))
 }

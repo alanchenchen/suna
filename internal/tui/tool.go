@@ -45,6 +45,7 @@ func (t *TUI) toolRenderDeps() toolview.RenderDeps {
 			SearchScanned:        t.tr("tui.tool.search.scanned"),
 			SearchTruncated:      t.tr("tui.tool.search.truncated"),
 			ModeContent:          t.tr("tui.tool.mode.content"),
+			SubtaskWaiting:       t.tr("tui.tool.subtask_waiting"),
 		},
 		Styles:             toolviewStyles(),
 		GuardDecisionLabel: t.guardDecisionLabel,

@@ -229,6 +229,34 @@ func TestRenderSubtaskEntryShowsModelInLabel(t *testing.T) {
 	}
 }
 
+func TestRenderRunningSubtaskShowsWaitingWhenNoChildRunning(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100}
+	block := &toolBlock{Entries: map[string]*toolEntry{}}
+	parent := &toolEntry{ID: "spawn-1", RawName: "spawn", Name: "Spawn", Intent: "分析代码", ParamsRaw: map[string]any{"model": "Oio/gpt-5.5"}, Status: toolRunning}
+	child := &toolEntry{ID: "spawn:spawn-1:tool-1", ParentID: "spawn-1", RawName: "search", Name: "Search", Intent: "搜索代码", Status: toolDone}
+	block.Add(parent)
+	block.Add(child)
+
+	plain := stripANSIForTest(tui.renderToolBlock(block))
+	if !strings.Contains(plain, "等待子任务继续") {
+		t.Fatalf("renderToolBlock() = %q, want subtask waiting line", plain)
+	}
+}
+
+func TestRenderRunningSubtaskHidesWaitingWhenChildRunning(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100}
+	block := &toolBlock{Entries: map[string]*toolEntry{}}
+	parent := &toolEntry{ID: "spawn-1", RawName: "spawn", Name: "Spawn", Intent: "分析代码", Status: toolRunning}
+	child := &toolEntry{ID: "spawn:spawn-1:tool-1", ParentID: "spawn-1", RawName: "search", Name: "Search", Intent: "搜索代码", Status: toolRunning}
+	block.Add(parent)
+	block.Add(child)
+
+	plain := stripANSIForTest(tui.renderToolBlock(block))
+	if strings.Contains(plain, "等待子任务继续") {
+		t.Fatalf("renderToolBlock() = %q, should hide subtask waiting line while child is running", plain)
+	}
+}
+
 func stripANSIForTest(s string) string {
 	var b strings.Builder
 	inEsc := false
