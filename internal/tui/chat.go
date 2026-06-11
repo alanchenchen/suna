@@ -386,6 +386,7 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.showHelp = !t.showHelp
 		return t, nil
 	case ks == "enter":
+		t.chat.ClearResponseNav()
 		return t.updateChatEnter()
 	case ks == "shift+enter" || ks == "ctrl+j":
 		t.chat.InsertNewline()
@@ -399,6 +400,12 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ks == "ctrl+r":
 		t.chat.ToggleReasoningDetail()
 		t.syncContent()
+		return t, nil
+	case ks == "ctrl+up":
+		t.jumpToLastAssistantStart()
+		return t, nil
+	case ks == "ctrl+down":
+		t.jumpToBottom()
 		return t, nil
 	case ks == "pgup":
 		t.scrollChatPage(-1)
@@ -477,6 +484,17 @@ func (t *TUI) updateChatEsc() (tea.Model, tea.Cmd) {
 
 func (t *TUI) toggleToolDetail() {
 	t.chat.ToggleToolDetail(t.visibleToolIDs())
+}
+
+func (t *TUI) jumpToLastAssistantStart() {
+	if t.chat.JumpToLastAssistantStart() {
+		t.layoutChat()
+	}
+}
+
+func (t *TUI) jumpToBottom() {
+	t.chat.JumpToBottom()
+	t.layoutChat()
 }
 
 func (t *TUI) scrollChatPage(direction int) {

@@ -74,6 +74,13 @@ type Model struct {
 	FollowBottom      bool
 	ForceBottom       bool
 
+	LastAssistantStartLine int
+	LastAssistantLineCount int
+	LastAssistantMsgIndex  int
+	ResponseNavAvailable   bool
+	ResponseNavJumped      bool
+	ResponseNavDismissed   bool
+
 	PendingAskID      string
 	PendingAskOptions []string
 	PendingAskCustom  bool
