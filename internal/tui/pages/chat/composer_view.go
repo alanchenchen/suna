@@ -12,8 +12,8 @@ type AttachmentPanelView struct {
 }
 
 func (m Model) AttachmentPanelView(help string) AttachmentPanelView {
-	if m.PendingImagePaste != nil {
-		return AttachmentPanelView{Pending: m.PendingImagePaste, Visible: true}
+	if p := m.ActiveImagePaste(); p != nil {
+		return AttachmentPanelView{Pending: p, Visible: true}
 	}
 	if len(m.Attachments) == 0 {
 		return AttachmentPanelView{}

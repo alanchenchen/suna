@@ -7,21 +7,26 @@ const (
 	KeyTargetNormal KeyTarget = iota
 	KeyTargetDiscardDraft
 	KeyTargetGuard
+	KeyTargetAskUser
+	KeyTargetImagePasteConfirm
 	KeyTargetModelPicker
 	KeyTargetSkills
 	KeyTargetMCP
-	KeyTargetPendingImagePaste
 	KeyTargetAttachment
 	KeyTargetBlocked
 )
 
-// RouteKey 按 overlay/modal 优先级路由 key。root adapter 根据返回值执行对应 tea.Cmd glue。
+// RouteKey 按 interaction、overlay、普通输入的顺序路由 key。root adapter 根据返回值执行对应 tea.Cmd glue。
 func (m Model) RouteKey(key string, inputLocked bool, compacting bool) KeyTarget {
-	if m.ConfirmDiscardDraft {
+	switch m.ActiveInteractionKind() {
+	case InteractionDiscardDraft:
 		return KeyTargetDiscardDraft
-	}
-	if m.PendingGuard != nil {
+	case InteractionGuardConfirm:
 		return KeyTargetGuard
+	case InteractionAskUser:
+		return KeyTargetAskUser
+	case InteractionImagePasteConfirm:
+		return KeyTargetImagePasteConfirm
 	}
 	if m.ModelPickerOpen {
 		return KeyTargetModelPicker
@@ -31,9 +36,6 @@ func (m Model) RouteKey(key string, inputLocked bool, compacting bool) KeyTarget
 	}
 	if m.MCPOverlayOpen {
 		return KeyTargetMCP
-	}
-	if m.PendingImagePaste != nil {
-		return KeyTargetPendingImagePaste
 	}
 	if m.AttachmentMode || m.AttachmentDelete {
 		return KeyTargetAttachment
@@ -61,12 +63,7 @@ func AllowLockedInputKey(key string, compacting bool) bool {
 	}
 }
 
-func (m *Model) CancelDiscardDraft() {
-	m.ConfirmDiscardDraft = false
-}
-
 func (m *Model) InsertNewline() {
-	m.ConfirmDiscardDraft = false
 	m.Textarea.InsertString("\n")
 }
 

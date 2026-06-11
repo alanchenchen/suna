@@ -117,16 +117,19 @@ func (t *TUI) syncContent() {
 
 func (t *TUI) currentInputPolicy() chatpage.InputPolicy {
 	return chatpage.CurrentInputPolicy(chatpage.InputPolicyState{
-		Compacting:       t.chat.Compacting,
-		Loading:          t.chat.Loading,
-		PendingAskID:     t.chat.PendingAskID,
-		PendingAskCustom: t.chat.PendingAskCustom,
-		PendingGuard:     t.chat.PendingGuard != nil,
-		StatusLabel:      t.currentStatusLabel(),
-		SpinnerView:      t.chat.Spinner.View(),
-		CompactRunning:   t.compactRunningLabel(),
-		RespondingLabel:  t.tr("status.responding"),
+		Compacting:      t.chat.Compacting,
+		Loading:         t.chat.Loading,
+		InteractionKind: t.chat.ActiveInteractionKind(),
+		AskAllowCustom:  activeAskAllowCustom(t.chat.ActiveAsk()),
+		StatusLabel:     t.currentStatusLabel(),
+		SpinnerView:     t.chat.Spinner.View(),
+		CompactRunning:  t.compactRunningLabel(),
+		RespondingLabel: t.tr("status.responding"),
 	})
+}
+
+func activeAskAllowCustom(ask *chatpage.AskUserView) bool {
+	return ask != nil && ask.AllowCustom
 }
 
 func (t *TUI) inputLocked() bool {
@@ -181,7 +184,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if t.mouseInComposer(m) {
 			return t, nil
 		}
-		if t.chat.PendingGuard != nil {
+		if t.chat.ActiveInteractionKind() == chatpage.InteractionGuardConfirm {
 			if mm, ok := any(m).(tea.MouseWheelMsg); ok {
 				if mm.Mouse().Button == tea.MouseWheelUp {
 					t.scrollGuardOverlay(-3)
@@ -208,8 +211,8 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, cmd
 	}
 
-	if t.chat.ConfirmDiscardDraft {
-		t.chat.ConfirmDiscardDraft = false
+	if t.chat.HasDiscardDraftConfirm() {
+		t.chat.CancelDiscardDraft()
 	}
 
 	var cmd tea.Cmd
@@ -262,18 +265,16 @@ func (t *TUI) handleSend() tea.Cmd {
 	t.chat.AttachmentCursor = 0
 	t.syncContent()
 
-	if t.chat.PendingAskID != "" {
-		askID := t.chat.PendingAskID
-		t.chat.PendingAskID = ""
-		options := t.chat.PendingAskOptions
-		t.chat.PendingAskOptions = nil
-		t.chat.PendingAskCustom = true
+	if ask := t.chat.ActiveAsk(); ask != nil {
+		askID := ask.ID
+		options := append([]string(nil), ask.Options...)
 		answer := input
 		if len(options) > 0 {
 			if idx, ok := parseOptionIndex(input, len(options)); ok {
 				answer = options[idx]
 			}
 		}
+		t.chat.CompleteInteraction()
 		t.startLLMWait()
 		return tea.Batch(t.askReplyCmd(askID, answer), t.chat.Spinner.Tick)
 	}
@@ -294,6 +295,7 @@ func (t *TUI) hasDraft() bool {
 }
 func (t *TUI) discardDraft() {
 	t.chat.Textarea.Reset()
+	t.chat.CancelDiscardDraft()
 	t.chat.ResetDraft()
 	t.layoutChat()
 }
@@ -356,13 +358,15 @@ func (t *TUI) updateChatKey(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t.updateDiscardDraftConfirm(ks, msg)
 	case chatpage.KeyTargetGuard:
 		return t.updateGuardConfirm(ks)
+	case chatpage.KeyTargetAskUser:
+		return t.updateAskUser(ks, msg)
 	case chatpage.KeyTargetModelPicker:
 		return t.updateModelPicker(ks)
 	case chatpage.KeyTargetSkills:
 		return t.updateSkillsOverlay(ks)
 	case chatpage.KeyTargetMCP:
 		return t.updateMCPOverlay(ks)
-	case chatpage.KeyTargetPendingImagePaste:
+	case chatpage.KeyTargetImagePasteConfirm:
 		cmd := t.updatePendingImagePaste(ks)
 		t.syncContent()
 		return t, cmd
@@ -429,7 +433,7 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (t *TUI) updateChatEnter() (tea.Model, tea.Cmd) {
-	t.chat.ConfirmDiscardDraft = false
+	t.chat.CancelDiscardDraft()
 	if len(t.chat.CmdSuggestions) > 0 {
 		cmd := t.acceptCommandSuggestion()
 		if cmd != nil {
@@ -437,14 +441,12 @@ func (t *TUI) updateChatEnter() (tea.Model, tea.Cmd) {
 		}
 		return t, t.syncInputFocus()
 	}
-	if t.chat.PendingAskID != "" && len(t.chat.PendingAskOptions) > 0 && t.chat.Textarea.Value() == "" {
-		idx := t.chat.PendingAskCursor
-		if idx >= 0 && idx < len(t.chat.PendingAskOptions) {
-			answer := t.chat.PendingAskOptions[idx]
-			askID := t.chat.PendingAskID
-			t.chat.PendingAskID = ""
-			t.chat.PendingAskOptions = nil
-			t.chat.PendingAskCustom = true
+	if ask := t.chat.ActiveAsk(); ask != nil && len(ask.Options) > 0 && t.chat.Textarea.Value() == "" {
+		idx := ask.Cursor
+		if idx >= 0 && idx < len(ask.Options) {
+			answer := ask.Options[idx]
+			askID := ask.ID
+			t.chat.CompleteInteraction()
 			t.appendNonToolMessage(chatMsg{Role: "user", Content: answer})
 			t.scrollToBottomOnNextSync()
 			t.startLLMWait()
@@ -477,7 +479,7 @@ func (t *TUI) updateChatEsc() (tea.Model, tea.Cmd) {
 		t.mode = uipage.Welcome
 		return t, t.refreshDaemonStatusCmd()
 	}
-	t.chat.ConfirmDiscardDraft = true
+	t.chat.RequestDiscardDraft()
 	t.layoutChat()
 	return t, t.syncInputFocus()
 }
@@ -530,13 +532,13 @@ func (t *TUI) moveChatCursor(delta int) {
 		}
 		return
 	}
-	if t.chat.PendingAskID != "" && len(t.chat.PendingAskOptions) > 0 {
-		t.chat.PendingAskCursor += delta
-		if t.chat.PendingAskCursor < 0 {
-			t.chat.PendingAskCursor = 0
+	if ask := t.chat.ActiveAsk(); ask != nil && len(ask.Options) > 0 {
+		ask.Cursor += delta
+		if ask.Cursor < 0 {
+			ask.Cursor = 0
 		}
-		if t.chat.PendingAskCursor >= len(t.chat.PendingAskOptions) {
-			t.chat.PendingAskCursor = len(t.chat.PendingAskOptions) - 1
+		if ask.Cursor >= len(ask.Options) {
+			ask.Cursor = len(ask.Options) - 1
 		}
 		t.syncContent()
 		return

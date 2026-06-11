@@ -25,11 +25,9 @@ func (m *Model) HandleReasoningStart(now time.Time) {
 	}
 }
 
-func (m *Model) SetAskPending(p protocol.AskUserParams) {
-	m.PendingAskID = p.ID
-	m.PendingAskOptions = p.Options
-	m.PendingAskCustom = p.AllowCustom || len(p.Options) == 0
-	m.PendingAskCursor = 0
+func (m *Model) EnqueueAskUser(p protocol.AskUserParams) {
+	ask := &AskUserView{ID: p.ID, Question: p.Question, Options: p.Options, AllowCustom: p.AllowCustom || len(p.Options) == 0}
+	m.EnqueueInteraction(Interaction{Kind: InteractionAskUser, ID: p.ID, Ask: ask})
 }
 
 func (m *Model) StartTool(p protocol.ToolStartParams, id string, now time.Time) *toolview.Entry {

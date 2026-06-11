@@ -10,29 +10,28 @@ type InputPolicy struct {
 
 // InputPolicyState 是推导输入锁定行为所需的最小运行态快照。
 type InputPolicyState struct {
-	Compacting       bool
-	Loading          bool
-	PendingAskID     string
-	PendingAskCustom bool
-	PendingGuard     bool
-	StatusLabel      string
-	SpinnerView      string
-	CompactRunning   string
-	RespondingLabel  string
+	Compacting      bool
+	Loading         bool
+	InteractionKind InteractionKind
+	AskAllowCustom  bool
+	StatusLabel     string
+	SpinnerView     string
+	CompactRunning  string
+	RespondingLabel string
 }
 
 func CurrentInputPolicy(state InputPolicyState) InputPolicy {
 	if state.Compacting {
 		return InputPolicy{Locked: true, Placeholder: joinNonEmpty(state.SpinnerView, state.CompactRunning)}
 	}
-	if state.Loading && state.PendingAskID == "" && !state.PendingGuard {
+	if state.Loading && state.InteractionKind == InteractionNone {
 		label := state.StatusLabel
 		if label == "" {
 			label = state.RespondingLabel
 		}
 		return InputPolicy{Locked: true, Placeholder: label, AllowCancel: true}
 	}
-	if state.PendingAskID != "" && !state.PendingAskCustom {
+	if state.InteractionKind == InteractionAskUser && !state.AskAllowCustom {
 		return InputPolicy{Locked: true, Placeholder: state.RespondingLabel}
 	}
 	return InputPolicy{}

@@ -147,7 +147,7 @@ func (t *TUI) handleUsageNotification(p protocol.UsageParams) {
 }
 
 func (t *TUI) handleAskUserNotification(p protocol.AskUserParams) {
-	t.chat.SetAskPending(p)
+	t.chat.EnqueueAskUser(p)
 	t.appendNonToolMessage(chatMsg{Role: "system", Content: "❓ " + p.Question})
 	t.resetPhase()
 }

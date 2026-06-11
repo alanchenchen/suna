@@ -4,13 +4,14 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/alanchenchen/suna/internal/protocol"
 )
 
 func TestAskUserAllowCustomKeepsTextareaEditable(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24, ready: true}
 	tui.initChatComponents()
-	tui.chat.PendingAskID = "ask-custom"
-	tui.chat.PendingAskCustom = true
+	tui.chat.EnqueueAskUser(protocol.AskUserParams{ID: "ask-custom", AllowCustom: true})
 	tui.chat.Loading = false
 
 	if tui.inputLocked() {
@@ -26,10 +27,7 @@ func TestAskUserAllowCustomKeepsTextareaEditable(t *testing.T) {
 func TestAskUserChoiceOnlyLocksTextareaButAllowsSelection(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24, ready: true}
 	tui.initChatComponents()
-	tui.chat.PendingAskID = "ask-choice"
-	tui.chat.PendingAskCustom = false
-	tui.chat.PendingAskOptions = []string{"A", "B"}
-	tui.chat.PendingAskCursor = 0
+	tui.chat.EnqueueAskUser(protocol.AskUserParams{ID: "ask-choice", Options: []string{"A", "B"}})
 
 	if !tui.inputLocked() {
 		t.Fatalf("inputLocked() = false for choice-only ask, want true")
@@ -41,7 +39,7 @@ func TestAskUserChoiceOnlyLocksTextareaButAllowsSelection(t *testing.T) {
 	}
 
 	tui.updateChat(tea.KeyPressMsg(tea.Key{Text: "", Code: tea.KeyDown}))
-	if got := tui.chat.PendingAskCursor; got != 1 {
-		t.Fatalf("PendingAskCursor = %d, want 1 after down", got)
+	if got := tui.chat.ActiveAsk().Cursor; got != 1 {
+		t.Fatalf("ActiveAsk().Cursor = %d, want 1 after down", got)
 	}
 }

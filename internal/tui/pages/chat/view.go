@@ -60,7 +60,7 @@ func (m Model) View(deps ViewDeps) string {
 	if m.MCPOverlayOpen && deps.MCPOverlay != "" {
 		content = overlay(content, deps.MCPOverlay, deps.Overlay)
 	}
-	if m.PendingGuard != nil && deps.GuardOverlay != "" {
+	if m.ActiveInteractionKind() == InteractionGuardConfirm && deps.GuardOverlay != "" {
 		content = overlay(content, deps.GuardOverlay, deps.Overlay)
 	}
 	sb.WriteString(content)

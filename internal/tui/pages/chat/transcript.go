@@ -140,9 +140,9 @@ func (m Model) RenderTranscriptWithNav(deps TranscriptDeps) (string, ResponseNav
 		}
 	}
 
-	if m.PendingAskID != "" && len(m.PendingAskOptions) > 0 {
-		for i, opt := range m.PendingAskOptions {
-			if i == m.PendingAskCursor {
+	if ask := m.ActiveAsk(); ask != nil && len(ask.Options) > 0 {
+		for i, opt := range ask.Options {
+			if i == ask.Cursor {
 				if deps.RenderAskSelected != nil {
 					sb.WriteString(deps.RenderAskSelected(opt))
 				}
@@ -151,7 +151,7 @@ func (m Model) RenderTranscriptWithNav(deps TranscriptDeps) (string, ResponseNav
 			}
 		}
 		help := deps.AskHelp
-		if !m.PendingAskCustom {
+		if !ask.AllowCustom {
 			help = deps.AskChoiceHelp
 		}
 		if deps.RenderAskHelp != nil {

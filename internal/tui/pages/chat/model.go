@@ -82,37 +82,29 @@ type Model struct {
 	ResponseNavDismissed   bool
 	LastWaitingTool        string
 
-	PendingAskID      string
-	PendingAskOptions []string
-	PendingAskCustom  bool
-	PendingAskCursor  int
+	ActiveInteraction *Interaction
+	InteractionQueue  []Interaction
 	GuardCursor       int
 	GuardScroll       int
-
-	ConfirmDiscardDraft bool
-	CmdSuggestion       string
-	CmdSuggestions      []CommandSpec
-	CmdSuggestionIdx    int
-	ModelPickerOpen     bool
-	ModelPickerCursor   int
+	CmdSuggestion     string
+	CmdSuggestions    []CommandSpec
+	CmdSuggestionIdx  int
+	ModelPickerOpen   bool
+	ModelPickerCursor int
 
 	ShowToolDetail      bool
 	ShowReasoningDetail bool
 	ToolDetailScroll    int
 	SelectedToolID      string
 
-	PendingGuard *GuardConfirmView
-	GuardQueue   []*GuardConfirmView
-
 	ActiveTools      map[string]*toolview.Entry
 	ToolStartTimes   map[string]time.Time
 	CurrentToolBlock *toolview.Block
 
-	Attachments       []attachment.Item
-	AttachmentMode    bool
-	AttachmentCursor  int
-	AttachmentDelete  bool
-	PendingImagePaste *attachment.PendingImagePaste
+	Attachments      []attachment.Item
+	AttachmentMode   bool
+	AttachmentCursor int
+	AttachmentDelete bool
 
 	Skills            []protocol.SkillInfo
 	SkillsOverlayOpen bool

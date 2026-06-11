@@ -26,7 +26,7 @@ type GuardOverlayView struct {
 func (m Model) GuardOverlayView(width, overlayMaxHeight int, labels GuardOverlayLabels) GuardOverlayView {
 	w := maxInt(44, minInt(76, width-4))
 	return GuardOverlayView{
-		Guard:      m.PendingGuard,
+		Guard:      m.ActiveGuard(),
 		Width:      w,
 		Inner:      maxInt(20, w-8),
 		BodyHeight: maxInt(0, minInt(12, overlayMaxHeight-12)),

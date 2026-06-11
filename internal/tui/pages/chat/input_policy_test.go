@@ -25,17 +25,17 @@ func TestCurrentInputPolicy(t *testing.T) {
 		},
 		{
 			name:  "ask choice locks without cancel",
-			state: InputPolicyState{Loading: true, PendingAskID: "ask", RespondingLabel: "responding"},
+			state: InputPolicyState{Loading: true, InteractionKind: InteractionAskUser, RespondingLabel: "responding"},
 			want:  InputPolicy{Locked: true, Placeholder: "responding"},
 		},
 		{
 			name:  "ask custom keeps composer editable",
-			state: InputPolicyState{Loading: true, PendingAskID: "ask", PendingAskCustom: true, RespondingLabel: "responding"},
+			state: InputPolicyState{Loading: true, InteractionKind: InteractionAskUser, AskAllowCustom: true, RespondingLabel: "responding"},
 			want:  InputPolicy{},
 		},
 		{
 			name:  "guard keeps composer available to modal",
-			state: InputPolicyState{Loading: true, PendingGuard: true, RespondingLabel: "responding"},
+			state: InputPolicyState{Loading: true, InteractionKind: InteractionGuardConfirm, RespondingLabel: "responding"},
 			want:  InputPolicy{},
 		},
 	}

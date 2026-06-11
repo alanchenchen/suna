@@ -38,7 +38,7 @@ func (t *TUI) viewChat() string {
 		mcpOverlay = t.renderMCPOverlay(t.width)
 	}
 	guardOverlay := ""
-	if t.chat.PendingGuard != nil {
+	if t.chat.ActiveInteractionKind() == chatpage.InteractionGuardConfirm {
 		guardOverlay = t.renderGuardOverlay(t.width)
 	}
 	cmdSuggestions := ""
@@ -71,7 +71,7 @@ func (t *TUI) layoutChat() {
 		InputHeight:      t.chat.Textarea.Height(),
 		AttachmentHeight: chatpage.AttachmentPanelHeight(t.renderAttachmentPanel()),
 		SuggestionCount:  len(t.chat.CmdSuggestions),
-		ConfirmDiscard:   t.chat.ConfirmDiscardDraft,
+		ConfirmDiscard:   t.chat.HasDiscardDraftConfirm(),
 	})
 	if layout.ViewportHeight == 0 && layout.InputWidth == 0 {
 		return
@@ -167,7 +167,7 @@ func (t *TUI) mouseInComposer(msg tea.MouseMsg) bool {
 		InputHeight:      t.chat.Textarea.Height(),
 		AttachmentHeight: chatpage.AttachmentPanelHeight(t.renderAttachmentPanel()),
 		SuggestionCount:  len(t.chat.CmdSuggestions),
-		ConfirmDiscard:   t.chat.ConfirmDiscardDraft,
+		ConfirmDiscard:   t.chat.HasDiscardDraftConfirm(),
 	})
 }
 
@@ -247,7 +247,7 @@ func (t *TUI) renderModelPicker() string {
 
 func (t *TUI) renderInputArea() string {
 	confirm := ""
-	if t.chat.ConfirmDiscardDraft {
+	if t.chat.HasDiscardDraftConfirm() {
 		confirm = styleError.Render(t.tr("tui.chat.discard_draft")) + " " + styleDim.Render(t.tr("tui.chat.discard_draft_help"))
 	}
 	separator := "  " + styleDim.Render(strings.Repeat("─", max(10, t.width-4)))
@@ -268,6 +268,9 @@ func (t *TUI) lockedInputPlaceholder() string {
 }
 
 func (t *TUI) inputHint() string {
+	if t.chat.HasBlockingInteraction() {
+		return ""
+	}
 	if hint := t.resumeHint(); hint != "" {
 		return hint
 	}
@@ -332,23 +335,24 @@ func (t *TUI) updateGuardConfirm(ks string) (tea.Model, tea.Cmd) {
 	return t, nil
 }
 func (t *TUI) submitGuardDecision(decision string) tea.Cmd {
-	if t.chat.PendingGuard == nil {
+	guard := t.chat.ActiveGuard()
+	if guard == nil {
 		return nil
 	}
-	id := t.chat.PendingGuard.ID
-	guardToolID := t.chat.PendingGuard.ToolCallID
+	id := guard.ID
+	guardToolID := guard.ToolCallID
 	if decision == "reject" {
 		t.markToolRejected(guardToolID)
 	}
 	t.advanceGuardQueue()
 	restartSpinner := false
-	if t.chat.PendingGuard == nil {
+	if t.chat.ActiveGuard() == nil {
 		t.chat.Textarea.Blur()
 		t.chat.ResumeToolPhase(time.Now())
 		restartSpinner = true
 	}
 	cmd := t.guardReplyCmd(id, decision)
-	if restartSpinner {
+	if restartSpinner && !t.chat.HasBlockingInteraction() {
 		return tea.Batch(cmd, t.chat.Spinner.Tick)
 	}
 	return cmd

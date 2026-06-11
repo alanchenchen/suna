@@ -5,15 +5,18 @@ import (
 	"github.com/alanchenchen/suna/internal/tui/components/attachment"
 )
 
-func (m *Model) SetPendingImagePaste(p attachment.PendingImagePaste) {
-	m.PendingImagePaste = &p
+func (m *Model) EnqueueImagePaste(p attachment.PendingImagePaste) {
+	m.EnqueueInteraction(Interaction{Kind: InteractionImagePasteConfirm, ID: "image_paste", ImagePaste: &p})
 	m.AttachmentMode = false
 	m.AttachmentDelete = false
 }
 
 func (m *Model) CancelPendingImagePaste() *attachment.PendingImagePaste {
-	p := m.PendingImagePaste
-	m.PendingImagePaste = nil
+	p := m.ActiveImagePaste()
+	if p == nil {
+		return nil
+	}
+	m.CancelActiveInteraction()
 	return p
 }
 

@@ -3,7 +3,6 @@ package chat
 import "time"
 
 func (m *Model) ResetDraft() {
-	m.ConfirmDiscardDraft = false
 	m.Attachments = nil
 	m.AttachmentMode = false
 	m.AttachmentDelete = false

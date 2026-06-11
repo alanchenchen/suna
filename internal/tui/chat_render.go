@@ -15,6 +15,7 @@ import (
 	"github.com/alanchenchen/suna/internal/protocol"
 	attachmentmodel "github.com/alanchenchen/suna/internal/tui/components/attachment"
 	textutil "github.com/alanchenchen/suna/internal/tui/components/text"
+	chatpage "github.com/alanchenchen/suna/internal/tui/pages/chat"
 )
 
 const maxSystemMarkdownBytes = 4000
@@ -223,7 +224,7 @@ func (t *TUI) currentStatusLabel() string {
 	if n := t.runningToolCount(); n > 0 {
 		return fmt.Sprintf("%s · %d running", t.tr("status.exec_tool"), n)
 	}
-	if t.chat.PendingAskID != "" {
+	if t.chat.ActiveInteractionKind() == chatpage.InteractionAskUser {
 		return t.tr("tui.ask.waiting")
 	}
 	switch t.chat.Phase {
@@ -367,12 +368,12 @@ func (t *TUI) handlePaste(content string) tea.Cmd {
 		t.layoutChat()
 		return nil
 	}
-	t.chat.SetPendingImagePaste(pending)
+	t.chat.EnqueueImagePaste(pending)
 	return nil
 }
 
 func (t *TUI) updatePendingImagePaste(key string) tea.Cmd {
-	if t.chat.PendingImagePaste == nil {
+	if t.chat.ActiveImagePaste() == nil {
 		return nil
 	}
 	switch key {
@@ -389,7 +390,7 @@ func (t *TUI) updatePendingImagePaste(key string) tea.Cmd {
 }
 
 func (t *TUI) confirmPendingImagePaste() tea.Cmd {
-	p := t.chat.PendingImagePaste
+	p := t.chat.ActiveImagePaste()
 	if p == nil {
 		return nil
 	}
@@ -514,7 +515,7 @@ func (t *TUI) renderAttachmentList(items []attachmentItem, cursor int, selectabl
 }
 
 func (t *TUI) renderPendingImagePaste() string {
-	p := t.chat.PendingImagePaste
+	p := t.chat.ActiveImagePaste()
 	if p == nil {
 		return ""
 	}
