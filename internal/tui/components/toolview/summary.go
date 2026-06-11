@@ -3,6 +3,8 @@ package toolview
 import (
 	"fmt"
 	"strings"
+
+	"charm.land/lipgloss/v2"
 )
 
 func SemanticSummary(te *Entry, maxWidth int, labels RenderLabels) string {
@@ -24,34 +26,63 @@ func SemanticSummary(te *Entry, maxWidth int, labels RenderLabels) string {
 		if mode == "content" {
 			mode = defaultLabel(labels.ModeContent, mode)
 		}
-		return compactSummary(fmt.Sprintf("%s %q in %s", mode, pick("query"), pick("path")), maxWidth)
+		return searchSummary(mode, pick("query"), pick("path"), maxWidth)
 	case "filesystem":
 		action := pick("action")
 		path := pick("path")
 		dst := pick("destination")
 		if dst != "" {
-			return compactSummary(fmt.Sprintf("%s %s → %s", action, path, dst), maxWidth)
+			return compactText(fmt.Sprintf("%s %s → %s", action, CompactPath(path, maxWidth/3), CompactPath(dst, maxWidth/3)), maxWidth)
 		}
-		return compactSummary(fmt.Sprintf("%s %s", action, path), maxWidth)
+		return compactText(fmt.Sprintf("%s %s", action, CompactPath(path, maxWidth-lipWidth(action)-1)), maxWidth)
 	case "http":
 		method := pick("method")
 		if method == "" {
 			method = "GET"
 		}
-		return compactSummary(method+" "+pick("url"), maxWidth)
+		return compactText(method+" "+pick("url"), maxWidth)
 	case "exec":
-		return compactSummary(pick("command"), maxWidth)
+		return compactText(pick("command"), maxWidth)
 	case "readfile", "listdir", "writefile", "editfile":
-		return compactSummary(pick("path"), maxWidth)
+		return CompactPath(pick("path"), maxWidth)
 	default:
 		return ""
 	}
 }
 
-func compactSummary(s string, maxWidth int) string {
-	s = strings.TrimSpace(s)
+func searchSummary(mode, query, path string, maxWidth int) string {
+	if strings.TrimSpace(query) == "" && strings.TrimSpace(path) == "" {
+		return ""
+	}
+	prefix := strings.TrimSpace(mode)
+	if prefix == "" {
+		prefix = "content"
+	}
+	pathLabel := CompactPath(path, maxInt(8, maxWidth/3))
+	queryBudget := maxInt(8, maxWidth-lipWidth(prefix)-lipWidth(pathLabel)-6)
+	queryLabel := compactText(query, queryBudget)
+	return compactText(fmt.Sprintf("%s %q in %s", prefix, queryLabel, pathLabel), maxWidth)
+}
+
+func compactText(s string, maxWidth int) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
 	if s == "" {
 		return ""
 	}
-	return CompactPath(s, maxWidth)
+	if maxWidth <= 0 || lipWidth(s) <= maxWidth {
+		return s
+	}
+	const ellipsis = "…"
+	if maxWidth <= lipWidth(ellipsis) {
+		return ellipsis
+	}
+	runes := []rune(s)
+	for len(runes) > 0 && lipWidth(string(runes)+ellipsis) > maxWidth {
+		runes = runes[:len(runes)-1]
+	}
+	return strings.TrimSpace(string(runes)) + ellipsis
+}
+
+func lipWidth(s string) int {
+	return lipgloss.Width(s)
 }

@@ -18,3 +18,36 @@ func TestCompactPathKeepsFilenameSuffixWhenTight(t *testing.T) {
 		t.Fatalf("CompactPath() = %q, want ellipsized filename suffix", got)
 	}
 }
+
+func TestSemanticSummarySearchKeepsQueryAndPathSuffix(t *testing.T) {
+	entry := &Entry{
+		RawName: "search",
+		ParamsRaw: map[string]any{
+			"mode":  "content",
+			"query": "SemanticSummary|tool|truncate",
+			"path":  "/Users/alanchen/Documents/suna/internal/tui",
+		},
+	}
+
+	got := SemanticSummary(entry, 52, RenderLabels{ModeContent: "内容"})
+	if !strings.Contains(got, "内容") || !strings.Contains(got, "SemanticSummary") || !strings.Contains(got, "tui") {
+		t.Fatalf("SemanticSummary(search) = %q, want mode, query, and path suffix", got)
+	}
+	if got == "…tui" || got == "...tui" {
+		t.Fatalf("SemanticSummary(search) = %q, should not compact the whole summary as a path", got)
+	}
+}
+
+func TestSemanticSummaryReadFileStillCompactsPath(t *testing.T) {
+	entry := &Entry{
+		RawName: "readfile",
+		ParamsRaw: map[string]any{
+			"path": "/Users/alanchen/Documents/suna/internal/tui/components/toolview/summary.go",
+		},
+	}
+
+	got := SemanticSummary(entry, 24, RenderLabels{})
+	if !strings.HasPrefix(got, "…") || !strings.Contains(got, "summary.go") {
+		t.Fatalf("SemanticSummary(readfile) = %q, want compact path suffix", got)
+	}
+}
