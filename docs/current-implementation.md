@@ -83,10 +83,10 @@ LLM 请求使用按场景维护的 idle timeout，而不是任务总时长 timeo
 |---|---|---|
 | `readfile` | 感知 | 按行范围、tail 或 base64 读取本地文件。 |
 | `listdir` | 感知 | 列目录，支持递归、分页、include/exclude 和隐藏文件开关。 |
-| `search` | 感知 | 按文件名或内容搜索目录，默认排除常见依赖/构建目录和凭据文件。 |
+| `search` | 感知 | 按文件名或内容搜索目录，默认排除常见依赖/构建目录和凭据文件；空结果或截断时只在正文追加诊断提示，不改变 TUI 依赖的 metadata contract。 |
 | `exec` | 行动 | 执行 shell 命令；Guard 会把可证明只读的命令归为 low risk。 |
 | `writefile` | 行动 | 创建、覆盖或追加文件，支持父目录创建和写前 SHA-256 校验。 |
-| `editfile` | 行动 | 对单个文件原子应用一个或多个精确文本替换。 |
+| `editfile` | 行动 | 对单个文件原子应用一个或多个精确文本替换；替换范围使用 `mode=unique|nth|all` 表达，避免互斥布尔参数组合。 |
 | `filesystem` | 行动 | `stat` / `mkdir` / `move` / `copy` / `remove` 文件系统路径；`stat` 为只读低风险调用。 |
 | `http` | 行动 | 统一 HTTP 请求工具；`GET` / `HEAD` 为只读低风险调用，写方法按风险审查。 |
 | `askuser` | runtime | 向用户提问。 |

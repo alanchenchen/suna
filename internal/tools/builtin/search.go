@@ -106,36 +106,37 @@ func (Search) Execute(ctx context.Context, params map[string]any) tools.Result {
 	if err := filepath.WalkDir(root, state.visit); err != nil {
 		return tools.ErrorResult(fmt.Sprintf("search path: %s", err))
 	}
-	content := state.output.String()
-	if content == "" {
-		content = "no matches"
-	}
-	if state.truncated {
-		content += "\n... (truncated)"
-	}
+	content := state.resultContent()
 	return tools.Result{Content: content, Truncated: state.truncated, Metadata: map[string]any{"kind": "search_result", "mode": mode, "matches": state.matches, "files_scanned": state.filesScanned, "files_matched": state.filesMatched, "truncated": state.truncated}}
 }
 
 type searchOptions struct {
-	include       []string
-	exclude       []string
-	recursive     bool
-	maxDepth      int
-	maxMatches    int
-	caseSensitive bool
-	regex         *regexp.Regexp
+	include           []string
+	exclude           []string
+	recursive         bool
+	maxDepth          int
+	maxMatches        int
+	caseSensitive     bool
+	useDefaultExclude bool
+	regex             *regexp.Regexp
 }
 
 type searchState struct {
-	root         string
-	query        string
-	mode         string
-	opts         searchOptions
-	matches      int
-	filesScanned int
-	filesMatched int
-	truncated    bool
-	output       strings.Builder
+	root            string
+	query           string
+	mode            string
+	opts            searchOptions
+	matches         int
+	filesScanned    int
+	filesMatched    int
+	skippedExcluded int
+	skippedDepth    int
+	skippedInclude  int
+	skippedLarge    int
+	skippedBinary   int
+	skippedMaxFiles int
+	truncated       bool
+	output          strings.Builder
 }
 
 func searchOptionsFromParams(params map[string]any, query string) (searchOptions, error) {
@@ -161,6 +162,7 @@ func searchOptionsFromParams(params map[string]any, query string) (searchOptions
 	if v, ok := params["use_default_exclude"].(bool); ok {
 		useDefault = v
 	}
+	opts.useDefaultExclude = useDefault
 	if useDefault {
 		opts.exclude = append(append([]string{}, defaultSearchExclude...), opts.exclude...)
 	}
@@ -190,15 +192,22 @@ func (s *searchState) visit(path string, d os.DirEntry, err error) error {
 	}
 	rel, _ := filepath.Rel(s.root, path)
 	if d.IsDir() {
-		if !s.opts.recursive || depthOf(rel) > s.opts.maxDepth || matchAnyGlob(rel+"/", s.opts.exclude) || matchAnyGlob(rel, s.opts.exclude) {
+		if !s.opts.recursive || depthOf(rel) > s.opts.maxDepth {
+			s.skippedDepth++
+			return filepath.SkipDir
+		}
+		if matchAnyGlob(rel+"/", s.opts.exclude) || matchAnyGlob(rel, s.opts.exclude) {
+			s.skippedExcluded++
 			return filepath.SkipDir
 		}
 		return nil
 	}
 	if len(s.opts.include) > 0 && !matchAnyGlob(rel, s.opts.include) {
+		s.skippedInclude++
 		return nil
 	}
 	if matchAnyGlob(rel, s.opts.exclude) {
+		s.skippedExcluded++
 		return nil
 	}
 	if s.mode == "name" {
@@ -210,12 +219,17 @@ func (s *searchState) visit(path string, d os.DirEntry, err error) error {
 		return nil
 	}
 	if s.filesScanned >= maxSearchScannedFiles {
+		s.skippedMaxFiles++
 		s.truncated = true
 		return nil
 	}
 	s.filesScanned++
 	info, err := d.Info()
-	if err != nil || info.Size() > maxSearchFileSize {
+	if err != nil {
+		return nil
+	}
+	if info.Size() > maxSearchFileSize {
+		s.skippedLarge++
 		return nil
 	}
 	matched, err := s.searchFile(path, rel)
@@ -232,6 +246,9 @@ func (s *searchState) searchFile(path string, rel string) (bool, error) {
 	}
 	defer file.Close()
 	if binary, err := looksBinary(file); err != nil || binary {
+		if binary {
+			s.skippedBinary++
+		}
 		return false, err
 	}
 	reader := bufio.NewReader(file)
@@ -277,6 +294,50 @@ func looksBinary(file *os.File) (bool, error) {
 		}
 	}
 	return false, nil
+}
+
+func (s *searchState) resultContent() string {
+	content := strings.TrimRight(s.output.String(), "\n")
+	if content == "" {
+		content = "no matches"
+	}
+
+	diagnostics := s.searchDiagnostics()
+	if diagnostics != "" {
+		content += "\n\n" + diagnostics
+	}
+	return content
+}
+
+func (s *searchState) searchDiagnostics() string {
+	var lines []string
+	if s.truncated {
+		lines = append(lines, "Search stopped early because the result limit, output limit, or scanned file limit was reached. Narrow the query or increase max_matches when appropriate.")
+	}
+	if s.matches == 0 {
+		lines = append(lines, fmt.Sprintf("No matches found after scanning %d files.", s.filesScanned))
+		if len(s.opts.include) > 0 && s.skippedInclude > 0 {
+			lines = append(lines, fmt.Sprintf("%d files were skipped by include filters; broaden include if the target may be outside those globs.", s.skippedInclude))
+		}
+		if s.opts.useDefaultExclude && s.skippedExcluded > 0 {
+			lines = append(lines, fmt.Sprintf("%d paths were skipped by default/user excludes; retry with use_default_exclude=false only when you intentionally need generated, dependency, hidden, or sensitive paths.", s.skippedExcluded))
+		} else if s.skippedExcluded > 0 {
+			lines = append(lines, fmt.Sprintf("%d paths were skipped by exclude filters; relax exclude if needed.", s.skippedExcluded))
+		}
+		if s.skippedDepth > 0 {
+			lines = append(lines, fmt.Sprintf("%d directories were skipped by recursive/max_depth limits; increase max_depth if the target is deeper.", s.skippedDepth))
+		}
+		if s.skippedLarge > 0 || s.skippedBinary > 0 {
+			lines = append(lines, fmt.Sprintf("Skipped %d large files and %d binary files for performance.", s.skippedLarge, s.skippedBinary))
+		}
+		if s.opts.regex != nil {
+			lines = append(lines, "Regex mode was enabled; retry with regex=false when searching for literal punctuation or markup.")
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "Search diagnostics:\n- " + strings.Join(lines, "\n- ")
 }
 
 func (s *searchState) matchString(value string) bool {

@@ -21,8 +21,8 @@ func (EditFile) Spec() tools.Spec {
 				"properties": map[string]any{
 					"old_string":            map[string]any{"type": "string", "description": "Exact text to replace"},
 					"new_string":            map[string]any{"type": "string", "description": "Replacement text"},
-					"occurrence":            map[string]any{"type": "integer", "description": "1-based occurrence to replace"},
-					"replace_all":           map[string]any{"type": "boolean", "description": "Whether to replace all matches"},
+					"mode":                  map[string]any{"type": "string", "enum": []string{"unique", "nth", "all"}, "description": "Replacement mode. unique (default) replaces only when old_string occurs once; nth replaces the specified occurrence; all replaces every match."},
+					"occurrence":            map[string]any{"type": "integer", "description": "1-based occurrence to replace. Required only when mode is nth."},
 					"expected_replacements": map[string]any{"type": "integer", "description": "Fail unless this many replacements are made"},
 				},
 				"required": []string{"old_string", "new_string"},
@@ -81,8 +81,8 @@ func (EditFile) Execute(ctx context.Context, params map[string]any) tools.Result
 type editOperation struct {
 	OldString            string
 	NewString            string
+	Mode                 string
 	Occurrence           int
-	ReplaceAll           bool
 	ExpectedReplacements *int
 }
 
@@ -102,15 +102,21 @@ func parseEditOperations(value any) ([]editOperation, error) {
 		if oldStr == "" {
 			return nil, fmt.Errorf("edits[%d].old_string is required", i)
 		}
-		edit := editOperation{OldString: oldStr, NewString: newStr}
-		if r, ok := m["replace_all"].(bool); ok {
-			edit.ReplaceAll = r
+		edit := editOperation{OldString: oldStr, NewString: newStr, Mode: "unique"}
+		if mode, ok := m["mode"].(string); ok && strings.TrimSpace(mode) != "" {
+			edit.Mode = strings.TrimSpace(mode)
+		}
+		if edit.Mode != "unique" && edit.Mode != "nth" && edit.Mode != "all" {
+			return nil, fmt.Errorf("edits[%d].mode must be unique, nth, or all", i)
 		}
 		if o, ok := m["occurrence"].(float64); ok && int(o) > 0 {
 			edit.Occurrence = int(o)
 		}
-		if edit.ReplaceAll && edit.Occurrence > 0 {
-			return nil, fmt.Errorf("edits[%d] cannot set both replace_all and occurrence", i)
+		if edit.Mode == "nth" && edit.Occurrence <= 0 {
+			return nil, fmt.Errorf("edits[%d].occurrence is required when mode is nth", i)
+		}
+		if edit.Mode != "nth" && edit.Occurrence > 0 {
+			return nil, fmt.Errorf("edits[%d].occurrence is only valid when mode is nth", i)
 		}
 		if expected, ok := m["expected_replacements"].(float64); ok && int(expected) >= 0 {
 			n := int(expected)
@@ -128,17 +134,18 @@ func applyEditOperation(content string, edit editOperation) (string, int, error)
 	}
 	replacements := 1
 	var updated string
-	if edit.ReplaceAll {
+	switch edit.Mode {
+	case "all":
 		updated = strings.ReplaceAll(content, edit.OldString, edit.NewString)
 		replacements = count
-	} else if edit.Occurrence > 0 {
+	case "nth":
 		if edit.Occurrence > count {
 			return content, 0, fmt.Errorf("old_string occurrence %d not found; found %d matches", edit.Occurrence, count)
 		}
 		updated = replaceOccurrence(content, edit.OldString, edit.NewString, edit.Occurrence)
-	} else {
+	case "unique":
 		if count > 1 {
-			return content, 0, fmt.Errorf("old_string found %d times in file. Set occurrence or replace_all=true", count)
+			return content, 0, fmt.Errorf("old_string found %d times in file. Use mode=\"nth\" with occurrence or mode=\"all\"", count)
 		}
 		updated = strings.Replace(content, edit.OldString, edit.NewString, 1)
 	}
