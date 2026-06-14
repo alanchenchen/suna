@@ -56,7 +56,6 @@ type transcriptBlock struct {
 type transcriptWindowSignature struct {
 	Start      int
 	End        int
-	YOffset    int
 	Width      int
 	Height     int
 	TotalLines int
@@ -301,23 +300,21 @@ func (m *Model) applyTranscriptWindow() {
 }
 
 func (m *Model) applyTranscriptWindowLines(start, end int, lines []string) {
-	// 内容签名完全一致时跳过 SetContentLines，避免 spinner/tick 等无语义变化刷新造成 CPU 抖动。
+	// 内容签名不包含滚动偏移：在 overscan 窗口内滚动时复用同一批内容，只移动 viewport offset。
 	sig := transcriptWindowSignature{
 		Start:      start,
 		End:        end,
-		YOffset:    m.TranscriptYOffset,
 		Width:      m.Viewport.Width(),
 		Height:     m.Viewport.Height(),
 		TotalLines: m.TranscriptTotalLines,
 		Hash:       transcriptLinesHash(lines),
 	}
-	if sig == m.TranscriptWindowSignature {
-		return
+	if sig != m.TranscriptWindowSignature {
+		m.TranscriptWindowStart = start
+		m.TranscriptWindowEnd = end
+		m.TranscriptWindowSignature = sig
+		m.Viewport.SetContentLines(lines)
 	}
-	m.TranscriptWindowStart = start
-	m.TranscriptWindowEnd = end
-	m.TranscriptWindowSignature = sig
-	m.Viewport.SetContentLines(lines)
 	m.Viewport.SetYOffset(m.TranscriptYOffset - start)
 }
 
@@ -349,8 +346,24 @@ func (m *Model) SetTranscriptYOffset(offset int) {
 	m.applyTranscriptWindow()
 }
 
+func (m Model) canReuseTranscriptWindow(offset int) bool {
+	if m.Viewport.Height() <= 0 || m.TranscriptWindowEnd <= m.TranscriptWindowStart {
+		return false
+	}
+	return offset >= m.TranscriptWindowStart && offset+m.Viewport.Height() <= m.TranscriptWindowEnd
+}
+
 func (m *Model) ScrollTranscript(delta int) {
-	m.SetTranscriptYOffset(m.TranscriptYOffset + delta)
+	newOffset := clampInt(m.TranscriptYOffset+delta, 0, m.TranscriptMaxYOffset())
+	if newOffset != m.TranscriptYOffset {
+		m.TranscriptYOffset = newOffset
+		// 滚动仍在当前 overscan 窗口内时，不重新切片/重设 viewport 内容，只移动窗口内偏移。
+		if m.canReuseTranscriptWindow(newOffset) {
+			m.Viewport.SetYOffset(newOffset - m.TranscriptWindowStart)
+		} else {
+			m.applyTranscriptWindow()
+		}
+	}
 	m.FollowBottom = m.TranscriptAtBottom()
 }
 

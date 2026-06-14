@@ -111,3 +111,30 @@ func TestRenderTranscriptReturnsFullTextWhenCacheWasTrimmed(t *testing.T) {
 		t.Fatalf("RenderTranscript() = %q, want full assistant content", view)
 	}
 }
+
+func TestScrollTranscriptReusesContentWithinOverscanWindow(t *testing.T) {
+	var m Model
+	m.InitComponents(ComponentDeps{})
+	m.Viewport.SetHeight(5)
+	m.Viewport.SetWidth(80)
+	for i := 0; i < 40; i++ {
+		m.AppendMessage(Msg{Role: "panel", Content: fmt.Sprintf("line-%03d", i)})
+	}
+	m.SyncTranscript(TranscriptDeps{Width: 80})
+	m.SetTranscriptYOffset(10)
+	content := m.Viewport.GetContent()
+	sig := m.TranscriptWindowSignature
+	oldViewportOffset := m.Viewport.YOffset()
+
+	m.ScrollTranscript(1)
+
+	if m.TranscriptWindowSignature != sig {
+		t.Fatalf("window content signature changed within overscan window: got %+v want %+v", m.TranscriptWindowSignature, sig)
+	}
+	if got := m.Viewport.GetContent(); got != content {
+		t.Fatalf("viewport content changed within overscan window")
+	}
+	if got, want := m.Viewport.YOffset(), oldViewportOffset+1; got != want {
+		t.Fatalf("viewport offset = %d, want %d", got, want)
+	}
+}
