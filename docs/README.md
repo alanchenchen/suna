@@ -9,10 +9,11 @@
 ### 快速了解代码和设计
 
 1. [关键设计](design.md)：先理解 Suna 为什么采用 TUI + daemon、Guard、上下文压缩、Subtask、Skill、MCP 等设计。
-2. [Subtask 设计](subtask.md)：重点了解 Suna 如何由主 Agent 动态分配模型、上下文、图片和工具权限。
-2. [架构说明](architecture.md)：再看整体分层、daemon 生命周期和核心模块边界。
-3. [代码地图](code-map.md)：需要定位代码时，看功能到包、核心流程和常见入口。
-4. [当前实现](current-implementation.md)：确认当前实际支持的行为和不要依赖的边界。
+2. [性能优化](performance.md)：集中了解 daemon、模型流、上下文、工具和 TUI 的性能边界。
+3. [Subtask 设计](subtask.md)：重点了解 Suna 如何由主 Agent 动态分配模型、上下文、图片和工具权限。
+4. [架构说明](architecture.md)：再看整体分层、daemon 生命周期和核心模块边界。
+5. [代码地图](code-map.md)：需要定位代码时，看功能到包、核心流程和常见入口。
+6. [当前实现](current-implementation.md)：确认当前实际支持的行为和不要依赖的边界。
 
 ### 配置和使用细节
 
@@ -27,6 +28,7 @@
 
 - 根目录 `README.md`：项目介绍、亮点、快速开始、常用操作、安全提醒和 docs 入口。
 - `docs/design.md`：关键设计和取舍，解释“为什么这样做”。
+- `docs/performance.md`：daemon、模型流、上下文、工具和 TUI 的当前性能优化。
 - `docs/subtask.md`：Subtask、独立上下文、动态模型分配和动态工具分配。
 - `docs/architecture.md`：稳定架构和模块边界，解释“系统怎么分层”。
 - `docs/code-map.md`：功能到代码位置和核心流程，解释“代码从哪里看”。

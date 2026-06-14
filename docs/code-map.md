@@ -13,7 +13,8 @@
 | protocol | `internal/protocol` | 定义 request、notification、事件和多模态消息结构。 |
 | 本地 transport | `internal/transport/local` | macOS/Linux Unix socket，Windows Named Pipe。 |
 | TUI 主体 | `internal/tui` | Bubble Tea app、页面切换、事件适配、主题、i18n。 |
-| Chat 页面 | `internal/tui/pages/chat`, `internal/tui/chat*.go` | 对话、输入、附件、工具展示、Guard、AskUser、模型/Skill/MCP 浮层。 |
+| Chat 页面 | `internal/tui/pages/chat`, `internal/tui/chat*.go` | 对话、输入、附件、工具展示、Guard、AskUser、模型/Skill/MCP 浮层；transcript 使用全局 offset + visible window 渲染长历史。 |
+| Chat transcript 性能 | `internal/tui/pages/chat/transcript.go`, `internal/tui/chat.go`, `internal/tui/chat_render.go` | 维护 transcript blocks、全局滚动 offset、visible window、Markdown render cache 和滚轮/PageUp/PageDown 适配。 |
 | Config 页面 | `internal/tui/pages/config`, `internal/tui/config*.go` | 模型、Guard、Workspace、UI、附件等配置。 |
 | Welcome 页面 | `internal/tui/pages/welcome` | 版本、active model、用量、daemon、memory、Guard、Workspace 状态。 |
 | Help 页面 | `internal/tui/pages/help` | 快捷键和 slash commands。 |

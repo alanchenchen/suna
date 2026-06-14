@@ -43,6 +43,28 @@ root TUI 不应承载新的业务逻辑。新增功能如果属于 daemon 状态
 
 页面包可以维护自身状态机，但不直接访问 daemon，也不直接执行副作用。需要副作用时返回结构化结果，由 root 转成 `tea.Cmd`。
 
+## Chat transcript 性能设计
+
+Chat transcript 遵循“完整数据在页面 model、渲染只取可见窗口”的策略，参考 Bubbles `table` / `list` 这类官方组件的窗口化思路，而不是把完整历史长期塞进 viewport。
+
+当前实现边界：
+
+- `pages/chat.Model.Messages` 保留完整消息和原始内容，是会话展示的业务数据源。
+- `TranscriptBlocks` 维护消息到行数的布局信息，`TranscriptYOffset` 是全局滚动位置。
+- 每次同步 transcript 时，只把当前窗口加 overscan 的 lines 传给 Bubbles viewport，viewport 不持有完整历史。
+- 已完成 assistant 的 Markdown render cache 有内部预算；裁剪时只删除旧 rendered output，不删除原始消息和行数元数据。
+- streaming assistant 继续走纯文本渲染，完成后再 Markdown 渲染，避免半截 Markdown 导致行数抖动和高频重排。
+- 鼠标模式保持 Bubble Tea 的 cell motion，以保留触控板滚动；优化重点是降低每个 wheel event 后面的 transcript 工作量，而不是关闭 mouse capture。
+- window signature 完全一致时跳过重复 `SetContentLines`；这不是帧率限制，不应改成基于时间的节流。
+
+维护约定：
+
+1. 不新增 fullscreen/classic/scrollback 双模式，除非有明确产品决策。
+2. 不自己实现 terminal renderer、mouse protocol、clipboard 或原生 scrollback。
+3. 不把 streaming 文本改为高频 Markdown 渲染。
+4. 不用明显降帧、延迟 chunk 或合并用户可感知输出的方式解决性能问题。
+5. 如果继续优化，优先保持 block/window/cache 边界清晰，并补充状态语义测试。
+
 ## components
 
 `internal/tui/components` 放可复用 UI 组件，优先保持纯函数或低状态：

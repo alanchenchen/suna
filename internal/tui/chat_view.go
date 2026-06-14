@@ -76,8 +76,13 @@ func (t *TUI) layoutChat() {
 	if layout.ViewportHeight == 0 && layout.InputWidth == 0 {
 		return
 	}
+	oldWidth := t.chat.Viewport.Width()
+	oldHeight := t.chat.Viewport.Height()
 	t.chat.Viewport.SetWidth(t.width)
 	t.chat.Viewport.SetHeight(layout.ViewportHeight)
+	if oldWidth != t.width || oldHeight != layout.ViewportHeight {
+		t.chat.SetTranscriptYOffset(t.chat.TranscriptYOffset)
+	}
 	t.chat.Textarea.SetWidth(layout.InputWidth)
 }
 

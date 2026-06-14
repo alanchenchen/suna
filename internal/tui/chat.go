@@ -83,6 +83,8 @@ func (t *TUI) initChatComponents() tea.Cmd {
 func (t *TUI) syncContent() {
 	t.chat.SyncTranscript(chatpage.TranscriptDeps{
 		Width:         t.width,
+		MarkdownWidth: max(24, t.width-8),
+		Theme:         currentTheme.Name,
 		SunaLabel:     t.tr("tui.chat.suna"),
 		AskHelp:       t.tr("tui.ask.help"),
 		AskChoiceHelp: t.tr("tui.ask.choice_help"),
@@ -206,8 +208,15 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, nil
 		}
 		var cmd tea.Cmd
+		oldOffset := t.chat.Viewport.YOffset()
 		t.chat.Viewport, cmd = t.chat.Viewport.Update(msg)
-		t.chat.FollowBottom = t.chat.Viewport.AtBottom()
+		delta := t.chat.Viewport.YOffset() - oldOffset
+		if delta != 0 {
+			t.chat.ScrollTranscript(delta)
+			t.syncContent()
+		} else {
+			t.chat.FollowBottom = t.chat.TranscriptAtBottom()
+		}
 		return t, cmd
 	}
 
@@ -490,12 +499,14 @@ func (t *TUI) toggleToolDetail() {
 
 func (t *TUI) jumpToLastAssistantStart() {
 	if t.chat.JumpToLastAssistantStart() {
+		t.syncContent()
 		t.layoutChat()
 	}
 }
 
 func (t *TUI) jumpToBottom() {
 	t.chat.JumpToBottom()
+	t.syncContent()
 	t.layoutChat()
 }
 
@@ -509,12 +520,14 @@ func (t *TUI) scrollChatPage(direction int) {
 		return
 	}
 	if direction < 0 {
-		t.chat.Viewport.HalfPageUp()
+		t.chat.PageTranscript(-1)
 		t.chat.FollowBottom = false
+		t.syncContent()
 		return
 	}
-	t.chat.Viewport.HalfPageDown()
-	t.chat.FollowBottom = t.chat.Viewport.AtBottom()
+	t.chat.PageTranscript(1)
+	t.chat.FollowBottom = t.chat.TranscriptAtBottom()
+	t.syncContent()
 }
 
 func (t *TUI) moveChatCursor(delta int) {

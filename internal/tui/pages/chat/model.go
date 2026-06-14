@@ -35,10 +35,12 @@ type Msg struct {
 }
 
 type MsgRenderCache struct {
-	Width   int
-	Theme   string
-	Content string
-	Output  string
+	Width       int
+	Theme       string
+	ContentLen  int
+	ContentHash uint64
+	LineCount   int
+	Output      string
 }
 
 type UserMessageContent struct {
@@ -60,6 +62,13 @@ type Model struct {
 	Viewport viewport.Model
 	Textarea textarea.Model
 	Spinner  spinner.Model
+
+	TranscriptBlocks          []transcriptBlock
+	TranscriptYOffset         int
+	TranscriptTotalLines      int
+	TranscriptWindowStart     int
+	TranscriptWindowEnd       int
+	TranscriptWindowSignature transcriptWindowSignature
 
 	Messages          []Msg
 	PendingInput      string

@@ -335,11 +335,21 @@ func (t *TUI) renderReasoningMessage(msg *chatMsg) string {
 
 func (t *TUI) cachedMarkdown(msg *chatMsg, content string, width int) string {
 	cache := msg.Render
-	if cache.Width == width && cache.Theme == currentTheme.Name && cache.Content == content {
+	hash := renderContentHash(content)
+	if cache.Output != "" && cache.Width == width && cache.Theme == currentTheme.Name && cache.ContentLen == len(content) && cache.ContentHash == hash {
 		return cache.Output
 	}
 	out := RenderMarkdown(content, width)
-	msg.Render = msgRenderCache{Width: width, Theme: currentTheme.Name, Content: content, Output: out}
+	msg.Render = msgRenderCache{Width: width, Theme: currentTheme.Name, ContentLen: len(content), ContentHash: hash, LineCount: chatpage.RenderedLineCount(out), Output: out}
+	return out
+}
+
+func renderContentHash(content string) uint64 {
+	sum := sha256.Sum256([]byte(content))
+	var out uint64
+	for _, b := range sum[:8] {
+		out = out<<8 | uint64(b)
+	}
 	return out
 }
 

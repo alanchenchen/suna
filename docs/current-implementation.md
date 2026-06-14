@@ -35,6 +35,12 @@ Chat slash commands：
 
 未注册的 `/文本` 会作为普通用户消息发送，不会报错或执行隐藏命令。
 
+Chat transcript 的长历史渲染采用窗口化策略：TUI 页面状态保留完整消息和全局滚动 offset，但只把当前可见区域上下各一屏 overscan 的内容交给 Bubbles viewport。这样滚动成本主要跟终端高度相关，而不是跟完整对话长度线性相关。该策略不改变交互语义：streaming 阶段仍使用轻量纯文本渲染，assistant 完成后再渲染 Markdown；鼠标滚轮、触控板、PageUp/PageDown、跳到回复开头/底部、复制模式和 alt screen 行为保持不变。
+
+已完成 assistant 的 Markdown 渲染结果使用有界缓存。缓存命中使用内容长度和 hash 判断，不额外保存完整原文；缓存超过内部预算时只裁剪远离当前窗口的旧 rendered output，保留原始消息、行数元数据、当前窗口附近内容和最近消息。滚回被裁剪的旧内容时会按需重新渲染，最终显示语义不变。viewport window 有内容签名，窗口和布局完全不变时会跳过重复 `SetContentLines`，避免 spinner/tick 等无语义变化刷新带来 CPU 抖动。
+
+TUI 仍依赖 Bubble Tea/Bubbles 负责 terminal renderer、alt screen、mouse/keyboard handling 和 viewport 基础行为；Suna 只在 Chat transcript 业务层维护 blocks、global y offset、visible range 和有界 Markdown cache，不实现自定义 terminal renderer 或 terminal scrollback 双模式。
+
 ## Daemon 生命周期
 
 当前 daemon 是按需运行的本地后台服务，不是长期任务调度器：
