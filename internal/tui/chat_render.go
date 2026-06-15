@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/alanchenchen/suna/internal/protocol"
 	attachmentmodel "github.com/alanchenchen/suna/internal/tui/components/attachment"
@@ -322,8 +323,8 @@ func (t *TUI) renderAssistantMessage(msg *chatMsg) string {
 	content, _ := msg.Content.(string)
 	width := max(20, t.width-6)
 	if msg.Streaming {
-		// 流式阶段避免每个 delta 都跑 Glamour；最终 done 后仍使用完整 Markdown 渲染。
-		return textutil.IndentLines(renderStreamingText(content, width), "  ")
+		// 流式阶段避免每个 delta 都跑 Glamour，也避免对完整已生成内容反复 wrap。
+		return textutil.IndentLines(t.cachedStreamingText(msg, content, width), "  ")
 	}
 	return textutil.IndentLines(t.cachedMarkdown(msg, content, width), "  ")
 }
@@ -342,6 +343,88 @@ func (t *TUI) cachedMarkdown(msg *chatMsg, content string, width int) string {
 	out := RenderMarkdown(content, width)
 	msg.Render = msgRenderCache{Width: width, Theme: currentTheme.Name, ContentLen: len(content), ContentHash: hash, LineCount: chatpage.RenderedLineCount(out), Output: out}
 	return out
+}
+
+func (t *TUI) cachedStreamingText(msg *chatMsg, content string, width int) string {
+	cache := msg.Render
+	if content == "" {
+		msg.Render = msgRenderCache{Width: width}
+		return ""
+	}
+	if cache.Width != width || cache.ContentLen > len(content) {
+		out := renderStreamingText(content, width)
+		lines := splitRenderedLines(out)
+		msg.Render = msgRenderCache{Width: width, ContentLen: len(content), LineCount: len(lines), Output: out, StreamLines: lines, StreamLastLineWidth: lastRenderedLineWidth(lines), StreamPendingNewlines: trailingNewlineCount(content)}
+		return out
+	}
+	if cache.ContentLen == len(content) && cache.Output != "" {
+		return cache.Output
+	}
+
+	lines := append([]string(nil), cache.StreamLines...)
+	lastWidth := cache.StreamLastLineWidth
+	pendingNewlines := cache.StreamPendingNewlines
+	appendStreamingDelta(&lines, &lastWidth, &pendingNewlines, content[cache.ContentLen:], width)
+	out := strings.Join(lines, "\n")
+	msg.Render = msgRenderCache{Width: width, ContentLen: len(content), LineCount: len(lines), Output: out, StreamLines: lines, StreamLastLineWidth: lastWidth, StreamPendingNewlines: pendingNewlines}
+	return out
+}
+
+func appendStreamingDelta(lines *[]string, lastWidth *int, pendingNewlines *int, delta string, width int) {
+	state := byte(0)
+	for i := 0; i < len(delta); {
+		if delta[i] == '\n' {
+			(*pendingNewlines)++
+			i++
+			state = 0
+			continue
+		}
+		for *pendingNewlines > 0 {
+			*lines = append(*lines, "")
+			*lastWidth = 0
+			(*pendingNewlines)--
+		}
+		if len(*lines) == 0 {
+			*lines = append(*lines, "")
+			*lastWidth = 0
+		}
+		_, cellWidth, n, newState := ansi.GraphemeWidth.DecodeSequenceInString(delta[i:], state, nil)
+		if n <= 0 {
+			n = 1
+			cellWidth = 1
+		}
+		if width > 0 && cellWidth > 0 && *lastWidth > 0 && *lastWidth+cellWidth > width {
+			*lines = append(*lines, "")
+			*lastWidth = 0
+		}
+		last := len(*lines) - 1
+		(*lines)[last] += delta[i : i+n]
+		*lastWidth += cellWidth
+		state = newState
+		i += n
+	}
+}
+
+func splitRenderedLines(out string) []string {
+	if out == "" {
+		return nil
+	}
+	return strings.Split(out, "\n")
+}
+
+func lastRenderedLineWidth(lines []string) int {
+	if len(lines) == 0 {
+		return 0
+	}
+	return lipgloss.Width(lines[len(lines)-1])
+}
+
+func trailingNewlineCount(s string) int {
+	count := 0
+	for i := len(s) - 1; i >= 0 && s[i] == '\n'; i-- {
+		count++
+	}
+	return count
 }
 
 func renderContentHash(content string) uint64 {

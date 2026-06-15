@@ -35,7 +35,9 @@ Chat slash commands：
 
 未注册的 `/文本` 会作为普通用户消息发送，不会报错或执行隐藏命令。
 
-Chat transcript 的长历史渲染采用窗口化策略：TUI 页面状态保留完整消息和全局滚动 offset，但只把当前可见区域上下各一屏 overscan 的内容交给 Bubbles viewport。这样滚动成本主要跟终端高度相关，而不是跟完整对话长度线性相关。该策略不改变交互语义：streaming 阶段仍使用轻量纯文本渲染，assistant 完成后再渲染 Markdown；鼠标滚轮、触控板、PageUp/PageDown、跳到回复开头/底部、复制模式和 alt screen 行为保持不变。
+Chat transcript 的长历史渲染采用窗口化策略：TUI 页面状态保留完整消息和全局滚动 offset，但只把当前可见区域上下各一屏 overscan 的内容交给 Bubbles viewport。这个实现属于 Chat 业务层的虚拟滚动 / windowed rendering：viewport 不持有完整 transcript，滚动时按全局 y offset 切换可见窗口；但 Suna 不替换 Bubble Tea/Bubbles 的 terminal renderer，也不使用终端原生 scrollback 双模式。该策略不改变交互语义，鼠标滚轮、触控板、PageUp/PageDown、跳到回复开头/底部、复制模式和 alt screen 行为保持不变。
+
+assistant streaming 阶段使用轻量纯文本渲染，并对正在追加的消息维护增量 wrap cache。新 delta 到达时只处理追加部分和必要的换行状态，不再对完整已生成回复反复 split/wrap/join；窗口宽度变化或内容回退时才完整重算。streaming 完成后会清除 streaming 标记并使用完整 Markdown 渲染缓存，因此最终阅读体验不降级。这个优化用少量“当前 streaming 消息的已换行行缓存”换掉长回复 O(n²) 重排 CPU；缓存规模与当前消息长度同阶，不按 chunk 数增长，回复结束后会随渲染缓存生命周期回收或替换。
 
 已完成 assistant 的 Markdown 渲染结果使用有界缓存。缓存命中使用内容长度和 hash 判断，不额外保存完整原文；缓存超过内部预算时只裁剪远离当前窗口的旧 rendered output，保留原始消息、行数元数据、当前窗口附近内容和最近消息。滚回被裁剪的旧内容时会按需重新渲染，最终显示语义不变。viewport window 有内容签名，窗口和布局完全不变时会跳过重复 `SetContentLines`，避免 spinner/tick 等无语义变化刷新带来 CPU 抖动。
 

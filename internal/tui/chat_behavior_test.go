@@ -395,3 +395,24 @@ func TestCtrlJInsertsNewline(t *testing.T) {
 		t.Fatalf("textarea value = %q, want newline appended", got)
 	}
 }
+
+func TestCachedStreamingTextMatchesFullRender(t *testing.T) {
+	tui := &TUI{width: 40}
+	msg := &chatMsg{Role: "assistant", Streaming: true}
+	chunks := []string{"hello", " world this is a long line", " that wraps", "\nsecond", " line", "\n\nthird", "\n", "after trailing", " 中文字符"}
+	content := ""
+	for _, chunk := range chunks {
+		content += chunk
+		got := tui.cachedStreamingText(msg, content, 12)
+		want := renderStreamingText(content, 12)
+		if got != want {
+			t.Fatalf("cachedStreamingText mismatch after %q\ngot:\n%q\nwant:\n%q", chunk, got, want)
+		}
+	}
+	// 重复渲染同一内容应直接复用缓存且保持一致。
+	got := tui.cachedStreamingText(msg, content, 12)
+	want := renderStreamingText(content, 12)
+	if got != want {
+		t.Fatalf("cachedStreamingText cached mismatch\ngot:\n%q\nwant:\n%q", got, want)
+	}
+}

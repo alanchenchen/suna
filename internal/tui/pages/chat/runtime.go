@@ -40,7 +40,7 @@ func (m *Model) AppendStreamMessage(role, chunk string, now time.Time) {
 			msg.StartedAt = now
 		}
 		msg.EndedAt = time.Time{}
-		msg.Render = MsgRenderCache{}
+		// 保留流式渲染缓存；内容只会追加，渲染层可增量更新，避免长回复 O(n²) 重排。
 		return
 	}
 	m.FinishStreamingMessages(now)
