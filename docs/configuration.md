@@ -191,7 +191,7 @@ api_key = "..."
 | `models.context_window` | int | 否 | `200000` | 上下文窗口，用于展示、usage 和 compact 判断。 |
 | `models.strengths` | string[] | 否 | 空 | 模型能力描述，会给主 Agent 参考，用于选择 subtask 模型。 |
 | `models.reasoning` | object | 否 | 空 | 透传到 provider 请求体的额外 reasoning/thinking 字段；Suna 不理解 preset，是否有效取决于上游。 |
-| `[guard].mode` | string | 否 | `ask` | `readonly` / `ask` / `auto` / `smart`。空或非法值按 `ask` 使用。 |
+| `[guard].mode` | string | 否 | `ask` | `readonly` / `ask` / `auto` / `smart`。空或非法值按 `ask` 使用；`smart` 会对中高风险调用进行安全审查，而不是做普通 tool-call 优化。 |
 | `[guard].workspace` | string | 否 | 空 | 本地文件和 exec 的目录硬边界；非空时必须是存在目录，会展开 `~/` 并规范化为绝对路径。 |
 | `[[guard.blocked]]` | array | 否 | 空 | 用户自定义硬拦截规则，追加到内置 blocked rules 后。 |
 | `guard.blocked.pattern` | string | 是 | 无 | Go regexp，匹配命令、路径或 URL。 |
@@ -282,6 +282,8 @@ reasoning = { model = "other-model" }
 TOML 字符串中的反斜杠需要转义，例如 regexp 的 `\s` 要写成 `\\s`，字面量 `.` 要写成 `\\.`。
 
 Workspace 启用后是最高优先级硬边界：workspace 外本地文件路径和明显 exec 路径会被拒绝，不能被 `allowed` 规则绕过。它不是 OS sandbox，不能限制外部程序运行后自己访问什么。
+
+`smart` mode 的 LLM Review 只负责安全、用户意图和权限边界判断：安全且合理的中高风险调用可以直接放行；不确定或影响较大时请求确认；明确危险时拒绝；只有当前调用不安全或明显过宽，并且有具体等价的更安全调用时才返回修改建议。它不用于修正普通参数风格、代码风格或常规 tool-call 优化。
 
 ## MCP 配置细节
 
