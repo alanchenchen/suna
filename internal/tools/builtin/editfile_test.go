@@ -18,7 +18,7 @@ func TestEditFileAppliesMultipleEditsAtomically(t *testing.T) {
 		"path": path,
 		"edits": []any{
 			map[string]any{"old_string": "alpha", "new_string": "ALPHA", "expected_replacements": float64(1)},
-			map[string]any{"old_string": "beta", "new_string": "BETA", "mode": "nth", "occurrence": float64(2), "expected_replacements": float64(1)},
+			map[string]any{"old_string": "beta", "new_string": "BETA", "target": "2", "expected_replacements": float64(1)},
 		},
 	})
 	if res.IsError {
@@ -36,7 +36,7 @@ func TestEditFileAppliesMultipleEditsAtomically(t *testing.T) {
 	}
 }
 
-func TestEditFileReplacesAllMatchesWithModeAll(t *testing.T) {
+func TestEditFileReplacesAllMatchesWithTargetAll(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.txt")
 	if err := os.WriteFile(path, []byte("beta beta"), 0644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -44,7 +44,7 @@ func TestEditFileReplacesAllMatchesWithModeAll(t *testing.T) {
 
 	res := EditFile{}.Execute(context.Background(), map[string]any{
 		"path":  path,
-		"edits": []any{map[string]any{"old_string": "beta", "new_string": "BETA", "mode": "all", "expected_replacements": float64(2)}},
+		"edits": []any{map[string]any{"old_string": "beta", "new_string": "BETA", "target": "all", "expected_replacements": float64(2)}},
 	})
 	if res.IsError {
 		t.Fatalf("EditFile.Execute() error = %s", res.Error)
@@ -84,80 +84,41 @@ func TestEditFileDoesNotWriteWhenAnyEditFails(t *testing.T) {
 	}
 }
 
-func TestEditFileRequiresModeForAmbiguousEdit(t *testing.T) {
+func TestEditFileRequiresTargetForAmbiguousEdit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.txt")
 	if err := os.WriteFile(path, []byte("beta beta"), 0644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
 	res := EditFile{}.Execute(context.Background(), map[string]any{"path": path, "edits": []any{map[string]any{"old_string": "beta", "new_string": "BETA"}}})
-	if !res.IsError || !strings.Contains(res.Error, "mode=\"nth\"") {
-		t.Fatalf("EditFile.Execute() = %#v, want ambiguous match error with mode hint", res)
+	if !res.IsError || !strings.Contains(res.Error, "target=\"all\"") {
+		t.Fatalf("EditFile.Execute() = %#v, want ambiguous match error with target hint", res)
 	}
 }
 
-func TestEditFileAcceptsZeroOccurrenceForNonNthModes(t *testing.T) {
-	tests := []struct {
-		name string
-		mode string
-	}{
-		{name: "unique", mode: "unique"},
-		{name: "all", mode: "all"},
+func TestEditFileReplacesSpecificTargetOccurrence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.txt")
+	if err := os.WriteFile(path, []byte("beta beta beta"), 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
 	}
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "config.txt")
-			if err := os.WriteFile(path, []byte("beta"), 0644); err != nil {
-				t.Fatalf("WriteFile() error = %v", err)
-			}
 
-			res := EditFile{}.Execute(context.Background(), map[string]any{
-				"path":  path,
-				"edits": []any{map[string]any{"old_string": "beta", "new_string": "BETA", "mode": tt.mode, "occurrence": float64(0)}},
-			})
-			if res.IsError {
-				t.Fatalf("EditFile.Execute() error = %s", res.Error)
-			}
-			data, err := os.ReadFile(path)
-			if err != nil {
-				t.Fatalf("ReadFile() error = %v", err)
-			}
-			if got, want := string(data), "BETA"; got != want {
-				t.Fatalf("file content = %q, want %q", got, want)
-			}
-		})
+	res := EditFile{}.Execute(context.Background(), map[string]any{
+		"path":  path,
+		"edits": []any{map[string]any{"old_string": "beta", "new_string": "BETA", "target": "2"}},
+	})
+	if res.IsError {
+		t.Fatalf("EditFile.Execute() error = %s", res.Error)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if got, want := string(data), "beta BETA beta"; got != want {
+		t.Fatalf("file content = %q, want %q", got, want)
 	}
 }
 
-func TestEditFileRejectsPositiveOccurrenceForNonNthModes(t *testing.T) {
-	tests := []struct {
-		name string
-		mode string
-	}{
-		{name: "unique", mode: "unique"},
-		{name: "all", mode: "all"},
-	}
-	for _, tt := range tests {
-		tt := tt
-		t.Run(tt.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "config.txt")
-			if err := os.WriteFile(path, []byte("beta"), 0644); err != nil {
-				t.Fatalf("WriteFile() error = %v", err)
-			}
-
-			res := EditFile{}.Execute(context.Background(), map[string]any{
-				"path":  path,
-				"edits": []any{map[string]any{"old_string": "beta", "new_string": "BETA", "mode": tt.mode, "occurrence": float64(1)}},
-			})
-			if !res.IsError || !strings.Contains(res.Error, "omit occurrence") {
-				t.Fatalf("EditFile.Execute() = %#v, want occurrence guidance error", res)
-			}
-		})
-	}
-}
-
-func TestEditFileRequiresOccurrenceForNthMode(t *testing.T) {
+func TestEditFileRejectsInvalidTarget(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.txt")
 	if err := os.WriteFile(path, []byte("beta beta"), 0644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -165,9 +126,9 @@ func TestEditFileRequiresOccurrenceForNthMode(t *testing.T) {
 
 	res := EditFile{}.Execute(context.Background(), map[string]any{
 		"path":  path,
-		"edits": []any{map[string]any{"old_string": "beta", "new_string": "BETA", "mode": "nth"}},
+		"edits": []any{map[string]any{"old_string": "beta", "new_string": "BETA", "target": "nth"}},
 	})
-	if !res.IsError || !strings.Contains(res.Error, "occurrence is required") {
-		t.Fatalf("EditFile.Execute() = %#v, want missing occurrence error", res)
+	if !res.IsError || !strings.Contains(res.Error, "target must be omitted") {
+		t.Fatalf("EditFile.Execute() = %#v, want invalid target error", res)
 	}
 }

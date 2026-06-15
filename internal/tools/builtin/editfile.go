@@ -21,8 +21,7 @@ func (EditFile) Spec() tools.Spec {
 				"properties": map[string]any{
 					"old_string":            map[string]any{"type": "string", "description": "Exact text to replace"},
 					"new_string":            map[string]any{"type": "string", "description": "Replacement text"},
-					"mode":                  map[string]any{"type": "string", "enum": []string{"unique", "nth", "all"}, "description": "Replacement mode. unique (default) replaces only when old_string occurs exactly once; omit occurrence. nth replaces the specified 1-based occurrence; occurrence is required. all replaces every match; omit occurrence."},
-					"occurrence":            map[string]any{"type": "integer", "description": "1-based occurrence to replace. Include this field only when mode is \"nth\"; omit it for \"unique\" and \"all\"."},
+					"target":                map[string]any{"type": "string", "description": "Match target. Omit for default unique replacement. Use \"all\" to replace every match. Use a positive 1-based occurrence number as a string, for example \"2\", to replace one specific match."},
 					"expected_replacements": map[string]any{"type": "integer", "description": "Fail unless this many replacements are made"},
 				},
 				"required": []string{"old_string", "new_string"},
@@ -103,20 +102,8 @@ func parseEditOperations(value any) ([]editOperation, error) {
 			return nil, fmt.Errorf("edits[%d].old_string is required", i)
 		}
 		edit := editOperation{OldString: oldStr, NewString: newStr, Mode: "unique"}
-		if mode, ok := m["mode"].(string); ok && strings.TrimSpace(mode) != "" {
-			edit.Mode = strings.TrimSpace(mode)
-		}
-		if edit.Mode != "unique" && edit.Mode != "nth" && edit.Mode != "all" {
-			return nil, fmt.Errorf("edits[%d].mode must be unique, nth, or all", i)
-		}
-		if o, ok := m["occurrence"].(float64); ok && int(o) > 0 {
-			edit.Occurrence = int(o)
-		}
-		if edit.Mode == "nth" && edit.Occurrence <= 0 {
-			return nil, fmt.Errorf("edits[%d].occurrence is required when mode is nth", i)
-		}
-		if edit.Mode != "nth" && edit.Occurrence > 0 {
-			return nil, fmt.Errorf("edits[%d].occurrence is only valid with mode=\"nth\"; omit occurrence for mode=\"%s\"", i, edit.Mode)
+		if err := applyEditTarget(i, m["target"], &edit); err != nil {
+			return nil, err
 		}
 		if expected, ok := m["expected_replacements"].(float64); ok && int(expected) >= 0 {
 			n := int(expected)
@@ -125,6 +112,45 @@ func parseEditOperations(value any) ([]editOperation, error) {
 		edits = append(edits, edit)
 	}
 	return edits, nil
+}
+
+func applyEditTarget(index int, value any, edit *editOperation) error {
+	if value != nil {
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("edits[%d].target must be omitted, \"all\", or a positive 1-based occurrence number string", index)
+		}
+	}
+	target, _ := value.(string)
+	target = strings.TrimSpace(target)
+	if target == "" || target == "unique" {
+		edit.Mode = "unique"
+		return nil
+	}
+	if target == "all" {
+		edit.Mode = "all"
+		return nil
+	}
+	n, ok := positiveIntegerString(target)
+	if !ok {
+		return fmt.Errorf("edits[%d].target must be omitted, \"all\", or a positive 1-based occurrence number string", index)
+	}
+	edit.Mode = "nth"
+	edit.Occurrence = n
+	return nil
+}
+
+func positiveIntegerString(value string) (int, bool) {
+	if value == "" {
+		return 0, false
+	}
+	n := 0
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return 0, false
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n, n > 0
 }
 
 func applyEditOperation(content string, edit editOperation) (string, int, error) {
@@ -145,7 +171,7 @@ func applyEditOperation(content string, edit editOperation) (string, int, error)
 		updated = replaceOccurrence(content, edit.OldString, edit.NewString, edit.Occurrence)
 	case "unique":
 		if count > 1 {
-			return content, 0, fmt.Errorf("old_string found %d times in file. Use mode=\"nth\" with occurrence or mode=\"all\"", count)
+			return content, 0, fmt.Errorf("old_string found %d times in file. Use target=\"all\" or target=\"2\" for a specific 1-based occurrence", count)
 		}
 		updated = strings.Replace(content, edit.OldString, edit.NewString, 1)
 	}
