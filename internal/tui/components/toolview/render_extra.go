@@ -60,6 +60,19 @@ func RenderSearchSummary(metadata map[string]any, prefix string, deps RenderDeps
 	filesScanned := MetadataInt(metadata["files_scanned"])
 	truncated, _ := metadata["truncated"].(bool)
 	text := formatTwoCount(defaultLabel(deps.Labels.SearchMatchesInFiles, "{} matches in {} files"), matches, filesMatched)
+	var parts []string
+	if n := MetadataInt(metadata["path_matches"]); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d path", n))
+	}
+	if n := MetadataInt(metadata["symbol_matches"]); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d symbol", n))
+	}
+	if n := MetadataInt(metadata["content_matches"]); n > 0 {
+		parts = append(parts, fmt.Sprintf("%d content", n))
+	}
+	if len(parts) > 0 {
+		text += "  " + strings.Join(parts, " / ")
+	}
 	if filesScanned > 0 {
 		text += "  " + formatOneCount(defaultLabel(deps.Labels.SearchScanned, "scanned {}"), filesScanned)
 	}

@@ -183,7 +183,7 @@ deepseek/deepseek-chat
 |---|---|---|
 | 感知 | `readfile` | 按行范围、tail 或 base64 读取本地文件 |
 | 感知 | `listdir` | 列目录，支持递归、分页和 include/exclude 过滤 |
-| 感知 | `search` | 按文件名或内容搜索目录 |
+| 感知 | `search` | 搜文件路径、结构入口和正文；支持文件或目录、`kind=auto/content/path/symbol`、include/exclude、regex、上下文行和安全默认排除，优先替代普通 `grep` / `rg` / `find` |
 | 行动 | `exec` | 执行 shell 命令；可证明只读的命令会被 Guard 归为低风险 |
 | 行动 | `writefile` | 创建、覆盖或追加文件 |
 | 行动 | `editfile` | 对单个文件原子应用一个或多个精确文本替换；默认唯一匹配，`target="all"` 替换全部，`target="2"` 替换第 2 个匹配 |

@@ -154,7 +154,7 @@ user profile memory 不保存完整对话，也不保存项目任务日志。主
 - `exec` 对 stdout / stderr 做有界收集和截断。
 - `http` 默认限制响应 body，可通过 `max_body_bytes` 调整。
 - `readfile` / tail 相关逻辑按行范围、tail 或块读取，避免无意读取超大内容。
-- `search` 默认排除常见依赖、构建和缓存目录，空结果或截断诊断写入正文，不破坏 TUI metadata contract。
+- `search` 支持目录和单文件搜索，`auto` 模式按 path / symbol / content 分组返回少量上下文；其中 symbol 是文档标题、配置段/key、常见定义/声明等轻量结构入口，不限于代码。仍默认排除常见依赖、构建、缓存和敏感文件，并限制单文件大小、扫描文件数、结果数和输出字节数。空结果或截断诊断写入正文，不破坏 TUI metadata contract。
 
 相关代码：
 
@@ -163,6 +163,7 @@ user profile memory 不保存完整对话，也不保存项目任务日志。主
 - `internal/tools/builtin/readfile.go`
 - `internal/tools/builtin/readtail.go`
 - `internal/tools/builtin/search.go`
+- `internal/tools/builtin/search_format.go`
 
 ## TUI 流式与渲染
 

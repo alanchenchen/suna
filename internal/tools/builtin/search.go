@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,12 +15,13 @@ import (
 )
 
 const (
-	defaultSearchMaxMatches = 200
-	maxSearchMaxMatches     = 1000
+	defaultSearchMaxResults = 100
+	maxSearchMaxResults     = 1000
 	maxSearchDepth          = 20
 	maxSearchFileSize       = 2 * 1024 * 1024
 	maxSearchOutputBytes    = 100 * 1024
 	maxSearchScannedFiles   = 20000
+	maxSearchContextLines   = 5
 )
 
 var defaultSearchExclude = []string{
@@ -54,20 +56,22 @@ var defaultSearchExclude = []string{
 type Search struct{}
 
 func (Search) Spec() tools.Spec {
-	return builtinSpec("search", "Search file names or text contents in a directory; prefer this over shell grep/find.", tools.Perceive, map[string]any{
+	return builtinSpec("search", "Search file paths, structured entries, and text in a file or directory. Prefer this over shell grep/rg/find for local search.", tools.Perceive, map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"path":                map[string]any{"type": "string", "description": "Directory path to search."},
-			"query":               map[string]any{"type": "string", "description": "Text or regex pattern to search for."},
-			"mode":                map[string]any{"type": "string", "enum": []string{"content", "name"}, "description": "Search mode: content searches file text, name searches file names. Default content."},
-			"regex":               map[string]any{"type": "boolean", "description": "Treat query as a regular expression."},
-			"case_sensitive":      map[string]any{"type": "boolean", "description": "Match case-sensitively."},
-			"recursive":           map[string]any{"type": "boolean", "description": "Search subdirectories recursively. Default true."},
-			"max_depth":           map[string]any{"type": "integer", "description": "Maximum recursion depth. Default 8, max 20."},
-			"include":             map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Glob patterns to include, such as [\"*.go\", \"internal/**\"]."},
-			"exclude":             map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Glob patterns to exclude."},
-			"use_default_exclude": map[string]any{"type": "boolean", "description": "Use default excludes for performance and common secret files. Default true."},
-			"max_matches":         map[string]any{"type": "integer", "description": "Maximum matches to return. Default 200, max 1000."},
+			"path":                map[string]any{"type": "string", "description": "File or directory to search. Use project-relative paths when possible. If a file is given, only that file is searched."},
+			"query":               map[string]any{"type": "string", "description": "Text, file path fragment, heading, definition name, key, or regex pattern to search for."},
+			"kind":                map[string]any{"type": "string", "enum": []string{"auto", "content", "path", "symbol"}, "description": "Search kind. Default auto. auto searches path names, structured entries, and text content; content searches file text; path searches file and directory names; symbol searches lightweight structure such as headings, configuration keys/sections, and common definition or declaration lines."},
+			"regex":               map[string]any{"type": "boolean", "description": "Treat query as a regular expression. Default false. Use false for literal punctuation, paths, and markup."},
+			"case_sensitive":      map[string]any{"type": "boolean", "description": "Match case-sensitively. Default false."},
+			"word":                map[string]any{"type": "boolean", "description": "Match query as a whole word or identifier when possible. Default false."},
+			"context_lines":       map[string]any{"type": "integer", "description": "Lines of context before and after each content or symbol match. Default 1, max 5. Use 0 for single-line output."},
+			"recursive":           map[string]any{"type": "boolean", "description": "Search subdirectories when path is a directory. Default true."},
+			"max_depth":           map[string]any{"type": "integer", "description": "Maximum recursion depth for directory searches. Default 8, max 20."},
+			"include":             map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Glob patterns to include, such as [" + `"**/*.go"` + ", " + `"internal/**"` + ", or " + `"**/*_test.go"` + ". Omit to search all supported text files."},
+			"exclude":             map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Glob patterns to exclude, in addition to default excludes when use_default_exclude is true."},
+			"use_default_exclude": map[string]any{"type": "boolean", "description": "Skip common dependency, build, cache, VCS, and secret files. Default true."},
+			"max_results":         map[string]any{"type": "integer", "description": "Maximum ranked matches to return. Default 100, max 1000."},
 		},
 		"required": []string{"path", "query"},
 	})
@@ -83,52 +87,62 @@ func (Search) Execute(ctx context.Context, params map[string]any) tools.Result {
 		return tools.ErrorResult("query is required")
 	}
 	root = expandPath(root)
-	mode, _ := params["mode"].(string)
-	if mode == "" {
-		mode = "content"
-	}
-	if mode != "content" && mode != "name" {
-		return tools.ErrorResult("mode must be content or name")
-	}
 	info, err := os.Stat(root)
 	if err != nil {
 		return tools.ErrorResult(fmt.Sprintf("stat search path: %s", err))
 	}
-	if !info.IsDir() {
-		return tools.ErrorResult(fmt.Sprintf("search path is not a directory: %s", root))
-	}
-
 	opts, err := searchOptionsFromParams(params, query)
 	if err != nil {
 		return tools.ErrorResult(err.Error())
 	}
-	state := &searchState{root: root, query: query, mode: mode, opts: opts}
-	if err := filepath.WalkDir(root, state.visit); err != nil {
-		return tools.ErrorResult(fmt.Sprintf("search path: %s", err))
+	state := &searchState{root: root, rootIsFile: !info.IsDir(), query: query, opts: opts, matchedFiles: map[string]bool{}}
+	if info.IsDir() {
+		if err := filepath.WalkDir(root, state.visit(ctx)); err != nil {
+			return tools.ErrorResult(fmt.Sprintf("search path: %s", err))
+		}
+	} else {
+		state.searchPath(ctx, root, filepath.Base(root), false)
 	}
 	content := state.resultContent()
-	return tools.Result{Content: content, Truncated: state.truncated, Metadata: map[string]any{"kind": "search_result", "mode": mode, "matches": state.matches, "files_scanned": state.filesScanned, "files_matched": state.filesMatched, "truncated": state.truncated}}
+	return tools.Result{Content: content, Truncated: state.truncated, Metadata: state.metadata()}
 }
 
+type searchKind string
+
+const (
+	searchKindAuto    searchKind = "auto"
+	searchKindContent searchKind = "content"
+	searchKindPath    searchKind = "path"
+	searchKindSymbol  searchKind = "symbol"
+)
+
 type searchOptions struct {
+	kind              searchKind
 	include           []string
 	exclude           []string
 	recursive         bool
 	maxDepth          int
-	maxMatches        int
+	maxResults        int
+	contextLines      int
 	caseSensitive     bool
+	word              bool
 	useDefaultExclude bool
 	regex             *regexp.Regexp
 }
 
 type searchState struct {
 	root            string
+	rootIsFile      bool
 	query           string
-	mode            string
 	opts            searchOptions
 	matches         int
+	pathMatches     int
+	symbolMatches   int
+	contentMatches  int
+	pathsScanned    int
 	filesScanned    int
 	filesMatched    int
+	matchedFiles    map[string]bool
 	skippedExcluded int
 	skippedDepth    int
 	skippedInclude  int
@@ -136,24 +150,50 @@ type searchState struct {
 	skippedBinary   int
 	skippedMaxFiles int
 	truncated       bool
-	output          strings.Builder
+	results         []searchMatch
+}
+
+type searchMatch struct {
+	kind   searchKind
+	rel    string
+	lineNo int
+	line   string
+	before []contextLine
+	after  []contextLine
+}
+
+type contextLine struct {
+	lineNo int
+	text   string
 }
 
 func searchOptionsFromParams(params map[string]any, query string) (searchOptions, error) {
-	opts := searchOptions{recursive: true, maxDepth: 8, maxMatches: defaultSearchMaxMatches}
+	opts := searchOptions{kind: searchKindAuto, recursive: true, maxDepth: 8, maxResults: defaultSearchMaxResults, contextLines: 1}
+	if k, _ := params["kind"].(string); k != "" {
+		opts.kind = searchKind(k)
+	}
+	if opts.kind != searchKindAuto && opts.kind != searchKindContent && opts.kind != searchKindPath && opts.kind != searchKindSymbol {
+		return opts, fmt.Errorf("kind must be auto, content, path, or symbol")
+	}
 	if r, ok := params["recursive"].(bool); ok {
 		opts.recursive = r
 	}
-	if d, ok := params["max_depth"].(float64); ok && int(d) >= 0 {
-		opts.maxDepth = int(d)
+	if d, ok := numberParam(params["max_depth"]); ok && d >= 0 {
+		opts.maxDepth = d
 		if opts.maxDepth > maxSearchDepth {
 			opts.maxDepth = maxSearchDepth
 		}
 	}
-	if n, ok := params["max_matches"].(float64); ok && int(n) > 0 {
-		opts.maxMatches = int(n)
-		if opts.maxMatches > maxSearchMaxMatches {
-			opts.maxMatches = maxSearchMaxMatches
+	if n, ok := numberParam(params["max_results"]); ok && n > 0 {
+		opts.maxResults = n
+	}
+	if opts.maxResults > maxSearchMaxResults {
+		opts.maxResults = maxSearchMaxResults
+	}
+	if n, ok := numberParam(params["context_lines"]); ok && n >= 0 {
+		opts.contextLines = n
+		if opts.contextLines > maxSearchContextLines {
+			opts.contextLines = maxSearchContextLines
 		}
 	}
 	opts.include = stringListParam(params["include"])
@@ -169,6 +209,9 @@ func searchOptionsFromParams(params map[string]any, query string) (searchOptions
 	if v, ok := params["case_sensitive"].(bool); ok {
 		opts.caseSensitive = v
 	}
+	if v, ok := params["word"].(bool); ok {
+		opts.word = v
+	}
 	if v, ok := params["regex"].(bool); ok && v {
 		pattern := query
 		if !opts.caseSensitive {
@@ -183,100 +226,159 @@ func searchOptionsFromParams(params map[string]any, query string) (searchOptions
 	return opts, nil
 }
 
-func (s *searchState) visit(path string, d os.DirEntry, err error) error {
-	if err != nil || s.truncated {
-		return nil
-	}
-	if path == s.root {
-		return nil
-	}
-	rel, _ := filepath.Rel(s.root, path)
-	if d.IsDir() {
-		if !s.opts.recursive || depthOf(rel) > s.opts.maxDepth {
-			s.skippedDepth++
-			return filepath.SkipDir
+func (s *searchState) visit(ctx context.Context) fs.WalkDirFunc {
+	return func(path string, d os.DirEntry, err error) error {
+		if err != nil || s.truncated || ctx.Err() != nil {
+			return nil
 		}
-		if matchAnyGlob(rel+"/", s.opts.exclude) || matchAnyGlob(rel, s.opts.exclude) {
-			s.skippedExcluded++
-			return filepath.SkipDir
+		if path == s.root {
+			return nil
 		}
+		rel, _ := filepath.Rel(s.root, path)
+		rel = filepath.ToSlash(rel)
+		if d.IsDir() {
+			if !s.opts.recursive || depthOf(rel) > s.opts.maxDepth {
+				s.skippedDepth++
+				return filepath.SkipDir
+			}
+			if matchAnyGlob(rel+"/", s.opts.exclude) || matchAnyGlob(rel, s.opts.exclude) {
+				s.skippedExcluded++
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		s.searchPath(ctx, path, rel, true)
 		return nil
 	}
-	if len(s.opts.include) > 0 && !matchAnyGlob(rel, s.opts.include) {
+}
+
+func (s *searchState) searchPath(ctx context.Context, path string, rel string, applyInclude bool) {
+	if s.truncated || ctx.Err() != nil {
+		return
+	}
+	rel = filepath.ToSlash(rel)
+	s.pathsScanned++
+	if applyInclude && len(s.opts.include) > 0 && !matchAnyGlob(rel, s.opts.include) {
 		s.skippedInclude++
-		return nil
+		return
 	}
 	if matchAnyGlob(rel, s.opts.exclude) {
 		s.skippedExcluded++
-		return nil
+		return
 	}
-	if s.mode == "name" {
-		if s.matchString(filepath.Base(path)) {
-			s.addLine(fmt.Sprintf("%s\n", rel))
-			s.matches++
-			s.filesMatched++
-		}
-		return nil
+	if s.wantsPath() && s.matchString(rel) {
+		s.addMatch(searchMatch{kind: searchKindPath, rel: rel})
+	}
+	if !s.wantsFileScan() || s.truncated {
+		return
 	}
 	if s.filesScanned >= maxSearchScannedFiles {
 		s.skippedMaxFiles++
 		s.truncated = true
-		return nil
+		return
 	}
-	s.filesScanned++
-	info, err := d.Info()
-	if err != nil {
-		return nil
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return
 	}
 	if info.Size() > maxSearchFileSize {
 		s.skippedLarge++
-		return nil
+		return
 	}
-	matched, err := s.searchFile(path, rel)
-	if err == nil && matched {
-		s.filesMatched++
-	}
-	return nil
+	s.filesScanned++
+	_ = s.searchFile(path, rel)
 }
 
-func (s *searchState) searchFile(path string, rel string) (bool, error) {
+func (s *searchState) wantsPath() bool {
+	return s.opts.kind == searchKindAuto || s.opts.kind == searchKindPath
+}
+
+func (s *searchState) wantsFileScan() bool {
+	return s.opts.kind == searchKindAuto || s.opts.kind == searchKindContent || s.opts.kind == searchKindSymbol
+}
+
+func (s *searchState) searchFile(path string, rel string) error {
 	file, err := os.Open(path)
 	if err != nil {
-		return false, err
+		return err
 	}
 	defer file.Close()
 	if binary, err := looksBinary(file); err != nil || binary {
 		if binary {
 			s.skippedBinary++
 		}
-		return false, err
+		return err
 	}
-	reader := bufio.NewReader(file)
-	lineNo := 0
-	matched := false
+	lines, err := readSearchLines(file)
+	if err != nil {
+		return err
+	}
+	for i, line := range lines {
+		if s.truncated {
+			break
+		}
+		lineNo := i + 1
+		symbolMatched := false
+		if s.wantsSymbol() && isLikelySymbolLine(line) && s.matchString(line) {
+			s.addMatch(s.lineMatch(searchKindSymbol, rel, lineNo, line, lines))
+			symbolMatched = true
+		}
+		// auto 模式下结构入口已经作为 symbol 返回，避免同一行在 content 中重复出现。
+		if s.wantsContent() && !(s.opts.kind == searchKindAuto && symbolMatched) && s.matchString(line) {
+			s.addMatch(s.lineMatch(searchKindContent, rel, lineNo, line, lines))
+		}
+	}
+	return nil
+}
+
+func (s *searchState) wantsSymbol() bool {
+	return s.opts.kind == searchKindAuto || s.opts.kind == searchKindSymbol
+}
+
+func (s *searchState) wantsContent() bool {
+	return s.opts.kind == searchKindAuto || s.opts.kind == searchKindContent
+}
+
+func (s *searchState) lineMatch(kind searchKind, rel string, lineNo int, line string, lines []string) searchMatch {
+	ctx := s.opts.contextLines
+	m := searchMatch{kind: kind, rel: rel, lineNo: lineNo, line: strings.TrimSpace(line)}
+	if ctx <= 0 {
+		return m
+	}
+	start := lineNo - ctx
+	if start < 1 {
+		start = 1
+	}
+	for n := start; n < lineNo; n++ {
+		m.before = append(m.before, contextLine{lineNo: n, text: strings.TrimSpace(lines[n-1])})
+	}
+	end := lineNo + ctx
+	if end > len(lines) {
+		end = len(lines)
+	}
+	for n := lineNo + 1; n <= end; n++ {
+		m.after = append(m.after, contextLine{lineNo: n, text: strings.TrimSpace(lines[n-1])})
+	}
+	return m
+}
+
+func readSearchLines(reader io.Reader) ([]string, error) {
+	buf := bufio.NewReader(reader)
+	var lines []string
 	for {
-		line, readErr := readLogicalLine(reader)
+		line, readErr := readLogicalLine(buf)
 		if readErr != nil && readErr != io.EOF {
-			return matched, readErr
+			return lines, readErr
 		}
 		if readErr == io.EOF && line == "" {
 			break
 		}
-		lineNo++
-		if s.matchString(line) {
-			matched = true
-			s.matches++
-			s.addLine(fmt.Sprintf("%s:%d: %s\n", rel, lineNo, strings.TrimSpace(line)))
-			if s.matches >= s.opts.maxMatches {
-				s.truncated = true
-				break
-			}
-		}
-		if readErr == io.EOF || s.truncated {
+		lines = append(lines, line)
+		if readErr == io.EOF {
 			break
 		}
 	}
-	return matched, nil
+	return lines, nil
 }
 
 func looksBinary(file *os.File) (bool, error) {
@@ -296,48 +398,32 @@ func looksBinary(file *os.File) (bool, error) {
 	return false, nil
 }
 
-func (s *searchState) resultContent() string {
-	content := strings.TrimRight(s.output.String(), "\n")
-	if content == "" {
-		content = "no matches"
+func (s *searchState) addMatch(m searchMatch) {
+	if s.matches >= s.opts.maxResults || len(s.results) >= s.opts.maxResults {
+		s.truncated = true
+		return
 	}
-
-	diagnostics := s.searchDiagnostics()
-	if diagnostics != "" {
-		content += "\n\n" + diagnostics
+	s.results = append(s.results, m)
+	s.matches++
+	s.markFileMatched(m.rel)
+	switch m.kind {
+	case searchKindPath:
+		s.pathMatches++
+	case searchKindSymbol:
+		s.symbolMatches++
+	case searchKindContent:
+		s.contentMatches++
 	}
-	return content
 }
 
-func (s *searchState) searchDiagnostics() string {
-	var lines []string
-	if s.truncated {
-		lines = append(lines, "Search stopped early because the result limit, output limit, or scanned file limit was reached. Narrow the query or increase max_matches when appropriate.")
+func (s *searchState) markFileMatched(rel string) {
+	if rel == "" {
+		return
 	}
-	if s.matches == 0 {
-		lines = append(lines, fmt.Sprintf("No matches found after scanning %d files.", s.filesScanned))
-		if len(s.opts.include) > 0 && s.skippedInclude > 0 {
-			lines = append(lines, fmt.Sprintf("%d files were skipped by include filters; broaden include if the target may be outside those globs.", s.skippedInclude))
-		}
-		if s.opts.useDefaultExclude && s.skippedExcluded > 0 {
-			lines = append(lines, fmt.Sprintf("%d paths were skipped by default/user excludes; retry with use_default_exclude=false only when you intentionally need generated, dependency, hidden, or sensitive paths.", s.skippedExcluded))
-		} else if s.skippedExcluded > 0 {
-			lines = append(lines, fmt.Sprintf("%d paths were skipped by exclude filters; relax exclude if needed.", s.skippedExcluded))
-		}
-		if s.skippedDepth > 0 {
-			lines = append(lines, fmt.Sprintf("%d directories were skipped by recursive/max_depth limits; increase max_depth if the target is deeper.", s.skippedDepth))
-		}
-		if s.skippedLarge > 0 || s.skippedBinary > 0 {
-			lines = append(lines, fmt.Sprintf("Skipped %d large files and %d binary files for performance.", s.skippedLarge, s.skippedBinary))
-		}
-		if s.opts.regex != nil {
-			lines = append(lines, "Regex mode was enabled; retry with regex=false when searching for literal punctuation or markup.")
-		}
+	if !s.matchedFiles[rel] {
+		s.matchedFiles[rel] = true
+		s.filesMatched++
 	}
-	if len(lines) == 0 {
-		return ""
-	}
-	return "Search diagnostics:\n- " + strings.Join(lines, "\n- ")
 }
 
 func (s *searchState) matchString(value string) bool {
@@ -349,15 +435,73 @@ func (s *searchState) matchString(value string) bool {
 		value = strings.ToLower(value)
 		query = strings.ToLower(query)
 	}
+	if s.opts.word {
+		return identifierWordMatch(value, query)
+	}
 	return strings.Contains(value, query)
 }
 
-func (s *searchState) addLine(line string) {
-	if s.output.Len()+len(line) > maxSearchOutputBytes {
-		s.truncated = true
-		return
+func identifierWordMatch(value, query string) bool {
+	if query == "" {
+		return false
 	}
-	s.output.WriteString(line)
+	start := 0
+	for {
+		idx := strings.Index(value[start:], query)
+		if idx < 0 {
+			return false
+		}
+		idx += start
+		beforeOK := idx == 0 || !isIdentRune(rune(value[idx-1]))
+		after := idx + len(query)
+		afterOK := after >= len(value) || !isIdentRune(rune(value[after]))
+		if beforeOK && afterOK {
+			return true
+		}
+		start = idx + len(query)
+	}
+}
+
+func isIdentRune(r rune) bool {
+	return r == '_' || r == '-' || r == '.' || r == '/' || r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z'
+}
+
+func isLikelySymbolLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "//") {
+		return false
+	}
+	// symbol 是轻量结构入口，不限于代码：文档标题、配置段、键值项和常见声明都可帮助模型快速定位。
+	if strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+		return true
+	}
+	if looksLikeKeyValueLine(trimmed) {
+		return true
+	}
+	prefixes := []string{"func ", "type ", "const ", "var ", "class ", "interface ", "enum ", "struct ", "def ", "async def ", "function ", "export function ", "export class ", "export interface ", "public ", "private ", "protected ", "service ", "message ", "rpc ", "table ", "CREATE TABLE ", "create table "}
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(trimmed, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func looksLikeKeyValueLine(line string) bool {
+	idx := strings.IndexAny(line, "=:")
+	if idx <= 0 || idx > 80 {
+		return false
+	}
+	key := strings.TrimSpace(line[:idx])
+	if key == "" || strings.ContainsAny(key, " \t{}()") {
+		return false
+	}
+	for _, r := range key {
+		if !isIdentRune(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func depthOf(rel string) int {
@@ -390,12 +534,43 @@ func stringListParam(value any) []string {
 	}
 }
 
+func numberParam(value any) (int, bool) {
+	switch v := value.(type) {
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	case float64:
+		return int(v), true
+	case float32:
+		return int(v), true
+	case string:
+		if v == "" {
+			return 0, false
+		}
+		var n int
+		if _, err := fmt.Sscanf(v, "%d", &n); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
 func matchAnyGlob(path string, patterns []string) bool {
 	path = filepath.ToSlash(path)
 	for _, pattern := range patterns {
 		pattern = filepath.ToSlash(strings.TrimSpace(pattern))
 		if pattern == "" {
 			continue
+		}
+		if strings.HasPrefix(pattern, "**/") {
+			suffix := strings.TrimPrefix(pattern, "**/")
+			if ok, _ := filepath.Match(suffix, filepath.Base(path)); ok {
+				return true
+			}
+			if ok, _ := filepath.Match(suffix, path); ok {
+				return true
+			}
 		}
 		if strings.HasSuffix(pattern, "/**") {
 			prefix := strings.TrimSuffix(pattern, "/**")

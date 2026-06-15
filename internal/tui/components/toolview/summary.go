@@ -19,14 +19,14 @@ func SemanticSummary(te *Entry, maxWidth int, labels RenderLabels) string {
 	}
 	switch te.RawName {
 	case "search":
-		mode := pick("mode")
-		if mode == "" {
-			mode = "content"
+		kind := pick("kind")
+		if kind == "" {
+			kind = "auto"
 		}
-		if mode == "content" {
-			mode = defaultLabel(labels.ModeContent, mode)
+		if kind == "content" {
+			kind = defaultLabel(labels.ModeContent, kind)
 		}
-		return searchSummary(mode, pick("query"), pick("path"), maxWidth)
+		return searchSummary(kind, pick("query"), pick("path"), maxWidth)
 	case "filesystem":
 		action := pick("action")
 		path := pick("path")

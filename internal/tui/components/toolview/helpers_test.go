@@ -23,7 +23,7 @@ func TestSemanticSummarySearchKeepsQueryAndPathSuffix(t *testing.T) {
 	entry := &Entry{
 		RawName: "search",
 		ParamsRaw: map[string]any{
-			"mode":  "content",
+			"kind":  "content",
 			"query": "SemanticSummary|tool|truncate",
 			"path":  "/Users/me/Documents/suna/internal/tui",
 		},

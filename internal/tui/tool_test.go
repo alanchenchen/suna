@@ -194,9 +194,9 @@ func TestRenderToolEntryShowsSearchAndHTTPSummaries(t *testing.T) {
 		RawName:   "search",
 		Name:      "Search",
 		Intent:    "Find guard rendering",
-		ParamsRaw: map[string]any{"mode": "content", "query": "Guard", "path": "internal"},
+		ParamsRaw: map[string]any{"kind": "auto", "query": "Guard", "path": "internal"},
 		Status:    toolDone,
-		Metadata:  map[string]any{"kind": "search_result", "matches": 18, "files_matched": 6, "files_scanned": 214},
+		Metadata:  map[string]any{"kind": "search_result", "matches": 18, "files_matched": 6, "files_scanned": 214, "path_matches": 2, "symbol_matches": 4, "content_matches": 12},
 	}
 	httpEntry := &toolEntry{
 		RawName:   "http",
@@ -208,7 +208,7 @@ func TestRenderToolEntryShowsSearchAndHTTPSummaries(t *testing.T) {
 	}
 
 	plain := stripANSIForTest(tui.renderToolEntry(search, false) + tui.renderToolEntry(httpEntry, false))
-	for _, want := range []string{"Search content \"Guard\" in internal", "18 matches in 6 files", "HTTP GET https://example.com/status", "HTTP GET  200"} {
+	for _, want := range []string{"Search auto \"Guard\" in internal", "18 matches in 6 files", "2 path / 4 symbol / 12 content", "HTTP GET https://example.com/status", "HTTP GET  200"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("rendered tools = %q, want substring %q", plain, want)
 		}
