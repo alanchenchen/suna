@@ -10,92 +10,149 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/alanchenchen/suna/internal/tools"
 )
 
 const (
-	defaultSearchMaxResults = 100
-	maxSearchMaxResults     = 1000
-	maxSearchDepth          = 20
-	maxSearchFileSize       = 2 * 1024 * 1024
-	maxSearchOutputBytes    = 100 * 1024
-	maxSearchScannedFiles   = 20000
-	maxSearchContextLines   = 5
+	defaultSearchLimit        = 100
+	maxSearchLimit            = 1000
+	maxSearchDepth            = 20
+	maxSearchFileSize         = 2 * 1024 * 1024
+	maxSearchOutputBytes      = 100 * 1024
+	maxSearchScannedFiles     = 20000
+	maxSearchContextLines     = 5
+	defaultSearchContextLines = 1
 )
 
-var defaultSearchExclude = []string{
-	".git/**",
-	"node_modules/**",
-	"vendor/**",
-	"dist/**",
-	"build/**",
-	"target/**",
-	".cache/**",
-	"coverage/**",
-	"tmp/**",
-	// 默认跳过常见凭据文件，避免普通 content search 将 secret 带入模型上下文；用户可关闭默认排除并交给 Guard 审核。
-	".env",
-	".env.*",
-	"*.pem",
-	"*.key",
-	"*.p12",
-	"*.pfx",
-	"id_rsa",
-	"id_ed25519",
-	"id_ecdsa",
-	".ssh/**",
-	".gnupg/**",
-	".netrc",
-	".npmrc",
-	".pypirc",
-	"credentials.json",
-	"credentials.toml",
-}
+var (
+	searchWorkspaceExclude = []string{
+		".git/**",
+		"node_modules/**",
+		"vendor/**",
+		"dist/**",
+		"build/**",
+		"target/**",
+		".cache/**",
+		"coverage/**",
+		"tmp/**",
+	}
+	searchDependencyExclude = []string{
+		".git/**",
+		"dist/**",
+		"build/**",
+		"target/**",
+		".cache/**",
+		"coverage/**",
+		"tmp/**",
+	}
+	searchSensitiveExclude = []string{
+		// 默认跳过常见凭据文件，避免普通搜索将 secret 带入模型上下文。
+		".env",
+		".env.*",
+		"*.pem",
+		"*.key",
+		"*.p12",
+		"*.pfx",
+		"id_rsa",
+		"id_ed25519",
+		"id_ecdsa",
+		".ssh/**",
+		".gnupg/**",
+		".netrc",
+		".npmrc",
+		".pypirc",
+		"credentials.json",
+		"credentials.toml",
+	}
+)
 
 type Search struct{}
 
 func (Search) Spec() tools.Spec {
-	return builtinSpec("search", "Search file paths, structured entries, and text in a file or directory. Prefer this over shell grep/rg/find for local search.", tools.Perceive, map[string]any{
+	return builtinSpec("search", "Search local files, paths, symbols, or text. Use this structured search instead of shell find/grep/glob/global-style searches when possible.", tools.Perceive, map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"path":                map[string]any{"type": "string", "description": "File or directory to search. Use project-relative paths when possible. If a file is given, only that file is searched."},
-			"query":               map[string]any{"type": "string", "description": "Text, file path fragment, heading, definition name, key, or regex pattern to search for."},
-			"kind":                map[string]any{"type": "string", "enum": []string{"auto", "content", "path", "symbol"}, "description": "Search kind. Default auto. auto searches path names, structured entries, and text content; content searches file text; path searches file and directory names; symbol searches lightweight structure such as headings, configuration keys/sections, and common definition or declaration lines."},
-			"regex":               map[string]any{"type": "boolean", "description": "Treat query as a regular expression. Default false. Use false for literal punctuation, paths, and markup."},
-			"case_sensitive":      map[string]any{"type": "boolean", "description": "Match case-sensitively. Default false."},
-			"word":                map[string]any{"type": "boolean", "description": "Match query as a whole word or identifier when possible. Default false."},
-			"context_lines":       map[string]any{"type": "integer", "description": "Lines of context before and after each content or symbol match. Default 1, max 5. Use 0 for single-line output."},
-			"recursive":           map[string]any{"type": "boolean", "description": "Search subdirectories when path is a directory. Default true."},
-			"max_depth":           map[string]any{"type": "integer", "description": "Maximum recursion depth for directory searches. Default 8, max 20."},
-			"include":             map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Glob patterns to include, such as [" + `"**/*.go"` + ", " + `"internal/**"` + ", or " + `"**/*_test.go"` + ". Omit to search all supported text files."},
-			"exclude":             map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Glob patterns to exclude, in addition to default excludes when use_default_exclude is true."},
-			"use_default_exclude": map[string]any{"type": "boolean", "description": "Skip common dependency, build, cache, VCS, and secret files. Default true."},
-			"max_results":         map[string]any{"type": "integer", "description": "Maximum ranked matches to return. Default 100, max 1000."},
+			"path": map[string]any{
+				"type":        "string",
+				"description": "File or directory to search. Use project-relative paths when possible.",
+			},
+			"pattern": map[string]any{
+				"type":        "string",
+				"description": "Single search pattern. Literal by default and safe for punctuation such as parentheses, brackets, dots, paths, and markup. Use terms for multiple alternatives instead of writing foo|bar.",
+			},
+			"terms": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Multiple literal alternatives. Matches if any term appears. Prefer this for searching several names, phrases, files, commands, symbols, or text snippets.",
+			},
+			"mode": map[string]any{
+				"type":        "string",
+				"enum":        []string{"auto", "content", "path", "symbol"},
+				"description": "Search mode. content is like grep/rg, path is like find/fd/glob, symbol searches headings/config keys/declarations, auto searches path + symbol + content. Default auto.",
+			},
+			"match": map[string]any{
+				"type":        "string",
+				"enum":        []string{"literal", "regex", "glob"},
+				"description": "Pattern match mode for pattern. Default literal. Use regex only for valid Go regular expressions. Use glob mainly with mode=path. terms are always literal alternatives.",
+			},
+			"case": map[string]any{
+				"type":        "string",
+				"enum":        []string{"smart", "insensitive", "sensitive"},
+				"description": "Case matching. Default smart: case-insensitive unless the search text contains uppercase.",
+			},
+			"scope": map[string]any{
+				"type":        "string",
+				"enum":        []string{"workspace", "deps", "all"},
+				"description": "Built-in search scope. workspace skips dependencies/build/cache/VCS/secret files. deps includes dependency source such as node_modules or vendor but still skips build/cache/VCS/secret files. all searches generated/cache/dependency files too, while still protecting common secret files. Default workspace.",
+			},
+			"word": map[string]any{
+				"type":        "boolean",
+				"description": "Match whole identifier-like words. Usually omit unless substring matches are too noisy.",
+			},
+			"include": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Glob filters for files to include, like grep/rg -g or find path filters. Example: [\"**/*.go\", \"docs/**\"].",
+			},
+			"exclude": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Glob filters to exclude, in addition to the selected scope's built-in excludes.",
+			},
+			"context": map[string]any{
+				"type":        "integer",
+				"description": "Lines of context around content/symbol matches. Default 1, max 5.",
+			},
+			"limit": map[string]any{
+				"type":        "integer",
+				"description": "Maximum matches to return. Default 100, max 1000.",
+			},
+			"depth": map[string]any{
+				"type":        "integer",
+				"description": "Maximum directory depth when path is a directory. Default 8, max 20. Use 0 for only the current directory.",
+			},
 		},
-		"required": []string{"path", "query"},
+		"required": []string{"path"},
 	})
 }
 
 func (Search) Execute(ctx context.Context, params map[string]any) tools.Result {
 	root, _ := params["path"].(string)
-	query, _ := params["query"].(string)
 	if root == "" {
 		return tools.ErrorResult("path is required")
-	}
-	if query == "" {
-		return tools.ErrorResult("query is required")
 	}
 	root = expandPath(root)
 	info, err := os.Stat(root)
 	if err != nil {
 		return tools.ErrorResult(fmt.Sprintf("stat search path: %s", err))
 	}
-	opts, err := searchOptionsFromParams(params, query)
+	opts, err := searchOptionsFromParams(params)
 	if err != nil {
 		return tools.ErrorResult(err.Error())
 	}
-	state := &searchState{root: root, rootIsFile: !info.IsDir(), query: query, opts: opts, matchedFiles: map[string]bool{}}
+	state := &searchState{root: root, rootIsFile: !info.IsDir(), opts: opts, matchedFiles: map[string]bool{}}
 	if info.IsDir() {
 		if err := filepath.WalkDir(root, state.visit(ctx)); err != nil {
 			return tools.ErrorResult(fmt.Sprintf("search path: %s", err))
@@ -107,33 +164,64 @@ func (Search) Execute(ctx context.Context, params map[string]any) tools.Result {
 	return tools.Result{Content: content, Truncated: state.truncated, Metadata: state.metadata()}
 }
 
-type searchKind string
+type searchMode string
 
 const (
-	searchKindAuto    searchKind = "auto"
-	searchKindContent searchKind = "content"
-	searchKindPath    searchKind = "path"
-	searchKindSymbol  searchKind = "symbol"
+	searchModeAuto    searchMode = "auto"
+	searchModeContent searchMode = "content"
+	searchModePath    searchMode = "path"
+	searchModeSymbol  searchMode = "symbol"
+)
+
+type searchMatchMode string
+
+const (
+	searchMatchLiteral searchMatchMode = "literal"
+	searchMatchRegex   searchMatchMode = "regex"
+	searchMatchGlob    searchMatchMode = "glob"
+)
+
+type searchCaseMode string
+
+const (
+	searchCaseSmart       searchCaseMode = "smart"
+	searchCaseInsensitive searchCaseMode = "insensitive"
+	searchCaseSensitive   searchCaseMode = "sensitive"
+)
+
+type searchScope string
+
+const (
+	searchScopeWorkspace searchScope = "workspace"
+	searchScopeDeps      searchScope = "deps"
+	searchScopeAll       searchScope = "all"
 )
 
 type searchOptions struct {
-	kind              searchKind
-	include           []string
-	exclude           []string
-	recursive         bool
-	maxDepth          int
-	maxResults        int
-	contextLines      int
-	caseSensitive     bool
-	word              bool
-	useDefaultExclude bool
-	regex             *regexp.Regexp
+	mode         searchMode
+	match        searchMatchMode
+	caseMode     searchCaseMode
+	scope        searchScope
+	pattern      string
+	terms        []searchTerm
+	include      []string
+	exclude      []string
+	depth        int
+	limit        int
+	contextLines int
+	word         bool
+}
+
+type searchTerm struct {
+	raw             string
+	cmp             string
+	regex           *regexp.Regexp
+	caseInsensitive bool
 }
 
 type searchState struct {
 	root            string
 	rootIsFile      bool
-	query           string
 	opts            searchOptions
 	matches         int
 	pathMatches     int
@@ -154,10 +242,11 @@ type searchState struct {
 }
 
 type searchMatch struct {
-	kind   searchKind
+	mode   searchMode
 	rel    string
 	lineNo int
 	line   string
+	term   string
 	before []contextLine
 	after  []contextLine
 }
@@ -167,63 +256,141 @@ type contextLine struct {
 	text   string
 }
 
-func searchOptionsFromParams(params map[string]any, query string) (searchOptions, error) {
-	opts := searchOptions{kind: searchKindAuto, recursive: true, maxDepth: 8, maxResults: defaultSearchMaxResults, contextLines: 1}
-	if k, _ := params["kind"].(string); k != "" {
-		opts.kind = searchKind(k)
+func searchOptionsFromParams(params map[string]any) (searchOptions, error) {
+	opts := searchOptions{
+		mode:         searchModeAuto,
+		match:        searchMatchLiteral,
+		caseMode:     searchCaseSmart,
+		scope:        searchScopeWorkspace,
+		depth:        8,
+		limit:        defaultSearchLimit,
+		contextLines: defaultSearchContextLines,
 	}
-	if opts.kind != searchKindAuto && opts.kind != searchKindContent && opts.kind != searchKindPath && opts.kind != searchKindSymbol {
-		return opts, fmt.Errorf("kind must be auto, content, path, or symbol")
+	if m, _ := params["mode"].(string); m != "" {
+		opts.mode = searchMode(m)
 	}
-	if r, ok := params["recursive"].(bool); ok {
-		opts.recursive = r
+	if opts.mode != searchModeAuto && opts.mode != searchModeContent && opts.mode != searchModePath && opts.mode != searchModeSymbol {
+		return opts, fmt.Errorf("mode must be auto, content, path, or symbol")
 	}
-	if d, ok := numberParam(params["max_depth"]); ok && d >= 0 {
-		opts.maxDepth = d
-		if opts.maxDepth > maxSearchDepth {
-			opts.maxDepth = maxSearchDepth
+	if m, _ := params["match"].(string); m != "" {
+		opts.match = searchMatchMode(m)
+	}
+	if opts.match != searchMatchLiteral && opts.match != searchMatchRegex && opts.match != searchMatchGlob {
+		return opts, fmt.Errorf("match must be literal, regex, or glob")
+	}
+	if c, _ := params["case"].(string); c != "" {
+		opts.caseMode = searchCaseMode(c)
+	}
+	if opts.caseMode != searchCaseSmart && opts.caseMode != searchCaseInsensitive && opts.caseMode != searchCaseSensitive {
+		return opts, fmt.Errorf("case must be smart, insensitive, or sensitive")
+	}
+	if s, _ := params["scope"].(string); s != "" {
+		opts.scope = searchScope(s)
+	}
+	if opts.scope != searchScopeWorkspace && opts.scope != searchScopeDeps && opts.scope != searchScopeAll {
+		return opts, fmt.Errorf("scope must be workspace, deps, or all")
+	}
+	if d, ok := numberParam(params["depth"]); ok && d >= 0 {
+		opts.depth = d
+		if opts.depth > maxSearchDepth {
+			opts.depth = maxSearchDepth
 		}
 	}
-	if n, ok := numberParam(params["max_results"]); ok && n > 0 {
-		opts.maxResults = n
+	if n, ok := numberParam(params["limit"]); ok && n > 0 {
+		opts.limit = n
 	}
-	if opts.maxResults > maxSearchMaxResults {
-		opts.maxResults = maxSearchMaxResults
+	if opts.limit > maxSearchLimit {
+		opts.limit = maxSearchLimit
 	}
-	if n, ok := numberParam(params["context_lines"]); ok && n >= 0 {
+	if n, ok := numberParam(params["context"]); ok && n >= 0 {
 		opts.contextLines = n
 		if opts.contextLines > maxSearchContextLines {
 			opts.contextLines = maxSearchContextLines
 		}
 	}
-	opts.include = stringListParam(params["include"])
-	opts.exclude = stringListParam(params["exclude"])
-	useDefault := true
-	if v, ok := params["use_default_exclude"].(bool); ok {
-		useDefault = v
-	}
-	opts.useDefaultExclude = useDefault
-	if useDefault {
-		opts.exclude = append(append([]string{}, defaultSearchExclude...), opts.exclude...)
-	}
-	if v, ok := params["case_sensitive"].(bool); ok {
-		opts.caseSensitive = v
-	}
 	if v, ok := params["word"].(bool); ok {
 		opts.word = v
 	}
-	if v, ok := params["regex"].(bool); ok && v {
-		pattern := query
-		if !opts.caseSensitive {
+	opts.include = stringListParam(params["include"])
+	opts.exclude = append(searchScopeExcludes(opts.scope), stringListParam(params["exclude"])...)
+	opts.pattern, _ = params["pattern"].(string)
+	rawTerms := stringListParam(params["terms"])
+	if len(rawTerms) == 0 && strings.TrimSpace(opts.pattern) != "" {
+		rawTerms = []string{opts.pattern}
+	}
+	if len(rawTerms) == 0 {
+		return opts, fmt.Errorf("pattern or terms is required")
+	}
+	if len(rawTerms) > 1 && opts.match != searchMatchLiteral {
+		return opts, fmt.Errorf("terms are literal alternatives; omit match or use match=literal when terms is provided")
+	}
+	for _, raw := range rawTerms {
+		term, err := buildSearchTerm(raw, opts.match, opts.caseMode)
+		if err != nil {
+			return opts, err
+		}
+		opts.terms = append(opts.terms, term)
+	}
+	return opts, nil
+}
+
+func buildSearchTerm(raw string, match searchMatchMode, caseMode searchCaseMode) (searchTerm, error) {
+	raw = strings.TrimSpace(raw)
+	term := searchTerm{raw: raw, caseInsensitive: searchTermCaseInsensitive(raw, caseMode)}
+	if raw == "" {
+		return term, fmt.Errorf("empty search term")
+	}
+	if term.caseInsensitive {
+		term.cmp = strings.ToLower(raw)
+	} else {
+		term.cmp = raw
+	}
+	if match == searchMatchRegex {
+		pattern := raw
+		if term.caseInsensitive {
 			pattern = "(?i:" + pattern + ")"
 		}
 		re, err := regexp.Compile(pattern)
 		if err != nil {
-			return opts, fmt.Errorf("compile regex: %s", err)
+			return term, fmt.Errorf("compile regex: %s\nTip: use match=literal for literal text with punctuation, or use terms for multiple alternatives", err)
 		}
-		opts.regex = re
+		term.regex = re
 	}
-	return opts, nil
+	return term, nil
+}
+
+func searchTermCaseInsensitive(value string, mode searchCaseMode) bool {
+	switch mode {
+	case searchCaseSensitive:
+		return false
+	case searchCaseInsensitive:
+		return true
+	default:
+		return !containsUpper(value)
+	}
+}
+
+func containsUpper(value string) bool {
+	for _, r := range value {
+		if unicode.IsUpper(r) {
+			return true
+		}
+	}
+	return false
+}
+
+func searchScopeExcludes(scope searchScope) []string {
+	var out []string
+	switch scope {
+	case searchScopeDeps:
+		out = append(out, searchDependencyExclude...)
+	case searchScopeAll:
+		// all 仍保留敏感文件保护，避免无意中把凭据带入上下文。
+	default:
+		out = append(out, searchWorkspaceExclude...)
+	}
+	out = append(out, searchSensitiveExclude...)
+	return out
 }
 
 func (s *searchState) visit(ctx context.Context) fs.WalkDirFunc {
@@ -237,7 +404,7 @@ func (s *searchState) visit(ctx context.Context) fs.WalkDirFunc {
 		rel, _ := filepath.Rel(s.root, path)
 		rel = filepath.ToSlash(rel)
 		if d.IsDir() {
-			if !s.opts.recursive || depthOf(rel) > s.opts.maxDepth {
+			if depthOf(rel) > s.opts.depth {
 				s.skippedDepth++
 				return filepath.SkipDir
 			}
@@ -266,8 +433,10 @@ func (s *searchState) searchPath(ctx context.Context, path string, rel string, a
 		s.skippedExcluded++
 		return
 	}
-	if s.wantsPath() && s.matchString(rel) {
-		s.addMatch(searchMatch{kind: searchKindPath, rel: rel})
+	if s.wantsPath() {
+		if term, ok := s.matchString(rel); ok {
+			s.addMatch(searchMatch{mode: searchModePath, rel: rel, term: term})
+		}
 	}
 	if !s.wantsFileScan() || s.truncated {
 		return
@@ -290,11 +459,11 @@ func (s *searchState) searchPath(ctx context.Context, path string, rel string, a
 }
 
 func (s *searchState) wantsPath() bool {
-	return s.opts.kind == searchKindAuto || s.opts.kind == searchKindPath
+	return s.opts.mode == searchModeAuto || s.opts.mode == searchModePath
 }
 
 func (s *searchState) wantsFileScan() bool {
-	return s.opts.kind == searchKindAuto || s.opts.kind == searchKindContent || s.opts.kind == searchKindSymbol
+	return s.opts.mode == searchModeAuto || s.opts.mode == searchModeContent || s.opts.mode == searchModeSymbol
 }
 
 func (s *searchState) searchFile(path string, rel string) error {
@@ -319,29 +488,33 @@ func (s *searchState) searchFile(path string, rel string) error {
 		}
 		lineNo := i + 1
 		symbolMatched := false
-		if s.wantsSymbol() && isLikelySymbolLine(line) && s.matchString(line) {
-			s.addMatch(s.lineMatch(searchKindSymbol, rel, lineNo, line, lines))
-			symbolMatched = true
+		if s.wantsSymbol() && isLikelySymbolLine(line) {
+			if term, ok := s.matchString(line); ok {
+				s.addMatch(s.lineMatch(searchModeSymbol, rel, lineNo, line, term, lines))
+				symbolMatched = true
+			}
 		}
 		// auto 模式下结构入口已经作为 symbol 返回，避免同一行在 content 中重复出现。
-		if s.wantsContent() && !(s.opts.kind == searchKindAuto && symbolMatched) && s.matchString(line) {
-			s.addMatch(s.lineMatch(searchKindContent, rel, lineNo, line, lines))
+		if s.wantsContent() && !(s.opts.mode == searchModeAuto && symbolMatched) {
+			if term, ok := s.matchString(line); ok {
+				s.addMatch(s.lineMatch(searchModeContent, rel, lineNo, line, term, lines))
+			}
 		}
 	}
 	return nil
 }
 
 func (s *searchState) wantsSymbol() bool {
-	return s.opts.kind == searchKindAuto || s.opts.kind == searchKindSymbol
+	return s.opts.mode == searchModeAuto || s.opts.mode == searchModeSymbol
 }
 
 func (s *searchState) wantsContent() bool {
-	return s.opts.kind == searchKindAuto || s.opts.kind == searchKindContent
+	return s.opts.mode == searchModeAuto || s.opts.mode == searchModeContent
 }
 
-func (s *searchState) lineMatch(kind searchKind, rel string, lineNo int, line string, lines []string) searchMatch {
+func (s *searchState) lineMatch(mode searchMode, rel string, lineNo int, line string, term string, lines []string) searchMatch {
 	ctx := s.opts.contextLines
-	m := searchMatch{kind: kind, rel: rel, lineNo: lineNo, line: strings.TrimSpace(line)}
+	m := searchMatch{mode: mode, rel: rel, lineNo: lineNo, line: strings.TrimSpace(line), term: term}
 	if ctx <= 0 {
 		return m
 	}
@@ -399,19 +572,19 @@ func looksBinary(file *os.File) (bool, error) {
 }
 
 func (s *searchState) addMatch(m searchMatch) {
-	if s.matches >= s.opts.maxResults || len(s.results) >= s.opts.maxResults {
+	if s.matches >= s.opts.limit || len(s.results) >= s.opts.limit {
 		s.truncated = true
 		return
 	}
 	s.results = append(s.results, m)
 	s.matches++
 	s.markFileMatched(m.rel)
-	switch m.kind {
-	case searchKindPath:
+	switch m.mode {
+	case searchModePath:
 		s.pathMatches++
-	case searchKindSymbol:
+	case searchModeSymbol:
 		s.symbolMatches++
-	case searchKindContent:
+	case searchModeContent:
 		s.contentMatches++
 	}
 }
@@ -426,19 +599,43 @@ func (s *searchState) markFileMatched(rel string) {
 	}
 }
 
-func (s *searchState) matchString(value string) bool {
-	if s.opts.regex != nil {
-		return s.opts.regex.MatchString(value)
+func (s *searchState) matchString(value string) (string, bool) {
+	for _, term := range s.opts.terms {
+		if s.matchTerm(value, term) {
+			return term.raw, true
+		}
 	}
-	query := s.query
-	if !s.opts.caseSensitive {
-		value = strings.ToLower(value)
-		query = strings.ToLower(query)
+	return "", false
+}
+
+func (s *searchState) matchTerm(value string, term searchTerm) bool {
+	if term.regex != nil {
+		return term.regex.MatchString(value)
+	}
+	needle := term.cmp
+	candidate := value
+	if term.caseInsensitive {
+		candidate = strings.ToLower(candidate)
+	}
+	if s.opts.match == searchMatchGlob {
+		return globMatch(candidate, needle)
 	}
 	if s.opts.word {
-		return identifierWordMatch(value, query)
+		return identifierWordMatch(candidate, needle)
 	}
-	return strings.Contains(value, query)
+	return strings.Contains(candidate, needle)
+}
+
+func globMatch(value string, pattern string) bool {
+	value = filepath.ToSlash(value)
+	pattern = filepath.ToSlash(pattern)
+	if ok, _ := filepath.Match(pattern, value); ok {
+		return true
+	}
+	if ok, _ := filepath.Match(pattern, filepath.Base(value)); ok {
+		return true
+	}
+	return false
 }
 
 func identifierWordMatch(value, query string) bool {

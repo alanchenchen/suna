@@ -19,14 +19,18 @@ func SemanticSummary(te *Entry, maxWidth int, labels RenderLabels) string {
 	}
 	switch te.RawName {
 	case "search":
-		kind := pick("kind")
-		if kind == "" {
-			kind = "auto"
+		mode := pick("mode")
+		if mode == "" {
+			mode = "auto"
 		}
-		if kind == "content" {
-			kind = defaultLabel(labels.ModeContent, kind)
+		if mode == "content" {
+			mode = defaultLabel(labels.ModeContent, mode)
 		}
-		return searchSummary(kind, pick("query"), pick("path"), maxWidth)
+		query := pick("pattern")
+		if query == "" {
+			query = compactTermsLabel(te.ParamsRaw["terms"])
+		}
+		return searchSummary(mode, query, pick("path"), maxWidth)
 	case "filesystem":
 		action := pick("action")
 		path := pick("path")
@@ -50,13 +54,60 @@ func SemanticSummary(te *Entry, maxWidth int, labels RenderLabels) string {
 	}
 }
 
+func compactTermsLabel(value any) string {
+	terms := stringsFromAny(value)
+	if len(terms) == 0 {
+		return ""
+	}
+	if len(terms) == 1 {
+		return terms[0]
+	}
+	label := strings.Join(terms, " | ")
+	return label
+}
+
+func stringsFromAny(value any) []string {
+	switch v := value.(type) {
+	case []string:
+		return compactNonEmptyStrings(v)
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			text := strings.TrimSpace(fmt.Sprintf("%v", item))
+			if text != "" {
+				out = append(out, text)
+			}
+		}
+		return out
+	case nil:
+		return nil
+	default:
+		text := strings.TrimSpace(fmt.Sprintf("%v", value))
+		if text == "" {
+			return nil
+		}
+		return []string{text}
+	}
+}
+
+func compactNonEmptyStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		text := strings.TrimSpace(value)
+		if text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
 func searchSummary(mode, query, path string, maxWidth int) string {
 	if strings.TrimSpace(query) == "" && strings.TrimSpace(path) == "" {
 		return ""
 	}
 	prefix := strings.TrimSpace(mode)
 	if prefix == "" {
-		prefix = "content"
+		prefix = "auto"
 	}
 	pathLabel := CompactPath(path, maxInt(8, maxWidth/3))
 	queryBudget := maxInt(8, maxWidth-lipWidth(prefix)-lipWidth(pathLabel)-6)

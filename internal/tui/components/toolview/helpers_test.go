@@ -19,22 +19,38 @@ func TestCompactPathKeepsFilenameSuffixWhenTight(t *testing.T) {
 	}
 }
 
-func TestSemanticSummarySearchKeepsQueryAndPathSuffix(t *testing.T) {
+func TestSemanticSummarySearchKeepsPatternAndPathSuffix(t *testing.T) {
 	entry := &Entry{
 		RawName: "search",
 		ParamsRaw: map[string]any{
-			"kind":  "content",
-			"query": "SemanticSummary|tool|truncate",
-			"path":  "/Users/me/Documents/suna/internal/tui",
+			"mode":    "content",
+			"pattern": "SemanticSummary",
+			"path":    "/Users/me/Documents/suna/internal/tui",
 		},
 	}
 
 	got := SemanticSummary(entry, 52, RenderLabels{ModeContent: "内容"})
 	if !strings.Contains(got, "内容") || !strings.Contains(got, "SemanticSummary") || !strings.Contains(got, "tui") {
-		t.Fatalf("SemanticSummary(search) = %q, want mode, query, and path suffix", got)
+		t.Fatalf("SemanticSummary(search) = %q, want mode, pattern, and path suffix", got)
 	}
 	if got == "…tui" || got == "...tui" {
 		t.Fatalf("SemanticSummary(search) = %q, should not compact the whole summary as a path", got)
+	}
+}
+
+func TestSemanticSummarySearchTerms(t *testing.T) {
+	entry := &Entry{
+		RawName: "search",
+		ParamsRaw: map[string]any{
+			"mode":  "content",
+			"terms": []any{"SemanticSummary", "tool", "truncate"},
+			"path":  "/Users/me/Documents/suna/internal/tui",
+		},
+	}
+
+	got := SemanticSummary(entry, 64, RenderLabels{ModeContent: "内容"})
+	if !strings.Contains(got, "SemanticSummary") || !strings.Contains(got, "tool") || !strings.Contains(got, "tui") {
+		t.Fatalf("SemanticSummary(search terms) = %q, want terms and path suffix", got)
 	}
 }
 

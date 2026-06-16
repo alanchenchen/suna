@@ -194,7 +194,7 @@ func TestRenderToolEntryShowsSearchAndHTTPSummaries(t *testing.T) {
 		RawName:   "search",
 		Name:      "Search",
 		Intent:    "Find guard rendering",
-		ParamsRaw: map[string]any{"kind": "auto", "query": "Guard", "path": "internal"},
+		ParamsRaw: map[string]any{"mode": "auto", "pattern": "Guard", "path": "internal"},
 		Status:    toolDone,
 		Metadata:  map[string]any{"kind": "search_result", "matches": 18, "files_matched": 6, "files_scanned": 214, "path_matches": 2, "symbol_matches": 4, "content_matches": 12},
 	}

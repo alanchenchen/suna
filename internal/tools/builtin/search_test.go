@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestSearchDefaultExcludeSkipsNestedBuildDirs(t *testing.T) {
+func TestSearchWorkspaceScopeSkipsDependencyDirs(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "pkg", "node_modules", "dep"), 0755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
@@ -20,24 +20,43 @@ func TestSearchDefaultExcludeSkipsNestedBuildDirs(t *testing.T) {
 		t.Fatalf("WriteFile(keep) error = %v", err)
 	}
 
-	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "query": "needle"})
+	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "pattern": "needle"})
 	if res.IsError {
 		t.Fatalf("Search.Execute() error = %s", res.Error)
 	}
 	if strings.Contains(res.Content, "node_modules") {
-		t.Fatalf("Search.Execute() content = %q, want default exclude to skip node_modules", res.Content)
+		t.Fatalf("Search.Execute() content = %q, want workspace scope to skip node_modules", res.Content)
 	}
 	if !strings.Contains(res.Content, "keep.txt") {
 		t.Fatalf("Search.Execute() content = %q, want keep.txt match", res.Content)
 	}
 }
 
-func TestSearchTruncatesAtMaxResults(t *testing.T) {
+func TestSearchDepsScopeIncludesDependencyDirs(t *testing.T) {
+	root := t.TempDir()
+	depDir := filepath.Join(root, "node_modules", "dep")
+	if err := os.MkdirAll(depDir, 0755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "index.js"), []byte("export const needle = true\n"), 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "pattern": "needle", "scope": "deps"})
+	if res.IsError {
+		t.Fatalf("Search.Execute() error = %s", res.Error)
+	}
+	if !strings.Contains(res.Content, "node_modules/dep/index.js") {
+		t.Fatalf("Search.Execute() content = %q, want dependency match", res.Content)
+	}
+}
+
+func TestSearchTruncatesAtLimit(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x\nx\nx\n"), 0644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "query": "x", "max_results": float64(2)})
+	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "pattern": "x", "limit": float64(2)})
 	if res.IsError {
 		t.Fatalf("Search.Execute() error = %s", res.Error)
 	}
@@ -54,7 +73,7 @@ func TestSearchSkipsBinaryFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "bin.dat"), []byte{'n', 0, 'e', 'e', 'd', 'l', 'e'}, 0644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "query": "needle"})
+	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "pattern": "needle"})
 	if res.IsError {
 		t.Fatalf("Search.Execute() error = %s", res.Error)
 	}
@@ -69,7 +88,7 @@ func TestSearchNoMatchesAddsDiagnosticsWithoutChangingMetadataContract(t *testin
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 
-	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "query": "needle"})
+	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "pattern": "needle"})
 	if res.IsError {
 		t.Fatalf("Search.Execute() error = %s", res.Error)
 	}
@@ -87,14 +106,14 @@ func TestSearchNoMatchesAddsDiagnosticsWithoutChangingMetadataContract(t *testin
 	}
 }
 
-func TestSearchSupportsFilePathAndContextLines(t *testing.T) {
+func TestSearchSupportsFilePathAndContext(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "a.go")
 	content := "package main\n\nfunc target() {\n\tprintln(\"needle\")\n}\n"
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	res := Search{}.Execute(context.Background(), map[string]any{"path": path, "query": "needle", "kind": "content", "context_lines": float64(1)})
+	res := Search{}.Execute(context.Background(), map[string]any{"path": path, "pattern": "needle", "mode": "content", "context": float64(1)})
 	if res.IsError {
 		t.Fatalf("Search.Execute() error = %s", res.Error)
 	}
@@ -115,7 +134,7 @@ func TestSearchAutoReturnsPathSymbolAndContentMatches(t *testing.T) {
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "query": "Target", "include": []any{"**/*.go"}})
+	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "pattern": "target", "include": []any{"**/*.go"}})
 	if res.IsError {
 		t.Fatalf("Search.Execute() error = %s", res.Error)
 	}
@@ -135,7 +154,7 @@ func TestSearchAutoReturnsPathSymbolAndContentMatches(t *testing.T) {
 	}
 }
 
-func TestSearchPathKindMatchesRelativePath(t *testing.T) {
+func TestSearchPathModeMatchesRelativePath(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "internal", "model"), 0755); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
@@ -143,7 +162,7 @@ func TestSearchPathKindMatchesRelativePath(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "internal", "model", "anthropic.go"), []byte("package model\n"), 0644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "query": "internal/model", "kind": "path"})
+	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "pattern": "internal/model", "mode": "path"})
 	if res.IsError {
 		t.Fatalf("Search.Execute() error = %s", res.Error)
 	}
@@ -155,13 +174,13 @@ func TestSearchPathKindMatchesRelativePath(t *testing.T) {
 	}
 }
 
-func TestSearchSymbolKindFindsDocumentAndConfigStructure(t *testing.T) {
+func TestSearchSymbolModeFindsDocumentAndConfigStructure(t *testing.T) {
 	root := t.TempDir()
 	content := "# Agent Guide\n\nplain text mention Agent Guide\n\n[profile]\nname = suna\n"
 	if err := os.WriteFile(filepath.Join(root, "notes.md"), []byte(content), 0644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "query": "Agent", "kind": "symbol"})
+	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "pattern": "Agent", "mode": "symbol"})
 	if res.IsError {
 		t.Fatalf("Search.Execute() error = %s", res.Error)
 	}
@@ -172,11 +191,53 @@ func TestSearchSymbolKindFindsDocumentAndConfigStructure(t *testing.T) {
 		t.Fatalf("Search.Execute() content = %q, want symbol search to skip plain content lines", res.Content)
 	}
 
-	res = Search{}.Execute(context.Background(), map[string]any{"path": root, "query": "profile", "kind": "symbol"})
+	res = Search{}.Execute(context.Background(), map[string]any{"path": root, "pattern": "profile", "mode": "symbol"})
 	if res.IsError {
 		t.Fatalf("Search.Execute() error = %s", res.Error)
 	}
 	if !strings.Contains(res.Content, "> 5 | [profile]") {
 		t.Fatalf("Search.Execute() content = %q, want config section match", res.Content)
+	}
+}
+
+func TestSearchTermsMatchLiteralAlternatives(t *testing.T) {
+	root := t.TempDir()
+	content := "alpha\ndescribe(\nmount(\n"
+	if err := os.WriteFile(filepath.Join(root, "spec.txt"), []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "terms": []any{"vitest", "describe(", "mount("}, "mode": "content"})
+	if res.IsError {
+		t.Fatalf("Search.Execute() error = %s", res.Error)
+	}
+	for _, want := range []string{"describe(", "mount(", "[matched: describe(", "[matched: mount("} {
+		if !strings.Contains(res.Content, want) {
+			t.Fatalf("Search.Execute() content = %q, want substring %q", res.Content, want)
+		}
+	}
+}
+
+func TestSearchLiteralPatternTreatsPunctuationAsText(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "spec.txt"), []byte("describe(\n"), 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "pattern": "describe(", "mode": "content"})
+	if res.IsError {
+		t.Fatalf("Search.Execute() error = %s", res.Error)
+	}
+	if !strings.Contains(res.Content, "> 1 | describe(") {
+		t.Fatalf("Search.Execute() content = %q, want literal punctuation match", res.Content)
+	}
+}
+
+func TestSearchRegexCompileErrorSuggestsLiteralOrTerms(t *testing.T) {
+	root := t.TempDir()
+	res := Search{}.Execute(context.Background(), map[string]any{"path": root, "pattern": "describe(", "match": "regex"})
+	if !res.IsError {
+		t.Fatalf("Search.Execute() IsError = false, want true")
+	}
+	if !strings.Contains(res.Error, "use match=literal") {
+		t.Fatalf("Search.Execute() error = %q, want literal suggestion", res.Error)
 	}
 }

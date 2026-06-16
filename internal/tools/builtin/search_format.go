@@ -16,26 +16,26 @@ func (s *searchState) resultContent() string {
 		return content
 	}
 	var out strings.Builder
-	s.writeLine(&out, fmt.Sprintf("Search results for %q in %s (kind=%s)", s.query, displaySearchRoot(s.root), s.opts.kind))
+	s.writeLine(&out, fmt.Sprintf("Search results for %s in %s (mode=%s, match=%s, scope=%s)", s.searchLabel(), displaySearchRoot(s.root), s.opts.mode, s.opts.match, s.opts.scope))
 	s.writeLine(&out, fmt.Sprintf("Found %d matches in %d files. Showing %d.", s.matches, s.filesMatched, len(s.results)))
 	sections := []struct {
-		kind  searchKind
+		mode  searchMode
 		title string
 	}{
-		{searchKindPath, "Path matches"},
-		{searchKindSymbol, "Symbol matches"},
-		{searchKindContent, "Content matches"},
+		{searchModePath, "Path matches"},
+		{searchModeSymbol, "Symbol matches"},
+		{searchModeContent, "Content matches"},
 	}
 	for _, section := range sections {
-		items := s.resultsOfKind(section.kind)
+		items := s.resultsOfMode(section.mode)
 		if len(items) == 0 {
 			continue
 		}
 		s.writeLine(&out, "")
 		s.writeLine(&out, section.title+":")
-		if section.kind == searchKindPath {
+		if section.mode == searchModePath {
 			for _, item := range items {
-				s.writeLine(&out, "- "+item.rel)
+				s.writeLine(&out, "- "+item.rel+s.matchSuffix(item))
 			}
 			continue
 		}
@@ -45,7 +45,7 @@ func (s *searchState) resultContent() string {
 				for _, line := range item.before {
 					s.writeLine(&out, fmt.Sprintf("  %d | %s", line.lineNo, line.text))
 				}
-				s.writeLine(&out, fmt.Sprintf("> %d | %s", item.lineNo, item.line))
+				s.writeLine(&out, fmt.Sprintf("> %d | %s%s", item.lineNo, item.line, s.matchSuffix(item)))
 				for _, line := range item.after {
 					s.writeLine(&out, fmt.Sprintf("  %d | %s", line.lineNo, line.text))
 				}
@@ -59,6 +59,24 @@ func (s *searchState) resultContent() string {
 	return strings.TrimRight(out.String(), "\n")
 }
 
+func (s *searchState) searchLabel() string {
+	if len(s.opts.terms) == 1 {
+		return fmt.Sprintf("%q", s.opts.terms[0].raw)
+	}
+	terms := make([]string, 0, len(s.opts.terms))
+	for _, term := range s.opts.terms {
+		terms = append(terms, term.raw)
+	}
+	return fmt.Sprintf("terms=%q", terms)
+}
+
+func (s *searchState) matchSuffix(item searchMatch) string {
+	if len(s.opts.terms) <= 1 || item.term == "" {
+		return ""
+	}
+	return fmt.Sprintf("  [matched: %s]", item.term)
+}
+
 func (s *searchState) writeLine(out *strings.Builder, line string) {
 	if s.truncated || out.Len()+len(line)+1 > maxSearchOutputBytes {
 		s.truncated = true
@@ -68,10 +86,10 @@ func (s *searchState) writeLine(out *strings.Builder, line string) {
 	out.WriteByte('\n')
 }
 
-func (s *searchState) resultsOfKind(kind searchKind) []searchMatch {
+func (s *searchState) resultsOfMode(mode searchMode) []searchMatch {
 	var out []searchMatch
 	for _, item := range s.results {
-		if item.kind == kind {
+		if item.mode == mode {
 			out = append(out, item)
 		}
 	}
@@ -110,26 +128,27 @@ func displaySearchRoot(path string) string {
 func (s *searchState) searchDiagnostics() string {
 	var lines []string
 	if s.truncated {
-		lines = append(lines, "Search stopped early because the result limit, output limit, or scanned file limit was reached. Narrow the query or increase max_results when appropriate.")
+		lines = append(lines, "Search stopped early because the result limit, output limit, or scanned file limit was reached. Narrow the pattern/terms or increase limit when appropriate.")
 	}
 	if s.matches == 0 {
 		lines = append(lines, fmt.Sprintf("No matches found after scanning %d files and %d paths.", s.filesScanned, s.pathsScanned))
 		if len(s.opts.include) > 0 && s.skippedInclude > 0 {
 			lines = append(lines, fmt.Sprintf("%d files were skipped by include filters; broaden include if the target may be outside those globs.", s.skippedInclude))
 		}
-		if s.opts.useDefaultExclude && s.skippedExcluded > 0 {
-			lines = append(lines, fmt.Sprintf("%d paths were skipped by default/user excludes; retry with use_default_exclude=false only when you intentionally need generated, dependency, hidden, or sensitive paths.", s.skippedExcluded))
-		} else if s.skippedExcluded > 0 {
-			lines = append(lines, fmt.Sprintf("%d paths were skipped by exclude filters; relax exclude if needed.", s.skippedExcluded))
+		if s.skippedExcluded > 0 {
+			lines = append(lines, fmt.Sprintf("%d paths were skipped by scope/user excludes. Use scope=deps to inspect dependency source, or scope=all for generated/cache/dependency files while still protecting common secret files.", s.skippedExcluded))
 		}
 		if s.skippedDepth > 0 {
-			lines = append(lines, fmt.Sprintf("%d directories were skipped by recursive/max_depth limits; increase max_depth if the target is deeper.", s.skippedDepth))
+			lines = append(lines, fmt.Sprintf("%d directories were skipped by depth limits; increase depth if the target is deeper.", s.skippedDepth))
 		}
 		if s.skippedLarge > 0 || s.skippedBinary > 0 {
 			lines = append(lines, fmt.Sprintf("Skipped %d large files and %d binary files for performance.", s.skippedLarge, s.skippedBinary))
 		}
-		if s.opts.regex != nil {
-			lines = append(lines, "Regex mode was enabled; retry with regex=false when searching for literal punctuation or markup.")
+		if s.opts.match == searchMatchLiteral && len(s.opts.terms) == 1 && strings.Contains(s.opts.terms[0].raw, "|") {
+			lines = append(lines, "The pattern contains '|', but literal mode searches it as text. Use terms for alternatives, or match=regex with a valid regex.")
+		}
+		if s.opts.match == searchMatchRegex {
+			lines = append(lines, "Regex mode was enabled; use match=literal for literal punctuation, paths, markup, or ordinary text.")
 		}
 	}
 	if len(lines) == 0 {
@@ -141,7 +160,9 @@ func (s *searchState) searchDiagnostics() string {
 func (s *searchState) metadata() map[string]any {
 	return map[string]any{
 		"kind":              "search_result",
-		"search_kind":       string(s.opts.kind),
+		"search_mode":       string(s.opts.mode),
+		"match_mode":        string(s.opts.match),
+		"scope":             string(s.opts.scope),
 		"matches":           s.matches,
 		"files_scanned":     s.filesScanned,
 		"files_matched":     s.filesMatched,

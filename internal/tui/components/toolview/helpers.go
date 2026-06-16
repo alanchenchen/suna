@@ -66,8 +66,12 @@ func ParamSummary(name string, params map[string]any) string {
 	case "readfile", "writefile", "editfile", "listdir":
 		return pick("path")
 	case "search":
-		if q := pick("query"); q != "" {
-			return q + " in " + pick("path")
+		pattern := pick("pattern")
+		if pattern == "" {
+			pattern = pick("terms")
+		}
+		if pattern != "" {
+			return pattern + " in " + pick("path")
 		}
 		return pick("path")
 	case "filesystem":
