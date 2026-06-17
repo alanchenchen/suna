@@ -75,6 +75,27 @@ func TestSlashCommandForcesScrollToBottom(t *testing.T) {
 	}
 }
 
+func TestMouseWheelScrollsAcrossTranscriptWindowWhenViewportAtWindowTop(t *testing.T) {
+	// Chat viewport 只持有当前 transcript window。如果先让 Bubble viewport 处理滚轮，
+	// 当局部 viewport 已在窗口顶部时 delta 会被 clamp 成 0，导致无法继续往上跨 window。
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 18, mode: uipage.Chat}
+	tui.initChatComponents()
+	for i := 0; i < 80; i++ {
+		tui.appendNonToolMessage(chatMsg{Role: "system", Content: fmt.Sprintf("历史消息-%02d", i)})
+	}
+	tui.layoutChat()
+	tui.syncContent()
+	tui.chat.SetTranscriptYOffset(20)
+	tui.chat.Viewport.SetYOffset(0)
+	before := tui.chat.TranscriptYOffset
+
+	_, _ = tui.updateChat(tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelUp}))
+
+	if got := tui.chat.TranscriptYOffset; got >= before {
+		t.Fatalf("TranscriptYOffset = %d after wheel up, want < %d", got, before)
+	}
+}
+
 func TestCompactLocksInputWithoutCancelHint(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
 	tui.initChatComponents()

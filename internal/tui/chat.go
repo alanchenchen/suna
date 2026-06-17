@@ -213,6 +213,26 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return t, nil
 		}
+		if mm, ok := any(m).(tea.MouseWheelMsg); ok {
+			mouse := mm.Mouse()
+			if !mouse.Mod.Contains(tea.ModShift) {
+				delta := 0
+				switch mouse.Button {
+				case tea.MouseWheelUp:
+					delta = -t.chat.Viewport.MouseWheelDelta
+				case tea.MouseWheelDown:
+					delta = t.chat.Viewport.MouseWheelDelta
+				}
+				if delta != 0 {
+					// Chat viewport 只持有当前 transcript window 的切片，不能先交给 Bubble viewport
+					// 处理垂直滚轮；否则会被当前窗口的局部 max offset 截断，无法跨 window 滚动。
+					if t.chat.ScrollTranscript(delta) {
+						t.syncContent()
+					}
+					return t, nil
+				}
+			}
+		}
 		var cmd tea.Cmd
 		oldOffset := t.chat.Viewport.YOffset()
 		t.chat.Viewport, cmd = t.chat.Viewport.Update(msg)
