@@ -309,7 +309,7 @@ func TestLockedInputShowsStatusPlaceholder(t *testing.T) {
 
 func TestWelcomeNewInitializesChatBeforeResetPhase(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24, ready: true}
-	tui.configState = protocol.ConfigParams{Models: []protocol.ConfigModel{{Provider: "test", Model: "model"}}}
+	tui.configState = protocol.ConfigParams{Models: []protocol.ConfigModel{{Provider: "test", Model: "model", ContextWindow: 128000, MaxOutputTokens: 8192}}}
 	tui.initWelcomeList()
 
 	_, cmd := tui.updateWelcome(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))

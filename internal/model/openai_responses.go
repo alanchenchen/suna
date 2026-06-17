@@ -13,21 +13,27 @@ import (
 )
 
 type OpenAIResponsesProvider struct {
-	client        openai.Client
-	model         string
-	contextWindow int
-	media         MediaResolver
+	client          openai.Client
+	model           string
+	contextWindow   int
+	maxOutputTokens int
+	media           MediaResolver
 }
 
-func NewOpenAIResponsesProvider(apiKey, baseURL, model string, contextWindow int, mediaResolver MediaResolver) *OpenAIResponsesProvider {
+func NewOpenAIResponsesProvider(apiKey, baseURL, model string, contextWindow, maxOutputTokens int, mediaResolver MediaResolver) *OpenAIResponsesProvider {
 	httpClient := compatibleHTTPClient(&http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}})
 	// 关闭 SDK 隐式重试，避免一次 Suna Complete 在上游产生多次不可见请求；
 	// 未来如需重试应由 Suna 自己实现并记录日志。
 	client := openai.NewClient(option.WithAPIKey(apiKey), option.WithBaseURL(baseURL), option.WithHTTPClient(httpClient), option.WithMaxRetries(0))
-	return &OpenAIResponsesProvider{client: client, model: model, contextWindow: contextWindow, media: mediaResolver}
+	return &OpenAIResponsesProvider{client: client, model: model, contextWindow: contextWindow, maxOutputTokens: maxOutputTokens, media: mediaResolver}
 }
 
 func (p *OpenAIResponsesProvider) Complete(ctx context.Context, req *CompletionRequest) (<-chan Chunk, error) {
+	if p.maxOutputTokens <= 0 {
+		return nil, fmt.Errorf("max_output_tokens is required for model %q", p.model)
+	}
+	maxTokens := p.resolveMaxTokens(req.MaxTokens)
+	req.MaxTokens = maxTokens
 	input, err := p.buildInput(ctx, req)
 	if err != nil {
 		return nil, err
@@ -35,7 +41,7 @@ func (p *OpenAIResponsesProvider) Complete(ctx context.Context, req *CompletionR
 	params := responses.ResponseNewParams{
 		Model:             responses.ResponsesModel(p.resolveModel(req.Model)),
 		Input:             responses.ResponseNewParamsInputUnion{OfInputItemList: input},
-		MaxOutputTokens:   openai.Int(int64(p.resolveMaxTokens(req.MaxTokens))),
+		MaxOutputTokens:   openai.Int(int64(maxTokens)),
 		Temperature:       openai.Float(p.resolveTemperature(req.Temperature)),
 		ParallelToolCalls: openai.Bool(true),
 	}
@@ -139,11 +145,10 @@ func responseReasoningContent(event responses.ResponseStreamEventUnion) string {
 
 func (p *OpenAIResponsesProvider) EstimateTokens(text string) int { return len(text) / 4 }
 
-func (p *OpenAIResponsesProvider) ContextWindow() int {
-	if p.contextWindow > 0 {
-		return p.contextWindow
-	}
-	return DefaultContextWindow
+func (p *OpenAIResponsesProvider) ContextWindow() int { return p.contextWindow }
+
+func (p *OpenAIResponsesProvider) MaxOutputTokens() int {
+	return p.maxOutputTokens
 }
 
 func (p *OpenAIResponsesProvider) resolveModel(m string) string {
@@ -154,7 +159,10 @@ func (p *OpenAIResponsesProvider) resolveModel(m string) string {
 }
 
 func (p *OpenAIResponsesProvider) resolveMaxTokens(m int) int {
-	return ResolveMaxTokens(m)
+	if m > 0 && m < p.maxOutputTokens {
+		return m
+	}
+	return p.maxOutputTokens
 }
 
 func (p *OpenAIResponsesProvider) resolveTemperature(t float64) float64 {

@@ -17,6 +17,7 @@ const (
 	maxCompressToolArgumentBytes = 2 * 1024
 	maxSessionStateTokens        = 3000
 	minSessionStateTokens        = 1200
+	minContextMarginTokens       = 2048
 	recentChatUserTurns          = 6
 	recentToolUserTurns          = 2
 	maxRecentMessages            = 48
@@ -135,7 +136,7 @@ func isUTF8Boundary(b byte) bool {
 }
 
 func (c *Compressor) CompressHistoryWithState(ctx context.Context, messages []model.Message, previousState string, contextWindow int) ([]model.Message, string, int, error) {
-	return c.CompressHistoryWithStateBudget(ctx, messages, previousState, contextWindow, 0)
+	return c.CompressHistoryWithStateBudget(ctx, messages, previousState, contextWindow, c.recentWindowTokenBudget(contextWindow))
 }
 
 func (c *Compressor) CompressHistoryWithStateBudget(ctx context.Context, messages []model.Message, previousState string, contextWindow, recentTokenBudget int) ([]model.Message, string, int, error) {
@@ -200,7 +201,6 @@ func (c *Compressor) compressHistoryKeepingState(ctx context.Context, messages [
 		Messages: []model.Message{
 			model.NewTextMessage(model.RoleUser, promptText),
 		},
-		MaxTokens: sessionStateMaxTokens(contextWindow),
 	}
 	ch, err := c.fastProvider.Complete(ctx, req)
 	if err != nil {
@@ -251,7 +251,7 @@ func chooseRecentKeepWithBudget(messages []model.Message, contextWindow, budget 
 		targetTurns = recentToolUserTurns
 	}
 	if budget <= 0 {
-		budget = recentWindowTokenBudget(contextWindow)
+		budget = recentWindowTokenBudget(contextWindow, 0)
 	}
 	turns := 0
 	keep := 0
@@ -280,15 +280,31 @@ func chooseRecentKeepWithBudget(messages []model.Message, contextWindow, budget 
 	return keep
 }
 
-func recentWindowTokenBudget(contextWindow int) int {
+func (c *Compressor) recentWindowTokenBudget(contextWindow int) int {
+	outputBudget := 0
+	if c != nil && c.fastProvider != nil {
+		outputBudget = c.fastProvider.MaxOutputTokens()
+	}
+	return recentWindowTokenBudget(contextWindow, outputBudget)
+}
+
+func recentWindowTokenBudget(contextWindow, outputBudget int) int {
 	if contextWindow <= 0 {
 		return 0
 	}
-	budget := int(float64(contextWindow)*0.8) - sessionStateMaxTokens(contextWindow) - model.DefaultMaxTokens
+	budget := contextWindow - outputBudget - sessionStateMaxTokens(contextWindow) - contextMargin(contextWindow)
 	if budget < 1 {
 		return 1
 	}
 	return budget
+}
+
+func contextMargin(contextWindow int) int {
+	margin := contextWindow / 200
+	if margin < minContextMarginTokens {
+		return minContextMarginTokens
+	}
+	return margin
 }
 
 func isToolHeavy(messages []model.Message) bool {

@@ -43,6 +43,8 @@ root TUI 不应承载新的业务逻辑。新增功能如果属于 daemon 状态
 
 页面包可以维护自身状态机，但不直接访问 daemon，也不直接执行副作用。需要副作用时返回结构化结果，由 root 转成 `tea.Cmd`。
 
+`pages/config` 只负责模型配置表单、校验提示和 protocol 参数构造。`context_window` 与 `max_output_tokens` 在 UI 上都是必填字段，但模型能力语义、配置持久化和运行时使用仍由 daemon / agent / model 层处理，TUI 不直接调用 provider 或改写核心状态。
+
 ## Chat transcript 性能设计
 
 Chat transcript 遵循“完整数据在页面 model、渲染只取可见窗口”的策略，参考 Bubbles `table` / `list` 这类官方组件的窗口化思路，而不是把完整历史长期塞进 viewport。

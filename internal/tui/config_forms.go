@@ -80,13 +80,14 @@ func (t *TUI) initProviderForm(mc *tuiconfig.ModelConfig) {
 
 func (t *TUI) providerFormLabels() tuiconfig.ProviderFormLabels {
 	return tuiconfig.ProviderFormLabels{
-		Provider:      t.tr("tui.config.provider.type"),
-		Model:         t.tr("tui.config.provider.model"),
-		APIKey:        t.tr("tui.config.provider.api_key"),
-		Endpoint:      t.tr("tui.config.provider.endpoint"),
-		ContextWindow: t.tr("tui.config.provider.context_window"),
-		Strengths:     t.tr("tui.config.provider.strengths"),
-		StrengthsHint: t.tr("tui.config.strengths_placeholder"),
+		Provider:        t.tr("tui.config.provider.type"),
+		Model:           t.tr("tui.config.provider.model"),
+		APIKey:          t.tr("tui.config.provider.api_key"),
+		Endpoint:        t.tr("tui.config.provider.endpoint"),
+		ContextWindow:   t.tr("tui.config.provider.context_window"),
+		MaxOutputTokens: t.tr("tui.config.provider.max_output_tokens"),
+		Strengths:       t.tr("tui.config.provider.strengths"),
+		StrengthsHint:   t.tr("tui.config.strengths_placeholder"),
 	}
 }
 
@@ -127,11 +128,12 @@ func (t *TUI) providerFormValues() tuiconfig.ProviderFormValues {
 
 func (t *TUI) validateProviderForm(v tuiconfig.ProviderFormValues) error {
 	return tuiconfig.ValidateProviderForm(v, t.config.SetupMode, tuiconfig.ProviderValidationLabels{
-		Required:             t.tr("tui.error.required"),
-		APIKeyRequired:       t.tr("tui.error.api_key_required"),
-		EndpointRequired:     t.tr("tui.error.endpoint_required"),
-		InvalidEndpoint:      t.tr("tui.error.invalid_endpoint"),
-		InvalidContextWindow: t.tr("tui.error.invalid_context_window"),
+		Required:               t.tr("tui.error.required"),
+		APIKeyRequired:         t.tr("tui.error.api_key_required"),
+		EndpointRequired:       t.tr("tui.error.endpoint_required"),
+		InvalidEndpoint:        t.tr("tui.error.invalid_endpoint"),
+		InvalidContextWindow:   t.tr("tui.error.invalid_context_window"),
+		InvalidMaxOutputTokens: t.tr("tui.error.invalid_max_output_tokens"),
 	})
 }
 

@@ -207,5 +207,5 @@ func TestSaveReasoningUpdatesDetailStateImmediately(t *testing.T) {
 }
 
 func testReasoningConfig(provider, model string) protocol.ConfigParams {
-	return protocol.ConfigParams{Models: []protocol.ConfigModel{{Provider: provider, Model: model}}}
+	return protocol.ConfigParams{Models: []protocol.ConfigModel{{Provider: provider, Model: model, ContextWindow: 128000, MaxOutputTokens: 8192}}}
 }

@@ -22,6 +22,7 @@ provider = "openai"
 model = "gpt-4o-mini"
 base_url = "https://api.openai.com/v1"
 context_window = 128000
+max_output_tokens = 8192
 strengths = ["general", "fast", "multimodal"]
 
 [guard]
@@ -54,6 +55,7 @@ provider = "openai"                         # OpenAI Responses 协议
 model = "gpt-4o-mini"
 base_url = "https://api.openai.com/v1"
 context_window = 128000
+max_output_tokens = 8192
 strengths = ["general", "fast", "multimodal"]
 # OpenAI Responses 风格 reasoning 扩展字段；不需要可省略。
 reasoning = { reasoning = { effort = "medium" } }
@@ -63,6 +65,7 @@ provider = "anthropic"                      # Anthropic Messages 协议
 model = "claude-sonnet-4-20250514"
 base_url = "https://api.anthropic.com"
 context_window = 200000
+max_output_tokens = 8192
 strengths = ["reasoning", "code review", "writing"]
 
 [[models]]
@@ -70,6 +73,7 @@ provider = "deepseek"                       # 其它 provider 走 OpenAI-compati
 model = "deepseek-chat"
 base_url = "https://api.deepseek.com/v1"
 context_window = 64000
+max_output_tokens = 8192
 strengths = ["code", "cheap", "fast"]
 # Chat-compatible 服务若支持 reasoning_effort，可按上游协议透传。
 reasoning = { reasoning_effort = "high" }
@@ -78,6 +82,8 @@ reasoning = { reasoning_effort = "high" }
 provider = "minimax"
 model = "MiniMax-M3"
 base_url = "https://api.minimax.io/v1"
+context_window = 1000000
+max_output_tokens = 8192
 reasoning = { reasoning_split = true }
 
 [[models]]
@@ -85,6 +91,7 @@ provider = "dreamfield"
 model = "kimi-k2.6"
 base_url = "https://example.com/v1"
 context_window = 256000
+max_output_tokens = 8192
 strengths = ["multimodal", "long context"]
 # 某些 OpenAI-compatible 服务使用 thinking 字段；是否有效取决于上游。
 reasoning = { thinking = { type = "enabled" } }
@@ -188,7 +195,8 @@ api_key = "..."
 | `models.provider` | string | 是 | 无 | provider 协议名，也是 credentials 分组名。`openai` 走 OpenAI Responses，`anthropic` 走 Anthropic Messages，其它名称走 OpenAI-compatible Chat Completions。 |
 | `models.model` | string | 是 | 无 | 上游模型 ID。模型 ref 为 `provider/model`。 |
 | `models.base_url` | string | 是 | 无 | API endpoint。当前所有 provider 都要求显式配置，Suna 不依赖 SDK 默认地址。 |
-| `models.context_window` | int | 否 | `200000` | 上下文窗口，用于展示、usage 和 compact 判断。 |
+| `models.context_window` | int | 是 | 无 | 模型服务声明的总上下文窗口，按 `input + output` 理解；用于 status、usage 展示和 compact 预算。 |
+| `models.max_output_tokens` | int | 是 | 无 | 模型服务允许的最大单次输出；所有 LLM 请求默认使用该值作为输出预算，且必须小于 `context_window`。 |
 | `models.strengths` | string[] | 否 | 空 | 模型能力描述，会给主 Agent 参考，用于选择 subtask 模型。 |
 | `models.reasoning` | object | 否 | 空 | 透传到 provider 请求体的额外 reasoning/thinking 字段；Suna 不理解 preset，是否有效取决于上游。 |
 | `[guard].mode` | string | 否 | `ask` | `readonly` / `ask` / `auto` / `smart`。空或非法值按 `ask` 使用；`smart` 会对中高风险调用进行安全审查，而不是做普通 tool-call 优化。 |
@@ -233,6 +241,28 @@ api_key = "..."
 2. `credentials.toml` 中存在同名 table；
 3. `active_model` 使用同样的 `provider/model` ref。
 
+### context_window 与 max_output_tokens
+
+`context_window` 和 `max_output_tokens` 都是必填的模型能力参数。Suna 不维护内置模型能力库，也不再为这两个字段提供运行时默认值；缺失或非法时配置加载/保存会失败。
+
+语义约定：
+
+```text
+context_window = input tokens + output tokens 的总窗口
+max_output_tokens = 单次请求可用的最大输出预算
+usable_input_budget ≈ context_window - max_output_tokens - margin
+```
+
+其中 `margin` 是小的 token 估算误差余量：`max(2048, context_window / 200)`。Suna 不再使用 `context_window * 0.8` 这类大比例保守阈值。
+
+所有 LLM 请求都会默认使用当前模型配置的 `max_output_tokens`，包括主 chat、subtask、Guard smart review、Skill review、Session State compact 和用户画像 memory compact。prompt/schema 负责约束内部请求输出格式；`max_output_tokens` 表示硬输出上限，不再用很小的 hard cap 截断可能包含 thinking/reasoning 的请求。
+
+填写建议：
+
+- 优先使用模型服务或中转控制台实际生效的限制，而不是只看模型官方宣传值。
+- 如果服务文档写的是 `400k context / 128k max output`，则填写 `context_window = 400000`、`max_output_tokens = 128000`。Suna 会按约 `272k` 输入空间再扣除 margin 规划 compact。
+- 如果某个服务只给出一个总上下文窗口，没有明确 max output，需要先查服务层默认/上限；不要随意留空。
+
 ### reasoning 写法
 
 `models.reasoning` 会作为额外 JSON 字段透传给上游请求。Suna 只检查不要覆盖它已经生成的字段，例如 `model`、`messages`、`tools`、`temperature` 等。
@@ -244,18 +274,24 @@ api_key = "..."
 provider = "openai"
 model = "gpt-5"
 base_url = "https://api.openai.com/v1"
+context_window = 400000
+max_output_tokens = 128000
 reasoning = { reasoning = { effort = "high" } }
 
 [[models]]
 provider = "deepseek"
 model = "deepseek-reasoner"
 base_url = "https://api.deepseek.com/v1"
+context_window = 64000
+max_output_tokens = 8192
 reasoning = { reasoning_effort = "high" }
 
 [[models]]
 provider = "dreamfield"
 model = "kimi-k2.6"
 base_url = "https://example.com/v1"
+context_window = 256000
+max_output_tokens = 8192
 reasoning = { thinking = { type = "disabled" } }
 ```
 

@@ -191,7 +191,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, inputLabel string,
 				emit(ctx, sink, protocol.NotifyToolStart, protocol.ToolStartParams{ID: evt.ToolCallID, Tool: evt.ToolName, Params: evt.ToolParams, Intent: evt.ToolIntent})
 			case agent.EventToolGuard:
 				flush()
-				emit(ctx, sink, protocol.NotifyToolGuard, protocol.ToolGuardParams{ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, Risk: evt.GuardRisk, Decision: evt.GuardDecision, Source: evt.GuardSource, Reason: evt.GuardReason, Suggestion: evt.GuardSuggestion})
+				emit(ctx, sink, protocol.NotifyToolGuard, protocol.ToolGuardParams{ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, Risk: evt.GuardRisk, Decision: evt.GuardDecision, Source: evt.GuardSource, Reason: evt.GuardReason, Suggestion: evt.GuardSuggestion, ReviewCode: evt.GuardReviewCode, ReviewMessage: evt.GuardReviewMsg})
 			case agent.EventToolResult:
 				flush()
 				display := limitToolResult(evt.ToolResult)
@@ -216,7 +216,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, inputLabel string,
 				if evt.Reply != nil {
 					s.pendingGuards.Store(guardID, evt.Reply)
 				}
-				emit(ctx, sink, protocol.NotifyGuardConfirm, protocol.GuardConfirmParams{ID: guardID, ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, Params: evt.GuardParams, Risk: evt.GuardRisk, Reason: evt.GuardReason, Suggestion: evt.GuardSuggestion})
+				emit(ctx, sink, protocol.NotifyGuardConfirm, protocol.GuardConfirmParams{ID: guardID, ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, Params: evt.GuardParams, Risk: evt.GuardRisk, Reason: evt.GuardReason, Suggestion: evt.GuardSuggestion, ReviewCode: evt.GuardReviewCode, ReviewMessage: evt.GuardReviewMsg})
 			case agent.EventStatus:
 				flush()
 				switch evt.Status {
@@ -365,7 +365,7 @@ func (s *service) handleConfigSet(ctx context.Context, req protocol.Request, sin
 	if err := decodeParams(req.Params, &params); err != nil {
 		return nil, invalidParams(err.Error())
 	}
-	updated, err := s.daemon.agent.UpdateConfig(agent.ConfigSetParams{Action: params.Action, ModelRef: params.ModelRef, ActiveModel: params.ActiveModel, APIKey: params.APIKey, DeleteAPIKey: params.DeleteAPIKey, Locale: params.Locale, Theme: params.Theme, GuardMode: params.GuardMode, Workspace: params.Workspace, Model: agent.ConfigModel{Provider: params.Model.Provider, Model: params.Model.Model, BaseURL: params.Model.BaseURL, ContextWindow: params.Model.ContextWindow, Strengths: params.Model.Strengths, Reasoning: params.Model.Reasoning}})
+	updated, err := s.daemon.agent.UpdateConfig(agent.ConfigSetParams{Action: params.Action, ModelRef: params.ModelRef, ActiveModel: params.ActiveModel, APIKey: params.APIKey, DeleteAPIKey: params.DeleteAPIKey, Locale: params.Locale, Theme: params.Theme, GuardMode: params.GuardMode, Workspace: params.Workspace, Model: agent.ConfigModel{Provider: params.Model.Provider, Model: params.Model.Model, BaseURL: params.Model.BaseURL, ContextWindow: params.Model.ContextWindow, MaxOutputTokens: params.Model.MaxOutputTokens, Strengths: params.Model.Strengths, Reasoning: params.Model.Reasoning}})
 	if err != nil {
 		logging.Error("config", "update_failed", err, logging.Event{"action": params.Action, "model_ref": params.ModelRef, "active_model": params.ActiveModel})
 		return nil, invalidParams(err.Error())
@@ -436,7 +436,7 @@ func periodFromSummary(sum *memory.UsageSummary) protocol.UsagePeriod {
 func configToParams(cfg *config.Config) protocol.ConfigParams {
 	out := protocol.ConfigParams{ActiveModel: cfg.ActiveModel, Locale: cfg.UI.Locale, Theme: cfg.UI.Theme, GuardMode: cfg.Guard.ModeOrDefault(), Workspace: cfg.Guard.Workspace}
 	for _, mc := range cfg.Models {
-		out.Models = append(out.Models, protocol.ConfigModel{Provider: mc.Provider, Model: mc.Model, BaseURL: mc.BaseURL, ContextWindow: mc.ContextWindow, Strengths: mc.Strengths, Reasoning: mc.Reasoning, HasAPIKey: mc.APIKey != ""})
+		out.Models = append(out.Models, protocol.ConfigModel{Provider: mc.Provider, Model: mc.Model, BaseURL: mc.BaseURL, ContextWindow: mc.ContextWindow, MaxOutputTokens: mc.MaxOutputTokens, Strengths: mc.Strengths, Reasoning: mc.Reasoning, HasAPIKey: mc.APIKey != ""})
 	}
 	return out
 }

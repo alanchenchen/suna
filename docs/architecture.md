@@ -122,7 +122,7 @@ Suna 当前是单用户单当前会话形态，不提供多会话管理或完整
 
 模型请求的缓存友好结构为：稳定 system/project/skill/tool schema 前缀 + 低频变化的 Session State + append-only recent messages + 靠近 latest user 的 user profile memory。Session State 不拼进 system prompt；user profile memory 也不放在 prior conversation 前面。
 
-自动 compact 在完整请求超过上下文窗口 80% 安全阈值时触发。compact 成功后，`conversation_state.session_state` / `CompletionRequest.SessionState` 保存新的会话状态，working memory 只保留 budget-aware recent window。compact 失败时不使用 fallback、不硬裁剪继续，并通过 TUI 显示错误。
+自动 compact 按模型能力参数计算输入预算：`context_window - max_output_tokens - margin`，其中 `margin = max(2048, context_window / 200)`。compact 成功后，`conversation_state.session_state` / `CompletionRequest.SessionState` 保存新的会话状态，working memory 只保留 budget-aware recent window。compact 失败时不使用 fallback、不硬裁剪继续，并通过 TUI 显示错误。
 
 ## 文档分工
 

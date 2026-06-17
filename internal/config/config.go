@@ -121,13 +121,14 @@ func (c *Config) GetMaxModelRPS() int {
 }
 
 type ModelConfig struct {
-	Provider      string         `toml:"provider"`
-	Model         string         `toml:"model"`
-	BaseURL       string         `toml:"base_url,omitempty"`
-	ContextWindow int            `toml:"context_window,omitempty"`
-	Strengths     []string       `toml:"strengths,omitempty"`
-	Reasoning     map[string]any `toml:"reasoning,omitempty"`
-	APIKey        string         `toml:"-"`
+	Provider        string         `toml:"provider"`
+	Model           string         `toml:"model"`
+	BaseURL         string         `toml:"base_url,omitempty"`
+	ContextWindow   int            `toml:"context_window,omitempty"`
+	MaxOutputTokens int            `toml:"max_output_tokens,omitempty"`
+	Strengths       []string       `toml:"strengths,omitempty"`
+	Reasoning       map[string]any `toml:"reasoning,omitempty"`
+	APIKey          string         `toml:"-"`
 }
 
 type configTOML struct {
@@ -139,12 +140,13 @@ type configTOML struct {
 }
 
 type modelConfigTOML struct {
-	Provider      string          `toml:"provider"`
-	Model         string          `toml:"model"`
-	BaseURL       string          `toml:"base_url,omitempty"`
-	ContextWindow int             `toml:"context_window,omitempty"`
-	Strengths     []string        `toml:"strengths,omitempty"`
-	Reasoning     inlineTOMLTable `toml:"reasoning,omitempty"`
+	Provider        string          `toml:"provider"`
+	Model           string          `toml:"model"`
+	BaseURL         string          `toml:"base_url,omitempty"`
+	ContextWindow   int             `toml:"context_window,omitempty"`
+	MaxOutputTokens int             `toml:"max_output_tokens,omitempty"`
+	Strengths       []string        `toml:"strengths,omitempty"`
+	Reasoning       inlineTOMLTable `toml:"reasoning,omitempty"`
 }
 
 type inlineTOMLTable map[string]any
@@ -220,6 +222,9 @@ func Load(path string) (*Config, error) {
 	if _, ok := cfg.ModelByRef(cfg.ActiveModel); !ok {
 		return nil, fmt.Errorf("active_model %q not found in [[models]]", cfg.ActiveModel)
 	}
+	if err := cfg.ValidateModelLimits(); err != nil {
+		return nil, err
+	}
 	if err := LoadCredentials(cfg); err != nil {
 		return nil, err
 	}
@@ -234,6 +239,21 @@ func (c *Config) NormalizeUI() {
 	if c.UI.Theme == "" {
 		c.UI.Theme = "auto"
 	}
+}
+
+func (c *Config) ValidateModelLimits() error {
+	for _, mc := range c.Models {
+		if mc.ContextWindow <= 0 {
+			return fmt.Errorf("model %q context_window is required", mc.Ref())
+		}
+		if mc.MaxOutputTokens <= 0 {
+			return fmt.Errorf("model %q max_output_tokens is required", mc.Ref())
+		}
+		if mc.MaxOutputTokens >= mc.ContextWindow {
+			return fmt.Errorf("model %q max_output_tokens must be smaller than context_window", mc.Ref())
+		}
+	}
+	return nil
 }
 
 func (c *Config) NormalizeGuard() error {
@@ -287,6 +307,9 @@ func (c *Config) Save(path string) error {
 		return err
 	}
 	c.NormalizeUI()
+	if err := c.ValidateModelLimits(); err != nil {
+		return err
+	}
 	if err := c.NormalizeGuard(); err != nil {
 		return err
 	}
@@ -304,12 +327,13 @@ func (c *Config) tomlView() configTOML {
 	models := make([]modelConfigTOML, 0, len(c.Models))
 	for _, mc := range c.Models {
 		models = append(models, modelConfigTOML{
-			Provider:      mc.Provider,
-			Model:         mc.Model,
-			BaseURL:       mc.BaseURL,
-			ContextWindow: mc.ContextWindow,
-			Strengths:     mc.Strengths,
-			Reasoning:     inlineTOMLTable(mc.Reasoning),
+			Provider:        mc.Provider,
+			Model:           mc.Model,
+			BaseURL:         mc.BaseURL,
+			ContextWindow:   mc.ContextWindow,
+			MaxOutputTokens: mc.MaxOutputTokens,
+			Strengths:       mc.Strengths,
+			Reasoning:       inlineTOMLTable(mc.Reasoning),
 		})
 	}
 	return configTOML{

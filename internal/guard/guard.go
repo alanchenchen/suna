@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -50,12 +51,14 @@ type ReviewRequest struct {
 type LLMReviewer func(ctx context.Context, req ReviewRequest) (string, error)
 
 type GuardResult struct {
-	Decision   Decision
-	Reason     string
-	Risk       RiskLevel
-	Suggestion string
-	Source     string
-	Audit      string
+	Decision      Decision
+	Reason        string
+	Risk          RiskLevel
+	Suggestion    string
+	Source        string
+	Audit         string
+	ReviewCode    string
+	ReviewMessage string
 }
 
 type RiskLevel int
@@ -211,17 +214,14 @@ func (g *Guard) Check(ctx context.Context, tool string, params map[string]any, r
 	}
 
 	// smart mode: medium/high 由 LLM 结合任务意图判断；失败或不确定才转人工确认。
-	if g.llmReviewer != nil {
-		ctxForReview := ReviewContext{}
-		if len(reviewCtx) > 0 {
-			ctxForReview = reviewCtx[0]
-		}
-		if result := g.llmReview(ctx, tool, params, risk, ctxForReview); result != nil {
-			return result
-		}
+	if g.llmReviewer == nil {
+		return g.reviewFallback(ctx, tool, params, risk, "review_unavailable", "Smart Guard reviewer is unavailable")
 	}
-	g.audit(ctx, tool, params, risk, "confirm", "smart review unavailable or inconclusive")
-	return &GuardResult{Decision: Confirm, Reason: "smart review unavailable or inconclusive", Risk: risk, Source: "fallback", Audit: "confirm"}
+	ctxForReview := ReviewContext{}
+	if len(reviewCtx) > 0 {
+		ctxForReview = reviewCtx[0]
+	}
+	return g.llmReview(ctx, tool, params, risk, ctxForReview)
 }
 
 // llmReview 调用 LLM 进行安全审查。LLM 可以 approve/reject/confirm/modify。
@@ -230,15 +230,20 @@ func (g *Guard) llmReview(ctx context.Context, toolName string, params map[strin
 	paramsJSON, _ := marshalParams(params)
 	resp, err := g.llmReviewer(ctx, ReviewRequest{ToolName: toolName, ParamsJSON: paramsJSON, Target: target, Risk: RiskString(risk), Context: reviewCtx})
 	if err != nil {
-		return nil
+		code, msg := classifyReviewError(err)
+		return g.reviewFallback(ctx, toolName, params, risk, code, msg)
+	}
+	jsonText := extractJSON(resp)
+	if strings.TrimSpace(jsonText) == "" {
+		return g.reviewFallback(ctx, toolName, params, risk, "review_empty_response", "Smart Guard review returned an empty response")
 	}
 	var decision struct {
 		Decision   string `json:"decision"`
 		Reason     string `json:"reason"`
 		Suggestion string `json:"suggestion"`
 	}
-	if err := json.Unmarshal([]byte(extractJSON(resp)), &decision); err != nil {
-		return nil
+	if err := json.Unmarshal([]byte(jsonText), &decision); err != nil {
+		return g.reviewFallback(ctx, toolName, params, risk, "review_parse_failed", "Smart Guard review returned invalid JSON")
 	}
 	decision.Decision = strings.ToLower(strings.TrimSpace(decision.Decision))
 	switch decision.Decision {
@@ -255,9 +260,29 @@ func (g *Guard) llmReview(ctx context.Context, toolName string, params map[strin
 		g.audit(ctx, toolName, params, risk, "llm_approve", decision.Reason)
 		return &GuardResult{Decision: Approve, Reason: decision.Reason, Risk: risk, Source: "llm", Audit: "llm_approve"}
 	default:
-		g.audit(ctx, toolName, params, risk, "llm_uncertain", decision.Reason)
-		return &GuardResult{Decision: Confirm, Reason: decision.Reason, Risk: risk, Suggestion: decision.Suggestion, Source: "llm", Audit: "llm_uncertain"}
+		return g.reviewFallback(ctx, toolName, params, risk, "review_invalid_decision", "Smart Guard review returned an invalid decision")
 	}
+}
+
+func (g *Guard) reviewFallback(ctx context.Context, tool string, params map[string]any, risk RiskLevel, code, message string) *GuardResult {
+	if strings.TrimSpace(code) == "" {
+		code = "review_unavailable"
+	}
+	if strings.TrimSpace(message) == "" {
+		message = "Smart Guard review failed"
+	}
+	g.audit(ctx, tool, params, risk, code, message)
+	return &GuardResult{Decision: Confirm, Reason: message, Risk: risk, Source: "fallback", Audit: code, ReviewCode: code, ReviewMessage: message}
+}
+
+func classifyReviewError(err error) (string, string) {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "review_timeout", "Smart Guard review timed out"
+	}
+	if errors.Is(err, context.Canceled) {
+		return "review_canceled", "Smart Guard review was canceled"
+	}
+	return "review_provider_error", "Smart Guard review request failed"
 }
 
 // extractJSON 从 LLM 回复中提取 JSON 对象。

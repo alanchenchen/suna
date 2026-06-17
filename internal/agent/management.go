@@ -62,7 +62,7 @@ func (a *Agent) ActiveModelRuntime() ModelRuntime {
 	router := a.router
 	a.configMu.RUnlock()
 
-	rt := ModelRuntime{ContextWindow: model.DefaultContextWindow}
+	rt := ModelRuntime{}
 	if cfg != nil {
 		if mc, ok := cfg.ActiveModelConfig(); ok {
 			rt.Provider = mc.Provider
@@ -100,7 +100,7 @@ func (a *Agent) ListMemory(ctx context.Context) ([]memory.UserMemory, error) {
 
 func (a *Agent) Compact(ctx context.Context) (int, int, int, int, int, error) {
 	r := &runner.Runner{Router: a.router, Compressor: a.compressor}
-	contextWindow := model.DefaultContextWindow
+	contextWindow := 0
 	if a.router != nil {
 		contextWindow = a.router.ActiveContextWindow()
 	}

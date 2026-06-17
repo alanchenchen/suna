@@ -50,13 +50,15 @@ type ToolEndParams struct {
 }
 
 type ToolGuardParams struct {
-	ToolCallID string `json:"tool_call_id"`
-	Tool       string `json:"tool"`
-	Risk       string `json:"risk"`
-	Decision   string `json:"decision"`
-	Source     string `json:"source"`
-	Reason     string `json:"reason,omitempty"`
-	Suggestion string `json:"suggestion,omitempty"`
+	ToolCallID    string `json:"tool_call_id"`
+	Tool          string `json:"tool"`
+	Risk          string `json:"risk"`
+	Decision      string `json:"decision"`
+	Source        string `json:"source"`
+	Reason        string `json:"reason,omitempty"`
+	Suggestion    string `json:"suggestion,omitempty"`
+	ReviewCode    string `json:"review_code,omitempty"`
+	ReviewMessage string `json:"review_message,omitempty"`
 }
 
 type AskUserParams struct {
@@ -67,13 +69,15 @@ type AskUserParams struct {
 }
 
 type GuardConfirmParams struct {
-	ID         string         `json:"id"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
-	Tool       string         `json:"tool"`
-	Params     map[string]any `json:"params"`
-	Risk       string         `json:"risk"`
-	Reason     string         `json:"reason"`
-	Suggestion string         `json:"suggestion,omitempty"`
+	ID            string         `json:"id"`
+	ToolCallID    string         `json:"tool_call_id,omitempty"`
+	Tool          string         `json:"tool"`
+	Params        map[string]any `json:"params"`
+	Risk          string         `json:"risk"`
+	Reason        string         `json:"reason"`
+	Suggestion    string         `json:"suggestion,omitempty"`
+	ReviewCode    string         `json:"review_code,omitempty"`
+	ReviewMessage string         `json:"review_message,omitempty"`
 }
 
 type GuardReplyParams struct {
@@ -117,13 +121,14 @@ type ConfigParams struct {
 }
 
 type ConfigModel struct {
-	Provider      string         `json:"provider"`
-	Model         string         `json:"model"`
-	BaseURL       string         `json:"base_url,omitempty"`
-	ContextWindow int            `json:"context_window,omitempty"`
-	Strengths     []string       `json:"strengths,omitempty"`
-	Reasoning     map[string]any `json:"reasoning,omitempty"`
-	HasAPIKey     bool           `json:"has_api_key,omitempty"`
+	Provider        string         `json:"provider"`
+	Model           string         `json:"model"`
+	BaseURL         string         `json:"base_url,omitempty"`
+	ContextWindow   int            `json:"context_window,omitempty"`
+	MaxOutputTokens int            `json:"max_output_tokens,omitempty"`
+	Strengths       []string       `json:"strengths,omitempty"`
+	Reasoning       map[string]any `json:"reasoning,omitempty"`
+	HasAPIKey       bool           `json:"has_api_key,omitempty"`
 }
 
 type ConfigSetParams struct {

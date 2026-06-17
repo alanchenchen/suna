@@ -69,13 +69,13 @@ func (r *Router) ActiveRef() string {
 
 func (r *Router) ActiveContextWindow() int {
 	if r == nil {
-		return DefaultContextWindow
+		return 0
 	}
 	r.mu.RLock()
 	p := r.providers[r.activeRef]
 	r.mu.RUnlock()
 	if p == nil {
-		return DefaultContextWindow
+		return 0
 	}
 	return p.ContextWindow()
 }
@@ -96,6 +96,19 @@ func (r *Router) Complete(ctx context.Context, ref string, req *CompletionReques
 		return nil, err
 	}
 	return p.Complete(ctx, req)
+}
+
+func (r *Router) MaxOutputTokens(ref string) int {
+	if r == nil {
+		return 0
+	}
+	r.mu.RLock()
+	p := r.providers[ref]
+	r.mu.RUnlock()
+	if p == nil {
+		return 0
+	}
+	return p.MaxOutputTokens()
 }
 
 func (r *Router) Route(ctx context.Context, task string) (Provider, string, error) {
@@ -137,10 +150,10 @@ func createProvider(mc config.ModelConfig, resolver MediaResolver) (Provider, er
 	}
 	switch {
 	case mc.IsAnthropic():
-		return NewAnthropicProvider(apiKey, mc.BaseURL, mc.Model, mc.ContextWindow, resolver), nil
+		return NewAnthropicProvider(apiKey, mc.BaseURL, mc.Model, mc.ContextWindow, mc.MaxOutputTokens, resolver), nil
 	case mc.IsOpenAI():
-		return NewOpenAIResponsesProvider(apiKey, mc.BaseURL, mc.Model, mc.ContextWindow, resolver), nil
+		return NewOpenAIResponsesProvider(apiKey, mc.BaseURL, mc.Model, mc.ContextWindow, mc.MaxOutputTokens, resolver), nil
 	default:
-		return NewOpenAIChatProvider(apiKey, mc.BaseURL, mc.Model, mc.ContextWindow, resolver), nil
+		return NewOpenAIChatProvider(apiKey, mc.BaseURL, mc.Model, mc.ContextWindow, mc.MaxOutputTokens, resolver), nil
 	}
 }

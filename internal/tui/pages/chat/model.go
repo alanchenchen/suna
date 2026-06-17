@@ -54,13 +54,15 @@ type UserMessageContent struct {
 }
 
 type GuardConfirmView struct {
-	ID         string
-	ToolCallID string
-	Tool       string
-	Params     map[string]any
-	Risk       string
-	Reason     string
-	Suggestion string
+	ID            string
+	ToolCallID    string
+	Tool          string
+	Params        map[string]any
+	Risk          string
+	Reason        string
+	Suggestion    string
+	ReviewCode    string
+	ReviewMessage string
 }
 
 type Model struct {

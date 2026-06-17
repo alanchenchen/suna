@@ -15,13 +15,14 @@ import (
 )
 
 type OpenAIChatProvider struct {
-	client        openai.Client
-	model         string
-	contextWindow int
-	media         MediaResolver
+	client          openai.Client
+	model           string
+	contextWindow   int
+	maxOutputTokens int
+	media           MediaResolver
 }
 
-func NewOpenAIChatProvider(apiKey, baseURL, model string, contextWindow int, mediaResolver MediaResolver) *OpenAIChatProvider {
+func NewOpenAIChatProvider(apiKey, baseURL, model string, contextWindow, maxOutputTokens int, mediaResolver MediaResolver) *OpenAIChatProvider {
 	httpClient := compatibleHTTPClient(&http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}})
 	// 关闭 SDK 隐式重试，避免一次 Suna Complete 在上游产生多次不可见请求；
 	// 未来如需重试应由 Suna 自己实现并记录日志。
@@ -29,10 +30,15 @@ func NewOpenAIChatProvider(apiKey, baseURL, model string, contextWindow int, med
 	if baseURL != "" {
 		opts = append(opts, option.WithBaseURL(baseURL))
 	}
-	return &OpenAIChatProvider{client: openai.NewClient(opts...), model: model, contextWindow: contextWindow, media: mediaResolver}
+	return &OpenAIChatProvider{client: openai.NewClient(opts...), model: model, contextWindow: contextWindow, maxOutputTokens: maxOutputTokens, media: mediaResolver}
 }
 
 func (p *OpenAIChatProvider) Complete(ctx context.Context, req *CompletionRequest) (<-chan Chunk, error) {
+	if p.maxOutputTokens <= 0 {
+		return nil, fmt.Errorf("max_output_tokens is required for model %q", p.model)
+	}
+	maxTokens := p.resolveMaxTokens(req.MaxTokens)
+	req.MaxTokens = maxTokens
 	messages, err := p.buildMessages(ctx, req)
 	if err != nil {
 		return nil, err
@@ -40,7 +46,7 @@ func (p *OpenAIChatProvider) Complete(ctx context.Context, req *CompletionReques
 	params := openai.ChatCompletionNewParams{
 		Model:       openai.ChatModel(p.resolveModel(req.Model)),
 		Messages:    messages,
-		MaxTokens:   openai.Int(int64(p.resolveMaxTokens(req.MaxTokens))),
+		MaxTokens:   openai.Int(int64(maxTokens)),
 		Temperature: openai.Float(p.resolveTemperature(req.Temperature)),
 		StreamOptions: openai.ChatCompletionStreamOptionsParam{
 			IncludeUsage: openai.Bool(true),
@@ -167,11 +173,10 @@ func chatReasoningDetails(field interface{ Raw() string }) string {
 
 func (p *OpenAIChatProvider) EstimateTokens(text string) int { return len(text) / 4 }
 
-func (p *OpenAIChatProvider) ContextWindow() int {
-	if p.contextWindow > 0 {
-		return p.contextWindow
-	}
-	return DefaultContextWindow
+func (p *OpenAIChatProvider) ContextWindow() int { return p.contextWindow }
+
+func (p *OpenAIChatProvider) MaxOutputTokens() int {
+	return p.maxOutputTokens
 }
 
 func (p *OpenAIChatProvider) resolveModel(m string) string {
@@ -182,7 +187,10 @@ func (p *OpenAIChatProvider) resolveModel(m string) string {
 }
 
 func (p *OpenAIChatProvider) resolveMaxTokens(m int) int {
-	return ResolveMaxTokens(m)
+	if m > 0 && m < p.maxOutputTokens {
+		return m
+	}
+	return p.maxOutputTokens
 }
 
 func (p *OpenAIChatProvider) resolveTemperature(t float64) float64 {

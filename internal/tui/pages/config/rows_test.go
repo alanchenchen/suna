@@ -14,7 +14,7 @@ func TestModelRowsActiveModelUsesMarkerWithoutRepeatedActiveText(t *testing.T) {
 			}
 			return key
 		},
-		Models:   []ModelConfig{{Provider: "openai", Model: "gpt-4o", BaseURL: "https://example.test", HasAPIKey: true}},
+		Models:   []ModelConfig{{Provider: "openai", Model: "gpt-4o", BaseURL: "https://example.test", ContextWindow: 128000, MaxOutputTokens: 8192, HasAPIKey: true}},
 		IsActive: func(ref string) bool { return ref == "openai/gpt-4o" },
 		ModelSummary: func(ModelConfig) string {
 			return "openai · gpt-4o"

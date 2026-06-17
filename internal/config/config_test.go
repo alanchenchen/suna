@@ -76,8 +76,10 @@ func TestConfigReasoningRoundTripsInlineTable(t *testing.T) {
 	cfg := &Config{
 		ActiveModel: "openai/gpt-5",
 		Models: []ModelConfig{{
-			Provider: "openai",
-			Model:    "gpt-5",
+			Provider:        "openai",
+			Model:           "gpt-5",
+			ContextWindow:   128000,
+			MaxOutputTokens: 8192,
 			Reasoning: map[string]any{
 				"reasoning": map[string]any{"effort": "high"},
 			},
@@ -110,10 +112,12 @@ func TestConfigReasoningSavesInlineThinkingTable(t *testing.T) {
 	cfg := &Config{
 		ActiveModel: "DF/GLM-5.1",
 		Models: []ModelConfig{{
-			Provider:  "DF",
-			Model:     "GLM-5.1",
-			BaseURL:   "https://api.example.com/v1",
-			Strengths: []string{"文本模型", "coding"},
+			Provider:        "DF",
+			Model:           "GLM-5.1",
+			BaseURL:         "https://api.example.com/v1",
+			ContextWindow:   128000,
+			MaxOutputTokens: 8192,
+			Strengths:       []string{"文本模型", "coding"},
 			Reasoning: map[string]any{
 				"thinking": map[string]any{"type": "disabled"},
 			},
@@ -152,7 +156,7 @@ func TestConfigSaveWritesSkillsAsFlatObjectMap(t *testing.T) {
 	workspace := mkdir(t, filepath.Join(dir, "workspace"))
 	cfg := &Config{
 		ActiveModel: "test/model",
-		Models:      []ModelConfig{{Provider: "test", Model: "model"}},
+		Models:      []ModelConfig{{Provider: "test", Model: "model", ContextWindow: 128000, MaxOutputTokens: 8192}},
 		Guard:       GuardConfig{Mode: "ask", Workspace: workspace},
 		UI:          UIConfig{Theme: "auto", Locale: "en"},
 		Skills: map[string]skill.Record{
@@ -313,7 +317,7 @@ func newSaveTestConfig(t *testing.T, maxModelRPS int) (*Config, string, string) 
 	workspace := mkdir(t, filepath.Join(dir, "workspace"))
 	cfg := &Config{
 		ActiveModel: "test/model",
-		Models:      []ModelConfig{{Provider: "test", Model: "model"}},
+		Models:      []ModelConfig{{Provider: "test", Model: "model", ContextWindow: 128000, MaxOutputTokens: 8192}},
 		Guard:       GuardConfig{Mode: "ask", Workspace: workspace},
 		UI:          UIConfig{Theme: "auto", Locale: "en"},
 		MaxModelRPS: maxModelRPS,

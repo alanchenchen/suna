@@ -32,7 +32,7 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 	if req.Purpose == "" {
 		req.Purpose = "chat"
 	}
-	req.MaxTokens = model.ResolveMaxTokens(req.MaxTokens)
+	req.MaxTokens = r.resolveMaxTokens(req.ModelRef, req.MaxTokens)
 	turns := 0
 	toolCallsExecuted := 0
 
@@ -91,12 +91,12 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			completionReq.Messages = trimToolResultsForContext(messages)
 			if shouldCompactRequest(completionReq, contextWindow) {
 				estimated := estimateRequestTokens(completionReq)
-				safeLimit := int(float64(contextWindow) * contextSafetyThreshold)
-				logging.Error("memory", "session_compact_still_oversized", nil, logging.Event{"mode": "auto", "purpose": req.Purpose, "model": req.ModelID, "context_window": contextWindow, "request_tokens": estimated, "safe_limit": safeLimit, "compacted": needCompact})
+				inputLimit := usableInputBudget(contextWindow, completionReq.MaxTokens)
+				logging.Error("memory", "session_compact_still_oversized", nil, logging.Event{"mode": "auto", "purpose": req.Purpose, "model": req.ModelID, "context_window": contextWindow, "request_tokens": estimated, "input_limit": inputLimit, "compacted": needCompact})
 				if needCompact && r.Sink != nil {
 					r.Sink.Status(StatusEvent{Kind: StatusCompactError, Message: "automatic context compression could not reduce the request enough; try /compact manually, reduce the current input, or start a new session"})
 				}
-				return result, fmt.Errorf("context remains too large after compaction (%d tokens estimated, %d token safe limit); start a new session or reduce the current input", estimated, safeLimit)
+				return result, fmt.Errorf("context remains too large after compaction (%d tokens estimated, %d token input limit); start a new session or reduce the current input", estimated, inputLimit)
 			}
 		}
 
@@ -315,13 +315,24 @@ func cloneMessages(msgs []model.Message) []model.Message {
 	return cp
 }
 
+func (r *Runner) resolveMaxTokens(modelRef string, requested int) int {
+	if r.Router == nil {
+		return requested
+	}
+	maxOutput := r.Router.MaxOutputTokens(modelRef)
+	if requested > 0 && requested < maxOutput {
+		return requested
+	}
+	return maxOutput
+}
+
 func (r *Runner) contextWindow(modelRef string) int {
 	if r.Router == nil {
-		return model.DefaultContextWindow
+		return 0
 	}
 	p, err := r.Router.Provider(modelRef)
 	if err != nil || p == nil {
-		return model.DefaultContextWindow
+		return 0
 	}
 	return p.ContextWindow()
 }

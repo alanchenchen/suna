@@ -13,11 +13,13 @@ const (
 
 // GuardInfo 是工具调用的安全审核展示数据。
 type GuardInfo struct {
-	Risk       string
-	Decision   string
-	Source     string
-	Reason     string
-	Suggestion string
+	Risk          string
+	Decision      string
+	Source        string
+	Reason        string
+	Suggestion    string
+	ReviewCode    string
+	ReviewMessage string
 }
 
 // Entry 是 Chat transcript 中单个工具调用的展示模型。

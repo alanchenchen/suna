@@ -56,40 +56,30 @@ func (r Row) Selectable() bool {
 }
 
 type ProviderFormValues struct {
-	Provider      string
-	Model         string
-	APIKey        string
-	Endpoint      string
-	ContextWindow string
-	Strengths     string
+	Provider        string
+	Model           string
+	APIKey          string
+	Endpoint        string
+	ContextWindow   string
+	MaxOutputTokens string
+	Strengths       string
 }
 
 type ModelConfig struct {
-	Provider      string
-	Model         string
-	BaseURL       string
-	ContextWindow int
-	Strengths     []string
-	Reasoning     map[string]any
-	HasAPIKey     bool
+	Provider        string
+	Model           string
+	BaseURL         string
+	ContextWindow   int
+	MaxOutputTokens int
+	Strengths       []string
+	Reasoning       map[string]any
+	HasAPIKey       bool
 }
 
 func (m ModelConfig) Ref() string { return m.Provider + "/" + m.Model }
 
-func DefaultContextWindow(mc ModelConfig) int {
-	if mc.ContextWindow > 0 {
-		return mc.ContextWindow
-	}
-	switch mc.Provider {
-	case "anthropic":
-		return 200000
-	default:
-		return 128000
-	}
-}
-
 func ModelNeedsAttention(mc ModelConfig) bool {
-	return !mc.HasAPIKey || mc.Model == "" || mc.BaseURL == ""
+	return !mc.HasAPIKey || mc.Model == "" || mc.BaseURL == "" || mc.ContextWindow <= 0 || mc.MaxOutputTokens <= 0 || mc.MaxOutputTokens >= mc.ContextWindow
 }
 
 func ModelStatusMark(mc ModelConfig, active bool) string {
@@ -115,6 +105,9 @@ func ModelSummary(mc ModelConfig, active bool, fmtTok func(int) string) string {
 	parts = append(parts, mc.Provider, mc.Model)
 	if mc.ContextWindow > 0 {
 		parts = append(parts, "ctx "+fmtTok(mc.ContextWindow))
+	}
+	if mc.MaxOutputTokens > 0 {
+		parts = append(parts, "out "+fmtTok(mc.MaxOutputTokens))
 	}
 	if mc.BaseURL != "" {
 		parts = append(parts, "endpoint_configured")

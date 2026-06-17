@@ -52,4 +52,5 @@ func (workerTestProvider) Complete(context.Context, *model.CompletionRequest) (<
 
 func (workerTestProvider) EstimateTokens(string) int { return 0 }
 
-func (workerTestProvider) ContextWindow() int { return 128000 }
+func (workerTestProvider) ContextWindow() int   { return 128000 }
+func (workerTestProvider) MaxOutputTokens() int { return 8192 }

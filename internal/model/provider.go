@@ -152,6 +152,7 @@ type Provider interface {
 	Complete(ctx context.Context, req *CompletionRequest) (<-chan Chunk, error)
 	EstimateTokens(text string) int
 	ContextWindow() int
+	MaxOutputTokens() int
 }
 
 // ParseToolCallArguments 将模型返回的工具参数 JSON 解为 map；非法 JSON 会显式保留 raw 字段便于排错。

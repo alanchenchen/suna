@@ -7,7 +7,6 @@ import (
 
 	"github.com/alanchenchen/suna/internal/protocol"
 	tuievents "github.com/alanchenchen/suna/internal/tui/events"
-	tuiconfig "github.com/alanchenchen/suna/internal/tui/pages/config"
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 )
 
@@ -153,7 +152,7 @@ func (t *TUI) handleAskUserNotification(p protocol.AskUserParams) {
 }
 
 func (t *TUI) handleGuardConfirmNotification(p protocol.GuardConfirmParams) {
-	t.enqueueGuardConfirm(&guardConfirmView{ID: p.ID, ToolCallID: p.ToolCallID, Tool: p.Tool, Params: p.Params, Risk: p.Risk, Reason: p.Reason, Suggestion: p.Suggestion})
+	t.enqueueGuardConfirm(&guardConfirmView{ID: p.ID, ToolCallID: p.ToolCallID, Tool: p.Tool, Params: p.Params, Risk: p.Risk, Reason: p.Reason, Suggestion: p.Suggestion, ReviewCode: p.ReviewCode, ReviewMessage: p.ReviewMessage})
 }
 
 func (t *TUI) handleToolStartNotification(p protocol.ToolStartParams) {
@@ -283,7 +282,7 @@ func (t *TUI) handleConfigStateNotification(p protocol.ConfigParams) {
 		if mc, ok := t.activeConfigModel(); ok {
 			t.providerName = mc.Provider
 			t.modelName = mc.Model
-			t.contextWindow = tuiconfig.DefaultContextWindow(mc)
+			t.contextWindow = mc.ContextWindow
 		}
 	}
 	if t.config.SetupMode && len(t.configState.Models) > 0 {

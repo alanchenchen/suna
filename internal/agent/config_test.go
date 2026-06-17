@@ -117,11 +117,11 @@ func newAgentConfig(dir string, models []config.ModelConfig, activeModel string)
 }
 
 func openAIModel(name string) config.ModelConfig {
-	return config.ModelConfig{Provider: "openai", Model: name, BaseURL: "https://api.openai.com/v1"}
+	return config.ModelConfig{Provider: "openai", Model: name, BaseURL: "https://api.openai.com/v1", ContextWindow: 128000, MaxOutputTokens: 8192}
 }
 
 func anthropicModel(name string) config.ModelConfig {
-	return config.ModelConfig{Provider: "anthropic", Model: name, BaseURL: "https://api.anthropic.com"}
+	return config.ModelConfig{Provider: "anthropic", Model: name, BaseURL: "https://api.anthropic.com", ContextWindow: 200000, MaxOutputTokens: 8192}
 }
 
 func mustSaveCredential(t *testing.T, dir, provider, key string) {
@@ -133,7 +133,7 @@ func mustSaveCredential(t *testing.T, dir, provider, key string) {
 
 func loadModelCredential(t *testing.T, dir, provider, modelName string) string {
 	t.Helper()
-	loaded := &config.Config{Models: []config.ModelConfig{{Provider: provider, Model: modelName}}, DataDir: dir}
+	loaded := &config.Config{Models: []config.ModelConfig{{Provider: provider, Model: modelName, ContextWindow: 128000, MaxOutputTokens: 8192}}, DataDir: dir}
 	if err := config.LoadCredentials(loaded); err != nil {
 		t.Fatalf("LoadCredentials() error = %v", err)
 	}
@@ -164,4 +164,5 @@ func (fakeProvider) Complete(context.Context, *model.CompletionRequest) (<-chan 
 
 func (fakeProvider) EstimateTokens(string) int { return 0 }
 
-func (fakeProvider) ContextWindow() int { return 128000 }
+func (fakeProvider) ContextWindow() int   { return 128000 }
+func (fakeProvider) MaxOutputTokens() int { return 8192 }

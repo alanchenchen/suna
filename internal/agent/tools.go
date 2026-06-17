@@ -101,7 +101,7 @@ func (a *Agent) emitToolGuard(events chan<- Event, id string, name string, resul
 		return
 	}
 	// Guard 决策是工具执行前的安全来源，单独发事件，避免混入工具执行结果 metadata。
-	events <- Event{Type: EventToolGuard, GuardToolCallID: id, GuardTool: name, GuardRisk: guard.RiskString(result.Risk), GuardDecision: string(result.Decision), GuardSource: result.Source, GuardReason: result.Reason, GuardSuggestion: result.Suggestion}
+	events <- Event{Type: EventToolGuard, GuardToolCallID: id, GuardTool: name, GuardRisk: guard.RiskString(result.Risk), GuardDecision: string(result.Decision), GuardSource: result.Source, GuardReason: result.Reason, GuardSuggestion: result.Suggestion, GuardReviewCode: result.ReviewCode, GuardReviewMsg: result.ReviewMessage}
 }
 
 func (a *Agent) confirmGuard(ctx context.Context, id string, name string, params map[string]any, result *guard.GuardResult, events chan<- Event) bool {
@@ -109,7 +109,7 @@ func (a *Agent) confirmGuard(ctx context.Context, id string, name string, params
 		return false
 	}
 	replyCh := make(chan string, 1)
-	events <- Event{Type: EventGuardConfirm, GuardToolCallID: id, GuardTool: name, GuardParams: params, GuardRisk: guard.RiskString(result.Risk), GuardReason: result.Reason, GuardSuggestion: result.Suggestion, Reply: replyCh}
+	events <- Event{Type: EventGuardConfirm, GuardToolCallID: id, GuardTool: name, GuardParams: params, GuardRisk: guard.RiskString(result.Risk), GuardReason: result.Reason, GuardSuggestion: result.Suggestion, GuardReviewCode: result.ReviewCode, GuardReviewMsg: result.ReviewMessage, Reply: replyCh}
 	select {
 	case <-ctx.Done():
 		return false
@@ -611,7 +611,7 @@ func (a *Agent) guardLLMReview(ctx context.Context, req guard.ReviewRequest) (st
 	}
 	modelRef := a.router.ActiveRef()
 	modelID := resolveModelID(a.cfg, modelRef)
-	request := &model.CompletionRequest{Model: modelID, Purpose: "guard_review", RequestID: uuid.New().String(), System: "Reply with JSON only.", Messages: []model.Message{model.NewTextMessage(model.RoleUser, reviewPrompt)}, MaxTokens: 180, Temperature: 0}
+	request := &model.CompletionRequest{Model: modelID, Purpose: "guard_review", RequestID: uuid.New().String(), System: "Reply with JSON only.", Messages: []model.Message{model.NewTextMessage(model.RoleUser, reviewPrompt)}, Temperature: 0}
 	ch, err := a.router.Complete(ctx, modelRef, request)
 	if err != nil {
 		return "", err

@@ -370,6 +370,7 @@ func (t *TUI) renderGuardOverlay(width int) string {
 		Title:      t.tr("tui.guard.title"),
 		Tool:       t.tr("tui.guard.tool"),
 		Risk:       t.tr("tui.guard.risk"),
+		Review:     t.tr("tui.guard.review"),
 		Reason:     t.tr("tui.guard.reason"),
 		Suggestion: t.tr("tui.guard.suggestion"),
 		Params:     t.tr("tui.tool.params"),
@@ -407,7 +408,22 @@ func (t *TUI) guardOverlayBodyLines(view chatpage.GuardOverlayView) []string {
 		return nil
 	}
 	var body []string
+	if strings.TrimSpace(g.ReviewCode) != "" || strings.TrimSpace(g.ReviewMessage) != "" {
+		body = append(body, styleDim.Render(view.Labels.Review))
+		review := strings.TrimSpace(g.ReviewMessage)
+		if code := strings.TrimSpace(g.ReviewCode); code != "" {
+			if review != "" {
+				review += " (" + code + ")"
+			} else {
+				review = code
+			}
+		}
+		body = append(body, splitWrapped(review, view.Inner, 0)...)
+	}
 	if strings.TrimSpace(g.Reason) != "" {
+		if len(body) > 0 {
+			body = append(body, "")
+		}
 		body = append(body, styleDim.Render(view.Labels.Reason))
 		body = append(body, splitWrapped(g.Reason, view.Inner, 0)...)
 	}

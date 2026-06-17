@@ -7,7 +7,7 @@ import (
 )
 
 func TestOpenAIChatBuildMessagesIncludesSessionStateBeforeHistory(t *testing.T) {
-	p := NewOpenAIChatProvider("test-key", "", "gpt-test", 0, nil)
+	p := NewOpenAIChatProvider("test-key", "", "gpt-test", 128000, 8192, nil)
 	req := &CompletionRequest{
 		System:       "system prompt",
 		SessionState: "早期决策：保持独立字段。",
@@ -39,7 +39,7 @@ func TestOpenAIChatBuildMessagesIncludesSessionStateBeforeHistory(t *testing.T) 
 }
 
 func TestOpenAIResponsesBuildInputIncludesSessionStateBeforeHistory(t *testing.T) {
-	p := NewOpenAIResponsesProvider("test-key", "", "gpt-test", 0, nil)
+	p := NewOpenAIResponsesProvider("test-key", "", "gpt-test", 128000, 8192, nil)
 	req := &CompletionRequest{
 		SessionState: "早期事实：已经完成 compact。",
 		Messages:     []Message{NewTextMessage(RoleUser, "继续")},
@@ -62,7 +62,7 @@ func TestOpenAIResponsesBuildInputIncludesSessionStateBeforeHistory(t *testing.T
 }
 
 func TestAnthropicBuildMessagesIncludesSessionStateBeforeHistory(t *testing.T) {
-	p := NewAnthropicProvider("test-key", "", "claude-test", 0, nil)
+	p := NewAnthropicProvider("test-key", "", "claude-test", 128000, 8192, nil)
 	req := &CompletionRequest{
 		SessionState: "早期约束：不要污染 WorkingMemory。",
 		Messages:     []Message{NewTextMessage(RoleUser, "继续")},

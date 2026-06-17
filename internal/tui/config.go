@@ -229,7 +229,11 @@ func (t *TUI) displayEndpoint(endpoint string) string {
 }
 
 func contextDisplay(mc tuiconfig.ModelConfig) string {
-	return fmtTok(tuiconfig.DefaultContextWindow(mc))
+	return fmtTok(mc.ContextWindow)
+}
+
+func maxOutputDisplay(mc tuiconfig.ModelConfig) string {
+	return fmtTok(mc.MaxOutputTokens)
 }
 
 func (t *TUI) modelNeedsAttention(mc tuiconfig.ModelConfig) bool {
@@ -289,6 +293,7 @@ func (t *TUI) configRowsDeps() tuiconfig.RowsDeps {
 		ConfigDir:        configDataDir(),
 		DisplayEndpoint:  t.displayEndpoint,
 		ContextDisplay:   contextDisplay,
+		MaxOutputDisplay: maxOutputDisplay,
 		ReasoningDisplay: t.reasoningDisplay,
 	}
 }
@@ -388,7 +393,7 @@ func (t *TUI) setActiveModelRef(ref string) {
 	if mc, ok := t.modelByRef(ref); ok {
 		t.providerName = mc.Provider
 		t.modelName = mc.Model
-		t.contextWindow = tuiconfig.DefaultContextWindow(mc)
+		t.contextWindow = mc.ContextWindow
 	}
 }
 func (t *TUI) sendConfigSet(params protocol.ConfigSetParams) tea.Cmd {

@@ -68,7 +68,7 @@ func (m *Model) StartTool(p protocol.ToolStartParams, id string, now time.Time) 
 
 func (m *Model) ApplyToolGuard(p protocol.ToolGuardParams) {
 	if te := m.FindTool(p.ToolCallID); te != nil {
-		te.Guard = &toolview.GuardInfo{Risk: p.Risk, Decision: p.Decision, Source: p.Source, Reason: p.Reason, Suggestion: p.Suggestion}
+		te.Guard = &toolview.GuardInfo{Risk: p.Risk, Decision: p.Decision, Source: p.Source, Reason: p.Reason, Suggestion: p.Suggestion, ReviewCode: p.ReviewCode, ReviewMessage: p.ReviewMessage}
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 )
 
 func TestAnthropicBuildMessagesGroupsConsecutiveToolResults(t *testing.T) {
-	p := NewAnthropicProvider("test-key", "", "claude-test", 0, nil)
+	p := NewAnthropicProvider("test-key", "", "claude-test", 128000, 8192, nil)
 	req := &CompletionRequest{Messages: []Message{
 		{
 			Role:        RoleAssistant,
@@ -105,7 +105,7 @@ func TestAnthropicUsageIncludesCacheTokensInInputTotal(t *testing.T) {
 }
 
 func TestAnthropicBuildAssistantToolUseInputIsObject(t *testing.T) {
-	p := NewAnthropicProvider("test-key", "", "claude-test", 0, nil)
+	p := NewAnthropicProvider("test-key", "", "claude-test", 128000, 8192, nil)
 	blocks, err := p.buildAssistantBlocks(context.Background(), Message{
 		Role: RoleAssistant,
 		ToolCalls: []ToolCall{

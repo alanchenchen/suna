@@ -15,13 +15,14 @@ import (
 )
 
 type AnthropicProvider struct {
-	client        *anthropic.Client
-	model         string
-	contextWindow int
-	media         MediaResolver
+	client          *anthropic.Client
+	model           string
+	contextWindow   int
+	maxOutputTokens int
+	media           MediaResolver
 }
 
-func NewAnthropicProvider(apiKey, baseURL, model string, contextWindow int, mediaResolver MediaResolver) *AnthropicProvider {
+func NewAnthropicProvider(apiKey, baseURL, model string, contextWindow, maxOutputTokens int, mediaResolver MediaResolver) *AnthropicProvider {
 	httpClient := compatibleHTTPClient(&http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}})
 	// 关闭 SDK 隐式重试，避免一次 Suna Complete 在上游产生多次不可见请求；
 	// 未来如需重试应由 Suna 自己实现并记录日志。
@@ -31,14 +32,20 @@ func NewAnthropicProvider(apiKey, baseURL, model string, contextWindow int, medi
 	}
 	client := anthropic.NewClient(opts...)
 	return &AnthropicProvider{
-		client:        &client,
-		model:         model,
-		contextWindow: contextWindow,
-		media:         mediaResolver,
+		client:          &client,
+		model:           model,
+		contextWindow:   contextWindow,
+		maxOutputTokens: maxOutputTokens,
+		media:           mediaResolver,
 	}
 }
 
 func (p *AnthropicProvider) Complete(ctx context.Context, req *CompletionRequest) (<-chan Chunk, error) {
+	if p.maxOutputTokens <= 0 {
+		return nil, fmt.Errorf("max_output_tokens is required for model %q", p.model)
+	}
+	maxTokens := p.resolveMaxTokens(req.MaxTokens)
+	req.MaxTokens = maxTokens
 	messages, buildErr := p.buildMessages(ctx, req)
 	if buildErr != nil {
 		return nil, buildErr
@@ -49,8 +56,6 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req *CompletionRequest
 	if req.Model != "" {
 		modelName = req.Model
 	}
-	maxTokens := ResolveMaxTokens(req.MaxTokens)
-
 	params := anthropic.MessageNewParams{
 		Model:     modelName,
 		MaxTokens: int64(maxTokens),
@@ -311,11 +316,17 @@ func (p *AnthropicProvider) EstimateTokens(text string) int {
 	return len(text) / 4
 }
 
-func (p *AnthropicProvider) ContextWindow() int {
-	if p.contextWindow > 0 {
-		return p.contextWindow
+func (p *AnthropicProvider) ContextWindow() int { return p.contextWindow }
+
+func (p *AnthropicProvider) MaxOutputTokens() int {
+	return p.maxOutputTokens
+}
+
+func (p *AnthropicProvider) resolveMaxTokens(m int) int {
+	if m > 0 && m < p.maxOutputTokens {
+		return m
 	}
-	return DefaultContextWindow
+	return p.maxOutputTokens
 }
 
 func (p *AnthropicProvider) buildMessages(ctx context.Context, req *CompletionRequest) ([]anthropic.MessageParam, error) {

@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const ProviderFormFieldCount = 6
+const ProviderFormFieldCount = 7
 
 type ProviderFormSpec struct {
 	Labels       []string
@@ -17,13 +17,14 @@ type ProviderFormSpec struct {
 }
 
 type ProviderFormLabels struct {
-	Provider      string
-	Model         string
-	APIKey        string
-	Endpoint      string
-	ContextWindow string
-	Strengths     string
-	StrengthsHint string
+	Provider        string
+	Model           string
+	APIKey          string
+	Endpoint        string
+	ContextWindow   string
+	MaxOutputTokens string
+	Strengths       string
+	StrengthsHint   string
 }
 
 func (m *Model) OpenProviderForm(ref string, mc *ModelConfig) {
@@ -37,9 +38,9 @@ func (m *Model) OpenProviderForm(ref string, mc *ModelConfig) {
 }
 
 func (m *Model) ProviderFormSpec(labels ProviderFormLabels, mc *ModelConfig) ProviderFormSpec {
-	fieldLabels := []string{labels.Provider, labels.Model, labels.APIKey, labels.Endpoint, labels.ContextWindow, labels.Strengths}
-	placeholders := []string{"Zhipu", "glm-5.1", "sk-...", "https://api.example.com/v1", "128000", labels.StrengthsHint}
-	values := []string{"", "", "", "", "", ""}
+	fieldLabels := []string{labels.Provider, labels.Model, labels.APIKey, labels.Endpoint, labels.ContextWindow, labels.MaxOutputTokens, labels.Strengths}
+	placeholders := []string{"Zhipu", "glm-5.1", "sk-...", "https://api.example.com/v1", "128000", "8192", labels.StrengthsHint}
+	values := []string{"", "", "", "", "", "", ""}
 	if mc != nil {
 		values[0] = mc.Provider
 		values[1] = mc.Model
@@ -47,7 +48,10 @@ func (m *Model) ProviderFormSpec(labels ProviderFormLabels, mc *ModelConfig) Pro
 		if mc.ContextWindow > 0 {
 			values[4] = strconv.Itoa(mc.ContextWindow)
 		}
-		values[5] = strings.Join(mc.Strengths, ", ")
+		if mc.MaxOutputTokens > 0 {
+			values[5] = strconv.Itoa(mc.MaxOutputTokens)
+		}
+		values[6] = strings.Join(mc.Strengths, ", ")
 	} else {
 		switch m.ProviderKind {
 		case "openai":
@@ -59,6 +63,7 @@ func (m *Model) ProviderFormSpec(labels ProviderFormLabels, mc *ModelConfig) Pro
 			values[3] = "https://api.anthropic.com"
 			placeholders[1] = "claude-sonnet-4-20250514"
 			placeholders[4] = "200000"
+			placeholders[5] = "8192"
 		}
 	}
 	return ProviderFormSpec{Labels: fieldLabels, Placeholders: placeholders, Values: values, PasswordAt: 2}
@@ -71,15 +76,16 @@ func ProviderFormValuesFromStrings(values []string) ProviderFormValues {
 			vals[i] = strings.TrimSpace(values[i])
 		}
 	}
-	return ProviderFormValues{Provider: vals[0], Model: vals[1], APIKey: vals[2], Endpoint: vals[3], ContextWindow: vals[4], Strengths: vals[5]}
+	return ProviderFormValues{Provider: vals[0], Model: vals[1], APIKey: vals[2], Endpoint: vals[3], ContextWindow: vals[4], MaxOutputTokens: vals[5], Strengths: vals[6]}
 }
 
 type ProviderValidationLabels struct {
-	Required             string
-	APIKeyRequired       string
-	EndpointRequired     string
-	InvalidEndpoint      string
-	InvalidContextWindow string
+	Required               string
+	APIKeyRequired         string
+	EndpointRequired       string
+	InvalidEndpoint        string
+	InvalidContextWindow   string
+	InvalidMaxOutputTokens string
 }
 
 func ValidateProviderForm(v ProviderFormValues, setupMode bool, labels ProviderValidationLabels) error {
@@ -96,11 +102,13 @@ func ValidateProviderForm(v ProviderFormValues, setupMode bool, labels ProviderV
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return fmt.Errorf("%s", labels.InvalidEndpoint)
 	}
-	if v.ContextWindow != "" {
-		ctx, err := strconv.Atoi(v.ContextWindow)
-		if err != nil || ctx <= 0 {
-			return fmt.Errorf("%s", labels.InvalidContextWindow)
-		}
+	ctx, err := strconv.Atoi(v.ContextWindow)
+	if err != nil || ctx <= 0 {
+		return fmt.Errorf("%s", labels.InvalidContextWindow)
+	}
+	out, err := strconv.Atoi(v.MaxOutputTokens)
+	if err != nil || out <= 0 || out >= ctx {
+		return fmt.Errorf("%s", labels.InvalidMaxOutputTokens)
 	}
 	return nil
 }

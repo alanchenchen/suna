@@ -201,12 +201,13 @@ func (m *Model) BuildReasoningSave(mc ModelConfig, reasoning map[string]any) pro
 		Action:   protocol.ConfigActionUpsertModel,
 		ModelRef: mc.Ref(),
 		Model: protocol.ConfigModel{
-			Provider:      mc.Provider,
-			Model:         mc.Model,
-			BaseURL:       mc.BaseURL,
-			ContextWindow: mc.ContextWindow,
-			Strengths:     mc.Strengths,
-			Reasoning:     reasoning,
+			Provider:        mc.Provider,
+			Model:           mc.Model,
+			BaseURL:         mc.BaseURL,
+			ContextWindow:   mc.ContextWindow,
+			MaxOutputTokens: mc.MaxOutputTokens,
+			Strengths:       mc.Strengths,
+			Reasoning:       reasoning,
 		},
 	}
 }

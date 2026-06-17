@@ -12,7 +12,7 @@ import (
 	"github.com/alanchenchen/suna/internal/model"
 )
 
-const contextSafetyThreshold = 0.8
+const minContextMarginTokens = 2048
 
 func (r *Runner) Compact(ctx context.Context, working *memory.WorkingMemory, sessionState string, contextWindow int) (before, after, turnsCompressed, truncated int, newSessionState string, err error) {
 	if r.Compressor == nil || working == nil {
@@ -69,17 +69,23 @@ func shouldCompactRequest(req *model.CompletionRequest, contextWindow int) bool 
 	if req == nil || contextWindow <= 0 {
 		return false
 	}
-	return estimateRequestTokens(req) > int(float64(contextWindow)*contextSafetyThreshold)
+	return estimateInputTokens(req) > usableInputBudget(contextWindow, req.MaxTokens)
 }
 
 func estimateRequestTokens(req *model.CompletionRequest) int {
 	if req == nil {
 		return 0
 	}
+	return estimateInputTokens(req) + req.MaxTokens
+}
+
+func estimateInputTokens(req *model.CompletionRequest) int {
+	if req == nil {
+		return 0
+	}
 	total := model.EstimateTokens(req.System)
 	total += model.EstimateTokens(model.FormatSessionStateForModel(req.SessionState))
 	total += model.EstimateMessagesTokens(req.Messages)
-	total += req.MaxTokens
 	if len(req.Tools) > 0 {
 		if data, err := json.Marshal(req.Tools); err == nil {
 			total += model.EstimateTokens(string(data))
@@ -88,17 +94,33 @@ func estimateRequestTokens(req *model.CompletionRequest) int {
 	return total
 }
 
+func usableInputBudget(contextWindow, outputBudget int) int {
+	budget := contextWindow - outputBudget - contextMargin(contextWindow)
+	if budget < 1 {
+		return 1
+	}
+	return budget
+}
+
+func contextMargin(contextWindow int) int {
+	margin := contextWindow / 200
+	if margin < minContextMarginTokens {
+		return minContextMarginTokens
+	}
+	return margin
+}
+
 func compactRecentBudget(req *model.CompletionRequest, contextWindow int) int {
 	if req == nil || contextWindow <= 0 {
 		return 0
 	}
-	fixed := model.EstimateTokens(req.System) + req.MaxTokens + memory.SessionStateTokenBudget(contextWindow)
+	fixed := model.EstimateTokens(req.System) + memory.SessionStateTokenBudget(contextWindow)
 	if len(req.Tools) > 0 {
 		if data, err := json.Marshal(req.Tools); err == nil {
 			fixed += model.EstimateTokens(string(data))
 		}
 	}
-	budget := int(float64(contextWindow)*contextSafetyThreshold) - fixed
+	budget := usableInputBudget(contextWindow, req.MaxTokens) - fixed
 	if budget < 1 {
 		return 1
 	}

@@ -20,6 +20,7 @@ type RowsDeps struct {
 	ConfigDir        string
 	DisplayEndpoint  func(string) string
 	ContextDisplay   func(ModelConfig) string
+	MaxOutputDisplay func(ModelConfig) string
 	ReasoningDisplay func(ModelConfig) string
 }
 
@@ -116,6 +117,7 @@ func (m *Model) DetailRows(deps RowsDeps) []Row {
 		{"info", "", deps.Tr("tui.config.provider.api_key"), apiKey},
 		{"info", "", deps.Tr("tui.config.provider.model"), ModelStatusMark(mc, deps.IsActive != nil && deps.IsActive(mc.Ref())) + " " + mc.Model},
 		{"info", "", deps.Tr("tui.config.provider.context_window"), deps.ContextDisplay(mc)},
+		{"info", "", deps.Tr("tui.config.provider.max_output_tokens"), deps.MaxOutputDisplay(mc)},
 		{"info", "", deps.Tr("tui.config.reasoning"), deps.ReasoningDisplay(mc)},
 		{"info", "", "", ""},
 		{"edit_model", "", "  " + deps.Tr("tui.config.edit_model"), ""},

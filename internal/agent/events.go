@@ -61,6 +61,8 @@ type Event struct {
 	GuardSource     string
 	GuardReason     string
 	GuardSuggestion string
+	GuardReviewCode string
+	GuardReviewMsg  string
 
 	InputTokens   int
 	OutputTokens  int

@@ -13,12 +13,13 @@ func (m Model) BuildProviderSave(v ProviderFormValues, existingReasoning map[str
 		ModelRef: m.EditingName,
 		APIKey:   v.APIKey,
 		Model: protocol.ConfigModel{
-			Provider:      v.Provider,
-			Model:         v.Model,
-			BaseURL:       v.Endpoint,
-			ContextWindow: ParsePositiveInt(v.ContextWindow),
-			Strengths:     SplitCSV(v.Strengths),
-			Reasoning:     existingReasoning,
+			Provider:        v.Provider,
+			Model:           v.Model,
+			BaseURL:         v.Endpoint,
+			ContextWindow:   ParsePositiveInt(v.ContextWindow),
+			MaxOutputTokens: ParsePositiveInt(v.MaxOutputTokens),
+			Strengths:       SplitCSV(v.Strengths),
+			Reasoning:       existingReasoning,
 		},
 	}
 	if m.SetupMode {

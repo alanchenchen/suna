@@ -78,10 +78,10 @@ suna help            # 查看帮助
    - **OpenAI**：OpenAI Responses 协议。
    - **Anthropic**：Anthropic Messages 协议。
    - **OpenAI Compatible**：兼容 OpenAI Chat Completions 的第三方服务或网关。
-5. 填写模型名、Endpoint、API Key、上下文窗口和能力标签。
+5. 填写模型名、Endpoint、API Key、`context_window`、`max_output_tokens` 和能力标签。
 6. 激活模型后回到 Welcome / New Conversation 开始对话。
 
-常用设置都可以在 TUI 中通过 `/config` 修改，不必手动编辑配置文件。
+常用设置都可以在 TUI 中通过 `/config` 修改，不必手动编辑配置文件。`context_window` 和 `max_output_tokens` 是模型能力参数，必须按当前模型服务实际限制填写。
 
 ## 可以直接让 Suna 做什么
 

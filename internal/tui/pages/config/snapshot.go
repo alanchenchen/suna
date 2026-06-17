@@ -7,13 +7,14 @@ func SnapshotFromProtocol(p protocol.ConfigParams) []ModelConfig {
 	models := make([]ModelConfig, 0, len(p.Models))
 	for _, cm := range p.Models {
 		models = append(models, ModelConfig{
-			Provider:      cm.Provider,
-			Model:         cm.Model,
-			BaseURL:       cm.BaseURL,
-			ContextWindow: cm.ContextWindow,
-			Strengths:     cm.Strengths,
-			Reasoning:     cm.Reasoning,
-			HasAPIKey:     cm.HasAPIKey,
+			Provider:        cm.Provider,
+			Model:           cm.Model,
+			BaseURL:         cm.BaseURL,
+			ContextWindow:   cm.ContextWindow,
+			MaxOutputTokens: cm.MaxOutputTokens,
+			Strengths:       cm.Strengths,
+			Reasoning:       cm.Reasoning,
+			HasAPIKey:       cm.HasAPIKey,
 		})
 	}
 	return models

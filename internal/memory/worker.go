@@ -26,9 +26,8 @@ type Worker struct {
 }
 
 const (
-	batchSize              = 5
-	batchTimeout           = 60 * time.Second
-	memoryCompactMaxTokens = 1536
+	batchSize    = 5
+	batchTimeout = 60 * time.Second
 )
 
 func NewWorker(queue *ExtractQueue, memories *MemoryStore, db *sql.DB, provider model.Provider) *Worker {
@@ -122,10 +121,10 @@ func (w *Worker) processPending() {
 		return
 	}
 	requestID := uuid.New().String()
-	logging.Info("memory", "compaction_start", logging.Event{"request_id": requestID, "queue_events": len(items), "queue_ids": compactQueueIDs(items), "attempts": compactAttempts(items), "significance": compactSignificance(items), "active_memories_before": len(current), "max_tokens": memoryCompactMaxTokens})
+	logging.Info("memory", "compaction_start", logging.Event{"request_id": requestID, "queue_events": len(items), "queue_ids": compactQueueIDs(items), "attempts": compactAttempts(items), "significance": compactSignificance(items), "active_memories_before": len(current)})
 	newList, err := w.compact(ctx, provider, current, items, requestID)
 	if err != nil {
-		logging.Error("memory", "compaction_failed", err, logging.Event{"request_id": requestID, "queue_events": len(items), "queue_ids": compactQueueIDs(items), "attempts": compactAttempts(items), "significance": compactSignificance(items), "active_memories_before": len(current), "max_tokens": memoryCompactMaxTokens, "will_retry": true})
+		logging.Error("memory", "compaction_failed", err, logging.Event{"request_id": requestID, "queue_events": len(items), "queue_ids": compactQueueIDs(items), "attempts": compactAttempts(items), "significance": compactSignificance(items), "active_memories_before": len(current), "will_retry": true})
 		_ = RetryQueueItems(context.Background(), w.db, ids, err)
 		return
 	}
@@ -162,7 +161,7 @@ func (w *Worker) compact(ctx context.Context, provider model.Provider, current [
 	systemPrompt := w.renderCompactionPrompt(current, items)
 	// 记忆整理是异步 LLM 调用，一次处理多条 queue event，并要求模型返回完整的新列表。
 	// 主请求链路不会等待这个调用，因此不会影响用户看到回复的延迟。
-	ch, err := provider.Complete(ctx, &model.CompletionRequest{Purpose: "memory_compact", RequestID: requestID, System: systemPrompt, Messages: []model.Message{model.NewTextMessage(model.RoleUser, "Return the new user profile memory JSON now.")}, MaxTokens: memoryCompactMaxTokens})
+	ch, err := provider.Complete(ctx, &model.CompletionRequest{Purpose: "memory_compact", RequestID: requestID, System: systemPrompt, Messages: []model.Message{model.NewTextMessage(model.RoleUser, "Return the new user profile memory JSON now.")}})
 	if err != nil {
 		return nil, err
 	}

@@ -4,6 +4,7 @@ type GuardOverlayLabels struct {
 	Title      string
 	Tool       string
 	Risk       string
+	Review     string
 	Reason     string
 	Suggestion string
 	Params     string

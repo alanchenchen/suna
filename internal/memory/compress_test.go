@@ -23,6 +23,7 @@ func (p *captureCompressProvider) Complete(ctx context.Context, req *model.Compl
 }
 func (p *captureCompressProvider) EstimateTokens(text string) int { return len(text) / 4 }
 func (p *captureCompressProvider) ContextWindow() int             { return 100000 }
+func (p *captureCompressProvider) MaxOutputTokens() int           { return 8192 }
 
 func TestCompressHistoryBuildsSessionState(t *testing.T) {
 	provider := &captureCompressProvider{text: "# Session State\n\n## Active context\n- continue task"}
@@ -94,7 +95,7 @@ func TestChooseRecentKeepUsesTokenBudget(t *testing.T) {
 		model.NewTextMessage(model.RoleAssistant, strings.Repeat("很长的回复", 200)),
 		model.NewTextMessage(model.RoleUser, strings.Repeat("最新请求", 200)),
 	}
-	keep := chooseRecentKeep(messages, 12000)
+	keep := chooseRecentKeepWithBudget(messages, 12000, 500)
 	if keep != 1 {
 		t.Fatalf("keep = %d, want 1 for tight budget", keep)
 	}
