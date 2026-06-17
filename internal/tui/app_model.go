@@ -78,6 +78,7 @@ type TUI struct {
 	hasUsage         bool
 	contextTokens    int
 	contextWindow    int
+	lastTextStreamAt time.Time
 }
 
 type guardConfirmView = chatpage.GuardConfirmView

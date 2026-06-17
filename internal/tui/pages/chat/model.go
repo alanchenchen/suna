@@ -41,6 +41,7 @@ type MsgRenderCache struct {
 	ContentHash uint64
 	LineCount   int
 	Output      string
+	Mode        string
 
 	// 流式文本只会追加。这里缓存已换行的行，避免每个 delta 都重新 wrap 完整回复。
 	StreamLines           []string

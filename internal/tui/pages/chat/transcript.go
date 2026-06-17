@@ -23,6 +23,7 @@ type TranscriptDeps struct {
 	MarkdownWidth int
 	Theme         string
 	RenderAll     bool
+	ReasoningMode string
 
 	SunaLabel     string
 	AskHelp       string
@@ -170,8 +171,14 @@ func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptB
 			nav = ResponseNavInfo{StartLine: startLine, LineCount: maxInt(0, endLine-startLine), MsgIndex: i, Streaming: msg.Streaming}
 		case "reasoning":
 			renderSunaHeader()
+			startLine := lineCount
 			if deps.RenderReasoning != nil {
-				addBlock(i, msg.Streaming, deps.RenderReasoning(msg))
+				// 思考链展开时可能很长；离屏时只复用行数，避免滚动历史后仍反复渲染不可见内容。
+				if cachedLines, ok := m.cachedRenderedBlockLines(msg, deps.Width, deps.Theme, deps.ReasoningMode); ok && !deps.RenderAll && !m.shouldRenderBlockText(startLine, cachedLines) {
+					addBlockWithLineCount(i, msg.Streaming, "", cachedLines)
+				} else {
+					addBlock(i, msg.Streaming, deps.RenderReasoning(msg))
+				}
 			}
 		case "tool":
 			if v, ok := msg.Content.(*toolview.Block); ok {
@@ -268,6 +275,16 @@ func (m Model) cachedAssistantBlockLines(msg *Msg, deps TranscriptDeps) (int, bo
 	return msg.Render.LineCount + 1, true
 }
 
+func (m Model) cachedRenderedBlockLines(msg *Msg, width int, theme string, mode string) (int, bool) {
+	if msg == nil || msg.Streaming || msg.Render.LineCount <= 0 {
+		return 0, false
+	}
+	if msg.Render.Width != width || msg.Render.Theme != theme || msg.Render.Mode != mode {
+		return 0, false
+	}
+	return msg.Render.LineCount, true
+}
+
 func (m Model) shouldRenderBlockText(start, lines int) bool {
 	if lines <= 0 || m.Viewport.Height() <= 0 {
 		return true
@@ -341,9 +358,10 @@ func (m Model) visibleTranscriptLines(start, end int) []string {
 	return lines
 }
 
-func (m *Model) SetTranscriptYOffset(offset int) {
+func (m *Model) SetTranscriptYOffset(offset int) bool {
 	m.TranscriptYOffset = clampInt(offset, 0, m.TranscriptMaxYOffset())
 	m.applyTranscriptWindow()
+	return true
 }
 
 func (m Model) canReuseTranscriptWindow(offset int) bool {
@@ -353,8 +371,9 @@ func (m Model) canReuseTranscriptWindow(offset int) bool {
 	return offset >= m.TranscriptWindowStart && offset+m.Viewport.Height() <= m.TranscriptWindowEnd
 }
 
-func (m *Model) ScrollTranscript(delta int) {
+func (m *Model) ScrollTranscript(delta int) bool {
 	newOffset := clampInt(m.TranscriptYOffset+delta, 0, m.TranscriptMaxYOffset())
+	windowChanged := false
 	if newOffset != m.TranscriptYOffset {
 		m.TranscriptYOffset = newOffset
 		// 滚动仍在当前 overscan 窗口内时，不重新切片/重设 viewport 内容，只移动窗口内偏移。
@@ -362,17 +381,19 @@ func (m *Model) ScrollTranscript(delta int) {
 			m.Viewport.SetYOffset(newOffset - m.TranscriptWindowStart)
 		} else {
 			m.applyTranscriptWindow()
+			windowChanged = true
 		}
 	}
 	m.FollowBottom = m.TranscriptAtBottom()
+	return windowChanged
 }
 
-func (m *Model) PageTranscript(direction int) {
+func (m *Model) PageTranscript(direction int) bool {
 	delta := maxInt(1, m.Viewport.Height()/2)
 	if direction < 0 {
 		delta = -delta
 	}
-	m.ScrollTranscript(delta)
+	return m.ScrollTranscript(delta)
 }
 
 func (m Model) TranscriptMaxYOffset() int {

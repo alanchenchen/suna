@@ -21,6 +21,13 @@ import (
 
 const maxSystemMarkdownBytes = 4000
 
+const (
+	// 思考框本身只展示少量行，流式阶段先裁剪源文本，避免每帧对完整思考链 wrap/markdown。
+	reasoningDetailSourceBytes = 32 * 1024
+	reasoningDetailSourceLines = 80
+	reasoningSummaryTailBytes  = 8 * 1024
+)
+
 func (t *TUI) renderSystemMessage(content string) string {
 	content = strings.TrimSpace(content)
 	if content == "" {
@@ -80,16 +87,19 @@ func (t *TUI) renderThinkingBox(content string, running bool, startedAt, endedAt
 		display = t.tr("status.thinking")
 	}
 	if !t.chat.ShowReasoningDetail {
-		display = extractLastSentence(display)
+		display = extractLastSentence(clipTailBytes(display, reasoningSummaryTailBytes))
 		if display == "" {
 			display = t.tr("tui.chat.thought_done")
 		}
 		display += "    [Ctrl+R " + t.tr("tui.key.reasoning_detail") + "]"
 	} else {
+		trimmed := strings.TrimSpace(content)
 		if running {
-			display = renderStreamingText(strings.TrimSpace(content), inner)
+			trimmed = clipTailLinesBytes(trimmed, reasoningDetailSourceLines, reasoningDetailSourceBytes)
+			display = renderStreamingText(trimmed, inner)
 		} else {
-			display = RenderMarkdown(strings.TrimSpace(content), inner)
+			trimmed = clipHeadLinesBytes(trimmed, reasoningDetailSourceLines, reasoningDetailSourceBytes)
+			display = RenderMarkdown(trimmed, inner)
 		}
 	}
 	lines := strings.Split(strings.TrimRight(display, "\n"), "\n")
@@ -247,6 +257,52 @@ func (t *TUI) currentStatusLabel() string {
 	}
 }
 
+func clipTailBytes(s string, maxBytes int) string {
+	if maxBytes <= 0 || len(s) <= maxBytes {
+		return s
+	}
+	start := len(s) - maxBytes
+	for start < len(s) && (s[start]&0xc0) == 0x80 {
+		start++
+	}
+	return s[start:]
+}
+
+func clipHeadBytes(s string, maxBytes int) string {
+	if maxBytes <= 0 || len(s) <= maxBytes {
+		return s
+	}
+	end := maxBytes
+	for end > 0 && (s[end]&0xc0) == 0x80 {
+		end--
+	}
+	return s[:end]
+}
+
+func clipTailLinesBytes(s string, maxLines, maxBytes int) string {
+	s = clipTailBytes(s, maxBytes)
+	if maxLines <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= maxLines {
+		return s
+	}
+	return strings.Join(lines[len(lines)-maxLines:], "\n")
+}
+
+func clipHeadLinesBytes(s string, maxLines, maxBytes int) string {
+	s = clipHeadBytes(s, maxBytes)
+	if maxLines <= 0 {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= maxLines {
+		return s
+	}
+	return strings.Join(lines[:maxLines], "\n")
+}
+
 func extractLastSentence(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -331,7 +387,16 @@ func (t *TUI) renderAssistantMessage(msg *chatMsg) string {
 
 func (t *TUI) renderReasoningMessage(msg *chatMsg) string {
 	content, _ := msg.Content.(string)
-	return t.renderThinkingBox(content, msg.Streaming, msg.StartedAt, msg.EndedAt)
+	out := t.renderThinkingBox(content, msg.Streaming, msg.StartedAt, msg.EndedAt)
+	msg.Render = msgRenderCache{Width: t.width, Theme: currentTheme.Name, ContentLen: len(content), LineCount: chatpage.RenderedLineCount(out), Output: out, Mode: reasoningRenderMode(t.chat.ShowReasoningDetail)}
+	return out
+}
+
+func reasoningRenderMode(detail bool) string {
+	if detail {
+		return "reasoning_detail"
+	}
+	return "reasoning_collapsed"
 }
 
 func (t *TUI) cachedMarkdown(msg *chatMsg, content string, width int) string {

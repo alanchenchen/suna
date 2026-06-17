@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -424,5 +425,62 @@ func TestRenderStreamingTextExpandsTabsBeforeWrapping(t *testing.T) {
 	}
 	if !strings.Contains(got, "    return") {
 		t.Fatalf("renderStreamingText() = %q, want tab expanded indentation", got)
+	}
+}
+
+func TestReasoningDetailClipsSourceBeforeRendering(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100}
+	tui.chat.ShowReasoningDetail = true
+
+	var lines []string
+	for i := 0; i < reasoningDetailSourceLines+20; i++ {
+		lines = append(lines, fmt.Sprintf("line-old-%03d", i))
+	}
+	lines = append(lines, "line-new")
+	got := stripANSIForTest(tui.renderThinkingBox(strings.Join(lines, "\n"), true, time.Now(), time.Time{}))
+	if strings.Contains(got, "line-old-000") {
+		t.Fatalf("renderThinkingBox() included clipped old reasoning: %q", got)
+	}
+	if !strings.Contains(got, "line-new") {
+		t.Fatalf("renderThinkingBox() = %q, want newest reasoning line", got)
+	}
+}
+
+func TestReasoningCompletedDetailClipsHeadBeforeMarkdown(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100}
+	tui.chat.ShowReasoningDetail = true
+
+	var lines []string
+	lines = append(lines, "line-new")
+	for i := 0; i < reasoningDetailSourceLines+20; i++ {
+		lines = append(lines, "line-old")
+	}
+	lines = append(lines, "line-clipped")
+	got := stripANSIForTest(tui.renderThinkingBox(strings.Join(lines, "\n"), false, time.Now(), time.Now()))
+	if !strings.Contains(got, "line-new") {
+		t.Fatalf("renderThinkingBox() = %q, want first reasoning line", got)
+	}
+	if strings.Contains(got, "line-clipped") {
+		t.Fatalf("renderThinkingBox() included clipped tail reasoning: %q", got)
+	}
+}
+
+func TestRecentTextStreamActiveOnlySuppressesNearStreamingText(t *testing.T) {
+	now := time.Now()
+	tui := &TUI{lastTextStreamAt: now.Add(-textStreamSpinnerSuppressWindow / 2)}
+	tui.chat.Messages = []chatMsg{{Role: "assistant", Streaming: true, Content: "hello"}}
+	if !tui.recentTextStreamActive(now) {
+		t.Fatalf("recentTextStreamActive() = false, want true for recent streaming assistant")
+	}
+
+	tui.lastTextStreamAt = now.Add(-textStreamSpinnerSuppressWindow * 2)
+	if tui.recentTextStreamActive(now) {
+		t.Fatalf("recentTextStreamActive() = true for stale text stream")
+	}
+
+	tui.lastTextStreamAt = now
+	tui.chat.Messages = []chatMsg{{Role: "assistant", Streaming: false, Content: "done"}}
+	if tui.recentTextStreamActive(now) {
+		t.Fatalf("recentTextStreamActive() = true without streaming message")
 	}
 }

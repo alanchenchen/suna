@@ -85,6 +85,7 @@ func (t *TUI) syncContent() {
 		Width:         t.width,
 		MarkdownWidth: max(24, t.width-8),
 		Theme:         currentTheme.Name,
+		ReasoningMode: reasoningRenderMode(t.chat.ShowReasoningDetail),
 		SunaLabel:     t.tr("tui.chat.suna"),
 		AskHelp:       t.tr("tui.ask.help"),
 		AskChoiceHelp: t.tr("tui.ask.choice_help"),
@@ -149,6 +150,8 @@ func (t *TUI) syncInputFocus() tea.Cmd {
 	return nil
 }
 
+const textStreamSpinnerSuppressWindow = 120 * time.Millisecond
+
 func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -166,7 +169,10 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if t.chat.Loading || t.chat.Compacting {
 			var cmd tea.Cmd
 			t.chat.Spinner, cmd = t.chat.Spinner.Update(msg)
-			t.syncContent()
+			// 文本流本身会高频刷新 transcript；短时间内不再让 spinner tick 额外触发完整同步。
+			if !t.recentTextStreamActive(time.Now()) {
+				t.syncContent()
+			}
 			return t, cmd
 		}
 		return t, nil
@@ -212,8 +218,9 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.chat.Viewport, cmd = t.chat.Viewport.Update(msg)
 		delta := t.chat.Viewport.YOffset() - oldOffset
 		if delta != 0 {
-			t.chat.ScrollTranscript(delta)
-			t.syncContent()
+			if t.chat.ScrollTranscript(delta) {
+				t.syncContent()
+			}
 		} else {
 			t.chat.FollowBottom = t.chat.TranscriptAtBottom()
 		}
@@ -231,6 +238,25 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	t.layoutChat()
 
 	return t, cmd
+}
+
+func (t *TUI) recentTextStreamActive(now time.Time) bool {
+	if t.lastTextStreamAt.IsZero() {
+		return false
+	}
+	if now.Sub(t.lastTextStreamAt) > textStreamSpinnerSuppressWindow {
+		return false
+	}
+	for i := len(t.chat.Messages) - 1; i >= 0; i-- {
+		msg := t.chat.Messages[i]
+		if msg.Streaming && (msg.Role == "assistant" || msg.Role == "reasoning") {
+			return true
+		}
+		if msg.Role == "assistant" || msg.Role == "reasoning" || msg.Role == "user" || msg.Role == "error" || msg.Role == "system" {
+			break
+		}
+	}
+	return false
 }
 
 func (t *TUI) updateDiscardDraftConfirm(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -520,14 +546,16 @@ func (t *TUI) scrollChatPage(direction int) {
 		return
 	}
 	if direction < 0 {
-		t.chat.PageTranscript(-1)
+		if t.chat.PageTranscript(-1) {
+			t.syncContent()
+		}
 		t.chat.FollowBottom = false
-		t.syncContent()
 		return
 	}
-	t.chat.PageTranscript(1)
+	if t.chat.PageTranscript(1) {
+		t.syncContent()
+	}
 	t.chat.FollowBottom = t.chat.TranscriptAtBottom()
-	t.syncContent()
 }
 
 func (t *TUI) moveChatCursor(delta int) {

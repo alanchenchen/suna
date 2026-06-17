@@ -114,7 +114,8 @@ func (t *TUI) handleStreamNotification(p protocol.StreamParams) {
 	t.chat.Compacting = false
 	t.compactAuto = false
 	t.chat.ResumeAvailable = false
-	t.chat.HandleStreamStart(time.Now())
+	t.lastTextStreamAt = time.Now()
+	t.chat.HandleStreamStart(t.lastTextStreamAt)
 	if p.Chunk != "" {
 		t.chat.LastAssistantText += p.Chunk
 	}
@@ -124,7 +125,8 @@ func (t *TUI) handleStreamNotification(p protocol.StreamParams) {
 func (t *TUI) handleReasoningNotification(p protocol.StreamParams) {
 	t.chat.Compacting = false
 	t.compactAuto = false
-	t.chat.HandleReasoningStart(time.Now())
+	t.lastTextStreamAt = time.Now()
+	t.chat.HandleReasoningStart(t.lastTextStreamAt)
 	t.appendStreamMessage("reasoning", p.Chunk)
 }
 
