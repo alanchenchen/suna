@@ -1,6 +1,9 @@
 package chat
 
 import (
+	"path/filepath"
+	"strings"
+
 	"github.com/alanchenchen/suna/internal/protocol"
 	"github.com/alanchenchen/suna/internal/tui/components/attachment"
 )
@@ -24,8 +27,45 @@ func (m *Model) AddConfirmedImageAttachment(p *attachment.PendingImagePaste) {
 	if p == nil {
 		return
 	}
-	m.Attachments = append(m.Attachments, attachment.Item{Type: "image", SourceKind: p.SourceKind, Path: p.Path, URL: p.URL, Name: p.Name, MimeType: p.MimeType, Size: p.Size})
+	item := attachment.Item{Type: "image", SourceKind: p.SourceKind, Path: p.Path, URL: p.URL, Name: p.Name, MimeType: p.MimeType, Size: p.Size}
+	if idx := m.findDuplicateAttachment(item); idx >= 0 {
+		m.AttachmentCursor = idx
+		return
+	}
+	m.Attachments = append(m.Attachments, item)
 	m.AttachmentCursor = len(m.Attachments) - 1
+}
+
+func (m *Model) findDuplicateAttachment(item attachment.Item) int {
+	key := attachmentDedupKey(item)
+	if key == "" {
+		return -1
+	}
+	for i, existing := range m.Attachments {
+		if attachmentDedupKey(existing) == key {
+			return i
+		}
+	}
+	return -1
+}
+
+func attachmentDedupKey(item attachment.Item) string {
+	switch item.SourceKind {
+	case protocol.AttachmentKindPath, protocol.AttachmentKindAttachment:
+		path := strings.TrimSpace(item.Path)
+		if path == "" {
+			return ""
+		}
+		return "path:" + filepath.Clean(path)
+	case protocol.AttachmentKindURL:
+		url := strings.TrimSpace(item.URL)
+		if url == "" {
+			return ""
+		}
+		return item.SourceKind + ":" + url
+	default:
+		return ""
+	}
 }
 
 func (m *Model) UpdateAttachmentMode(key string) bool {
