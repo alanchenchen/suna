@@ -108,6 +108,7 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			r.Sink.Status(StatusEvent{Kind: StatusWaitingLLM})
 		}
 		requestStarted := time.Now()
+		estimatedContextTokens := logRequestPrepare(req, completionReq, contextWindow, turns)
 		ch, err := r.Router.Complete(ctx, req.ModelRef, completionReq)
 		if err != nil {
 			return result, err
@@ -131,12 +132,13 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 					contextTokens = usage.InputTokens + usage.OutputTokens
 				}
 				r.Sink.Usage(UsageEvent{
-					InputTokens:   usage.InputTokens,
-					OutputTokens:  usage.OutputTokens,
-					CachedTokens:  usage.CachedTokens,
-					ContextTokens: contextTokens,
-					ContextWindow: contextWindow,
-					Duration:      time.Since(requestStarted),
+					InputTokens:            usage.InputTokens,
+					OutputTokens:           usage.OutputTokens,
+					CachedTokens:           usage.CachedTokens,
+					ContextTokens:          contextTokens,
+					EstimatedContextTokens: estimatedContextTokens,
+					ContextWindow:          contextWindow,
+					Duration:               time.Since(requestStarted),
 				})
 			}
 			if r.UsageSink != nil {

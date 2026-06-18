@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/prompt"
@@ -61,6 +62,57 @@ func (r *Router) DefaultProvider() Provider {
 	return r.providers[r.activeRef]
 }
 
+// NewRoutedProvider 返回一个通过 Router.ActiveRef 调用模型的 Provider 适配器。
+// 后台压缩、记忆整理等非 Runner 请求也必须经过 Router，才能复用限流、reasoning 配置和统一 LLM 日志。
+func NewRoutedProvider(router *Router) Provider {
+	if router == nil {
+		return nil
+	}
+	return routedProvider{router: router}
+}
+
+// routedProvider 不持有底层 provider 快照，而是在每次调用时解析 active provider；
+// 这样配置热更新后，后台任务不会继续使用旧模型实例。
+type routedProvider struct {
+	router *Router
+}
+
+func (p routedProvider) Complete(ctx context.Context, req *CompletionRequest) (<-chan Chunk, error) {
+	if p.router == nil {
+		return nil, fmt.Errorf("model router is not configured")
+	}
+	return p.router.Complete(ctx, p.router.ActiveRef(), req)
+}
+
+func (p routedProvider) EstimateTokens(text string) int {
+	provider := p.defaultProvider()
+	if provider == nil {
+		return EstimateTokens(text)
+	}
+	return provider.EstimateTokens(text)
+}
+
+func (p routedProvider) ContextWindow() int {
+	if p.router == nil {
+		return 0
+	}
+	return p.router.ActiveContextWindow()
+}
+
+func (p routedProvider) MaxOutputTokens() int {
+	if p.router == nil {
+		return 0
+	}
+	return p.router.ActiveMaxOutputTokens()
+}
+
+func (p routedProvider) defaultProvider() Provider {
+	if p.router == nil {
+		return nil
+	}
+	return p.router.DefaultProvider()
+}
+
 func (r *Router) ActiveRef() string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -80,7 +132,20 @@ func (r *Router) ActiveContextWindow() int {
 	return p.ContextWindow()
 }
 
-// Complete 调用指定 provider 的 Complete，自动执行 per-model 速率限制
+func (r *Router) ActiveMaxOutputTokens() int {
+	if r == nil {
+		return 0
+	}
+	r.mu.RLock()
+	p := r.providers[r.activeRef]
+	r.mu.RUnlock()
+	if p == nil {
+		return 0
+	}
+	return p.MaxOutputTokens()
+}
+
+// Complete 调用指定 provider 的 Complete，自动执行 per-model 速率限制。
 func (r *Router) Complete(ctx context.Context, ref string, req *CompletionRequest) (<-chan Chunk, error) {
 	r.mu.RLock()
 	p, ok := r.providers[ref]
@@ -89,13 +154,79 @@ func (r *Router) Complete(ctx context.Context, ref string, req *CompletionReques
 	if !ok {
 		return nil, fmt.Errorf("model %q not found", ref)
 	}
-	if req != nil && len(req.Reasoning) == 0 && len(mc.Reasoning) > 0 {
-		req.Reasoning = mc.Reasoning
+	if req != nil {
+		ensureRequestID(req)
+		if len(req.Reasoning) == 0 && len(mc.Reasoning) > 0 {
+			req.Reasoning = mc.Reasoning
+		}
 	}
 	if err := r.rateLimit.Wait(ctx, ref); err != nil {
 		return nil, err
 	}
-	return p.Complete(ctx, req)
+	started := time.Now()
+	route := llmRoute{
+		Provider: mc.Provider,
+		ModelRef: ref,
+		Model:    resolvedRequestModel(mc, req),
+	}
+	raw, err := p.Complete(ctx, req)
+	if err != nil {
+		fields := loggingFields(started, nil)
+		fields["usage_received"] = false
+		logRoutedLLMFailure(req, route, err, fields)
+		return nil, err
+	}
+	return wrapLLMLogStream(raw, req, route, started), nil
+}
+
+func resolvedRequestModel(mc config.ModelConfig, req *CompletionRequest) string {
+	if req != nil && req.Model != "" {
+		return req.Model
+	}
+	return mc.Model
+}
+
+func wrapLLMLogStream(raw <-chan Chunk, req *CompletionRequest, route llmRoute, started time.Time) <-chan Chunk {
+	out := make(chan Chunk, providerChunkBuffer)
+	go func() {
+		defer close(out)
+		usage, stats, failed, errText := collectAndForwardLLMChunks(raw, out, started)
+		fields := loggingFields(started, usage)
+		fields["tool_calls"] = stats.toolCalls
+		fields["chunk_count"] = stats.chunkCount
+		fields["assistant_bytes"] = stats.assistantBytes
+		fields["reasoning_bytes"] = stats.reasoningBytes
+		fields["usage_received"] = stats.usageReceived
+		if failed {
+			fields["last_chunk_age_ms"] = time.Since(stats.lastChunkAt).Milliseconds()
+			logRoutedLLMFailure(req, route, fmt.Errorf("%s", errText), fields)
+			return
+		}
+		logRoutedLLMSuccess(req, route, fields)
+	}()
+	return out
+}
+
+func collectAndForwardLLMChunks(raw <-chan Chunk, out chan<- Chunk, started time.Time) (*Usage, llmStreamStats, bool, string) {
+	stats := llmStreamStats{lastChunkAt: started}
+	var usage *Usage
+	for chunk := range raw {
+		if chunk.Error != "" {
+			out <- chunk
+			return usage, stats, true, chunk.Error
+		}
+		stats.chunkCount++
+		stats.lastChunkAt = time.Now()
+		stats.assistantBytes += len(chunk.Content)
+		stats.reasoningBytes += len(chunk.ReasoningContent)
+		stats.toolCalls += len(chunk.ToolCalls)
+		if chunk.Usage != nil {
+			usage = chunk.Usage
+			stats.usageReceived = true
+		}
+		out <- chunk
+	}
+	return usage, stats, false, ""
 }
 
 func (r *Router) MaxOutputTokens(ref string) int {

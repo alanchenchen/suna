@@ -64,12 +64,13 @@ type Event struct {
 	GuardReviewCode string
 	GuardReviewMsg  string
 
-	InputTokens   int
-	OutputTokens  int
-	CachedTokens  int
-	ContextTokens int
-	ContextWindow int
-	DurationMs    int64
+	InputTokens            int
+	OutputTokens           int
+	CachedTokens           int
+	ContextTokens          int
+	EstimatedContextTokens int
+	ContextWindow          int
+	DurationMs             int64
 
 	ResumeAvailable bool
 }

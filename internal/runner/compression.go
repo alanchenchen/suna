@@ -14,7 +14,7 @@ import (
 
 const minContextMarginTokens = 2048
 
-func (r *Runner) Compact(ctx context.Context, working *memory.WorkingMemory, sessionState string, contextWindow int) (before, after, turnsCompressed, truncated int, newSessionState string, err error) {
+func (r *Runner) Compact(ctx context.Context, working *memory.WorkingMemory, sessionState string, contextWindow, outputBudget int) (before, after, turnsCompressed, truncated int, newSessionState string, err error) {
 	if r.Compressor == nil || working == nil {
 		return 0, 0, 0, 0, "", fmt.Errorf("compressor not initialized")
 	}
@@ -23,7 +23,8 @@ func (r *Runner) Compact(ctx context.Context, working *memory.WorkingMemory, ses
 	if len(msgs) <= 1 {
 		return before, before, 0, 0, sessionState, nil
 	}
-	compressed, state, folded, compErr := r.Compressor.CompressHistoryWithState(ctx, msgs, sessionState, contextWindow)
+	recentBudget := manualCompactRecentBudget(contextWindow, outputBudget)
+	compressed, state, folded, compErr := r.Compressor.CompressHistoryWithStateBudget(ctx, msgs, sessionState, contextWindow, recentBudget)
 	if compErr != nil {
 		return 0, 0, 0, 0, "", compErr
 	}
@@ -69,7 +70,29 @@ func shouldCompactRequest(req *model.CompletionRequest, contextWindow int) bool 
 	if req == nil || contextWindow <= 0 {
 		return false
 	}
-	return estimateInputTokens(req) > usableInputBudget(contextWindow, req.MaxTokens)
+	estimated := estimateInputTokens(req)
+	return compactContextTokens(estimated) > usableInputBudget(contextWindow, req.MaxTokens)
+}
+
+func compactContextTokens(estimatedInputTokens int) int {
+	if estimatedInputTokens <= 0 {
+		return 0
+	}
+	return estimatedInputTokens + estimatorSafetyTokens(estimatedInputTokens)
+}
+
+func estimatorSafetyTokens(estimatedInputTokens int) int {
+	if estimatedInputTokens <= 0 {
+		return 0
+	}
+	// token 估算会随上下文结构变化产生偏差；后期代码、JSON、工具结果占比升高时
+	// 当前轻量估算可能低估约 5%。压缩边界需要额外安全垫，避免接近模型窗口时
+	// 因 raw estimate 偏低而触发过晚。UI 仍展示 raw estimate，不叠加该 safety。
+	safety := estimatedInputTokens / 16
+	if safety < 8192 {
+		return 8192
+	}
+	return safety
 }
 
 func estimateRequestTokens(req *model.CompletionRequest) int {
@@ -120,7 +143,20 @@ func compactRecentBudget(req *model.CompletionRequest, contextWindow int) int {
 			fixed += model.EstimateTokens(string(data))
 		}
 	}
-	budget := usableInputBudget(contextWindow, req.MaxTokens) - fixed
+	return recentMessageTokenBudget(contextWindow, req.MaxTokens, fixed)
+}
+
+func manualCompactRecentBudget(contextWindow, outputBudget int) int {
+	if contextWindow <= 0 {
+		return 0
+	}
+	return recentMessageTokenBudget(contextWindow, outputBudget, memory.SessionStateTokenBudget(contextWindow))
+}
+
+func recentMessageTokenBudget(contextWindow, outputBudget, fixedInputTokens int) int {
+	budget := usableInputBudget(contextWindow, outputBudget)
+	budget -= estimatorSafetyTokens(budget)
+	budget -= fixedInputTokens
 	if budget < 1 {
 		return 1
 	}

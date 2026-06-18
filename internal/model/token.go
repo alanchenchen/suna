@@ -11,15 +11,18 @@ func EstimateTokens(text string) int {
 		return 0
 	}
 	asciiCount := 0
-	cjkCount := 0
+	nonASCIICount := 0
 	for _, r := range text {
 		if r > 127 || unicode.Is(unicode.Han, r) {
-			cjkCount++
+			nonASCIICount++
 		} else {
 			asciiCount++
 		}
 	}
-	return asciiCount/4 + cjkCount*2 + 1
+	// 这是跨 provider 的粗略估算，不用于计费；现代 GPT/GLM tokenizer 对中文、
+	// 全角标点和常见非 ASCII 字符通常接近 1 字符 1 token。旧的 2x 会让
+	// 中文会话显著高估，进而过早触发压缩并误导 TUI ctx 展示。
+	return asciiCount/4 + nonASCIICount + 1
 }
 
 func EstimateMessagesTokens(msgs []Message) int {

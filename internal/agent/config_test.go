@@ -69,14 +69,14 @@ func TestReloadRouterUpdatesMemoryWorkerProvider(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
 	}
-	a := &Agent{cfg: cfg, router: router, mediaStore: media.NewStore(t.TempDir()), compressor: memory.NewCompressor(backgroundProvider(router)), extractWorker: worker}
+	a := &Agent{cfg: cfg, router: router, mediaStore: media.NewStore(t.TempDir()), compressor: memory.NewCompressor(model.NewRoutedProvider(router)), extractWorker: worker}
 
 	initial := worker.Provider()
 	if initial == nil {
 		t.Fatalf("worker.Provider() = nil, want OpenAIResponsesProvider")
 	}
-	if _, ok := initial.(*model.OpenAIResponsesProvider); !ok {
-		t.Fatalf("worker.Provider() = %T, want OpenAIResponsesProvider", initial)
+	if got := initial.ContextWindow(); got != 128000 {
+		t.Fatalf("worker.Provider().ContextWindow() = %d, want 128000", got)
 	}
 	if _, err := a.UpdateConfig(ConfigSetParams{Action: protocol.ConfigActionActivateModel, ActiveModel: "anthropic/claude-sonnet"}); err != nil {
 		t.Fatalf("UpdateConfig() error = %v", err)
@@ -85,8 +85,8 @@ func TestReloadRouterUpdatesMemoryWorkerProvider(t *testing.T) {
 	if updated == nil {
 		t.Fatalf("worker.Provider() after update = nil, want AnthropicProvider")
 	}
-	if _, ok := updated.(*model.AnthropicProvider); !ok {
-		t.Fatalf("worker.Provider() after update = %T, want AnthropicProvider", updated)
+	if got := updated.ContextWindow(); got != 200000 {
+		t.Fatalf("worker.Provider() after update ContextWindow() = %d, want 200000", got)
 	}
 	if updated == initial {
 		t.Fatalf("worker.Provider() after update reused initial provider, want replacement")
@@ -151,7 +151,7 @@ func newMemoryWorker(t *testing.T, cfg *config.Config) *memory.Worker {
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
 	}
-	return memory.NewWorker(memory.NewExtractQueue(store.DB()), memory.NewMemoryStore(store.DB()), store.DB(), backgroundProvider(router))
+	return memory.NewWorker(memory.NewExtractQueue(store.DB()), memory.NewMemoryStore(store.DB()), store.DB(), model.NewRoutedProvider(router))
 }
 
 type fakeProvider struct{}

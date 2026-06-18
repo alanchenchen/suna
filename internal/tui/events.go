@@ -144,7 +144,11 @@ func (t *TUI) handleUsageNotification(p protocol.UsageParams) {
 	t.sessionInputTok += p.InputTokens
 	t.sessionOutputTok += p.OutputTokens
 	t.sessionCachedTok += p.CachedTokens
-	t.applyContextStats(p.ContextTokens, p.ContextWindow)
+	contextTokens := p.EstimatedContextTokens
+	if contextTokens <= 0 {
+		contextTokens = p.ContextTokens
+	}
+	t.applyContextStats(contextTokens, p.ContextWindow)
 }
 
 func (t *TUI) handleAskUserNotification(p protocol.AskUserParams) {

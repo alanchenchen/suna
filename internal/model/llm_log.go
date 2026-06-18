@@ -9,6 +9,31 @@ import (
 	"github.com/alanchenchen/suna/internal/logging"
 )
 
+type llmRoute struct {
+	Provider string
+	ModelRef string
+	Model    string
+}
+
+type llmStreamStats struct {
+	chunkCount     int
+	assistantBytes int
+	reasoningBytes int
+	toolCalls      int
+	usageReceived  bool
+	lastChunkAt    time.Time
+}
+
+func ensureRequestID(req *CompletionRequest) string {
+	if req == nil {
+		return uuid.New().String()
+	}
+	if req.RequestID == "" {
+		req.RequestID = uuid.New().String()
+	}
+	return req.RequestID
+}
+
 func requestID(req *CompletionRequest) string {
 	if req != nil && req.RequestID != "" {
 		return req.RequestID
@@ -34,23 +59,33 @@ func purpose(req *CompletionRequest) string {
 	return "unknown"
 }
 
-func logLLMSuccess(req *CompletionRequest, fields logging.Event) {
-	logLLM("INFO", req, "success", nil, fields)
+func logRoutedLLMSuccess(req *CompletionRequest, route llmRoute, fields logging.Event) {
+	logRoutedLLM("INFO", req, route, "success", nil, fields)
 }
 
-func logLLMFailure(req *CompletionRequest, err error, fields logging.Event) {
-	logLLM("ERROR", req, "failed", err, fields)
+func logRoutedLLMFailure(req *CompletionRequest, route llmRoute, err error, fields logging.Event) {
+	logRoutedLLM("ERROR", req, route, "failed", err, fields)
 }
 
-func logLLM(level string, req *CompletionRequest, status string, err error, fields logging.Event) {
+func logRoutedLLM(level string, req *CompletionRequest, route llmRoute, status string, err error, fields logging.Event) {
 	if fields == nil {
 		fields = logging.Event{}
 	}
 	fields["request_id"] = requestID(req)
 	fields["purpose"] = purpose(req)
 	fields["status"] = status
-	if req != nil {
+	if route.Provider != "" {
+		fields["provider"] = route.Provider
+	}
+	if route.ModelRef != "" {
+		fields["model_ref"] = route.ModelRef
+	}
+	if route.Model != "" {
+		fields["model"] = route.Model
+	} else if req != nil {
 		fields["model"] = req.Model
+	}
+	if req != nil {
 		fields["request_messages"] = len(req.Messages)
 		fields["tool_defs"] = len(req.Tools)
 		fields["max_tokens"] = req.MaxTokens

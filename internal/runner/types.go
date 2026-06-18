@@ -87,12 +87,13 @@ type ToolResultEvent struct {
 }
 
 type UsageEvent struct {
-	InputTokens   int
-	OutputTokens  int
-	CachedTokens  int
-	ContextTokens int
-	ContextWindow int
-	Duration      time.Duration
+	InputTokens            int
+	OutputTokens           int
+	CachedTokens           int
+	ContextTokens          int
+	EstimatedContextTokens int
+	ContextWindow          int
+	Duration               time.Duration
 }
 
 // ToolExecution 是一次具体工具调用的不可变上下文。

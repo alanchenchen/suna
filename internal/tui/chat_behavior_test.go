@@ -505,3 +505,37 @@ func TestRecentTextStreamActiveOnlySuppressesNearStreamingText(t *testing.T) {
 		t.Fatalf("recentTextStreamActive() = true without streaming message")
 	}
 }
+
+func TestUsageNotificationPrefersEstimatedContextTokens(t *testing.T) {
+	tui := &TUI{}
+
+	tui.handleUsageNotification(protocol.UsageParams{
+		InputTokens:            160000,
+		OutputTokens:           120,
+		ContextTokens:          160120,
+		EstimatedContextTokens: 98000,
+		ContextWindow:          1000000,
+	})
+
+	if got, want := tui.contextTokens, 98000; got != want {
+		t.Fatalf("contextTokens = %d, want %d", got, want)
+	}
+	if got, want := tui.lastInputTok, 160000; got != want {
+		t.Fatalf("lastInputTok = %d, want provider input %d", got, want)
+	}
+}
+
+func TestUsageNotificationFallsBackToProviderContextTokens(t *testing.T) {
+	tui := &TUI{}
+
+	tui.handleUsageNotification(protocol.UsageParams{
+		InputTokens:   42000,
+		OutputTokens:  200,
+		ContextTokens: 42200,
+		ContextWindow: 400000,
+	})
+
+	if got, want := tui.contextTokens, 42200; got != want {
+		t.Fatalf("contextTokens = %d, want fallback %d", got, want)
+	}
+}

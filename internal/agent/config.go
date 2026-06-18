@@ -234,7 +234,7 @@ func (a *Agent) reloadRouterLocked(cfg *config.Config) error {
 	if a.prompts != nil {
 		router.SetPrompts(a.prompts)
 	}
-	provider := backgroundProvider(router)
+	provider := model.NewRoutedProvider(router)
 	a.compressor = memory.NewCompressor(provider)
 	if a.prompts != nil {
 		a.compressor.SetPrompts(a.prompts)

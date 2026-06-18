@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
-	"time"
 
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -59,32 +58,22 @@ func (p *OpenAIResponsesProvider) Complete(ctx context.Context, req *CompletionR
 	ch := make(chan Chunk, providerChunkBuffer)
 	go func() {
 		defer close(ch)
-		started := time.Now()
 		stream := p.client.Responses.NewStreaming(ctx, params, opts...)
 		defer stream.Close()
 
 		var usage *Usage
 		toolCallsByID := map[string]*ToolCall{}
 		var toolCallOrder []string
-		chunkCount := 0
-		assistantBytes := 0
-		reasoningBytes := 0
-		usageReceived := false
-		lastChunkAt := started
 
 		for stream.Next() {
-			chunkCount++
-			lastChunkAt = time.Now()
 			event := stream.Current()
 			switch event.Type {
 			case "response.output_text.delta":
 				if event.Delta != "" {
-					assistantBytes += len(event.Delta)
 					ch <- Chunk{Content: event.Delta, Done: false}
 				}
 			case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
 				if reasoning := responseReasoningContent(event); reasoning != "" {
-					reasoningBytes += len(reasoning)
 					ch <- Chunk{ReasoningContent: reasoning, Done: false}
 				}
 			case "response.function_call_arguments.delta", "response.function_call_arguments.done", "response.output_item.done", "response.output_item.added":
@@ -93,31 +82,19 @@ func (p *OpenAIResponsesProvider) Complete(ctx context.Context, req *CompletionR
 				u := event.Response.Usage
 				if event.JSON.Response.Valid() {
 					usage = &Usage{InputTokens: int(u.InputTokens), OutputTokens: int(u.OutputTokens), CachedTokens: int(u.InputTokensDetails.CachedTokens), TotalTokens: int(u.TotalTokens)}
-					usageReceived = true
 					collectResponseOutputToolCalls(event.Response.Output, toolCallsByID, &toolCallOrder)
 				}
 			case "error":
 				err := fmt.Errorf("responses error: %s", event.Message)
-				logLLMFailure(req, err, loggingFields(started, usage))
 				ch <- Chunk{Done: true, Error: err.Error()}
 				return
 			}
 		}
 		if err := stream.Err(); err != nil {
-			fields := loggingFields(started, usage)
-			fields["chunk_count"] = chunkCount
-			fields["assistant_bytes"] = assistantBytes
-			fields["reasoning_bytes"] = reasoningBytes
-			fields["usage_received"] = usageReceived
-			fields["last_chunk_age_ms"] = time.Since(lastChunkAt).Milliseconds()
-			logLLMFailure(req, err, fields)
 			ch <- Chunk{Done: true, Error: err.Error()}
 			return
 		}
 		toolCalls := orderedResponseToolCalls(toolCallsByID, toolCallOrder)
-		fields := loggingFields(started, usage)
-		fields["tool_calls"] = len(toolCalls)
-		logLLMSuccess(req, fields)
 		if len(toolCalls) > 0 {
 			ch <- Chunk{ToolCalls: toolCalls, Done: false}
 		}

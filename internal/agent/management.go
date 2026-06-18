@@ -101,8 +101,10 @@ func (a *Agent) ListMemory(ctx context.Context) ([]memory.UserMemory, error) {
 func (a *Agent) Compact(ctx context.Context) (int, int, int, int, int, error) {
 	r := &runner.Runner{Router: a.router, Compressor: a.compressor}
 	contextWindow := 0
+	outputBudget := 0
 	if a.router != nil {
 		contextWindow = a.router.ActiveContextWindow()
+		outputBudget = a.router.ActiveMaxOutputTokens()
 	}
 	started := time.Now()
 	beforeEstimate := 0
@@ -111,10 +113,10 @@ func (a *Agent) Compact(ctx context.Context) (int, int, int, int, int, error) {
 		beforeEstimate = a.working.EstimatedTokens()
 		messageCount = a.working.Len()
 	}
-	logging.Info("memory", "session_compact_start", logging.Event{"mode": "manual", "context_window": contextWindow, "before_tokens": beforeEstimate, "messages": messageCount})
-	before, after, turnsCompressed, truncated, state, err := r.Compact(ctx, a.working, a.sessionState, contextWindow)
+	logging.Info("memory", "session_compact_start", logging.Event{"mode": "manual", "context_window": contextWindow, "output_budget": outputBudget, "before_tokens": beforeEstimate, "messages": messageCount})
+	before, after, turnsCompressed, truncated, state, err := r.Compact(ctx, a.working, a.sessionState, contextWindow, outputBudget)
 	if err != nil {
-		logging.Error("memory", "session_compact_failed", err, logging.Event{"mode": "manual", "context_window": contextWindow, "before_tokens": beforeEstimate, "messages": messageCount, "duration_ms": time.Since(started).Milliseconds()})
+		logging.Error("memory", "session_compact_failed", err, logging.Event{"mode": "manual", "context_window": contextWindow, "output_budget": outputBudget, "before_tokens": beforeEstimate, "messages": messageCount, "duration_ms": time.Since(started).Milliseconds()})
 		return 0, 0, 0, 0, 0, err
 	}
 	if state != "" {
@@ -124,7 +126,7 @@ func (a *Agent) Compact(ctx context.Context) (int, int, int, int, int, error) {
 	} else {
 		a.saveConversationState(ctx)
 	}
-	logging.Info("memory", "session_compact_success", logging.Event{"mode": "manual", "context_window": contextWindow, "before_tokens": before, "after_tokens": after, "folded_messages": turnsCompressed, "truncated_tool_outputs": truncated, "duration_ms": time.Since(started).Milliseconds()})
+	logging.Info("memory", "session_compact_success", logging.Event{"mode": "manual", "context_window": contextWindow, "output_budget": outputBudget, "before_tokens": before, "after_tokens": after, "folded_messages": turnsCompressed, "truncated_tool_outputs": truncated, "duration_ms": time.Since(started).Milliseconds()})
 	return before, after, contextWindow, turnsCompressed, truncated, nil
 }
 

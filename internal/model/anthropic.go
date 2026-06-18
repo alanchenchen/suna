@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"sort"
 	"strings"
-	"time"
 
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -78,43 +77,31 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req *CompletionRequest
 	ch := make(chan Chunk, providerChunkBuffer)
 	go func() {
 		defer close(ch)
-		started := time.Now()
 		stream := p.client.Messages.NewStreaming(ctx, params)
 		defer stream.Close()
 
 		var usage *Usage
 		toolCalls := map[int64]*anthropicToolCallAccum{}
-		chunkCount := 0
-		assistantBytes := 0
-		reasoningBytes := 0
-		usageReceived := false
-		lastChunkAt := started
 
 		for stream.Next() {
-			chunkCount++
-			lastChunkAt = time.Now()
 			event := stream.Current()
 			switch event.Type {
 			case "message_start":
 				start := event.AsMessageStart()
 				usage = anthropicUsageFromMessage(start.Message.Usage)
-				usageReceived = true
 			case "message_delta":
 				delta := event.AsMessageDelta()
 				usage = mergeAnthropicUsage(usage, anthropicUsageFromDelta(delta.Usage))
-				usageReceived = true
 			case "content_block_start":
 				start := event.AsContentBlockStart()
 				block := start.ContentBlock
 				switch block.Type {
 				case "text":
 					if block.Text != "" {
-						assistantBytes += len(block.Text)
 						ch <- Chunk{Content: block.Text, Done: false}
 					}
 				case "thinking":
 					if block.Thinking != "" {
-						reasoningBytes += len(block.Thinking)
 						ch <- Chunk{ReasoningContent: block.Thinking, Done: false}
 					}
 				case "tool_use":
@@ -131,12 +118,10 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req *CompletionRequest
 				switch delta.Delta.Type {
 				case "text_delta":
 					if delta.Delta.Text != "" {
-						assistantBytes += len(delta.Delta.Text)
 						ch <- Chunk{Content: delta.Delta.Text, Done: false}
 					}
 				case "thinking_delta":
 					if delta.Delta.Thinking != "" {
-						reasoningBytes += len(delta.Delta.Thinking)
 						ch <- Chunk{ReasoningContent: delta.Delta.Thinking, Done: false}
 					}
 				case "input_json_delta":
@@ -151,25 +136,11 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req *CompletionRequest
 		}
 
 		if err := stream.Err(); err != nil {
-			fields := loggingFields(started, usage)
-			fields["chunk_count"] = chunkCount
-			fields["assistant_bytes"] = assistantBytes
-			fields["reasoning_bytes"] = reasoningBytes
-			fields["usage_received"] = usageReceived
-			fields["last_chunk_age_ms"] = time.Since(lastChunkAt).Milliseconds()
-			logLLMFailure(req, err, fields)
 			ch <- Chunk{Done: true, Error: err.Error()}
 			return
 		}
 
 		calls := anthropicAccumulatedToolCalls(toolCalls)
-		fields := loggingFields(started, usage)
-		fields["tool_calls"] = len(calls)
-		fields["chunk_count"] = chunkCount
-		fields["assistant_bytes"] = assistantBytes
-		fields["reasoning_bytes"] = reasoningBytes
-		fields["usage_received"] = usageReceived
-		logLLMSuccess(req, fields)
 		if len(calls) > 0 {
 			ch <- Chunk{ToolCalls: calls, Done: false}
 		}
