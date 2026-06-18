@@ -249,18 +249,27 @@ api_key = "..."
 
 ```text
 context_window = input tokens + output tokens 的总窗口
-max_output_tokens = 单次请求可用的最大输出预算
+max_output_tokens = 单次请求可用的最大输出预算，也是输入预算里的完整输出预留
 usable_input_budget ≈ context_window - max_output_tokens - margin
+compact_context_tokens = estimated_context_tokens + estimator_safety_tokens
 ```
 
-其中 `margin` 是小的 token 估算误差余量：`max(2048, context_window / 200)`。Suna 不再使用 `context_window * 0.8` 这类大比例保守阈值。
+其中 `margin` 是小的 context 边界余量：`max(2048, context_window / 200)`。自动 compact 判断不会直接使用 provider 返回的 usage，而是使用 Suna 请求前估算的输入上下文：
 
-所有 LLM 请求都会默认使用当前模型配置的 `max_output_tokens`，包括主 chat、subtask、Guard smart review、Skill review、Session State compact 和用户画像 memory compact。prompt/schema 负责约束内部请求输出格式；`max_output_tokens` 表示硬输出上限，不再用很小的 hard cap 截断可能包含 thinking/reasoning 的请求。
+```text
+estimated_context_tokens = Suna 对本次请求输入上下文的本地估算
+estimator_safety_tokens = max(8192, estimated_context_tokens / 16)
+compact_context_tokens = estimated_context_tokens + estimator_safety_tokens
+```
+
+当 `compact_context_tokens > usable_input_budget` 时，Suna 会主动 compact。TUI 的 `ctx` 展示使用 raw `estimated_context_tokens`；provider 返回的 `input_tokens` / `context_tokens` 保留用于 usage 统计、计费对账和诊断。Suna 不再使用 `context_window * 0.8` 这类大比例保守阈值，也不依赖 provider context overflow 后的 fallback retry 作为常规策略。
+
+所有 LLM 请求都会默认使用当前模型配置的 `max_output_tokens`，包括主 chat、subtask、Guard smart review、Skill review、Session State compact 和用户画像 memory compact。prompt/schema 负责约束内部请求输出格式；`max_output_tokens` 表示硬输出上限，同时也是上下文预算里的完整输出预留。这个策略更安全但会更早触发 compact；Suna 当前不提供单独的 `reserved_output_tokens` / `default_output_tokens` 字段。
 
 填写建议：
 
 - 优先使用模型服务或中转控制台实际生效的限制，而不是只看模型官方宣传值。
-- 如果服务文档写的是 `400k context / 128k max output`，则填写 `context_window = 400000`、`max_output_tokens = 128000`。Suna 会按约 `272k` 输入空间再扣除 margin 规划 compact。
+- 如果服务文档写的是 `400k context / 128k max output`，则填写 `context_window = 400000`、`max_output_tokens = 128000`。Suna 会先完整预留 128k 输出空间，再扣除 margin 和 estimator safety 规划 compact。
 - 如果某个服务只给出一个总上下文窗口，没有明确 max output，需要先查服务层默认/上限；不要随意留空。
 
 ### reasoning 写法

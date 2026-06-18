@@ -141,6 +141,7 @@ Suna 的上下文设计兼顾可恢复性、长对话和模型前缀缓存。dae
 - **稳定前缀**：system prompt、项目指令、Skill 索引和工具 schema 尽量稳定，减少不必要的前缀缓存失效。
 - **Session State 不塞进 system prompt**：compact 生成的当前会话状态作为独立上下文字段参与请求，避免 system prompt 频繁变化。
 - **recent window 而不是完整历史**：恢复和后续请求使用 Session State + 最近对话窗口，而不是无上限重放所有原始 tool call/result。
+- **主动 compact 而不是极限塞满上下文**：Suna 用本地估算、完整输出预留和 estimator safety 在安全边界前触发 compact，优先保证长工具任务连续性，不把 provider context overflow fallback 作为常规路径。
 - **compact 失败不硬继续**：上下文压缩失败时，Suna 会停止本轮请求并提示错误，不使用不可靠摘要或强行裁剪继续。
 - **工具 schema 稳定性**：工具名称、描述、参数和排序变化会影响模型缓存和行为，修改时需要谨慎。
 
