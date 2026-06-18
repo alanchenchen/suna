@@ -84,6 +84,34 @@ func (s *MemoryStore) Count(ctx context.Context, userID string) (active, core in
 	return active, core
 }
 
+func (s *MemoryStore) Delete(ctx context.Context, userID, id string) (bool, error) {
+	if userID == "" {
+		userID = DefaultUserID
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false, nil
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM user_profile_memory WHERE user_id = ? AND id = ?`, userID, id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+func (s *MemoryStore) Clear(ctx context.Context, userID string) (int, error) {
+	if userID == "" {
+		userID = DefaultUserID
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM user_profile_memory WHERE user_id = ?`, userID)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 func (s *MemoryStore) BuildBrief(ctx context.Context, userID, query string) (string, []UserMemory, error) {
 	mems, err := s.List(ctx, userID, MaxActiveMemories)
 	if err != nil || len(mems) == 0 {

@@ -137,4 +137,13 @@ type Model struct {
 	MCPScroll       int
 	MCPError        string
 	MCPActionServer string
+
+	Memories          []protocol.MemoryItem
+	MemoryOverlayOpen bool
+	MemoryLoading     bool
+	MemoryCursor      int
+	MemoryScroll      int
+	MemoryError       string
+	MemoryConfirm     MemoryConfirmMode
+	MemoryConfirmText string
 }

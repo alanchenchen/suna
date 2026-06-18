@@ -91,6 +91,10 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 		return s.handleGuardReply(req)
 	case protocol.MethodMemoryList:
 		return s.handleMemoryList(ctx, sink)
+	case protocol.MethodMemoryDelete:
+		return s.handleMemoryDelete(ctx, req, sink)
+	case protocol.MethodMemoryClear:
+		return s.handleMemoryClear(ctx, sink)
 	case protocol.MethodSessionNew:
 		s.daemon.agent.NewSession()
 		_ = sink.Emit(ctx, protocol.Event{Method: protocol.NotifyDaemonFullStatus, Params: s.buildDaemonStatus(ctx)})
@@ -291,6 +295,45 @@ func (s *service) handleMemoryList(ctx context.Context, sink protocol.EventSink)
 	}
 	emit(ctx, sink, protocol.NotifyMemoryListResult, result)
 	return map[string]string{"status": "ok"}, nil
+}
+
+func (s *service) handleMemoryDelete(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
+	var params protocol.MemoryDeleteParams
+	if err := decodeParams(req.Params, &params); err != nil {
+		return nil, invalidParams(err.Error())
+	}
+	deleted, err := s.daemon.agent.DeleteMemory(ctx, params.ID)
+	if err != nil {
+		return nil, protocolError{code: -32603, message: err.Error()}
+	}
+	if err := s.emitMemoryList(ctx, sink); err != nil {
+		return nil, err
+	}
+	return protocol.MemoryDeleteResult{Deleted: deleted}, nil
+}
+
+func (s *service) handleMemoryClear(ctx context.Context, sink protocol.EventSink) (any, error) {
+	deleted, err := s.daemon.agent.ClearMemory(ctx)
+	if err != nil {
+		return nil, protocolError{code: -32603, message: err.Error()}
+	}
+	if err := s.emitMemoryList(ctx, sink); err != nil {
+		return nil, err
+	}
+	return protocol.MemoryClearResult{DeletedCount: deleted}, nil
+}
+
+func (s *service) emitMemoryList(ctx context.Context, sink protocol.EventSink) error {
+	memories, err := s.daemon.agent.ListMemory(ctx)
+	if err != nil {
+		return protocolError{code: -32603, message: err.Error()}
+	}
+	result := protocol.MemoryListResult{Memories: make([]protocol.MemoryItem, 0, len(memories))}
+	for _, m := range memories {
+		result.Memories = append(result.Memories, protocol.MemoryItem{ID: m.ID, Content: m.Content, Kind: m.Kind, Tags: m.Tags, Priority: m.Priority, IsCore: m.IsCore})
+	}
+	emit(ctx, sink, protocol.NotifyMemoryListResult, result)
+	return nil
 }
 
 func (s *service) handleSessionRestore(ctx context.Context, sink protocol.EventSink) (any, error) {

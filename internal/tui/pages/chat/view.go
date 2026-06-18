@@ -23,6 +23,7 @@ type ViewDeps struct {
 	HelpOverlay       string
 	SkillsOverlay     string
 	MCPOverlay        string
+	MemoryOverlay     string
 	GuardOverlay      string
 	Overlay           func(base, overlay string) string
 }
@@ -59,6 +60,9 @@ func (m Model) View(deps ViewDeps) string {
 	}
 	if m.MCPOverlayOpen && deps.MCPOverlay != "" {
 		content = overlay(content, deps.MCPOverlay, deps.Overlay)
+	}
+	if m.MemoryOverlayOpen && deps.MemoryOverlay != "" {
+		content = overlay(content, deps.MemoryOverlay, deps.Overlay)
 	}
 	if m.ActiveInteractionKind() == InteractionGuardConfirm && deps.GuardOverlay != "" {
 		content = overlay(content, deps.GuardOverlay, deps.Overlay)

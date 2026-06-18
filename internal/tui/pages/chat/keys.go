@@ -12,6 +12,7 @@ const (
 	KeyTargetModelPicker
 	KeyTargetSkills
 	KeyTargetMCP
+	KeyTargetMemory
 	KeyTargetAttachment
 	KeyTargetBlocked
 )
@@ -36,6 +37,9 @@ func (m Model) RouteKey(key string, inputLocked bool, compacting bool) KeyTarget
 	}
 	if m.MCPOverlayOpen {
 		return KeyTargetMCP
+	}
+	if m.MemoryOverlayOpen {
+		return KeyTargetMemory
 	}
 	if m.AttachmentMode || m.AttachmentDelete {
 		return KeyTargetAttachment

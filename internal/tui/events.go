@@ -234,10 +234,13 @@ func (t *TUI) handleCompactResultNotification(p protocol.CompactResult) {
 }
 
 func (t *TUI) handleMemoryListNotification(p protocol.MemoryListResult) {
-	if len(p.Memories) == 0 {
-		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.i18n.T("memory.not_found")})
-	} else {
-		t.appendNonToolMessage(chatMsg{Role: "panel", Content: t.renderMemoryList(p.Memories)})
+	t.chat.SetMemories(p.Memories)
+	if !t.chat.MemoryOverlayOpen {
+		if len(p.Memories) == 0 {
+			t.appendNonToolMessage(chatMsg{Role: "system", Content: t.i18n.T("memory.not_found")})
+		} else {
+			t.appendNonToolMessage(chatMsg{Role: "panel", Content: t.renderMemoryList(p.Memories)})
+		}
 	}
 }
 

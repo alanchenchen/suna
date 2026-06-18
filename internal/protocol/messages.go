@@ -161,6 +161,18 @@ type MemoryListResult struct {
 	Memories []MemoryItem `json:"memories"`
 }
 
+type MemoryDeleteParams struct {
+	ID string `json:"id"`
+}
+
+type MemoryDeleteResult struct {
+	Deleted bool `json:"deleted"`
+}
+
+type MemoryClearResult struct {
+	DeletedCount int `json:"deleted_count"`
+}
+
 type MemoryItem struct {
 	ID       string   `json:"id"`
 	Content  string   `json:"content"`

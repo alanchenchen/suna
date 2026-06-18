@@ -104,7 +104,11 @@ func (c *Client) RestoreSession() error {
 	return c.SendRequestNotify(protocol.MethodSessionRestore, nil)
 }
 func (c *Client) ListMemory() error { return c.SendRequestNotify(protocol.MethodMemoryList, nil) }
-func (c *Client) ListSkills() error { return c.SendRequestNotify(protocol.MethodSkillList, nil) }
+func (c *Client) DeleteMemory(id string) error {
+	return c.SendRequestNotify(protocol.MethodMemoryDelete, protocol.MemoryDeleteParams{ID: id})
+}
+func (c *Client) ClearMemory() error { return c.SendRequestNotify(protocol.MethodMemoryClear, nil) }
+func (c *Client) ListSkills() error  { return c.SendRequestNotify(protocol.MethodSkillList, nil) }
 func (c *Client) SetSkill(params protocol.SkillSetParams) error {
 	return c.SendRequestNotify(protocol.MethodSkillSet, params)
 }

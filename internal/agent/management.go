@@ -98,6 +98,20 @@ func (a *Agent) ListMemory(ctx context.Context) ([]memory.UserMemory, error) {
 	return a.memories.List(ctx, memory.DefaultUserID, memory.MaxActiveMemories)
 }
 
+func (a *Agent) DeleteMemory(ctx context.Context, id string) (bool, error) {
+	if a.memories == nil {
+		return false, nil
+	}
+	return a.memories.Delete(ctx, memory.DefaultUserID, id)
+}
+
+func (a *Agent) ClearMemory(ctx context.Context) (int, error) {
+	if a.memories == nil {
+		return 0, nil
+	}
+	return a.memories.Clear(ctx, memory.DefaultUserID)
+}
+
 func (a *Agent) Compact(ctx context.Context) (int, int, int, int, int, error) {
 	r := &runner.Runner{Router: a.router, Compressor: a.compressor}
 	contextWindow := 0

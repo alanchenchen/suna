@@ -421,6 +421,8 @@ func (t *TUI) updateChatKey(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t.updateSkillsOverlay(ks)
 	case chatpage.KeyTargetMCP:
 		return t.updateMCPOverlay(ks)
+	case chatpage.KeyTargetMemory:
+		return t.updateMemoryOverlay(ks)
 	case chatpage.KeyTargetImagePasteConfirm:
 		cmd := t.updatePendingImagePaste(ks)
 		t.syncContent()
@@ -721,11 +723,12 @@ func (t *TUI) updateModelPicker(key string) (tea.Model, tea.Cmd) {
 }
 
 func (t *TUI) handleMemory(parts []string) tea.Cmd {
-	if len(parts) == 1 {
-		return t.listMemoryCmd()
+	if len(parts) != 1 {
+		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.i18n.T("memory.list_hint")})
+		return nil
 	}
-	t.appendNonToolMessage(chatMsg{Role: "system", Content: t.i18n.T("memory.list_hint")})
-	return nil
+	t.chat.OpenMemoryOverlay()
+	return t.listMemoryCmd()
 }
 
 func (t *TUI) handleSkills(parts []string) tea.Cmd {
@@ -766,6 +769,76 @@ func (t *TUI) setSkillOverlayCmd(name string, enabled bool) tea.Cmd {
 			return ipcErrorNotification(notifyConfigError, err)
 		}
 		if err := t.localCli.ListSkills(); err != nil {
+			return ipcErrorNotification(notifyConfigError, err)
+		}
+		return nil
+	}
+}
+
+func (t *TUI) updateMemoryOverlay(ks string) (tea.Model, tea.Cmd) {
+	if t.chat.MemoryConfirm != chatpage.MemoryConfirmNone {
+		switch ks {
+		case "esc":
+			t.chat.CancelMemoryConfirm()
+			return t, nil
+		case "enter":
+			if t.chat.MemoryConfirm == chatpage.MemoryConfirmDelete {
+				if action, ok := t.chat.ConfirmMemoryDelete(); ok {
+					return t, t.deleteMemoryOverlayCmd(action.ID)
+				}
+				return t, nil
+			}
+			if t.chat.ConfirmMemoryClear() {
+				return t, t.clearMemoryOverlayCmd()
+			}
+			return t, nil
+		default:
+			t.chat.UpdateMemoryConfirmText(ks)
+			return t, nil
+		}
+	}
+	switch ks {
+	case "esc":
+		t.chat.CloseMemoryOverlay()
+		return t, t.syncInputFocus()
+	case "up":
+		t.chat.MoveMemoryCursor(-1)
+		return t, nil
+	case "down":
+		t.chat.MoveMemoryCursor(1)
+		return t, nil
+	case "delete", "backspace", "ctrl+h":
+		if t.chat.BeginMemoryDelete() {
+			return t, nil
+		}
+		return t, nil
+	case "enter":
+		if t.chat.MemorySelectionIsClear() {
+			t.chat.BeginMemoryClear()
+		}
+		return t, nil
+	}
+	return t, nil
+}
+
+func (t *TUI) deleteMemoryOverlayCmd(id string) tea.Cmd {
+	return func() tea.Msg {
+		if t.localCli == nil {
+			return ipcErrorNotification(notifyConfigError, errNotConnected(t))
+		}
+		if err := t.localCli.DeleteMemory(id); err != nil {
+			return ipcErrorNotification(notifyConfigError, err)
+		}
+		return nil
+	}
+}
+
+func (t *TUI) clearMemoryOverlayCmd() tea.Cmd {
+	return func() tea.Msg {
+		if t.localCli == nil {
+			return ipcErrorNotification(notifyConfigError, errNotConnected(t))
+		}
+		if err := t.localCli.ClearMemory(); err != nil {
 			return ipcErrorNotification(notifyConfigError, err)
 		}
 		return nil
@@ -970,6 +1043,86 @@ func (t *TUI) renderSkillRowView(row chatpage.SkillRowView, width int) string {
 		line += "  " + styleTool.Render(skillIssueText(t, row.Skill))
 	}
 	return line
+}
+
+func (t *TUI) renderMemoryOverlay(width int) string {
+	view := t.chat.MemoryOverlayView(width, t.overlayMaxHeight())
+	if view.Confirm != chatpage.MemoryConfirmNone {
+		return t.renderMemoryConfirmOverlay(view)
+	}
+	var body []string
+	body = append(body, styleDim.Render(t.tr("tui.memory.description")), "")
+	if view.Loading {
+		body = append(body, styleDim.Render(t.tr("tui.memory.loading")))
+	} else {
+		for _, row := range view.Rows {
+			body = append(body, t.renderMemoryRowView(row, view.Inner)...)
+		}
+	}
+	body, start, total := scrollWindow(body, view.Height, &t.chat.MemoryScroll)
+	title := t.tr("tui.memory.title", view.Total)
+	lines := []string{styleHL.Render(title), ""}
+	lines = append(lines, body...)
+	if view.Error != "" {
+		lines = append(lines, "", styleError.Render(view.Error))
+	}
+	lines = append(lines, "", styleDim.Render(t.memoryHelpText(start, view.Height, total)))
+	return boxStyle.Width(view.Width).Padding(1, 2).Render(strings.Join(lines, "\n"))
+}
+
+func (t *TUI) renderMemoryRowView(row chatpage.MemoryRowView, width int) []string {
+	cursor := "  "
+	contentStyle := styleToolDim
+	if row.Selected {
+		cursor = styleCursor.Render("▶ ")
+		contentStyle = styleHL
+	}
+	if row.Kind == chatpage.MemoryRowClear {
+		return []string{"", cursor + styleError.Render(t.tr("tui.memory.clear_item"))}
+	}
+	badge := row.Memory.Kind
+	if row.Memory.IsCore {
+		badge = "core " + badge
+	}
+	content := strings.TrimSpace(row.Memory.Content)
+	if content == "" {
+		content = "-"
+	}
+	wrapped := textutil.WrapLine(content, max(12, width-12))
+	if len(wrapped) == 0 {
+		wrapped = []string{""}
+	}
+	lines := []string{fmt.Sprintf("%s%s %s", cursor, styleTool.Render("["+badge+"]"), contentStyle.Render(wrapped[0]))}
+	for _, line := range wrapped[1:] {
+		lines = append(lines, "    "+contentStyle.Render(line))
+	}
+	return lines
+}
+
+func (t *TUI) renderMemoryConfirmOverlay(view chatpage.MemoryOverlayView) string {
+	var lines []string
+	switch view.Confirm {
+	case chatpage.MemoryConfirmDelete:
+		lines = append(lines, styleHL.Render(t.tr("tui.memory.delete_confirm_title")), "")
+		if t.chat.MemoryCursor >= 0 && t.chat.MemoryCursor < len(t.chat.Memories) {
+			lines = append(lines, styleToolDim.Render(t.chat.Memories[t.chat.MemoryCursor].Content))
+		}
+		lines = append(lines, "", styleDim.Render(t.tr("tui.memory.delete_confirm_help")))
+	case chatpage.MemoryConfirmClear:
+		lines = append(lines, styleHL.Render(t.tr("tui.memory.clear_confirm_title")), "")
+		lines = append(lines, styleDim.Render(t.tr("tui.memory.clear_confirm_body", view.Total)), "")
+		lines = append(lines, t.tr("tui.memory.clear_confirm_input", view.ConfirmText))
+		lines = append(lines, "", styleDim.Render(t.tr("tui.memory.clear_confirm_help")))
+	}
+	return boxStyle.Width(view.Width).Padding(1, 2).Render(strings.Join(lines, "\n"))
+}
+
+func (t *TUI) memoryHelpText(start, height, total int) string {
+	text := t.tr("tui.memory.help")
+	if total > height {
+		text += fmt.Sprintf(" · %d-%d/%d", start+1, min(total, start+height), total)
+	}
+	return text
 }
 
 func (t *TUI) renderSkillRow(i int, s protocol.SkillInfo, width int) string {

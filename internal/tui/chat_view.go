@@ -37,6 +37,10 @@ func (t *TUI) viewChat() string {
 	if t.chat.MCPOverlayOpen {
 		mcpOverlay = t.renderMCPOverlay(t.width)
 	}
+	memoryOverlay := ""
+	if t.chat.MemoryOverlayOpen {
+		memoryOverlay = t.renderMemoryOverlay(t.width)
+	}
 	guardOverlay := ""
 	if t.chat.ActiveInteractionKind() == chatpage.InteractionGuardConfirm {
 		guardOverlay = t.renderGuardOverlay(t.width)
@@ -59,6 +63,7 @@ func (t *TUI) viewChat() string {
 		HelpOverlay:        helpOverlay,
 		SkillsOverlay:      skillsOverlay,
 		MCPOverlay:         mcpOverlay,
+		MemoryOverlay:      memoryOverlay,
 		GuardOverlay:       guardOverlay,
 		Overlay:            overlay.OverlayBlock,
 	})
