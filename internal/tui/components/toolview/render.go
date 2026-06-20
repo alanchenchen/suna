@@ -143,13 +143,13 @@ func renderToolTitledBox(width int, title string, lines []string, styles RenderS
 	topRest := strings.Repeat("─", maxInt(0, contentWidth-titleWidth))
 	top := styles.Dim.Render("╭"+titlePrefix) + styles.HL.Render(title) + styles.Dim.Render(titleSuffix+topRest+"╮")
 	bottom := styles.Dim.Render("╰" + strings.Repeat("─", contentWidth) + "╯")
-	out := []string{"    " + top}
+	out := []string{top}
 	for _, line := range lines {
 		content := ansi.Truncate(" "+line+" ", contentWidth, "…")
 		pad := strings.Repeat(" ", maxInt(0, contentWidth-lipgloss.Width(content)))
-		out = append(out, "    "+styles.Dim.Render("│")+content+pad+styles.Dim.Render("│"))
+		out = append(out, styles.Dim.Render("│")+content+pad+styles.Dim.Render("│"))
 	}
-	out = append(out, "    "+bottom)
+	out = append(out, bottom)
 	return strings.Join(out, "\n") + "\n"
 }
 

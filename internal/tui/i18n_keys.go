@@ -47,6 +47,7 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"tui.chat.you":                       {LocaleEN: "You", LocaleZH: "你"},
 		"tui.chat.suna":                      {LocaleEN: "Suna", LocaleZH: "Suna"},
 		"tui.chat.thinking":                  {LocaleEN: "Thinking", LocaleZH: "思考"},
+		"tui.chat.thinking_detail_hint":      {LocaleEN: "Ctrl+R details", LocaleZH: "Ctrl+R 详情"},
 		"tui.chat.thought_done":              {LocaleEN: "Thought completed", LocaleZH: "思考完成"},
 		"tui.chat.input_placeholder":         {LocaleEN: "Type a message...", LocaleZH: "输入消息..."},
 		"tui.chat.input_help_empty":          {LocaleEN: "Enter send · Shift+Enter/Ctrl+J newline · / commands", LocaleZH: "Enter 发送 · Shift+Enter/Ctrl+J 换行 · / 命令"},

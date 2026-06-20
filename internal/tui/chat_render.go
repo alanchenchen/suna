@@ -21,11 +21,17 @@ import (
 
 const maxSystemMarkdownBytes = 4000
 
+// transcriptBlockIndent 统一主流程 block（tool/thinking/subtask）的左缩进，避免同级块左右错位。
+const transcriptBlockIndent = "  "
+
 const (
 	// 思考框本身只展示少量行，流式阶段先裁剪源文本，避免每帧对完整思考链 wrap/markdown。
 	reasoningDetailSourceBytes = 32 * 1024
 	reasoningDetailSourceLines = 80
 	reasoningSummaryTailBytes  = 8 * 1024
+	reasoningRunningMaxRows    = 5
+	reasoningCompletedMaxRows  = 3
+	reasoningDetailMaxRows     = 10
 )
 
 func (t *TUI) renderSystemMessage(content string) string {
@@ -82,16 +88,23 @@ func (t *TUI) renderThinkingBox(content string, running bool, startedAt, endedAt
 	} else if elapsed > 0 {
 		title = fmt.Sprintf("✓ %s %.1fs", t.tr("tui.chat.thinking"), elapsed.Seconds())
 	}
+	if !running && !t.chat.ShowReasoningDetail {
+		title += " · " + t.tr("tui.chat.thinking_detail_hint")
+	}
 	display := strings.TrimSpace(content)
 	if running && display == "" {
 		display = t.tr("status.thinking")
 	}
 	if !t.chat.ShowReasoningDetail {
-		display = extractLastSentence(clipTailBytes(display, reasoningSummaryTailBytes))
-		if display == "" {
+		trimmed := strings.TrimSpace(clipTailBytes(display, reasoningSummaryTailBytes))
+		if running {
+			display = renderStreamingText(trimmed, inner)
+		} else {
+			display = renderStreamingText(clipHeadLinesBytes(trimmed, reasoningDetailSourceLines, reasoningSummaryTailBytes), inner)
+		}
+		if strings.TrimSpace(display) == "" {
 			display = t.tr("tui.chat.thought_done")
 		}
-		display += "\n[Ctrl+R " + t.tr("tui.key.reasoning_detail") + "]"
 	} else {
 		trimmed := strings.TrimSpace(content)
 		if running {
@@ -103,49 +116,40 @@ func (t *TUI) renderThinkingBox(content string, running bool, startedAt, endedAt
 		}
 	}
 	lines := strings.Split(strings.TrimRight(display, "\n"), "\n")
-	if running && !t.chat.ShowReasoningDetail && len(lines) > 4 {
-		lines = append([]string{"..."}, lines[len(lines)-4:]...)
-	}
-	if t.chat.ShowReasoningDetail && len(lines) > 15 {
-		if running {
-			lines = append([]string{"..."}, lines[len(lines)-15:]...)
-		} else {
-			lines = append(lines[:15], "...")
-		}
-	}
 	body := make([]string, 0, len(lines))
 	for _, line := range lines {
 		body = append(body, textutil.WrapLine(line, inner)...)
 	}
-	body = fixedThinkingBodyRows(body, t.chat.ShowReasoningDetail, running)
-	return textutil.IndentLines(renderThinkingRoundBox(width, title, body), "    ") + "\n"
+	body = limitThinkingBodyRows(body, t.chat.ShowReasoningDetail, running)
+	return textutil.IndentLines(renderThinkingRoundBox(width, title, body), transcriptBlockIndent) + "\n"
 }
-func fixedThinkingBodyRows(lines []string, detail bool, running bool) []string {
-	if !running {
+func limitThinkingBodyRows(lines []string, detail bool, running bool) []string {
+	maxRows := reasoningCompletedMaxRows
+	if detail {
+		maxRows = reasoningDetailMaxRows
+	} else if running {
+		maxRows = reasoningRunningMaxRows
+	}
+	lines = trimEmptyThinkingRows(lines)
+	if len(lines) <= maxRows {
 		return lines
 	}
-	target := 3
-	if detail {
-		target = 15
+	if running {
+		return append([]string{"..."}, lines[len(lines)-maxRows+1:]...)
 	}
-	if len(lines) > target {
-		return append([]string(nil), lines[len(lines)-target:]...)
+	return append(append([]string(nil), lines[:maxRows-1]...), "...")
+}
+
+func trimEmptyThinkingRows(lines []string) []string {
+	start := 0
+	for start < len(lines) && strings.TrimSpace(lines[start]) == "" {
+		start++
 	}
-	out := append([]string(nil), lines...)
-	if !detail && len(out) > 1 {
-		// 折叠态最后一行通常是快捷提示。空白补在提示前，避免块底部出现空行。
-		last := out[len(out)-1]
-		out = append([]string(nil), out[:len(out)-1]...)
-		for len(out) < target-1 {
-			out = append(out, "")
-		}
-		out = append(out, last)
-		return out
+	end := len(lines)
+	for end > start && strings.TrimSpace(lines[end-1]) == "" {
+		end--
 	}
-	for len(out) < target {
-		out = append(out, "")
-	}
-	return out
+	return append([]string(nil), lines[start:end]...)
 }
 
 func reasoningElapsed(running bool, startedAt, endedAt time.Time) time.Duration {
@@ -341,26 +345,6 @@ func clipHeadLinesBytes(s string, maxLines, maxBytes int) string {
 	return strings.Join(lines[:maxLines], "\n")
 }
 
-func extractLastSentence(text string) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return ""
-	}
-	sentences := strings.FieldsFunc(text, func(r rune) bool {
-		return r == '.' || r == '。' || r == '\n'
-	})
-	for i := len(sentences) - 1; i >= 0; i-- {
-		s := strings.TrimSpace(sentences[i])
-		if s != "" {
-			if len(s) > 80 {
-				return s[:80] + "..."
-			}
-			return s
-		}
-	}
-	return ""
-}
-
 func (t *TUI) renderRestoreSummaryBox(content string) string {
 	content = strings.TrimSpace(content)
 	if content == "" {
@@ -369,8 +353,11 @@ func (t *TUI) renderRestoreSummaryBox(content string) string {
 	width := max(36, min(76, t.width-6))
 	inner := max(20, width-8)
 	lines := strings.Split(content, "\n")
-	if len(lines) > 0 && strings.Contains(lines[0], "：") {
+	if len(lines) > 0 && strings.HasPrefix(lines[0], "上一轮工具操作摘要") {
 		lines = lines[1:]
+	}
+	if len(lines) > 5 {
+		lines = append(lines[:4], "...")
 	}
 	var body []string
 	for _, line := range lines {
@@ -385,7 +372,7 @@ func (t *TUI) renderRestoreSummaryBox(content string) string {
 	if len(body) == 0 {
 		body = []string{styleDim.Render(content)}
 	}
-	title := styleHL.Render("上一轮操作摘要")
+	title := styleHL.Render("上一轮工具操作")
 	return textutil.IndentLines(boxStyle.Width(width).Padding(1, 2).Render(title+"\n"+strings.Join(body, "\n")), "  ")
 }
 

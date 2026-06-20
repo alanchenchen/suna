@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -132,10 +133,102 @@ func FormatToolSummary(items []ToolSummaryItem) string {
 	if len(items) == 0 {
 		return ""
 	}
-	lines := make([]string, 0, len(items)+1)
+	lines := make([]string, 0, 6)
 	lines = append(lines, "上一轮工具操作摘要：")
-	for _, item := range items {
-		lines = append(lines, "- "+item.Name+" ["+item.Status+"]: "+item.Summary)
+	lines = append(lines, formatToolSummaryStats(items))
+	if failure := formatToolSummaryFailures(items); failure != "" {
+		lines = append(lines, failure)
+	}
+	if changes := formatToolSummaryChanges(items); changes != "" {
+		lines = append(lines, changes)
+	}
+	lines = append(lines, formatToolSummaryRecent(items))
+	if hidden := len(items) - min(len(items), 4); hidden > 0 {
+		lines = append(lines, fmt.Sprintf("已折叠 %d 次较早操作", hidden))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formatToolSummaryStats(items []ToolSummaryItem) string {
+	failures := 0
+	for _, item := range items {
+		if isToolSummaryFailure(item.Status) {
+			failures++
+		}
+	}
+	if failures == 0 {
+		return fmt.Sprintf("%d 次 · 全部成功", len(items))
+	}
+	return fmt.Sprintf("%d 次 · %d 成功 / %d 失败", len(items), len(items)-failures, failures)
+}
+
+func formatToolSummaryFailures(items []ToolSummaryItem) string {
+	parts := make([]string, 0, 2)
+	for _, item := range items {
+		if !isToolSummaryFailure(item.Status) {
+			continue
+		}
+		parts = append(parts, item.Name+" · "+truncateRunes(item.Summary, 72))
+		if len(parts) >= 2 {
+			break
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "失败：" + strings.Join(parts, "；")
+}
+
+func formatToolSummaryChanges(items []ToolSummaryItem) string {
+	counts := make(map[string]int)
+	order := make([]string, 0, 3)
+	for _, item := range items {
+		name := canonicalToolSummaryName(item.Name)
+		if !isToolSummaryChangeTool(name) {
+			continue
+		}
+		if counts[name] == 0 {
+			order = append(order, name)
+		}
+		counts[name]++
+	}
+	if len(order) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(order))
+	for _, name := range order {
+		parts = append(parts, fmt.Sprintf("%s ×%d", name, counts[name]))
+	}
+	return "变更：" + strings.Join(parts, "，")
+}
+
+func formatToolSummaryRecent(items []ToolSummaryItem) string {
+	start := max(0, len(items)-4)
+	names := make([]string, 0, len(items)-start)
+	for _, item := range items[start:] {
+		names = append(names, canonicalToolSummaryName(item.Name))
+	}
+	return "最近：" + strings.Join(names, " → ")
+}
+
+func isToolSummaryFailure(status string) bool {
+	status = strings.ToLower(strings.TrimSpace(status))
+	return strings.Contains(status, "error") || strings.Contains(status, "fail")
+}
+
+func canonicalToolSummaryName(name string) string {
+	name = strings.TrimSpace(name)
+	if i := strings.LastIndex(name, "."); i >= 0 && i < len(name)-1 {
+		name = name[i+1:]
+	}
+	return name
+}
+
+func isToolSummaryChangeTool(name string) bool {
+	switch strings.ToLower(name) {
+	case "editfile", "writefile", "filesystem":
+		return true
+	default:
+		return false
+	}
 }

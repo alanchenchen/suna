@@ -13,7 +13,7 @@ func (t *TUI) canAppendToCurrentToolBlock() bool { return t.chat.CanAppendToCurr
 func (t *TUI) hasRunningTools() bool             { return t.chat.HasRunningTools() }
 
 func (t *TUI) renderToolBlock(block *toolBlock) string {
-	return toolview.RenderBlock(block, t.toolRenderDeps())
+	return textutil.IndentLines(toolview.RenderBlock(block, t.toolRenderDeps()), transcriptBlockIndent)
 }
 
 func (t *TUI) renderToolEntry(te *toolEntry, nested bool) string {

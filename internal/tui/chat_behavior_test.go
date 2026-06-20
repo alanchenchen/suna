@@ -15,25 +15,28 @@ import (
 	tuitransport "github.com/alanchenchen/suna/internal/tui/transport"
 )
 
-func TestThinkingBoxCollapsedWhileStreamingAndStopsElapsed(t *testing.T) {
+func TestThinkingBoxCollapsedShowsAdaptivePreviewAndStopsElapsed(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100}
 	started := time.Now().Add(-2 * time.Second)
 	ended := started.Add(1500 * time.Millisecond)
 
 	streaming := stripANSIForTest(tui.renderThinkingBox("第一段\n第二段\n最终判断", true, started, time.Time{}))
-	if strings.Contains(streaming, "第一段") || strings.Contains(streaming, "第二段") {
-		t.Fatalf("renderThinkingBox(streaming) = %q, should not show hidden reasoning lines", streaming)
+	if !strings.Contains(streaming, "第一段") || !strings.Contains(streaming, "第二段") || !strings.Contains(streaming, "最终判断") {
+		t.Fatalf("renderThinkingBox(streaming) = %q, want adaptive reasoning preview", streaming)
 	}
-	if !strings.Contains(streaming, "最终判断") || !strings.Contains(streaming, "Ctrl+R") {
-		t.Fatalf("renderThinkingBox(streaming) = %q, want compact summary and Ctrl+R hint", streaming)
+	if strings.Contains(streaming, "Ctrl+R") {
+		t.Fatalf("renderThinkingBox(streaming) = %q, should not spend a body row on shortcut hint", streaming)
 	}
 
 	completed := stripANSIForTest(tui.renderThinkingBox("第一段\n第二段\n最终判断", false, started, ended))
 	if !strings.Contains(completed, "1.5s") {
 		t.Fatalf("renderThinkingBox(completed) = %q, want fixed duration", completed)
 	}
-	if strings.Contains(completed, "第一段") || strings.Contains(completed, "第二段") {
-		t.Fatalf("renderThinkingBox(completed) = %q, should not show hidden reasoning lines", completed)
+	if !strings.Contains(completed, "Ctrl+R") || !strings.Contains(completed, "详情") {
+		t.Fatalf("renderThinkingBox(completed) = %q, want collapsed detail hint", completed)
+	}
+	if !strings.Contains(completed, "第一段") || !strings.Contains(completed, "第二段") || !strings.Contains(completed, "最终判断") {
+		t.Fatalf("renderThinkingBox(completed) = %q, want up to three completed reasoning lines", completed)
 	}
 }
 
@@ -822,14 +825,39 @@ func TestPendingImagePasteDoesNotRenderAsAttachmentPanel(t *testing.T) {
 	}
 }
 
-func TestThinkingBoxStreamingKeepsStableHeight(t *testing.T) {
+func TestThinkingBoxStreamingGrowsButStaysBounded(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100}
 	tui.initChatComponents()
 	started := time.Now().Add(-time.Second)
 	short := tui.renderThinkingBox("短句", true, started, time.Time{})
-	long := tui.renderThinkingBox("这是一个非常非常非常非常非常非常非常非常非常非常非常长的推理片段，会因为换行而变高", true, started, time.Time{})
-	if got, want := chatpage.RenderedLineCount(long), chatpage.RenderedLineCount(short); got != want {
-		t.Fatalf("streaming thinking height = %d, want stable %d", got, want)
+	long := tui.renderThinkingBox("第一行\n第二行\n第三行\n第四行\n第五行\n第六行\n第七行", true, started, time.Time{})
+	shortRows := chatpage.RenderedLineCount(short)
+	longRows := chatpage.RenderedLineCount(long)
+	if longRows <= shortRows {
+		t.Fatalf("streaming thinking height = %d, want taller than short height %d", longRows, shortRows)
+	}
+	if maxRows := reasoningRunningMaxRows + 3; longRows > maxRows {
+		t.Fatalf("streaming thinking height = %d, want at most %d", longRows, maxRows)
+	}
+	plain := stripANSIForTest(long)
+	if strings.Contains(plain, "第一行") || !strings.Contains(plain, "第七行") {
+		t.Fatalf("renderThinkingBox(long) = %q, want clipped tail preview", plain)
+	}
+}
+
+func TestThinkingBoxCompletedShowsAtMostThreeBodyRows(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100}
+	started := time.Now().Add(-time.Second)
+	ended := time.Now()
+	got := stripANSIForTest(tui.renderThinkingBox("第一行\n第二行\n第三行\n第四行\n第五行", false, started, ended))
+	if !strings.Contains(got, "第一行") || !strings.Contains(got, "第二行") {
+		t.Fatalf("renderThinkingBox() = %q, want leading completed reasoning lines", got)
+	}
+	if strings.Contains(got, "第四行") || strings.Contains(got, "第五行") {
+		t.Fatalf("renderThinkingBox() = %q, should clip completed reasoning after three rows", got)
+	}
+	if !strings.Contains(got, "...") {
+		t.Fatalf("renderThinkingBox() = %q, want overflow marker", got)
 	}
 }
 
@@ -921,4 +949,58 @@ func TestImagePasteOverlayKeepsTinyViewUnchanged(t *testing.T) {
 	if got != view {
 		t.Fatalf("overlayImagePasteAboveInput() = %q, want tiny view unchanged to avoid covering top chrome", got)
 	}
+}
+
+func TestRestoreSummaryBoxRendersCompactContent(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100}
+	content := strings.Join([]string{
+		"上一轮工具操作摘要：",
+		"6 次 · 5 成功 / 1 失败",
+		"失败：exec · go test ./... 超时",
+		"变更：editfile ×1，filesystem ×1",
+		"最近：editfile → readfile → filesystem → exec",
+		"已折叠 2 次较早操作",
+	}, "\n")
+	got := stripANSIForTest(tui.renderRestoreSummaryBox(content))
+	if strings.Count(got, "上一轮工具操作") != 1 {
+		t.Fatalf("renderRestoreSummaryBox() = %q, want single title", got)
+	}
+	checks := []string{"6 次 · 5 成功 / 1 失败", "失败：exec", "变更：editfile", "最近：editfile", "已折叠 2 次"}
+	for _, want := range checks {
+		if !strings.Contains(got, want) {
+			t.Fatalf("renderRestoreSummaryBox() = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestProgressBlocksShareLeftIndent(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100}
+	tui.initChatComponents()
+
+	mainTools := &toolBlock{}
+	mainTools.Add(&toolEntry{ID: "tool-1", Name: "Search", RawName: "search", Intent: "查找资料", Status: toolDone})
+
+	subtasks := &toolBlock{}
+	subtasks.Add(&toolEntry{ID: "spawn-1", Name: "Spawn", RawName: "spawn", Intent: "调研方案", Status: toolRunning})
+
+	blocks := map[string]string{
+		"tool":     tui.renderToolBlock(mainTools),
+		"thinking": tui.renderThinkingBox("正在分析", false, time.Now().Add(-time.Second), time.Now()),
+		"subtask":  tui.renderSubtaskBlock(subtasks),
+	}
+	for name, rendered := range blocks {
+		first := strings.Split(strings.TrimRight(rendered, "\n"), "\n")[0]
+		if got, want := leadingSpaces(first), len(transcriptBlockIndent); got != want {
+			t.Fatalf("%s block first line has %d leading spaces, want %d: %q", name, got, want, first)
+		}
+	}
+}
+
+func leadingSpaces(s string) int {
+	for i, r := range s {
+		if r != ' ' {
+			return i
+		}
+	}
+	return len(s)
 }

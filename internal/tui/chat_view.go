@@ -484,7 +484,7 @@ func (t *TUI) renderSubtaskBlock(block *toolBlock) string {
 		}
 		lines = append(lines, styleDim.Render(t.tr(t.subtaskPanelHelpKey())))
 	}
-	return textutil.IndentLines(renderTitledRoundBox(width, title, lines), "  ")
+	return textutil.IndentLines(renderTitledRoundBox(width, title, lines), transcriptBlockIndent)
 }
 
 func subtaskIDsInBlock(block *toolBlock) []string {
