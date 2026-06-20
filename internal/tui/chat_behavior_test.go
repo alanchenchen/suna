@@ -973,6 +973,34 @@ func TestRestoreSummaryBoxRendersCompactContent(t *testing.T) {
 	}
 }
 
+func TestSubtaskSectionDividerReachesRightEdge(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 40}
+	tui.initChatComponents()
+	block := &toolBlock{}
+	block.Add(&toolEntry{
+		ID:      "spawn-1",
+		Name:    "Spawn",
+		RawName: "spawn",
+		Intent:  "研究渲染机制",
+		Status:  toolRunning,
+		ParamsRaw: map[string]any{
+			"model": "DF/MiniMax-M3",
+			"tools": "[http exec]",
+			"task":  "研究 TUI 渲染刷新机制",
+		},
+	})
+	tui.chat.CurrentToolBlock = block
+	got := stripANSIForTest(tui.renderSubtaskBlock(block))
+	for _, line := range strings.Split(got, "\n") {
+		if !strings.Contains(line, "当前子任务") && !strings.Contains(line, "工具调用") {
+			continue
+		}
+		if strings.Contains(line, "   │") {
+			t.Fatalf("subtask section divider has a visible right gap: %q", line)
+		}
+	}
+}
+
 func TestProgressBlocksShareLeftIndent(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100}
 	tui.initChatComponents()

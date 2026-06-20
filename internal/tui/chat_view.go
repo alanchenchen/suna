@@ -463,6 +463,7 @@ func (t *TUI) renderSubtaskBlock(block *toolBlock) string {
 	}
 	width := max(40, t.width-8)
 	innerWidth := max(24, width-8)
+	sectionWidth := max(24, width-4)
 	done, running, failed := t.subtaskStatusCounts(ids)
 	title := fmt.Sprintf("%s "+t.tr("tui.subtask_panel.title"), t.subtaskBlockStatusIcon(done, running, failed, len(ids)), len(ids), running, done, failed)
 	lines := make([]string, 0)
@@ -473,12 +474,12 @@ func (t *TUI) renderSubtaskBlock(block *toolBlock) string {
 	lines = append(lines, t.renderSubtaskRows(ids, innerWidth, selected)...)
 	if active {
 		if current := t.selectedSubtask(); current != nil {
-			lines = append(lines, t.subtaskSectionTitle(t.tr("tui.subtask_panel.current"), innerWidth))
+			lines = append(lines, t.subtaskSectionTitle(t.tr("tui.subtask_panel.current"), sectionWidth))
 			lines = append(lines, t.renderSelectedSubtaskSummary(current, innerWidth)...)
-			lines = append(lines, t.subtaskSectionTitle(t.tr("tui.subtask_panel.tools"), innerWidth))
+			lines = append(lines, t.subtaskSectionTitle(t.tr("tui.subtask_panel.tools"), sectionWidth))
 			lines = append(lines, t.renderSelectedSubtaskTools(innerWidth)...)
 			if t.chat.SubtaskToolDetailExpanded {
-				lines = append(lines, t.subtaskSectionTitle(t.tr("tui.subtask_panel.tool_detail"), innerWidth))
+				lines = append(lines, t.subtaskSectionTitle(t.tr("tui.subtask_panel.tool_detail"), sectionWidth))
 				lines = append(lines, t.renderSelectedSubtaskToolDetail(innerWidth)...)
 			}
 		}
