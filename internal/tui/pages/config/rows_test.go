@@ -65,3 +65,41 @@ func TestModelSummaryKeepsCapabilitiesBriefAndPrioritizesStrengths(t *testing.T)
 		}
 	}
 }
+
+func TestModelSummaryOmitsSubtaskFor(t *testing.T) {
+	mc := ModelConfig{Provider: "DF", Model: "MiniMax-M3", ContextWindow: 1000000, MaxOutputTokens: 8192, SubtaskFor: []string{"Froghire/**"}, HasAPIKey: true}
+	got := ModelSummary(mc, false, func(int) string { return "x" })
+	if strings.Contains(got, "Froghire") || strings.Contains(got, "subtask") {
+		t.Fatalf("ModelSummary() = %q, should omit subtask_for", got)
+	}
+}
+
+func TestDetailRowsShowsSubtaskFor(t *testing.T) {
+	m := &Model{Page: "detail", DetailRef: "DF/MiniMax-M3"}
+	rows := m.DetailRows(RowsDeps{
+		Tr: func(key string) string {
+			switch key {
+			case "tui.config.provider.subtask_for":
+				return "Subtask for"
+			case "tui.config.subtask_for_all":
+				return "all main models"
+			default:
+				return key
+			}
+		},
+		Models:           []ModelConfig{{Provider: "DF", Model: "MiniMax-M3", ContextWindow: 1000000, MaxOutputTokens: 8192, SubtaskFor: []string{"Froghire/**", "Oio/**"}}},
+		DisplayEndpoint:  func(string) string { return "" },
+		ContextDisplay:   func(ModelConfig) string { return "" },
+		MaxOutputDisplay: func(ModelConfig) string { return "" },
+		ReasoningDisplay: func(ModelConfig) string { return "" },
+	})
+	for _, row := range rows {
+		if row.Label == "Subtask for" {
+			if row.Value != "Froghire/**, Oio/**" {
+				t.Fatalf("Subtask for row value = %q", row.Value)
+			}
+			return
+		}
+	}
+	t.Fatalf("Subtask for row not found in %#v", rows)
+}

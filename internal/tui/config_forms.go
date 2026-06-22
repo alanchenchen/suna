@@ -87,7 +87,9 @@ func (t *TUI) providerFormLabels() tuiconfig.ProviderFormLabels {
 		ContextWindow:   t.tr("tui.config.provider.context_window"),
 		MaxOutputTokens: t.tr("tui.config.provider.max_output_tokens"),
 		Strengths:       t.tr("tui.config.provider.strengths"),
+		SubtaskFor:      t.tr("tui.config.provider.subtask_for"),
 		StrengthsHint:   t.tr("tui.config.strengths_placeholder"),
+		SubtaskForHint:  t.tr("tui.config.subtask_for_placeholder"),
 	}
 }
 

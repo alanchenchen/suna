@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const ProviderFormFieldCount = 7
+const ProviderFormFieldCount = 8
 
 type ProviderFormSpec struct {
 	Labels       []string
@@ -24,7 +24,9 @@ type ProviderFormLabels struct {
 	ContextWindow   string
 	MaxOutputTokens string
 	Strengths       string
+	SubtaskFor      string
 	StrengthsHint   string
+	SubtaskForHint  string
 }
 
 func (m *Model) OpenProviderForm(ref string, mc *ModelConfig) {
@@ -38,9 +40,9 @@ func (m *Model) OpenProviderForm(ref string, mc *ModelConfig) {
 }
 
 func (m *Model) ProviderFormSpec(labels ProviderFormLabels, mc *ModelConfig) ProviderFormSpec {
-	fieldLabels := []string{labels.Provider, labels.Model, labels.APIKey, labels.Endpoint, labels.ContextWindow, labels.MaxOutputTokens, labels.Strengths}
-	placeholders := []string{"Zhipu", "glm-5.1", "sk-...", "https://api.example.com/v1", "128000", "8192", labels.StrengthsHint}
-	values := []string{"", "", "", "", "", "", ""}
+	fieldLabels := []string{labels.Provider, labels.Model, labels.APIKey, labels.Endpoint, labels.ContextWindow, labels.MaxOutputTokens, labels.Strengths, labels.SubtaskFor}
+	placeholders := []string{"Zhipu", "glm-5.1", "sk-...", "https://api.example.com/v1", "128000", "8192", labels.StrengthsHint, labels.SubtaskForHint}
+	values := []string{"", "", "", "", "", "", "", ""}
 	if mc != nil {
 		values[0] = mc.Provider
 		values[1] = mc.Model
@@ -52,6 +54,7 @@ func (m *Model) ProviderFormSpec(labels ProviderFormLabels, mc *ModelConfig) Pro
 			values[5] = strconv.Itoa(mc.MaxOutputTokens)
 		}
 		values[6] = strings.Join(mc.Strengths, ", ")
+		values[7] = strings.Join(mc.SubtaskFor, ", ")
 	} else {
 		switch m.ProviderKind {
 		case "openai":
@@ -76,7 +79,7 @@ func ProviderFormValuesFromStrings(values []string) ProviderFormValues {
 			vals[i] = strings.TrimSpace(values[i])
 		}
 	}
-	return ProviderFormValues{Provider: vals[0], Model: vals[1], APIKey: vals[2], Endpoint: vals[3], ContextWindow: vals[4], MaxOutputTokens: vals[5], Strengths: vals[6]}
+	return ProviderFormValues{Provider: vals[0], Model: vals[1], APIKey: vals[2], Endpoint: vals[3], ContextWindow: vals[4], MaxOutputTokens: vals[5], Strengths: vals[6], SubtaskFor: vals[7]}
 }
 
 type ProviderValidationLabels struct {

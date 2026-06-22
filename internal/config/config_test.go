@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -366,4 +367,69 @@ func loadCredentials(t *testing.T, dir string) credentialsFile {
 		t.Fatalf("readCredentials() error = %v", err)
 	}
 	return creds
+}
+
+func TestModelConfigAvailableAsSubtaskFor(t *testing.T) {
+	tests := []struct {
+		name      string
+		model     ModelConfig
+		activeRef string
+		want      bool
+	}{
+		{name: "empty matches all", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3"}, activeRef: "Froghire/gpt-5.5", want: true},
+		{name: "self always matches", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"Froghire/**"}}, activeRef: "DF/MiniMax-M3", want: true},
+		{name: "exact match", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"Froghire/gpt-5.5"}}, activeRef: "Froghire/gpt-5.5", want: true},
+		{name: "provider glob", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"Froghire/**"}}, activeRef: "Froghire/gpt-5.4", want: true},
+		{name: "model glob", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"DF/glm-*"}}, activeRef: "DF/glm-5.2", want: true},
+		{name: "or semantics miss", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"Froghire/**", "Oio/**"}}, activeRef: "DF/glm-5.2", want: false},
+		{name: "star matches all", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"*"}}, activeRef: "Any/model", want: true},
+		{name: "provider double star crosses slash", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"Froghire/**"}}, activeRef: "Froghire/family/gpt-5.5", want: true},
+		{name: "star does not cross slash", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"Froghire/*"}}, activeRef: "Froghire/family/gpt-5.5", want: false},
+		{name: "invalid-looking pattern treated literal", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"["}}, activeRef: "Froghire/gpt-5.5", want: false},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.model.AvailableAsSubtaskFor(tt.activeRef); got != tt.want {
+				t.Fatalf("AvailableAsSubtaskFor() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestConfigSubtaskForRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	workspace := mkdir(t, filepath.Join(dir, "workspace"))
+	cfg := &Config{
+		ActiveModel: "DF/MiniMax-M3",
+		Models: []ModelConfig{{
+			Provider:        "DF",
+			Model:           "MiniMax-M3",
+			BaseURL:         "https://api.example.com/v1",
+			ContextWindow:   1000000,
+			MaxOutputTokens: 8192,
+			SubtaskFor:      []string{"Froghire/**", "Oio/**"},
+		}},
+		Guard:   GuardConfig{Mode: "ask", Workspace: workspace},
+		UI:      UIConfig{Theme: "auto", Locale: "en"},
+		DataDir: dir,
+	}
+	path := filepath.Join(dir, "config.toml")
+
+	if err := cfg.Save(path); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	saved := readFile(t, path)
+	if !strings.Contains(saved, `subtask_for = ["Froghire/**", "Oio/**"]`) {
+		t.Fatalf("saved config = %q, want subtask_for", saved)
+	}
+	var loaded Config
+	if err := LoadTOML(path, &loaded); err != nil {
+		t.Fatalf("LoadTOML() error = %v", err)
+	}
+	got := loaded.Models[0].SubtaskFor
+	want := []string{"Froghire/**", "Oio/**"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("SubtaskFor = %#v, want %#v", got, want)
+	}
 }

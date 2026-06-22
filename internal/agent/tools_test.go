@@ -8,7 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/guard"
+	"github.com/alanchenchen/suna/internal/media"
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/runner"
@@ -224,4 +226,37 @@ func testWorkingMemory(userText string) *memory.WorkingMemory {
 	w := memory.NewWorkingMemory()
 	w.AddMessage(model.NewTextMessage(model.RoleUser, userText))
 	return w
+}
+
+func TestExecuteSpawnToolRejectsModelHiddenBySubtaskFor(t *testing.T) {
+	cfg := &config.Config{
+		ActiveModel: "Froghire/gpt-5.5",
+		Models: []config.ModelConfig{
+			{Provider: "Froghire", Model: "gpt-5.5", BaseURL: "https://api.example.com/v1", ContextWindow: 400000, MaxOutputTokens: 8192, APIKey: "sk-test"},
+			{Provider: "DF", Model: "MiniMax-M3", BaseURL: "https://api.example.com/v1", ContextWindow: 1000000, MaxOutputTokens: 8192, APIKey: "sk-test", SubtaskFor: []string{"DF/**"}},
+		},
+	}
+	router, err := model.NewRouter(cfg, media.NewStore(t.TempDir()))
+	if err != nil {
+		t.Fatalf("NewRouter() error = %v", err)
+	}
+	a := &Agent{cfg: cfg, router: router}
+	events := make(chan Event, 1)
+	var sink chan<- Event = events
+	ctx := agenttools.WithEvents(context.Background(), sink)
+
+	result := a.ExecuteSpawnTool(ctx, "spawn-1", map[string]any{
+		"task":  "check something",
+		"model": "DF/MiniMax-M3",
+		"tools": []any{},
+	})
+	if !result.IsError {
+		t.Fatalf("ExecuteSpawnTool() IsError = false, want true")
+	}
+	if !strings.Contains(result.Error, "not available for active model") {
+		t.Fatalf("ExecuteSpawnTool() error = %q, want availability message", result.Error)
+	}
+	if strings.Contains(result.Error, "DF/MiniMax-M3") && strings.Contains(result.Error, "Choose one of: DF/MiniMax-M3") {
+		t.Fatalf("ExecuteSpawnTool() error = %q, should not list hidden model as choice", result.Error)
+	}
 }

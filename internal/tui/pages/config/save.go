@@ -19,6 +19,7 @@ func (m Model) BuildProviderSave(v ProviderFormValues, existingReasoning map[str
 			ContextWindow:   ParsePositiveInt(v.ContextWindow),
 			MaxOutputTokens: ParsePositiveInt(v.MaxOutputTokens),
 			Strengths:       SplitCSV(v.Strengths),
+			SubtaskFor:      SplitCSV(v.SubtaskFor),
 			Reasoning:       existingReasoning,
 		},
 	}

@@ -271,6 +271,33 @@ func (r *Router) ListProviders() []string {
 	return names
 }
 
+// ListSpawnableModels 返回当前 active 模型可见的子任务模型；
+// subtask_for 只影响候选列表，不改变模型 strengths 或实际工具授权。
+func (r *Router) ListSpawnableModels() []string {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	refs := make([]string, 0, len(r.models))
+	for ref, mc := range r.models {
+		if mc.AvailableAsSubtaskFor(r.activeRef) {
+			refs = append(refs, ref)
+		}
+	}
+	return refs
+}
+
+func (r *Router) IsSpawnableModel(ref string) bool {
+	if r == nil {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	mc, ok := r.models[ref]
+	return ok && mc.AvailableAsSubtaskFor(r.activeRef)
+}
+
 func createProvider(mc config.ModelConfig, resolver MediaResolver) (Provider, error) {
 	apiKey, err := mc.ResolveAPIKey()
 	if err != nil {

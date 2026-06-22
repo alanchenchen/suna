@@ -207,6 +207,7 @@ func (m *Model) BuildReasoningSave(mc ModelConfig, reasoning map[string]any) pro
 			ContextWindow:   mc.ContextWindow,
 			MaxOutputTokens: mc.MaxOutputTokens,
 			Strengths:       mc.Strengths,
+			SubtaskFor:      mc.SubtaskFor,
 			Reasoning:       reasoning,
 		},
 	}

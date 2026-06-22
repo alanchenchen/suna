@@ -63,6 +63,7 @@ type ProviderFormValues struct {
 	ContextWindow   string
 	MaxOutputTokens string
 	Strengths       string
+	SubtaskFor      string
 }
 
 type ModelConfig struct {
@@ -72,6 +73,7 @@ type ModelConfig struct {
 	ContextWindow   int
 	MaxOutputTokens int
 	Strengths       []string
+	SubtaskFor      []string
 	Reasoning       map[string]any
 	HasAPIKey       bool
 }

@@ -76,7 +76,7 @@ func (a *Agent) modelRoutingSummary() string {
 	if a.router == nil {
 		return "- No models configured. Configure a model before using spawn."
 	}
-	refs := a.router.ListProviders()
+	refs := a.router.ListSpawnableModels()
 	sort.Strings(refs)
 	if len(refs) == 0 {
 		return "- No models configured. Configure a model before using spawn."

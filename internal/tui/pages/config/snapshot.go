@@ -13,6 +13,7 @@ func SnapshotFromProtocol(p protocol.ConfigParams) []ModelConfig {
 			ContextWindow:   cm.ContextWindow,
 			MaxOutputTokens: cm.MaxOutputTokens,
 			Strengths:       cm.Strengths,
+			SubtaskFor:      cm.SubtaskFor,
 			Reasoning:       cm.Reasoning,
 			HasAPIKey:       cm.HasAPIKey,
 		})

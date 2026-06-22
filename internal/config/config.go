@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,6 +37,8 @@ func (c *Config) Clone() *Config {
 	cp.Models = append([]ModelConfig(nil), c.Models...)
 	for i := range cp.Models {
 		cp.Models[i].Reasoning = cloneMap(cp.Models[i].Reasoning)
+		cp.Models[i].Strengths = append([]string(nil), cp.Models[i].Strengths...)
+		cp.Models[i].SubtaskFor = append([]string(nil), cp.Models[i].SubtaskFor...)
 	}
 	cp.Guard.Blocked = append([]GuardRule(nil), c.Guard.Blocked...)
 	cp.Guard.Allowed = append([]GuardAllowRule(nil), c.Guard.Allowed...)
@@ -127,6 +130,7 @@ type ModelConfig struct {
 	ContextWindow   int            `toml:"context_window,omitempty"`
 	MaxOutputTokens int            `toml:"max_output_tokens,omitempty"`
 	Strengths       []string       `toml:"strengths,omitempty"`
+	SubtaskFor      []string       `toml:"subtask_for,omitempty"`
 	Reasoning       map[string]any `toml:"reasoning,omitempty"`
 	APIKey          string         `toml:"-"`
 }
@@ -146,6 +150,7 @@ type modelConfigTOML struct {
 	ContextWindow   int             `toml:"context_window,omitempty"`
 	MaxOutputTokens int             `toml:"max_output_tokens,omitempty"`
 	Strengths       []string        `toml:"strengths,omitempty"`
+	SubtaskFor      []string        `toml:"subtask_for,omitempty"`
 	Reasoning       inlineTOMLTable `toml:"reasoning,omitempty"`
 }
 
@@ -333,6 +338,7 @@ func (c *Config) tomlView() configTOML {
 			ContextWindow:   mc.ContextWindow,
 			MaxOutputTokens: mc.MaxOutputTokens,
 			Strengths:       mc.Strengths,
+			SubtaskFor:      mc.SubtaskFor,
 			Reasoning:       inlineTOMLTable(mc.Reasoning),
 		})
 	}
@@ -703,6 +709,60 @@ func (c *Config) ModelByRef(ref string) (ModelConfig, bool) {
 func (c *Config) ActiveModelConfig() (ModelConfig, bool) { return c.ModelByRef(c.ActiveModel) }
 
 func (mc ModelConfig) Ref() string { return mc.Provider + "/" + mc.Model }
+
+// AvailableAsSubtaskFor 判断当前模型是否应作为 activeRef 的子任务候选展示；
+// subtask_for 仅是可见性过滤器，不改变 strengths 或工具授权语义。
+func (mc ModelConfig) AvailableAsSubtaskFor(activeRef string) bool {
+	ref := mc.Ref()
+	if strings.TrimSpace(activeRef) == "" || activeRef == ref {
+		return true
+	}
+	if len(mc.SubtaskFor) == 0 {
+		return true
+	}
+	for _, pattern := range mc.SubtaskFor {
+		if matchModelRefPattern(strings.TrimSpace(pattern), activeRef) {
+			return true
+		}
+	}
+	return false
+}
+
+func matchModelRefPattern(pattern, ref string) bool {
+	if pattern == "" {
+		return false
+	}
+	if pattern == "*" || pattern == "**" {
+		return true
+	}
+	re, err := modelRefGlobRegexp(pattern)
+	return err == nil && re.MatchString(ref)
+}
+
+func modelRefGlobRegexp(pattern string) (*regexp.Regexp, error) {
+	var b strings.Builder
+	b.WriteString("^")
+	for i := 0; i < len(pattern); {
+		switch pattern[i] {
+		case '*':
+			if i+1 < len(pattern) && pattern[i+1] == '*' {
+				b.WriteString(".*")
+				i += 2
+				continue
+			}
+			b.WriteString("[^/]*")
+			i++
+		case '?':
+			b.WriteString("[^/]")
+			i++
+		default:
+			b.WriteString(regexp.QuoteMeta(string(pattern[i])))
+			i++
+		}
+	}
+	b.WriteString("$")
+	return regexp.Compile(b.String())
+}
 
 func (mc ModelConfig) ResolveAPIKey() (string, error) {
 	if mc.APIKey == "" {

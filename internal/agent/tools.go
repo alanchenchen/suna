@@ -180,6 +180,9 @@ func (a *Agent) ExecuteSpawnTool(ctx context.Context, id string, params map[stri
 	if _, err := a.router.Provider(modelRef); err != nil {
 		return tools.ErrorResult(fmt.Sprintf("invalid spawn model %q. Choose one of: %s", modelRef, strings.Join(a.availableModelRefs(), ", ")))
 	}
+	if !a.router.IsSpawnableModel(modelRef) {
+		return tools.ErrorResult(fmt.Sprintf("spawn model %q is not available for active model %q. Choose one of: %s", modelRef, a.router.ActiveRef(), strings.Join(a.availableModelRefs(), ", ")))
+	}
 	allowedTools, toolNames, errResult := a.buildSubtaskAllowedTools(params["tools"])
 	if errResult.IsError {
 		return errResult
@@ -593,7 +596,7 @@ func (a *Agent) availableModelRefs() []string {
 	if a.router == nil {
 		return nil
 	}
-	refs := a.router.ListProviders()
+	refs := a.router.ListSpawnableModels()
 	sort.Strings(refs)
 	return refs
 }

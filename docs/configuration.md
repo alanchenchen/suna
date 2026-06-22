@@ -85,6 +85,8 @@ base_url = "https://api.minimax.io/v1"
 context_window = 1000000
 max_output_tokens = 8192
 reasoning = { reasoning_split = true }
+# 可选：仅当主模型 ref 匹配这些 glob 时，MiniMax-M3 才作为 subtask 候选展示。
+subtask_for = ["Froghire/**", "Oio/**"]
 
 [[models]]
 provider = "dreamfield"
@@ -198,6 +200,7 @@ api_key = "..."
 | `models.context_window` | int | 是 | 无 | 模型服务声明的总上下文窗口，按 `input + output` 理解；用于 status、usage 展示和 compact 预算。 |
 | `models.max_output_tokens` | int | 是 | 无 | 模型服务允许的最大单次输出；所有 LLM 请求默认使用该值作为输出预算，且必须小于 `context_window`。 |
 | `models.strengths` | string[] | 否 | 空 | 模型能力描述，会给主 Agent 参考，用于选择 subtask 模型。 |
+| `models.subtask_for` | string[] | 否 | 空 | 子任务候选可见性过滤器；留空表示所有主模型可用，非空时 active model ref 匹配任一 glob 才展示，模型始终可作为自己的子任务模型。`*` 不跨 `/`，`**` 可跨 `/`。 |
 | `models.reasoning` | object | 否 | 空 | 透传到 provider 请求体的额外 reasoning/thinking 字段；Suna 不理解 preset，是否有效取决于上游。 |
 | `[guard].mode` | string | 否 | `ask` | `readonly` / `ask` / `auto` / `smart`。空或非法值按 `ask` 使用；`smart` 会对中高风险调用进行安全审查，而不是做普通 tool-call 优化。 |
 | `[guard].workspace` | string | 否 | 空 | 本地文件和 exec 的目录硬边界；非空时必须是存在目录，会展开 `~/` 并规范化为绝对路径。 |

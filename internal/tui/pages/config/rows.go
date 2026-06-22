@@ -1,6 +1,9 @@
 package config
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 type RowsDeps struct {
 	Tr               func(string) string
@@ -119,6 +122,7 @@ func (m *Model) DetailRows(deps RowsDeps) []Row {
 		{"info", "", deps.Tr("tui.config.provider.context_window"), deps.ContextDisplay(mc)},
 		{"info", "", deps.Tr("tui.config.provider.max_output_tokens"), deps.MaxOutputDisplay(mc)},
 		{"info", "", deps.Tr("tui.config.reasoning"), deps.ReasoningDisplay(mc)},
+		{"info", "", deps.Tr("tui.config.provider.subtask_for"), subtaskForDisplay(mc, deps.Tr)},
 		{"info", "", "", ""},
 		{"edit_model", "", "  " + deps.Tr("tui.config.edit_model"), ""},
 		{"edit_reasoning", "", "  " + deps.Tr("tui.config.edit_reasoning"), ""},
@@ -128,6 +132,13 @@ func (m *Model) DetailRows(deps RowsDeps) []Row {
 	}
 	rows = append(rows, Row{"delete_model", "", "  " + deps.Tr("tui.config.delete_model"), ""})
 	return rows
+}
+
+func subtaskForDisplay(mc ModelConfig, tr func(string) string) string {
+	if len(mc.SubtaskFor) == 0 {
+		return tr("tui.config.subtask_for_all")
+	}
+	return strings.Join(mc.SubtaskFor, ", ")
 }
 
 func (m *Model) EnsureCursor(rows []Row) {

@@ -128,6 +128,7 @@ type ConfigModel struct {
 	ContextWindow   int            `json:"context_window,omitempty"`
 	MaxOutputTokens int            `json:"max_output_tokens,omitempty"`
 	Strengths       []string       `json:"strengths,omitempty"`
+	SubtaskFor      []string       `json:"subtask_for,omitempty"`
 	Reasoning       map[string]any `json:"reasoning,omitempty"`
 	HasAPIKey       bool           `json:"has_api_key,omitempty"`
 }
