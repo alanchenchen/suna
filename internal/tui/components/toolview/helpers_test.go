@@ -29,8 +29,8 @@ func TestSemanticSummarySearchKeepsPatternAndPathSuffix(t *testing.T) {
 		},
 	}
 
-	got := SemanticSummary(entry, 52, RenderLabels{ModeContent: "内容"})
-	if !strings.Contains(got, "内容") || !strings.Contains(got, "SemanticSummary") || !strings.Contains(got, "tui") {
+	got := SemanticSummary(entry, 52, RenderLabels{})
+	if !strings.Contains(got, "content") || strings.Contains(got, "内容") || !strings.Contains(got, "SemanticSummary") || !strings.Contains(got, "tui") {
 		t.Fatalf("SemanticSummary(search) = %q, want mode, pattern, and path suffix", got)
 	}
 	if got == "…tui" || got == "...tui" {
@@ -48,7 +48,7 @@ func TestSemanticSummarySearchTerms(t *testing.T) {
 		},
 	}
 
-	got := SemanticSummary(entry, 64, RenderLabels{ModeContent: "内容"})
+	got := SemanticSummary(entry, 64, RenderLabels{})
 	if !strings.Contains(got, "SemanticSummary") || !strings.Contains(got, "tool") || !strings.Contains(got, "tui") {
 		t.Fatalf("SemanticSummary(search terms) = %q, want terms and path suffix", got)
 	}

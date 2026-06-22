@@ -599,6 +599,25 @@ func TestSubtaskPanelKeyboardAndToolDetail(t *testing.T) {
 	}
 }
 
+func TestSubtaskBlockUsesAvailableWidthForRowSummary(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 180, height: 30, mode: uipage.Chat}
+	tui.initChatComponents()
+	block := tui.ensureToolBlock()
+	tui.chat.CurrentToolBlock = block
+	intent := "并行检查配置和 TUI 字段传播路径，避免新增字段在保存时丢失"
+	path := "internal/tui/pages/config/forms.go"
+	block.Add(&toolEntry{ID: "spawn-1", Name: "Spawn", RawName: "spawn", Intent: intent, Status: toolRunning})
+	block.Add(&toolEntry{ID: "spawn:spawn-1:read-1", ParentID: "spawn-1", Name: "Readfile", RawName: "readfile", ParamsRaw: map[string]any{"path": path}, Status: toolRunning})
+
+	plain := stripANSIForTest(tui.renderSubtaskBlock(block))
+	if !strings.Contains(plain, intent) {
+		t.Fatalf("renderSubtaskBlock() = %q, want full subtask intent on wide viewport", plain)
+	}
+	if !strings.Contains(plain, path) {
+		t.Fatalf("renderSubtaskBlock() = %q, want full active tool path on wide viewport", plain)
+	}
+}
+
 func TestGlobalToolDetailSkipsSpawnAndSubtaskChildren(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 28, mode: uipage.Chat}
 	tui.initChatComponents()
@@ -761,6 +780,23 @@ func TestSubtaskBlockTitleShowsStatusIconAndFailureReason(t *testing.T) {
 	}
 	if !strings.Contains(panel, "quota exceeded") {
 		t.Fatalf("renderSubtaskBlock() = %q, want failure reason", panel)
+	}
+}
+
+func TestSubtaskBlockPrioritizesFailureReasonOverLastChild(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 30, mode: uipage.Chat}
+	tui.initChatComponents()
+	block := tui.ensureToolBlock()
+	tui.chat.CurrentToolBlock = block
+	block.Add(&toolEntry{ID: "spawn-1", Name: "Spawn", RawName: "spawn", Intent: "失败子任务", Status: toolError, Result: "quota exceeded\ntry later"})
+	block.Add(&toolEntry{ID: "spawn:spawn-1:read-1", ParentID: "spawn-1", Name: "Readfile", RawName: "readfile", Intent: "读取文件", Status: toolDone})
+
+	panel := stripANSIForTest(tui.renderSubtaskBlock(block))
+	if !strings.Contains(panel, "quota exceeded") {
+		t.Fatalf("renderSubtaskBlock() = %q, want failure reason even when subtask has children", panel)
+	}
+	if !strings.Contains(panel, "错误:") || !strings.Contains(panel, "quota exceeded") {
+		t.Fatalf("renderSubtaskBlock() = %q, want selected subtask error line", panel)
 	}
 }
 

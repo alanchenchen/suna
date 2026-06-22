@@ -555,17 +555,9 @@ func (t *TUI) renderSubtaskRows(ids []string, innerWidth int, selected int) []st
 		if dur != "" {
 			durWidth = lipgloss.Width(" · " + dur)
 		}
-		activityBudget := max(0, innerWidth-prefixWidth-durWidth-3)
-		titleWidth := min(max(12, innerWidth/2), max(4, activityBudget/2))
-		if titleWidth <= 0 {
-			titleWidth = max(4, innerWidth-prefixWidth-durWidth)
-		}
-		label := textutil.TruncateRunes(toolview.PlainIntentLabel(te), titleWidth)
-		remaining := max(0, innerWidth-prefixWidth-lipgloss.Width(label)-durWidth)
-		activity := ""
-		if remaining > 4 {
-			activity = textutil.TruncateRunes(t.subtaskActivity(te), remaining-3)
-		}
+		rawLabel := toolview.PlainIntentLabel(te)
+		rawActivity := t.subtaskActivity(te, innerWidth)
+		label, activity := fitSubtaskRowParts(rawLabel, rawActivity, innerWidth-prefixWidth-durWidth)
 		line := fmt.Sprintf("%s%s %s", cursor, icon, labelStyle.Render(label))
 		if activity != "" {
 			line += styleDim.Render(" · " + activity)
@@ -581,6 +573,11 @@ func (t *TUI) renderSubtaskRows(ids []string, innerWidth int, selected int) []st
 func (t *TUI) renderSelectedSubtaskSummary(te *toolEntry, innerWidth int) []string {
 	label := textutil.TruncateRunes(toolview.PlainIntentLabel(te), max(12, innerWidth))
 	parts := []string{styleHL.Render(label)}
+	if te != nil && te.Status == toolview.StatusError {
+		if reason := t.subtaskFailureReason(te); reason != "" {
+			parts = append(parts, styleDim.Render(t.tr("tui.subtask_panel.error")+": ")+styleToolErr.Render(textutil.TruncateRunes(reason, max(12, innerWidth-8))))
+		}
+	}
 	if model := subtaskParamLabel(te, "model"); model != "" {
 		parts = append(parts, styleDim.Render(t.tr("tui.tool.model")+": ")+styleToolDim.Render(textutil.TruncateRunes(model, max(10, innerWidth-8))))
 	}
@@ -790,28 +787,56 @@ func (t *TUI) subtaskStatusIcon(te *toolEntry) string {
 	}
 }
 
-func (t *TUI) subtaskActivity(te *toolEntry) string {
+func (t *TUI) subtaskActivity(te *toolEntry, width int) string {
 	if te == nil || t.chat.CurrentToolBlock == nil {
 		return ""
+	}
+	if te.Status == toolview.StatusError {
+		return t.subtaskFailureReason(te)
 	}
 	children := toolview.SubtaskChildren(t.chat.CurrentToolBlock, te.ID)
 	var latest *toolEntry
 	for _, child := range children {
 		if child.Status == toolview.StatusRunning {
-			return t.subtaskActiveToolLabel(child, 48)
+			return t.subtaskActiveToolLabel(child, width)
 		}
 		latest = child
 	}
 	if latest != nil {
-		return t.subtaskActiveToolLabel(latest, 48)
-	}
-	if te.Status == toolview.StatusError {
-		return t.subtaskFailureReason(te)
+		return t.subtaskActiveToolLabel(latest, width)
 	}
 	if te.Status == toolview.StatusDone {
 		return t.tr("tui.subtask_panel.done")
 	}
 	return t.tr("tui.subtask_panel.waiting")
+}
+
+func fitSubtaskRowParts(label, activity string, width int) (string, string) {
+	label = strings.TrimSpace(label)
+	activity = strings.TrimSpace(activity)
+	if width <= 0 {
+		return "", ""
+	}
+	if activity == "" {
+		return textutil.TruncateRunes(label, width), ""
+	}
+	sepWidth := lipgloss.Width(" · ")
+	if width <= sepWidth+4 {
+		return textutil.TruncateRunes(label, width), ""
+	}
+	labelWidth := lipgloss.Width(label)
+	activityWidth := lipgloss.Width(activity)
+	if labelWidth+sepWidth+activityWidth <= width {
+		return label, activity
+	}
+	// 子任务 intent 是主信息，工具活动是辅助信息；根据当前可用宽度动态分配，避免宽屏仍按固定半宽过早截断。
+	minActivityWidth := min(20, max(8, width/4))
+	labelMax := min(labelWidth, max(12, width-sepWidth-minActivityWidth))
+	activityMax := width - sepWidth - labelMax
+	if activityMax < 8 {
+		return textutil.TruncateRunes(label, width), ""
+	}
+	return textutil.TruncateRunes(label, labelMax), textutil.TruncateRunes(activity, activityMax)
 }
 
 func (t *TUI) subtaskFailureReason(te *toolEntry) string {

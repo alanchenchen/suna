@@ -23,9 +23,7 @@ func SemanticSummary(te *Entry, maxWidth int, labels RenderLabels) string {
 		if mode == "" {
 			mode = "auto"
 		}
-		if mode == "content" {
-			mode = defaultLabel(labels.ModeContent, mode)
-		}
+		// 摘要里直接展示 search 的原始 mode（content/path/symbol/auto），避免与参数名混用时中英交错。
 		query := pick("pattern")
 		if query == "" {
 			query = compactTermsLabel(te.ParamsRaw["terms"])

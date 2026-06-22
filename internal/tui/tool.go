@@ -45,7 +45,6 @@ func (t *TUI) toolRenderDeps() toolview.RenderDeps {
 			SearchMatchesInFiles: t.tr("tui.tool.search.matches_in_files"),
 			SearchScanned:        t.tr("tui.tool.search.scanned"),
 			SearchTruncated:      t.tr("tui.tool.search.truncated"),
-			ModeContent:          t.tr("tui.tool.mode.content"),
 		},
 		Styles:             toolviewStyles(),
 		GuardDecisionLabel: t.guardDecisionLabel,

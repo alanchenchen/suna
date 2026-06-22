@@ -49,7 +49,6 @@ type RenderLabels struct {
 	SearchMatchesInFiles string
 	SearchScanned        string
 	SearchTruncated      string
-	ModeContent          string
 }
 
 // RenderDeps 汇总工具块渲染所需依赖。
