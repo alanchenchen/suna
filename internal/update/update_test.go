@@ -50,3 +50,22 @@ func TestFindAssetReportsAvailableNames(t *testing.T) {
 		}
 	}
 }
+
+func TestReleaseTagFromURL(t *testing.T) {
+	got := releaseTagFromURL("https://github.com/alanchenchen/suna/releases/tag/v0.3.0?foo=bar")
+	if got != "v0.3.0" {
+		t.Fatalf("got %q, want v0.3.0", got)
+	}
+}
+
+func TestReleaseAssetsForTagUsesFixedReleaseNaming(t *testing.T) {
+	rel := release{TagName: "v0.3.0", Assets: releaseAssetsForTag("v0.3.0")}
+	asset, err := findAsset(rel, "suna-darwin-arm64.zip")
+	if err != nil {
+		t.Fatalf("findAsset error: %v", err)
+	}
+	want := "https://github.com/alanchenchen/suna/releases/download/v0.3.0/suna-darwin-arm64.zip"
+	if asset.URL != want {
+		t.Fatalf("got %q, want %q", asset.URL, want)
+	}
+}

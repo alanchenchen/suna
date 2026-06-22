@@ -23,8 +23,11 @@ import (
 )
 
 const (
-	githubLatestReleaseURL = "https://api.github.com/repos/alanchenchen/suna/releases/latest"
-	checksumsAssetName     = "checksums.txt"
+	githubLatestReleaseURL         = "https://api.github.com/repos/alanchenchen/suna/releases/latest"
+	githubLatestReleaseRedirectURL = "https://github.com/alanchenchen/suna/releases/latest"
+	githubReleaseDownloadBaseURL   = "https://github.com/alanchenchen/suna/releases/download"
+	githubReleaseTagBaseURL        = "https://github.com/alanchenchen/suna/releases/tag"
+	checksumsAssetName             = "checksums.txt"
 )
 
 type Options struct {
@@ -132,6 +135,18 @@ func Install(ctx context.Context, opts Options) (Latest, error) {
 }
 
 func fetchLatestRelease(ctx context.Context) (release, error) {
+	rel, err := fetchLatestReleaseAPI(ctx)
+	if err == nil {
+		return rel, nil
+	}
+	fallback, fallbackErr := fetchLatestReleaseRedirect(ctx)
+	if fallbackErr == nil {
+		return fallback, nil
+	}
+	return release{}, fmt.Errorf("fetch latest release: %w; fallback: %w", err, fallbackErr)
+}
+
+func fetchLatestReleaseAPI(ctx context.Context) (release, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, githubLatestReleaseURL, nil)
 	if err != nil {
 		return release{}, err
@@ -141,12 +156,12 @@ func fetchLatestRelease(ctx context.Context) (release, error) {
 	client := http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return release{}, fmt.Errorf("fetch latest release: %w", err)
+		return release{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return release{}, fmt.Errorf("fetch latest release: HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return release{}, fmt.Errorf("GitHub API HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	var rel release
 	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
@@ -156,6 +171,71 @@ func fetchLatestRelease(ctx context.Context) (release, error) {
 		return release{}, errors.New("latest release has empty tag")
 	}
 	return rel, nil
+}
+
+func fetchLatestReleaseRedirect(ctx context.Context) (release, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, githubLatestReleaseRedirectURL, nil)
+	if err != nil {
+		return release{}, err
+	}
+	req.Header.Set("User-Agent", "suna-update")
+	client := http.Client{
+		Timeout: 60 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return release{}, err
+	}
+	defer resp.Body.Close()
+	location := resp.Header.Get("Location")
+	if location == "" && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		location = resp.Request.URL.String()
+	}
+	tag := releaseTagFromURL(location)
+	if tag == "" {
+		return release{}, fmt.Errorf("latest release redirect did not include a tag: HTTP %d", resp.StatusCode)
+	}
+	assets := releaseAssetsForTag(tag)
+	return release{
+		TagName: tag,
+		HTMLURL: githubReleaseTagBaseURL + "/" + tag,
+		Assets:  assets,
+	}, nil
+}
+
+func releaseTagFromURL(raw string) string {
+	idx := strings.LastIndex(raw, "/releases/tag/")
+	if idx < 0 {
+		return ""
+	}
+	tag := raw[idx+len("/releases/tag/"):]
+	if cut := strings.IndexAny(tag, "?#"); cut >= 0 {
+		tag = tag[:cut]
+	}
+	return strings.TrimSpace(tag)
+}
+
+func releaseAssetsForTag(tag string) []asset {
+	names := []string{
+		"suna-darwin-amd64.zip",
+		"suna-darwin-arm64.zip",
+		"suna-linux-amd64.tar.gz",
+		"suna-linux-arm64.tar.gz",
+		"suna-windows-amd64.zip",
+		"suna-windows-arm64.zip",
+		checksumsAssetName,
+	}
+	assets := make([]asset, 0, len(names))
+	for _, name := range names {
+		assets = append(assets, asset{
+			Name: name,
+			URL:  githubReleaseDownloadBaseURL + "/" + tag + "/" + name,
+		})
+	}
+	return assets
 }
 
 func selectPlatformAsset(rel release) (asset, error) {
