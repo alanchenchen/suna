@@ -38,6 +38,8 @@ suna
 export PATH="$(go env GOPATH)/bin:$PATH"
 ```
 
+通过 `go install github.com/alanchenchen/suna@latest` 安装的用户后续也可以使用 `suna update`；update 会从 GitHub Release 下载对应平台的预构建二进制，并替换当前 `suna` 可执行文件。
+
 也可以从源码安装：
 
 ```bash
@@ -76,11 +78,13 @@ Windows 下通常是：
 ```bash
 suna                 # 打开 TUI；daemon 未运行时自动启动
 suna status          # 查看 daemon 状态
+suna update --check  # 检查 GitHub Release 是否有新版本
+suna update          # 下载、校验并安装最新 GitHub Release（请先退出 TUI）
 suna stop            # 停止 daemon
 suna help            # 查看帮助
 ```
 
-升级新版前建议先执行 `suna stop`，避免新版 TUI 连接到旧 daemon。
+升级新版前建议先退出 TUI 并执行 `suna stop`，避免新版 CLI 连接到旧 daemon。`suna update` 会下载 GitHub Release 资产并替换当前可执行文件，适用于 GitHub Release 安装和 `go install ...@latest` 安装；如果 daemon 仍在运行，update 会中止并提示先退出/停止 daemon。
 
 ## 首次使用
 

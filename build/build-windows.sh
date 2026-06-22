@@ -14,7 +14,7 @@ build_one() {
 
   CGO_ENABLED=0 GOOS=windows GOARCH="$arch" go build \
     -trimpath \
-    -ldflags "-s -w -X 'github.com/alanchenchen/suna/internal/tui.appVersion=$APP_VERSION'" \
+    -ldflags "-s -w -X 'github.com/alanchenchen/suna/internal/version.BuildVersion=$APP_VERSION'" \
     -o "$DIST_DIR/$exe" \
     "$ROOT_DIR"
 

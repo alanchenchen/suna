@@ -20,13 +20,25 @@ go build -o suna .
 ./build/build-release.sh   # 一次性构建以上 6 个平台包
 ```
 
-Release 构建产物默认放在 `dist/`，每个平台/架构只保留一个压缩包。
+Release 构建产物默认放在 `dist/`。压缩包名称带平台/架构后缀，包内二进制统一为 `suna`（Windows 为 `suna.exe`）。`build-release.sh` 会优先使用 `SUNA_BUILD_VERSION`，否则在 tag 上构建时使用当前 Git tag，开发构建回退到 `dev+<short-sha>`。
+
+正式发版通过 GitHub Actions 完成：推送 `v*` tag 后，`.github/workflows/release.yml` 会运行测试、构建全平台包、生成 `checksums.txt`、创建 GitHub Release、自动生成 release notes 并上传 `dist/*`。本地只需：
+
+```bash
+git tag -a v0.3.0 -m "v0.3.0"
+git push origin main
+git push origin v0.3.0
+```
+
+用户可在退出 TUI 后运行 `suna update --check` 或 `suna update`。update 会先检查 daemon 是否仍在运行；如果 daemon 仍在运行，会中止并提示用户先退出 TUI / `suna stop`。下载缓存位于 `~/.suna/update/`，开始前和结束后都会清理。
 
 ## 常用运行命令
 
 ```bash
 ./suna              # 打开 TUI，必要时自动启动 daemon
 ./suna status       # 查看 daemon 状态
+./suna update --check # 检查 GitHub Release 是否有新版本
+./suna update       # 下载、校验并安装最新 GitHub Release
 ./suna stop         # 停止 daemon
 ```
 

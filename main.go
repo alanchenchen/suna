@@ -31,6 +31,8 @@ func main() {
 		stopDaemonCommand()
 	case "status":
 		showStatus()
+	case "update":
+		updateCommand(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", cmd)
 		printHelp()
@@ -59,6 +61,8 @@ func parseCLI(args []string) string {
 		return "stop"
 	case "status":
 		return "status"
+	case "update":
+		return "update"
 	default:
 		return fs.Arg(0)
 	}
@@ -71,6 +75,8 @@ Usage:
   suna                 Open the TUI. Starts the daemon if needed.
   suna stop            Stop the running daemon.
   suna status          Show daemon status.
+  suna update --check  Check the latest GitHub Release.
+  suna update          Download and install the latest GitHub Release.
   suna help            Show this help.
 
 Notes:

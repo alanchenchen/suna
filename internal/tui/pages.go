@@ -135,7 +135,7 @@ func (t *TUI) renderWelcomeInfo() string {
 		model = "-"
 	}
 	rows := []string{
-		fmt.Sprintf("%-8s %s", t.tr("tui.status.version"), styleHL.Render(appVersion)),
+		fmt.Sprintf("%-8s %s", t.tr("tui.status.version"), styleHL.Render(appVersion())),
 		fmt.Sprintf("%-8s %s", t.tr("tui.status.model"), styleHL.Render(provider+"/"+model)),
 	}
 	if mc, ok := t.activeConfigModel(); ok {
