@@ -595,6 +595,10 @@ func (t *TUI) confirmPendingImagePaste() tea.Cmd {
 	}
 	t.chat.AddConfirmedImageAttachment(p)
 	t.layoutChat()
+	if p.SourceKind == protocol.AttachmentKindAttachment && p.Path != "" {
+		// TUI 本地保存粘贴图片后，daemon 侧的附件统计不会自动变化；主动刷新状态，避免配置页显示旧数量。
+		return t.attachmentStatusCmd()
+	}
 	return nil
 }
 
