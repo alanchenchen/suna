@@ -79,6 +79,8 @@ type TUI struct {
 	contextTokens    int
 	contextWindow    int
 	lastTextStreamAt time.Time
+	// lastPasteAt 用于让终端已经传入的 PasteMsg 优先于 Ctrl+V 剪贴板图片兜底，避免文本粘贴被图片读取抢占。
+	lastPasteAt time.Time
 
 	// 输入区空态光标由 TUI 自己定时闪烁，避免依赖终端 ANSI blink 支持。
 	inputCursorVisible bool

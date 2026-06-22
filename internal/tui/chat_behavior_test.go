@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -1067,4 +1068,39 @@ func leadingSpaces(s string) int {
 		}
 	}
 	return len(s)
+}
+
+func TestConfirmClipboardImagePasteSavesAttachment(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
+	tui.initChatComponents()
+	tui.attachmentStatus.Root = t.TempDir()
+	data := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0, 'I', 'H', 'D', 'R'}
+	tui.chat.EnqueueImagePaste(pendingImagePaste{SourceKind: "clipboard_image", Name: "clipboard-image.png", MimeType: "image/png", Size: int64(len(data)), Data: data})
+
+	tui.confirmPendingImagePaste()
+	if len(tui.chat.Attachments) != 1 {
+		t.Fatalf("attachments len = %d, want 1", len(tui.chat.Attachments))
+	}
+	got := tui.chat.Attachments[0]
+	if got.SourceKind != protocol.AttachmentKindAttachment || got.Path == "" {
+		t.Fatalf("attachment = %+v, want persisted attachment", got)
+	}
+	if _, err := os.Stat(got.Path); err != nil {
+		t.Fatalf("saved image stat: %v", err)
+	}
+}
+
+func TestClipboardImagePasteIgnoredAfterTerminalPaste(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
+	tui.initChatComponents()
+	started := time.Now()
+	tui.lastPasteAt = started.Add(time.Millisecond)
+	data := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0, 'I', 'H', 'D', 'R'}
+	msg := clipboardImagePasteMsg{StartedAt: started, Pending: pendingImagePaste{SourceKind: "clipboard_image", Name: "clipboard-image.png", MimeType: "image/png", Size: int64(len(data)), Data: data}}
+
+	model, _ := tui.Update(msg)
+	tui = model.(*TUI)
+	if tui.chat.ActiveImagePaste() != nil {
+		t.Fatalf("clipboard image paste should be ignored when a later PasteMsg already arrived")
+	}
 }

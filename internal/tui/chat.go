@@ -10,6 +10,8 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/alanchenchen/suna/internal/protocol"
+	"github.com/alanchenchen/suna/internal/tui/clipboard"
+	attachmentmodel "github.com/alanchenchen/suna/internal/tui/components/attachment"
 	textutil "github.com/alanchenchen/suna/internal/tui/components/text"
 	"github.com/alanchenchen/suna/internal/tui/components/toolview"
 	chatpage "github.com/alanchenchen/suna/internal/tui/pages/chat"
@@ -23,6 +25,12 @@ type phase = chatpage.Phase
 type manualCompactRequestMsg struct{}
 type transcriptSyncMsg struct{}
 type inputCursorBlinkMsg struct{}
+type clipboardImagePasteMsg struct {
+	StartedAt time.Time
+	Pending   pendingImagePaste
+	Blocked   bool
+	Err       error
+}
 
 // transcriptSyncFrameInterval 只限制 TUI 聊天正文的同步频率，不影响 daemon 收流；
 // 16ms 约等于 60fps，比 8ms/125fps 更适合终端渲染，能降低 VSCode renderer 压力。
@@ -230,9 +238,27 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if t.inputLocked() {
 			return t, nil
 		}
+		t.lastPasteAt = time.Now()
 		cmd := t.handlePaste(m.Content)
 		t.syncContent()
 		return t, cmd
+
+	case clipboardImagePasteMsg:
+		if t.inputLocked() || t.lastPasteAt.After(m.StartedAt) {
+			return t, nil
+		}
+		if m.Blocked {
+			t.appendNonToolMessage(chatMsg{Role: "error", Content: t.tr("tui.attachment.clipboard_image_too_large")})
+			t.syncContent()
+			return t, nil
+		}
+		if m.Err != nil || len(m.Pending.Data) == 0 {
+			return t, nil
+		}
+		t.chat.EnqueueImagePaste(m.Pending)
+		t.layoutChat()
+		t.syncContent()
+		return t, nil
 
 	case tea.MouseMsg:
 		if t.chat.SubtaskToolDetailExpanded && t.hasActiveSubtaskPanel() {
@@ -495,6 +521,22 @@ func (t *TUI) updateChatKey(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 	return t.updateChatKeyNormal(ks, msg)
 }
 
+func (t *TUI) readClipboardImagePasteCmd(startedAt time.Time) tea.Cmd {
+	return func() tea.Msg {
+		// 有些终端可能先发 Ctrl+V key，再发 bracketed paste；短暂等待让 PasteMsg 优先落地。
+		time.Sleep(40 * time.Millisecond)
+		data, err := clipboard.ReadImage()
+		if err != nil {
+			return clipboardImagePasteMsg{StartedAt: startedAt, Err: err}
+		}
+		pending, ok, blocked := attachmentmodel.NewImageDataPaste("clipboard_image", "clipboard-image", "", data)
+		if !ok {
+			return clipboardImagePasteMsg{StartedAt: startedAt, Blocked: blocked}
+		}
+		return clipboardImagePasteMsg{StartedAt: startedAt, Pending: pending, Blocked: blocked}
+	}
+}
+
 func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch {
 	case ks == "ctrl+c":
@@ -517,6 +559,8 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, nil
 	case ks == "esc":
 		return t.updateChatEsc()
+	case ks == "ctrl+v":
+		return t, t.readClipboardImagePasteCmd(time.Now())
 	case ks == "ctrl+t":
 		t.toggleToolDetail()
 		return t, nil

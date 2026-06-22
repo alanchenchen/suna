@@ -18,7 +18,7 @@
 | Config 页面 | `internal/tui/pages/config`, `internal/tui/config*.go` | 模型、Guard、Workspace、UI、附件等配置。 |
 | Welcome 页面 | `internal/tui/pages/welcome` | 版本、active model、用量、daemon、memory、Guard、Workspace 状态。 |
 | Help 页面 | `internal/tui/pages/help` | 快捷键和 slash commands。 |
-| 附件识别 | `internal/tui/components/attachment` | 识别本地图片路径、图片 URL、data URI。 |
+| 附件识别 | `internal/tui/components/attachment`, `internal/tui/clipboard` | 识别本地图片路径、图片 URL、data URI，并在收到 `ctrl+v` fallback 时读取系统剪贴板图片。 | |
 | 附件存储 | `internal/media`, `internal/daemon/attachments.go` | 本地附件缓存和消息附件提交。 |
 | 模型路由 | `internal/model/router.go` | 根据 provider / model 配置选择 provider。 |
 | OpenAI Responses | `internal/model/openai_responses.go` | `provider = "openai"` 的请求和流式响应适配。 |
@@ -36,7 +36,7 @@
 | 记忆和会话 | `internal/memory` | user profile memory、memory queue、conversation state、compact 支撑。 |
 | Skill runtime | `internal/skill` | Skill 扫描、导入、检查、review、启用状态和运行时索引。 |
 | MCP runtime | `internal/mcp` | stdio server 生命周期、JSON-RPC、tools/list、tools/call。 |
-| Subtask | `internal/subtask`, `internal/agent/tools.go`, `internal/tools/agenttools` | 主 Agent 通过 `spawn` 动态选择模型、上下文、图片和工具白名单，创建独立上下文子任务。 |
+| Subtask | `internal/subtask`, `internal/agent/tools.go`, `internal/tools/agenttools` | 主 Agent 通过 `spawn` 动态选择经过 `subtask_for` 过滤的模型、上下文、图片和工具白名单，创建独立上下文子任务并接收结构化结果。 | |
 | Prompt 模板 | `internal/prompt/templates` | system、compact、memory extract、guard review、skill review、subtask。 |
 | 日志 | `internal/logging` | 应用日志，默认写入 `~/.suna/logs/app.log`。 |
 

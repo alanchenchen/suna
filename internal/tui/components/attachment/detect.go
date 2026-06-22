@@ -2,6 +2,7 @@ package attachment
 
 import (
 	"encoding/base64"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -70,14 +71,47 @@ func detectDataImageURI(raw string) (PendingImagePaste, bool) {
 	mimeType := raw[len("data:"):idx]
 	encoded := raw[idx+len(";base64,"):]
 	data, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil || len(data) == 0 || len(data) > MaxPastedImageBytes {
+	if err != nil {
 		return PendingImagePaste{}, false
 	}
+	p, ok, _ := NewImageDataPaste("data_uri", "pasted-image", mimeType, data)
+	return p, ok
+}
+
+func NewImageDataPaste(sourceKind, baseName, mimeType string, data []byte) (PendingImagePaste, bool, bool) {
+	if len(data) == 0 {
+		return PendingImagePaste{}, false, false
+	}
+	if len(data) > MaxPastedImageBytes {
+		return PendingImagePaste{}, false, true
+	}
+	if mimeType == "" {
+		mimeType = http.DetectContentType(data)
+	}
+	if !IsImageMime(mimeType) {
+		return PendingImagePaste{}, false, false
+	}
 	ext := ExtFromMime(mimeType)
-	return PendingImagePaste{SourceKind: "data_uri", Name: "pasted-image" + ext, MimeType: mimeType, Size: int64(len(data)), Data: data}, true
+	name := strings.TrimSpace(baseName)
+	if name == "" {
+		name = "pasted-image"
+	}
+	if filepath.Ext(name) == "" {
+		name += ext
+	}
+	return PendingImagePaste{SourceKind: sourceKind, Name: name, MimeType: mimeType, Size: int64(len(data)), Data: data}, true, false
 }
 
 func IsImageName(name string) bool { return ImageMimeFromName(name) != "" }
+
+func IsImageMime(mimeType string) bool {
+	switch strings.ToLower(strings.TrimSpace(mimeType)) {
+	case "image/jpeg", "image/png", "image/webp", "image/gif":
+		return true
+	default:
+		return false
+	}
+}
 
 func ImageMimeFromName(name string) string {
 	switch strings.ToLower(filepath.Ext(name)) {

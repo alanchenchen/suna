@@ -218,10 +218,10 @@ Subtask 是 Suna 当前智能模型路由的主要体现。它不是普通子对
 关键点：
 
 - **完全由主 Agent 驱动**：是否委派、委派给哪个模型、传入什么上下文、开放哪些工具，都由主 Agent 在 `spawn` 调用中决定。
-- **动态模型分配**：主 Agent 可以根据模型配置中的上下文窗口、能力标签和多模态能力，选择更适合的模型处理子任务。
+- **动态模型分配**：主 Agent 可以根据模型配置中的上下文窗口、能力标签和多模态能力，选择更适合的模型处理子任务；`subtask_for` 只控制候选可见性，不替代 strengths 判断。
 - **动态工具分配**：每个 Subtask 都有独立工具白名单。`tools: []` 表示纯模型任务；只授权 `readfile` / `search` 时就是只读分析；也可以只授权某个 MCP tool。
 - **独立上下文**：Subtask 不继承主对话历史、恢复会话、记忆、完整附件或完整工具目录。
-- **主 Agent 汇总决策**：Subtask 不能直接接管用户交互，最终如何采纳、合并和继续执行仍由主 Agent 决定。
+- **主 Agent 汇总决策**：Subtask 不能直接接管用户交互，最终如何采纳、合并和继续执行仍由主 Agent 决定；结果会带有 `side_effects` 披露，帮助主 Agent 识别保留变更、已清理临时产物或未知副作用。
 
 隔离规则：
 
@@ -245,7 +245,7 @@ config.toml        # 主配置
 credentials.toml   # API Key
 memory.db          # 记忆、会话、用量等本地数据
 skills/            # Skill 目录
-attachments/       # 图片和二进制附件
+attachments/       # 图片和二进制附件，粘贴图片按内容 hash 去重落盘
 logs/app.log       # 日志
 ```
 

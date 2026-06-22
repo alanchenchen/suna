@@ -9,9 +9,10 @@
 ### 快速了解代码和设计
 
 1. [关键设计](design.md)：先理解 Suna 为什么采用 TUI + daemon、Guard、上下文压缩、Subtask、Skill、MCP 等设计。
-2. [性能优化](performance.md)：集中了解 daemon、模型流、上下文、工具和 TUI 的性能边界。
-3. [Subtask 设计](subtask.md)：重点了解 Suna 如何由主 Agent 动态分配模型、上下文、图片和工具权限。
-4. [架构说明](architecture.md)：再看整体分层、daemon 生命周期和核心模块边界。
+2. [配置说明](configuration.md)：查看模型、`subtask_for`、Guard、MCP、Skill 等配置字段。
+3. [性能优化](performance.md)：集中了解 daemon、模型流、上下文、工具和 TUI 的性能边界。
+4. [Subtask 设计](subtask.md)：重点了解 Suna 如何由主 Agent 动态分配模型、上下文、图片和工具权限。
+5. [架构说明](architecture.md)：再看整体分层、daemon 生命周期和核心模块边界。
 5. [代码地图](code-map.md)：需要定位代码时，看功能到包、核心流程和常见入口。
 6. [当前实现](current-implementation.md)：确认当前实际支持的行为和不要依赖的边界。
 

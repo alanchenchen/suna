@@ -2,7 +2,7 @@
 
 Subtask 是 Suna 当前智能模型路由的核心能力。它不是简单的“开一个子对话”，而是由主 Agent 在运行时显式创建的隔离执行单元：主 Agent 选择模型、定义任务、裁剪上下文、决定是否传入图片，并按最小权限原则授予工具。
 
-这让 Suna 可以在一次任务中组合不同模型的优势，同时避免子任务天然继承主会话的历史、记忆和完整工具箱。
+这让 Suna 可以在一次任务中组合不同模型的优势，同时避免子任务天然继承主会话的历史、记忆和完整工具箱。Subtask 是轻量 bounded worker：可以分析，也可以在授权工具范围内执行行动型任务，但边界应清晰、结果应能被主 Agent 汇总。
 
 ## 核心价值
 
@@ -11,7 +11,7 @@ Subtask 是 Suna 当前智能模型路由的核心能力。它不是简单的“
 - **动态模型分配**：主 Agent 可根据当前子问题选择不同模型，而不是让整轮对话只能使用 active model。
 - **独立上下文**：子任务不继承主对话历史、恢复会话、记忆或项目长上下文，只接收主 Agent 显式传入的信息。
 - **动态工具分配**：每个 Subtask 有自己的工具白名单。不给工具时就是纯模型任务；只给读文件工具时就无法写文件；只给 MCP 某个工具时就只能调用该能力。
-- **主 Agent 保持控制权**：Subtask 只返回结果。是否采纳、如何合并、是否继续追问用户、是否再调用工具，都由主 Agent 决定。
+- **主 Agent 保持控制权**：Subtask 返回结构化结果。是否采纳、如何合并、是否继续追问用户、是否再调用工具，都由主 Agent 决定。
 - **权限和路由绑定**：模型路由不是黑盒自动发生，而是和上下文裁剪、图片传递、工具授权一起在 `spawn` 调用中显式表达。
 
 ## 什么时候使用 Subtask
@@ -60,7 +60,7 @@ Subtask 的初始 working memory 是新建的，只包含本次 `task` 和显式
 
 ## 动态模型分配
 
-Suna 支持配置多个模型连接。主 Agent 的 system prompt 会看到可用于 Subtask 的模型列表，包括模型引用、能力信息和上下文窗口等摘要。运行时，主 Agent 可以根据任务选择模型，例如：
+Suna 支持配置多个模型连接。主 Agent 的 system prompt 会看到可用于 Subtask 的模型列表，包括模型引用、能力信息和上下文窗口等摘要。`models.subtask_for` 可作为候选可见性过滤器：未配置时对所有主模型开放，配置后只有 active model ref 匹配任一 glob 时才展示；模型始终可作为自己的子任务模型。运行时，主 Agent 可以根据任务选择模型，例如：
 
 ```text
 主对话模型：低成本快速模型
@@ -153,7 +153,7 @@ runner 使用指定 model 运行子任务
   ↓
 子任务工具调用经 subtaskExecutor 校验和 Guard
   ↓
-返回 JSON 结果给主 Agent
+返回 JSON 结果给主 Agent：status/result/error/side_effects
   ↓
 主 Agent 汇总、判断、继续执行或回复用户
 ```
@@ -166,6 +166,25 @@ runner 使用指定 model 运行子任务
 - `internal/prompt/templates/system.md`：主 Agent 如何理解 delegation。
 - `internal/prompt/templates/subtask_system.md`：Subtask 的隔离规则和输出要求。
 - `internal/tools/types.go`：`CanGrantToSubtask` 工具授权边界。
+
+## Subtask 结果与副作用披露
+
+Subtask 的最终回答由 runtime 包装为 JSON 结果返回给主 Agent：
+
+```json
+{
+  "status": "completed | completed_unstructured | failed",
+  "result": "concise result for the main agent",
+  "error": "only when failed",
+  "side_effects": {
+    "status": "none | cleaned | remaining | unknown",
+    "summary": "short disclosure",
+    "paths": ["optional/path"]
+  }
+}
+```
+
+`side_effects` 是披露，不是限制。实现型子任务可以在授权工具允许时保留任务所需变更，此时通常报告 `remaining`。如果子任务正常结束但没有按结构化 schema 返回，runtime 会保留原始文本并标记 `completed_unstructured`，副作用状态按是否使用过工具降级为 `unknown` 或 `none`。
 
 ## 和普通工具调用的区别
 
@@ -181,7 +200,7 @@ runner 使用指定 model 运行子任务
 | 工具 | 主 Agent 可见工具 | 每次 `spawn` 指定白名单 |
 | 用户交互 | 主 Agent 可 `askuser` | 子任务不能 `askuser` |
 | 再委派 | 主 Agent 可 `spawn` | 子任务不能再 `spawn` |
-| 结果处理 | 工具结果进入主模型循环 | 子任务最终文本作为 `spawn` 结果进入主模型循环 |
+| 结果处理 | 工具结果进入主模型循环 | 子任务结果以 JSON 进入主模型循环，包含运行状态、结果文本和副作用披露 |
 
 ## 当前边界
 

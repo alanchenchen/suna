@@ -582,7 +582,7 @@ func (t *TUI) confirmPendingImagePaste() tea.Cmd {
 	}
 	t.chat.CancelPendingImagePaste()
 	t.layoutChat()
-	if p.SourceKind == "data_uri" {
+	if len(p.Data) > 0 {
 		path, name, size, err := t.savePastedImage(p)
 		if err != nil {
 			t.appendNonToolMessage(chatMsg{Role: "error", Content: err.Error()})

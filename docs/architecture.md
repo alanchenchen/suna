@@ -31,7 +31,7 @@ CLI 不承载业务逻辑，只做进程管理、入口适配和本地 transport
 TUI 是用户交互层，职责包括：
 
 - 渲染聊天、配置、帮助、欢迎页。
-- 接收键盘、粘贴、窗口尺寸等终端事件。
+- 接收键盘、粘贴、窗口尺寸等终端事件；剪贴板图片读取只作为 TUI 用户输入 fallback，不进入 daemon。
 - 将用户操作转换成 protocol request。
 - 将 daemon notification 转成 Bubble Tea 消息并更新 UI 状态。
 
@@ -107,6 +107,8 @@ TUI 重构或 UI 交互调整不应改变 daemon 的业务语义。
 - `logs/app.log`：日志。
 
 MCP server 配置位于 `config.toml` 的 `[mcp.servers.<name>]`。daemon 启动时会尝试启动 enabled 的 stdio server；单个 server 启动失败不会阻塞 Suna，错误通过 MCP 状态接口和 TUI `/mcp` 面板展示。MCP 工具公共名使用 `mcp__<server>__<tool>`，二进制结果会保存到附件目录并以文本引用返回。
+
+TUI 通过 protocol 获取 attachment root，用于保存用户粘贴的 data URI / 剪贴板图片；这属于 UI 输入落盘，最终仍以普通 attachment ref 发送给 daemon。daemon 不读取系统剪贴板。
 
 TUI 可以缓存配置快照用于展示，但真实持久化状态以 daemon 为准。
 
