@@ -10,18 +10,19 @@ mkdir -p "$DIST_DIR"
 build_one() {
   local arch="$1"
   local name="suna-darwin-$arch"
+  local bin="suna"
 
   CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" go build \
     -trimpath \
     -ldflags "-s -w -X 'github.com/alanchenchen/suna/internal/tui.appVersion=$APP_VERSION'" \
-    -o "$DIST_DIR/$name" \
+    -o "$DIST_DIR/$bin" \
     "$ROOT_DIR"
 
   (
     cd "$DIST_DIR"
     rm -f "$name.zip"
-    zip -9 "$name.zip" "$name"
-    rm -f "$name"
+    zip -9 "$name.zip" "$bin"
+    rm -f "$bin"
   )
 
   ls -lh "$DIST_DIR/$name.zip"
