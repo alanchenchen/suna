@@ -158,7 +158,7 @@ func (a *Agent) NewSession() {
 	a.guard = a.newGuardForSession(a.sessionID)
 	a.working.Clear()
 	a.sessionState = ""
-	a.toolSummary = nil
+	a.toolSummary = memory.ToolSummary{}
 }
 
 func (a *Agent) AttachmentStatus() (root string, bytes int64, count int, err error) {
@@ -202,22 +202,22 @@ func (a *Agent) RestoreSession(ctx context.Context) RestoreSessionResult {
 	a.guard = a.newGuardForSession(a.sessionID)
 	a.working.Clear()
 	a.sessionState = strings.TrimSpace(st.SessionState)
-	a.toolSummary = nil
+	a.toolSummary = memory.ToolSummary{}
 	for _, m := range st.LastMessages {
 		a.working.AddMessage(m)
 	}
 	return RestoreSessionResult{Messages: len(st.LastMessages), Compacted: a.sessionState != ""}
 }
 
-func (a *Agent) RestoreToolSummary(ctx context.Context) string {
+func (a *Agent) RestoreToolSummary(ctx context.Context) memory.ToolSummary {
 	if a.conversation == nil {
-		return ""
+		return memory.ToolSummary{}
 	}
 	st, err := a.conversation.Load(ctx, memory.DefaultUserID)
 	if err != nil || st == nil {
-		return ""
+		return memory.ToolSummary{}
 	}
-	return memory.FormatToolSummary(st.ToolSummary)
+	return st.ToolSummary.Normalize()
 }
 
 func (a *Agent) WorkingMessages() []model.Message {

@@ -209,7 +209,7 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 }
 
 func (r *Runner) readStream(ctx context.Context, ch <-chan model.Chunk, streamTimeout time.Duration, dynamicReasoningTimeout bool, req Request) (string, []model.ToolCall, *model.Usage, error) {
-	var fullContent string
+	var contentBuilder strings.Builder
 	var toolCalls []model.ToolCall
 	var lastUsage *model.Usage
 	timer := time.NewTimer(streamTimeout)
@@ -219,7 +219,7 @@ func (r *Runner) readStream(ctx context.Context, ch <-chan model.Chunk, streamTi
 		select {
 		case chunk, ok := <-ch:
 			if !ok {
-				return fullContent, toolCalls, lastUsage, nil
+				return contentBuilder.String(), toolCalls, lastUsage, nil
 			}
 			if dynamicReasoningTimeout && chunk.ReasoningContent != "" {
 				streamTimeout = defaultReasoningIdleTimeout
@@ -232,16 +232,16 @@ func (r *Runner) readStream(ctx context.Context, ch <-chan model.Chunk, streamTi
 			}
 			timer.Reset(streamTimeout)
 			if ctx.Err() != nil {
-				return fullContent, toolCalls, lastUsage, ctx.Err()
+				return contentBuilder.String(), toolCalls, lastUsage, ctx.Err()
 			}
 			if chunk.Error != "" {
-				return fullContent, toolCalls, lastUsage, fmt.Errorf("%s", readableLLMStreamError(chunk.Error))
+				return contentBuilder.String(), toolCalls, lastUsage, fmt.Errorf("%s", readableLLMStreamError(chunk.Error))
 			}
 			if chunk.ReasoningContent != "" && req.EmitReasoning && r.Sink != nil {
 				r.Sink.Reasoning(chunk.ReasoningContent)
 			}
 			if chunk.Content != "" {
-				fullContent += chunk.Content
+				contentBuilder.WriteString(chunk.Content)
 				if req.EmitStream && r.Sink != nil {
 					r.Sink.Stream(chunk.Content)
 				}
@@ -253,12 +253,12 @@ func (r *Runner) readStream(ctx context.Context, ch <-chan model.Chunk, streamTi
 				lastUsage = chunk.Usage
 			}
 			if chunk.Done {
-				return fullContent, toolCalls, lastUsage, nil
+				return contentBuilder.String(), toolCalls, lastUsage, nil
 			}
 		case <-timer.C:
-			return fullContent, toolCalls, lastUsage, fmt.Errorf("LLM stream idle timeout (%s). The model may still be thinking; continue or retry if needed", streamTimeout)
+			return contentBuilder.String(), toolCalls, lastUsage, fmt.Errorf("LLM stream idle timeout (%s). The model may still be thinking; continue or retry if needed", streamTimeout)
 		case <-ctx.Done():
-			return fullContent, toolCalls, lastUsage, ctx.Err()
+			return contentBuilder.String(), toolCalls, lastUsage, ctx.Err()
 		}
 	}
 }

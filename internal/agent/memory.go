@@ -75,7 +75,7 @@ func (a *Agent) addToolSummary(name string, result tools.Result) {
 	if summary == "" {
 		summary = "completed"
 	}
-	a.toolSummary = append(a.toolSummary, memory.ToolSummaryItem{Name: name, Status: status, Summary: summary})
+	a.toolSummary = a.toolSummary.Add(memory.ToolSummaryItem{Name: name, Status: status, Summary: summary})
 }
 
 func summarizeToolResult(content string) string {

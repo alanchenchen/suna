@@ -45,7 +45,7 @@ type Agent struct {
 	sessionID    string
 	turnCount    int
 	sessionState string
-	toolSummary  []memory.ToolSummaryItem
+	toolSummary  memory.ToolSummary
 
 	extractQueue  *memory.ExtractQueue
 	extractWorker *memory.Worker

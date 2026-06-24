@@ -35,7 +35,10 @@ func (w *WorkingMemory) Messages() []model.Message {
 func (w *WorkingMemory) SetMessages(msgs []model.Message) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.messages = msgs
+	// SetMessages 是 compact 后改写上下文的内存边界；必须复制 slice，避免保留旧历史的 backing array。
+	cp := make([]model.Message, len(msgs))
+	copy(cp, msgs)
+	w.messages = cp
 }
 
 func (w *WorkingMemory) LastN(n int) []model.Message {

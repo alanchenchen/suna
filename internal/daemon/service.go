@@ -351,12 +351,31 @@ func (s *service) handleSessionRestore(ctx context.Context, sink protocol.EventS
 				emit(ctx, sink, protocol.NotifySessionRestoreMsg, map[string]string{"role": "assistant", "content": content})
 			}
 		}
-		if summary := s.daemon.agent.RestoreToolSummary(ctx); summary != "" {
-			emit(ctx, sink, protocol.NotifySessionRestoreMsg, map[string]string{"role": "restore_summary", "content": summary})
-		}
 	}
-	emit(ctx, sink, protocol.NotifySessionRestoreStatus, protocol.SessionRestoreStatus{Messages: result.Messages, Compacted: result.Compacted})
+	status := protocol.SessionRestoreStatus{Messages: result.Messages, Compacted: result.Compacted}
+	if summary := toolSummaryPayload(s.daemon.agent.RestoreToolSummary(ctx)); summary != nil {
+		status.ToolSummary = summary
+	}
+	emit(ctx, sink, protocol.NotifySessionRestoreStatus, status)
 	return map[string]int{"messages": result.Messages}, nil
+}
+
+func toolSummaryPayload(summary memory.ToolSummary) *protocol.ToolSummaryPayload {
+	summary = summary.Normalize()
+	if summary.Empty() {
+		return nil
+	}
+	out := &protocol.ToolSummaryPayload{Total: summary.Total, Success: summary.Success, Failed: summary.Failed, Omitted: summary.Omitted}
+	for _, item := range summary.Changes {
+		out.Changes = append(out.Changes, protocol.ToolChangeItem{Tool: item.Name, Count: item.Count})
+	}
+	for _, item := range summary.Failures {
+		out.Failures = append(out.Failures, protocol.ToolSummaryItem{Tool: item.Name, Status: item.Status, Summary: item.Summary})
+	}
+	for _, item := range summary.Recent {
+		out.Recent = append(out.Recent, protocol.ToolSummaryItem{Tool: item.Name, Status: item.Status, Summary: item.Summary})
+	}
+	return out
 }
 
 func (s *service) handleCompact(ctx context.Context, sink protocol.EventSink) (any, error) {

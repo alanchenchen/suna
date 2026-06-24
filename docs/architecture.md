@@ -119,12 +119,12 @@ Suna 当前是单用户单当前会话形态，不提供多会话管理或完整
 - `user_profile_memory`：长期 user profile memory，只保存少量跨会话稳定的用户偏好、习惯、约束和纠错。
 - `conversation_state.session_state`：当前会话的 Session State，由 compact 生成/更新，保存 active context、完成任务/话题账本、用户要求、关键决策、tool facts 和 open threads。
 - `conversation_state.last_messages`：TUI 恢复展示用的真实可见 user/assistant 对话；不保存 system state、原始 tool call/result 或 raw 结构。
-- `conversation_state.tool_summary`：TUI-only 的工具摘要，恢复时展示给用户，不作为原始 tool 上下文注入模型。
+- `conversation_state.tool_summary`：TUI-only 的有界结构化工具摘要，恢复时通过 `session.restore_status.tool_summary` 下发给客户端展示，不作为原始 tool 上下文注入模型，也不承担工具历史归档语义。
 - `memory_queue`：user profile memory 的临时提取队列，daemon worker 按批量策略处理后删除；daemon 退出不会为未开始的队列强制触发记忆提取，pending item 会留在 SQLite 中等待下次启动恢复。
 
 模型请求的缓存友好结构为：稳定 system/project/skill/tool schema 前缀 + 低频变化的 Session State + append-only recent messages + 靠近 latest user 的 user profile memory。Session State 不拼进 system prompt；user profile memory 也不放在 prior conversation 前面。
 
-自动 compact 按模型能力参数计算输入预算：`context_window - max_output_tokens - margin`，其中 `margin = max(2048, context_window / 200)`；触发判断使用 `estimated_context_tokens + estimator_safety_tokens`，`estimator_safety_tokens = max(8192, estimated_context_tokens / 16)`。compact 成功后，`conversation_state.session_state` / `CompletionRequest.SessionState` 保存新的会话状态，working memory 只保留 budget-aware recent window。compact 失败时不使用 fallback、不硬裁剪继续，并通过 TUI 显示错误。
+自动 compact 按模型能力参数计算输入预算：`context_window - max_output_tokens - margin`，其中 `margin = max(2048, context_window / 200)`；触发判断使用 `estimated_context_tokens + estimator_safety_tokens`，`estimator_safety_tokens = max(8192, estimated_context_tokens / 16)`。compact 成功后，`conversation_state.session_state` / `CompletionRequest.SessionState` 保存新的会话状态，working memory 只保留 budget-aware recent window；改写 `WorkingMemory` 时会复制新的消息 slice，避免 compact 后的 recent window 继续持有旧历史 backing array。compact 失败时不使用 fallback、不硬裁剪继续，并通过 TUI 显示错误。
 
 ## 文档分工
 

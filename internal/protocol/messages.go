@@ -18,8 +18,30 @@ type StreamParams struct {
 }
 
 type SessionRestoreStatus struct {
-	Messages  int  `json:"messages"`
-	Compacted bool `json:"compacted"`
+	Messages    int                 `json:"messages"`
+	Compacted   bool                `json:"compacted"`
+	ToolSummary *ToolSummaryPayload `json:"tool_summary,omitempty"`
+}
+
+type ToolSummaryPayload struct {
+	Total    int               `json:"total"`
+	Success  int               `json:"success"`
+	Failed   int               `json:"failed"`
+	Changes  []ToolChangeItem  `json:"changes,omitempty"`
+	Failures []ToolSummaryItem `json:"failures,omitempty"`
+	Recent   []ToolSummaryItem `json:"recent,omitempty"`
+	Omitted  int               `json:"omitted,omitempty"`
+}
+
+type ToolChangeItem struct {
+	Tool  string `json:"tool"`
+	Count int    `json:"count"`
+}
+
+type ToolSummaryItem struct {
+	Tool    string `json:"tool"`
+	Status  string `json:"status"`
+	Summary string `json:"summary,omitempty"`
 }
 
 type UsageParams struct {

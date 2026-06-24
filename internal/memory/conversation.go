@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -15,15 +14,9 @@ type ConversationState struct {
 	UserID            string
 	SessionState      string
 	LastMessages      []model.Message
-	ToolSummary       []ToolSummaryItem
+	ToolSummary       ToolSummary
 	MemoryProcessedAt time.Time
 	UpdatedAt         time.Time
-}
-
-type ToolSummaryItem struct {
-	Name    string `json:"name"`
-	Status  string `json:"status"`
-	Summary string `json:"summary"`
 }
 
 type ConversationStore struct {
@@ -47,13 +40,13 @@ func (s *ConversationStore) Load(ctx context.Context, userID string) (*Conversat
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(lastMessages), &st.LastMessages)
-	_ = json.Unmarshal([]byte(toolSummary), &st.ToolSummary)
+	st.ToolSummary = decodeToolSummary(toolSummary)
 	st.MemoryProcessedAt = parseDBTime(processed.String)
 	st.UpdatedAt = parseDBTime(updated.String)
 	return &st, nil
 }
 
-func (s *ConversationStore) Save(ctx context.Context, userID, sessionState string, msgs []model.Message, tools []ToolSummaryItem) error {
+func (s *ConversationStore) Save(ctx context.Context, userID, sessionState string, msgs []model.Message, tools ToolSummary) error {
 	if userID == "" {
 		userID = DefaultUserID
 	}
@@ -64,7 +57,7 @@ func (s *ConversationStore) Save(ctx context.Context, userID, sessionState strin
 		return err
 	}
 	// tool_summary 只服务 TUI 恢复展示，不作为原始 tool 上下文恢复给模型。
-	toolJSON, err := json.Marshal(normalizeToolSummary(tools))
+	toolJSON, err := json.Marshal(tools.Normalize())
 	if err != nil {
 		return err
 	}
@@ -107,128 +100,19 @@ func visibleMessages(msgs []model.Message) []model.Message {
 	return visible
 }
 
-func normalizeToolSummary(items []ToolSummaryItem) []ToolSummaryItem {
-	out := make([]ToolSummaryItem, 0, len(items))
-	for _, item := range items {
-		item.Name = strings.TrimSpace(item.Name)
-		item.Status = strings.TrimSpace(item.Status)
-		item.Summary = strings.TrimSpace(item.Summary)
-		if item.Name == "" || item.Summary == "" {
-			continue
-		}
-		if item.Status == "" {
-			item.Status = "done"
-		}
-		// 摘要只用于恢复 UI 的“上一轮操作摘要”块，必须短，不能变成另一个历史日志。
-		if len([]rune(item.Summary)) > 180 {
-			item.Summary = truncateRunes(item.Summary, 180)
-		}
-		out = append(out, item)
+func decodeToolSummary(raw string) ToolSummary {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "[]" || raw == "{}" {
+		return ToolSummary{}
 	}
-	return out
-}
-
-func FormatToolSummary(items []ToolSummaryItem) string {
-	items = normalizeToolSummary(items)
-	if len(items) == 0 {
-		return ""
+	var summary ToolSummary
+	if err := json.Unmarshal([]byte(raw), &summary); err == nil && !summary.Empty() {
+		return summary.Normalize()
 	}
-	lines := make([]string, 0, 6)
-	lines = append(lines, "上一轮工具操作摘要：")
-	lines = append(lines, formatToolSummaryStats(items))
-	if failure := formatToolSummaryFailures(items); failure != "" {
-		lines = append(lines, failure)
+	// 旧版本 tool_summary 是数组；只转换为有界聚合摘要，解析失败则当无摘要处理。
+	var items []ToolSummaryItem
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return ToolSummary{}
 	}
-	if changes := formatToolSummaryChanges(items); changes != "" {
-		lines = append(lines, changes)
-	}
-	lines = append(lines, formatToolSummaryRecent(items))
-	if hidden := len(items) - min(len(items), 4); hidden > 0 {
-		lines = append(lines, fmt.Sprintf("已折叠 %d 次较早操作", hidden))
-	}
-	return strings.Join(lines, "\n")
-}
-
-func formatToolSummaryStats(items []ToolSummaryItem) string {
-	failures := 0
-	for _, item := range items {
-		if isToolSummaryFailure(item.Status) {
-			failures++
-		}
-	}
-	if failures == 0 {
-		return fmt.Sprintf("%d 次 · 全部成功", len(items))
-	}
-	return fmt.Sprintf("%d 次 · %d 成功 / %d 失败", len(items), len(items)-failures, failures)
-}
-
-func formatToolSummaryFailures(items []ToolSummaryItem) string {
-	parts := make([]string, 0, 2)
-	for _, item := range items {
-		if !isToolSummaryFailure(item.Status) {
-			continue
-		}
-		parts = append(parts, item.Name+" · "+truncateRunes(item.Summary, 72))
-		if len(parts) >= 2 {
-			break
-		}
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return "失败：" + strings.Join(parts, "；")
-}
-
-func formatToolSummaryChanges(items []ToolSummaryItem) string {
-	counts := make(map[string]int)
-	order := make([]string, 0, 3)
-	for _, item := range items {
-		name := canonicalToolSummaryName(item.Name)
-		if !isToolSummaryChangeTool(name) {
-			continue
-		}
-		if counts[name] == 0 {
-			order = append(order, name)
-		}
-		counts[name]++
-	}
-	if len(order) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(order))
-	for _, name := range order {
-		parts = append(parts, fmt.Sprintf("%s ×%d", name, counts[name]))
-	}
-	return "变更：" + strings.Join(parts, "，")
-}
-
-func formatToolSummaryRecent(items []ToolSummaryItem) string {
-	start := max(0, len(items)-4)
-	names := make([]string, 0, len(items)-start)
-	for _, item := range items[start:] {
-		names = append(names, canonicalToolSummaryName(item.Name))
-	}
-	return "最近：" + strings.Join(names, " → ")
-}
-
-func isToolSummaryFailure(status string) bool {
-	status = strings.ToLower(strings.TrimSpace(status))
-	return strings.Contains(status, "error") || strings.Contains(status, "fail")
-}
-
-func canonicalToolSummaryName(name string) string {
-	name = strings.TrimSpace(name)
-	if i := strings.LastIndex(name, "."); i >= 0 && i < len(name)-1 {
-		name = name[i+1:]
-	}
-	return name
-}
-
-func isToolSummaryChangeTool(name string) bool {
-	switch strings.ToLower(name) {
-	case "editfile", "writefile", "filesystem":
-		return true
-	default:
-		return false
-	}
+	return BuildToolSummary(items)
 }
