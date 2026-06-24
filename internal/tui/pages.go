@@ -57,6 +57,7 @@ func (t *TUI) handleWelcomeAction(action welcomepage.Action) tea.Cmd {
 		}
 		t.mode = uipage.Chat
 		t.chat.Messages = []chatMsg{}
+		t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}
 		t.chat.Attachments = nil
 		t.resetConversationStats()
 		cmd := t.initChatComponents()
@@ -68,6 +69,7 @@ func (t *TUI) handleWelcomeAction(action welcomepage.Action) tea.Cmd {
 		}
 		t.mode = uipage.Chat
 		t.chat.Messages = []chatMsg{}
+		t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}
 		t.resetConversationStats()
 		cmd := t.initChatComponents()
 		t.resetPhase()

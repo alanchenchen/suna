@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
@@ -25,6 +26,32 @@ const (
 
 // Model 持有 Chat 页面运行态。迁移期间 daemon 命令和样式仍由 root TUI 注入。
 
+type StreamingTextState struct {
+	Raw             strings.Builder
+	Pending         []string
+	RenderedBytes   int
+	Width           int
+	Lines           []string
+	DroppedLines    int
+	LastLineWidth   int
+	PendingNewlines int
+}
+
+func (s *StreamingTextState) Append(chunk string) {
+	if s == nil || chunk == "" {
+		return
+	}
+	s.Raw.WriteString(chunk)
+	s.Pending = append(s.Pending, chunk)
+}
+
+func (s *StreamingTextState) Text() string {
+	if s == nil {
+		return ""
+	}
+	return s.Raw.String()
+}
+
 type Msg struct {
 	Role      string
 	Content   any
@@ -32,6 +59,7 @@ type Msg struct {
 	StartedAt time.Time
 	EndedAt   time.Time
 	Render    MsgRenderCache
+	Stream    *StreamingTextState
 }
 
 type MsgRenderCache struct {
@@ -79,6 +107,7 @@ type Model struct {
 	TranscriptWindowSignature transcriptWindowSignature
 
 	Messages          []Msg
+	DisplayDiscard    DisplayDiscardSummary
 	PendingInput      string
 	LastAssistantText string
 	Loading           bool

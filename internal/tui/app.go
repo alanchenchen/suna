@@ -62,6 +62,7 @@ func (t *TUI) startLLMWait() {
 
 func (t *TUI) appendNonToolMessage(msg chatMsg) {
 	t.chat.AppendMessage(msg)
+	t.trimDisplayHistoryIfNeeded()
 }
 
 func (t *TUI) appendStreamMessage(role, chunk string) {

@@ -79,6 +79,11 @@ type toolBlock = toolview.Block
 
 type commandSpec = chatpage.CommandSpec
 
+const (
+	// displayMemoryLimitBytes 限制 TUI 自身可控的聊天展示数据；超过后按 turn 从顶部释放到低水位。
+	displayMemoryLimitBytes = 32 * 1024 * 1024
+)
+
 func (t *TUI) initChatComponents() tea.Cmd {
 	t.chat.InitComponents(chatpage.ComponentDeps{
 		Placeholder:    t.tr("tui.chat.input_placeholder"),
@@ -108,6 +113,7 @@ func (t *TUI) syncContent() {
 		RenderSunaHeader: func(label string) string {
 			return "\n  " + styleAgentLine.Render("● "+label) + "\n"
 		},
+		RenderDisplayDiscard: t.renderDisplayDiscardSummary,
 		RenderUserMessage:    t.renderUserMessage,
 		RenderAssistant:      t.renderAssistantMessage,
 		RenderReasoning:      t.renderReasoningMessage,
@@ -152,7 +158,12 @@ func (t *TUI) flushScheduledTranscriptSync() {
 	if !t.transcriptSyncDirty || t.mode != uipage.Chat {
 		return
 	}
+	t.trimDisplayHistoryIfNeeded()
 	t.syncContent()
+}
+
+func (t *TUI) trimDisplayHistoryIfNeeded() bool {
+	return t.chat.TrimDisplayHistory(displayMemoryLimitBytes)
 }
 
 const inputCursorBlinkInterval = 530 * time.Millisecond
@@ -933,6 +944,7 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 	switch cmd {
 	case "/new":
 		t.chat.Messages = []chatMsg{}
+		t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}
 		t.chat.Attachments = nil
 		t.chat.ResumeAvailable = false
 		t.resetConversationStats()

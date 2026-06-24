@@ -1104,3 +1104,23 @@ func TestClipboardImagePasteIgnoredAfterTerminalPaste(t *testing.T) {
 		t.Fatalf("clipboard image paste should be ignored when a later PasteMsg already arrived")
 	}
 }
+
+func TestCachedStreamingStateKeepsOnlyTailLines(t *testing.T) {
+	tui := &TUI{width: 80}
+	tui.chat.Viewport.SetHeight(2)
+	msg := &chatMsg{Role: "assistant", Streaming: true, Stream: &chatpage.StreamingTextState{}}
+	for i := 0; i < 160; i++ {
+		msg.Stream.Append("line\n")
+	}
+
+	got := tui.cachedStreamingState(msg, 20)
+	if lines := strings.Count(got, "\n") + 1; lines > 120 {
+		t.Fatalf("rendered lines = %d, want <= 120", lines)
+	}
+	if msg.Stream.Raw.Len() == 0 {
+		t.Fatal("raw stream is empty, want full content retained")
+	}
+	if msg.Stream.DroppedLines == 0 {
+		t.Fatal("dropped lines = 0, want tail window to drop early rendered lines")
+	}
+}

@@ -44,19 +44,25 @@ func (m *Model) AppendStreamMessage(role, chunk string, now time.Time) {
 		return
 	}
 	if len(m.Messages) > 0 && m.Messages[len(m.Messages)-1].Role == role {
-		prev, _ := m.Messages[len(m.Messages)-1].Content.(string)
 		msg := &m.Messages[len(m.Messages)-1]
-		msg.Content = prev + chunk
+		if msg.Stream == nil {
+			prev, _ := msg.Content.(string)
+			msg.Stream = &StreamingTextState{}
+			msg.Stream.Append(prev)
+		}
+		msg.Stream.Append(chunk)
 		msg.Streaming = true
 		if msg.StartedAt.IsZero() {
 			msg.StartedAt = now
 		}
 		msg.EndedAt = time.Time{}
-		// 保留流式渲染缓存；内容只会追加，渲染层可增量更新，避免长回复 O(n²) 重排。
+		// 流式内容只追加到 builder，避免 prev+chunk 对长回复反复复制。
 		return
 	}
 	m.FinishStreamingMessages(now)
-	m.AppendMessage(Msg{Role: role, Content: chunk, Streaming: true, StartedAt: now})
+	stream := &StreamingTextState{}
+	stream.Append(chunk)
+	m.AppendMessage(Msg{Role: role, Streaming: true, StartedAt: now, Stream: stream})
 }
 
 func (m *Model) FinishStreamingMessages(now time.Time) {
@@ -65,6 +71,10 @@ func (m *Model) FinishStreamingMessages(now time.Time) {
 			m.Messages[i].Streaming = false
 			if m.Messages[i].EndedAt.IsZero() {
 				m.Messages[i].EndedAt = now
+			}
+			if m.Messages[i].Stream != nil {
+				m.Messages[i].Content = m.Messages[i].Stream.Text()
+				m.Messages[i].Stream = nil
 			}
 			m.Messages[i].Render = MsgRenderCache{}
 		}

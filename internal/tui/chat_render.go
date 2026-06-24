@@ -34,6 +34,29 @@ const (
 	reasoningDetailMaxRows     = 10
 )
 
+func (t *TUI) renderDisplayDiscardSummary(s chatpage.DisplayDiscardSummary) string {
+	if s.Empty() {
+		return ""
+	}
+	turns := s.Turns
+	if turns <= 0 {
+		turns = s.Messages
+	}
+	text := fmt.Sprintf("已释放 %d 轮早期显示历史 · 约 %s", turns, s.ApproxMB())
+	width := max(24, t.width-8)
+	bodyWidth := max(20, width-4)
+	wrapped := lipgloss.NewStyle().Width(bodyWidth).Render(text)
+	lines := strings.Split(wrapped, "\n")
+	for i := range lines {
+		if i == 0 {
+			lines[i] = styleSysLine.Render("  ◇ ") + styleDim.Render(lines[i])
+		} else {
+			lines[i] = "    " + styleDim.Render(lines[i])
+		}
+	}
+	return "\n" + strings.Join(lines, "\n") + "\n"
+}
+
 func (t *TUI) renderSystemMessage(content string) string {
 	content = strings.TrimSpace(content)
 	if content == "" {
@@ -404,6 +427,9 @@ func (t *TUI) renderAssistantMessage(msg *chatMsg) string {
 	content, _ := msg.Content.(string)
 	width := max(20, t.width-6)
 	if msg.Streaming {
+		if msg.Stream != nil {
+			return textutil.IndentLines(t.cachedStreamingState(msg, width), "  ")
+		}
 		// 流式阶段避免每个 delta 都跑 Glamour，也避免对完整已生成内容反复 wrap。
 		return textutil.IndentLines(t.cachedStreamingText(msg, content, width), "  ")
 	}
@@ -412,6 +438,9 @@ func (t *TUI) renderAssistantMessage(msg *chatMsg) string {
 
 func (t *TUI) renderReasoningMessage(msg *chatMsg) string {
 	content, _ := msg.Content.(string)
+	if msg.Stream != nil {
+		content = msg.Stream.Text()
+	}
 	out := t.renderThinkingBox(content, msg.Streaming, msg.StartedAt, msg.EndedAt)
 	msg.Render = msgRenderCache{Width: t.width, Theme: currentTheme.Name, ContentLen: len(content), LineCount: chatpage.RenderedLineCount(out), Output: out, Mode: reasoningRenderMode(t.chat.ShowReasoningDetail)}
 	return out
@@ -433,6 +462,65 @@ func (t *TUI) cachedMarkdown(msg *chatMsg, content string, width int) string {
 	out := RenderMarkdown(content, width)
 	msg.Render = msgRenderCache{Width: width, Theme: currentTheme.Name, ContentLen: len(content), ContentHash: hash, LineCount: chatpage.RenderedLineCount(out), Output: out}
 	return out
+}
+
+func (t *TUI) cachedStreamingState(msg *chatMsg, width int) string {
+	state := msg.Stream
+	if state == nil {
+		return ""
+	}
+	if width <= 0 {
+		width = 20
+	}
+	tailLines := t.streamingRenderTailLines()
+	if state.Width != width {
+		content := state.Text()
+		out := renderStreamingText(content, width)
+		lines := splitRenderedLines(out)
+		state.Width = width
+		state.Lines = lines
+		state.DroppedLines = 0
+		limitStreamingStateLines(state, tailLines)
+		state.LastLineWidth = lastRenderedLineWidth(state.Lines)
+		state.PendingNewlines = trailingNewlineCount(content)
+		state.RenderedBytes = len(content)
+		state.Pending = nil
+		out = strings.Join(state.Lines, "\n")
+		msg.Render = msgRenderCache{Width: width, ContentLen: len(content), LineCount: len(state.Lines)}
+		return out
+	}
+	if len(state.Pending) > 0 {
+		for _, delta := range state.Pending {
+			appendStreamingDelta(&state.Lines, &state.LastLineWidth, &state.PendingNewlines, delta, width)
+			state.RenderedBytes += len(delta)
+			limitStreamingStateLines(state, tailLines)
+		}
+		state.Pending = nil
+	}
+	limitStreamingStateLines(state, tailLines)
+	out := strings.Join(state.Lines, "\n")
+	msg.Render = msgRenderCache{Width: width, ContentLen: state.Raw.Len(), LineCount: len(state.Lines)}
+	return out
+}
+
+func (t *TUI) streamingRenderTailLines() int {
+	height := t.chat.Viewport.Height()
+	if height <= 0 {
+		return 200
+	}
+	return max(120, min(600, height*4))
+}
+
+func limitStreamingStateLines(state *chatpage.StreamingTextState, maxLines int) {
+	if state == nil || maxLines <= 0 || len(state.Lines) <= maxLines {
+		return
+	}
+	drop := len(state.Lines) - maxLines
+	for i := 0; i < drop; i++ {
+		state.Lines[i] = ""
+	}
+	state.Lines = append([]string(nil), state.Lines[drop:]...)
+	state.DroppedLines += drop
 }
 
 func (t *TUI) cachedStreamingText(msg *chatMsg, content string, width int) string {

@@ -30,6 +30,7 @@ type TranscriptDeps struct {
 	AskChoiceHelp string
 
 	RenderSunaHeader        func(string) string
+	RenderDisplayDiscard    func(DisplayDiscardSummary) string
 	RenderUserMessage       func(any, int) string
 	RenderAssistant         func(*Msg) string
 	RenderReasoning         func(*Msg) string
@@ -148,6 +149,15 @@ func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptB
 			addBlock(-1, false, deps.RenderSunaHeader(deps.SunaLabel))
 		}
 		inSunaBlock = true
+	}
+
+	if !m.DisplayDiscard.Empty() {
+		if deps.RenderDisplayDiscard != nil {
+			addBlock(-1, false, deps.RenderDisplayDiscard(m.DisplayDiscard))
+		} else {
+			addBlock(-1, false, fmt.Sprintf("\n  已释放 %d 轮早期显示历史 · 约 %s\n", m.DisplayDiscard.Turns, m.DisplayDiscard.ApproxMB()))
+		}
+		inSunaBlock = false
 	}
 
 	for i := range m.Messages {
