@@ -16,11 +16,11 @@ Suna 是本地终端 AI Agent：CLI 启动 TUI，TUI 通过 protocol/local trans
 
 - `main.go`、`daemon_cmd.go`：CLI 命令、daemon 进程管理入口。
 - `internal/tui`：终端 UI、页面、快捷键、slash command、剪贴板输入和 daemon 事件适配。
-- `internal/protocol`、`internal/transport/local`：TUI 与 daemon 的请求、通知和本地连接。
+- `internal/protocol`、`internal/transport/local`：TUI 与 daemon 的请求、通知和本地连接；Agent 内容流、运行生命周期和用量统计分别使用 `agent.delta`、`agent.run`、`agent.usage`。
 - `internal/daemon`：长期运行服务，协调配置、会话、Agent、附件和状态通知。
 - `internal/agent`：主 Agent 编排、上下文、工具执行入口、Guard 协调、subtask 委派。
-- `internal/runner`：模型调用循环、流式输出、工具调用和上下文压缩。
-- `internal/model`：模型 provider、路由、请求/响应适配和 token 估算。
+- `internal/runner`：模型调用循环、流式输出、工具调用、上下文压缩和模型请求自动恢复。
+- `internal/model`：模型 provider、路由、请求/响应适配、结构化模型错误和 token 估算。
 - `internal/tools`：统一工具目录、Provider、schema 和执行路由。
 - `internal/tools/builtin`：文件、命令、HTTP 等内置工具。
 - `internal/tools/agenttools`：`askuser`、`spawn` 等 Agent runtime 工具。
@@ -28,12 +28,15 @@ Suna 是本地终端 AI Agent：CLI 启动 TUI，TUI 通过 protocol/local trans
 - `internal/tools/mcptools`、`internal/mcp`：MCP runtime、server 状态和 MCP tools 适配。
 - `internal/guard`：风险识别、Smart Review 和工具调用安全确认。
 - `internal/memory`、`internal/media`、`internal/config`：记忆、附件、配置和本地路径。
+- `internal/prompt`、`internal/logging`：提示词模板加载和结构化日志。
 - `internal/subtask`：独立上下文的子任务执行器，由主 Agent 显式指定模型和工具；子任务结果包含状态、文本和副作用披露。
 - `internal/update`、`internal/version`：自更新流程、GitHub Release 版本检查、构建版本来源。
 
 ## 架构规则
 
 - TUI 不直接依赖 `agent`、`runner`、`tools`、`guard` 等业务包；交互必须走 protocol。
+- Agent protocol 语义保持分层：`agent.delta` 只承载 assistant/reasoning 内容增量，`agent.run` 承载 running/retrying/done/failed/cancelled 生命周期，`agent.usage` 承载 token/context/duration 统计。
+- Runner 负责模型请求自动恢复；Router/provider 只表示单次物理模型请求，retry 判断依赖结构化 `ModelError` 的 status code / kind，不靠错误字符串匹配。
 - 项目指令只从当前工作目录读取第一个非空文件，优先级为 `AGENTS.md`、`CLAUDE.md`、`GEMINI.md`、`.cursorrules`、`.windsurfrules`；不向父目录递归，不读取 `.suna/`。
 - 新模型可见工具优先以 `tools.Provider` 接入，不在 Agent/Runner 中手动拼 schema。
 - Guard 决策由 Agent 统一处理，工具只声明自身 Guard policy。
@@ -67,8 +70,10 @@ Suna 是本地终端 AI Agent：CLI 启动 TUI，TUI 通过 protocol/local trans
 
 - 版本号使用 SemVer tag，不再使用日期版本；示例：`v0.3.0`、`v0.3.1`、`v0.4.0`。
 - 版本号来源以 Git tag 为准，不在代码或脚本里手动维护固定版本号。
-- 发版前先确认工作区和测试状态，建议执行：`git status --short`、`git diff --check`、`go test ./...`。
-- 发版必须使用 annotated tag，并在 tag message 中写 release notes；GitHub Actions 会把 tag message 作为 GitHub Release body。不要使用 lightweight tag。
-- 推荐交互式创建 tag：`git tag -a v0.3.0`，在编辑器里写本次更新内容；也可用多段 `-m`：`git tag -a v0.3.0 -m "v0.3.0" -m "- 改进 update 交互"`。
-- 推送顺序建议先推主分支再推 tag：`git push origin main`，然后 `git push origin v0.3.0`。也可以合并为 `git push origin main v0.3.0`。
+- 让 Suna 代发版时，先根据变更范围建议版本号；用户确认后再继续创建 tag 和推送。
+- 发版前必须确认工作区和测试状态，建议执行：`git status --short`、`git diff --check`、`go test ./...`。
+- 发版必须使用 annotated tag，并在 tag message 中写中文 release notes；GitHub Actions 会把 tag message 作为 GitHub Release body。不要使用 lightweight tag。
+- 推荐交互式创建 tag：`git tag -a v0.5.0`，在编辑器里写本次更新内容；也可用多段 `-m`：`git tag -a v0.5.0 -m "v0.5.0" -m "- 改进模型请求自动恢复"`。
+- 推送顺序建议先推主分支再推 tag：`git push origin main`，然后 `git push origin v0.5.0`。也可以合并为 `git push origin main v0.5.0`。
 - 推送 `v*` tag 会触发 GitHub Actions 自动构建 release assets、生成 `checksums.txt`、创建 GitHub Release 并上传产物。
+- 发版后本地只需用 `git ls-remote --tags origin v0.5.0` 确认远端 tag 存在；不要默认使用 `gh` CLI 检查 workflow 或 release 状态，除非当前环境明确安装并已授权 `gh`。
