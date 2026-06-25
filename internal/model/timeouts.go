@@ -41,8 +41,8 @@ func ReadStreamTextWithIdle(ctx context.Context, ch <-chan Chunk, timeout time.D
 				return out, nil
 			}
 			resetTimer()
-			if chunk.Error != "" {
-				return "", fmt.Errorf("%s", chunk.Error)
+			if chunk.Error != nil {
+				return "", chunk.Error
 			}
 			out += chunk.Content
 			if chunk.Done {

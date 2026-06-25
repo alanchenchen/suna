@@ -56,8 +56,8 @@ const (
 )
 
 const (
-	NotifyStream       = "agent.stream"
-	NotifyReasoning    = "agent.reasoning"
+	NotifyAgentDelta   = "agent.delta"
+	NotifyAgentRun     = "agent.run"
 	NotifyUsage        = "agent.usage"
 	NotifyToolStart    = "agent.tool_start"
 	NotifyToolGuard    = "agent.tool_guard"

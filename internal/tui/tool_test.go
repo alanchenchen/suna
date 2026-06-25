@@ -20,8 +20,8 @@ func TestInterleavedToolsStartNewBlockAfterAssistantText(t *testing.T) {
 		params: mustJSON(t, protocol.ToolEndParams{ID: "tool-1", Tool: "readfile"}),
 	})
 	tui.handleLocalNotification(localNotification{
-		method: protocol.NotifyStream,
-		params: mustJSON(t, protocol.StreamParams{Chunk: "first answer"}),
+		method: protocol.NotifyAgentDelta,
+		params: mustJSON(t, protocol.AgentDeltaParams{Kind: protocol.AgentDeltaAssistant, Content: "first answer"}),
 	})
 	tui.handleLocalNotification(localNotification{
 		method: protocol.NotifyToolStart,

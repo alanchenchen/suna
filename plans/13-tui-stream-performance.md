@@ -5,7 +5,7 @@
 
 ## 背景
 
-之前 TUI 对每个 `agent.stream` / `agent.reasoning` delta 都立即投递 Bubble Tea 事件，并在每个事件里全量 `syncContent()`、重跑 assistant Markdown。长回复或大上下文时，UI 消费速度会落后于 daemon 事件生产速度，表现为 daemon 已结束但 TUI 仍在补播历史 delta。
+之前 TUI 对每个 `agent.delta` 都立即投递 Bubble Tea 事件，并在每个事件里全量 `syncContent()`、重跑 assistant Markdown。长回复或大上下文时，UI 消费速度会落后于 daemon 事件生产速度，表现为 daemon 已结束但 TUI 仍在补播历史 delta。
 
 OpenAI-compatible 中转在高速碎片流下还会暴露另一类问题：部分中转会发送 heartbeat/comment-only/empty SSE event。`openai-go` 默认 decoder 会把这些空 payload 继续交给 `json.Unmarshal`，错误表现为 `unexpected end of JSON input`。因此当前设计同时保护三条路径：兼容空 SSE 事件；上游 LLM 读取不能被 UI 速度轻易拖住；UI 渲染也不能被每个小 delta 打爆。
 
@@ -31,7 +31,7 @@ OpenAI-compatible Chat Completions 保留 `stream_options.include_usage=true`，
 daemon 在 `runAgent` 出口对文本流做传输级 micro-batching：
 
 - provider chunk channel 和 agent event channel 使用 2048 有界缓冲，用于吸收 LLM 服务在碎片化 SSE 下的短时尖峰，同时避免过高的 daemon 常驻内存。
-- daemon 只合并 `agent.stream` 和 `agent.reasoning`，默认 8ms flush 一次。
+- daemon 只合并 `agent.delta` 文本，默认 8ms flush 一次。
 - 单类文本 batch 超过 32KB 时立即 flush，避免单个 JSON-RPC 事件过大。
 - 遇到 usage、tool、ask、guard、done、error、cancelled 等关键事件时，先 flush pending 文本，再即时发送关键事件。
 这个 batcher 是传输级优化，不是 UI 缓存。daemon 不保存 Markdown 渲染状态、滚动状态、折叠状态或 copy mode；这些仍由具体 UI client 负责。
@@ -40,9 +40,9 @@ daemon 在 `runAgent` 出口对文本流做传输级 micro-batching：
 
 TUI 在 notification pump 层合并连续文本流：
 
-- 只合并 `agent.stream` 和 `agent.reasoning`。
+- 只合并 `agent.delta`。
 - 默认约 8ms flush 一次，保留接近字符级的 notification 反馈；Chat transcript 视觉同步另有约 16ms dirty frame，用于把 viewport 正文刷新限制在约 60fps。
-- 遇到 `done`、tool、ask、guard、error 等非文本事件时，先 flush pending 文本，再即时投递状态事件。
+- 遇到 `agent.run`、tool、ask、guard、error 等非文本事件时，先 flush pending 文本，再即时投递状态事件。
 - local transport read loop 仍不阻塞在 `program.Send` 上，避免反向卡住 daemon 写入。
 
 ### 流式轻量渲染

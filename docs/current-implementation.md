@@ -59,7 +59,7 @@ TUI 仍依赖 Bubble Tea/Bubbles 负责 terminal renderer、alt screen、mouse/k
 
 - macOS/Linux 使用 Unix socket。
 - Windows 使用 Named Pipe。
-- protocol 为 JSON-RPC 风格 request / notification。
+- protocol 为 JSON-RPC 风格 request / notification；模型输出使用 `agent.delta`，run 生命周期和错误恢复使用 `agent.run`，usage/context 使用 `agent.usage`。
 - TUI 只通过 protocol 与 daemon 通信，不直接调用 agent、runner、tools、guard、memory、skill、mcp 等业务包。
 
 ## 模型与请求
@@ -76,11 +76,13 @@ TUI 仍依赖 Bubble Tea/Bubbles 负责 terminal renderer、alt screen、mouse/k
 
 LLM 请求使用按场景维护的 idle timeout，而不是任务总时长 timeout。Runner 内的主对话、工具调用前后请求和 subtask 内部请求默认按普通流式响应等待 120 秒；如果实际收到 provider 归一化后的 `ReasoningContent` chunk，本次请求会升级为 30 分钟 idle timeout。这个判断基于 LLM stream 实际返回类型，不基于 `models.reasoning` 配置或模型名。compact、Guard Smart Review、Skill LLM Review、记忆整理等不走 Runner 的单独 LLM 请求使用固定 idle timeout。
 
+Runner 对主循环中的 model request 做内置 recovery：在尚未产生 assistant/reasoning/tool call 输出前，如果遇到结构化 HTTP 408/429/5xx 或网络/timeout 错误，会最多尝试 3 次，总间隔按 8 秒等待；已产生可见输出后的中断不会自动重试，最终失败仍通过 `agent.run state=failed` 暴露并由 `agent.resumeRun` 作为人工兜底。
+
 当前 OpenAI Responses 和 OpenAI-compatible Chat provider 会把 reasoning delta 归一为 `ReasoningContent`。Chat-compatible provider 目前支持常见的 `reasoning_content` 字符串，以及 MiniMax M3 在 `reasoning_split=true` 时返回的 `reasoning_details[].text`；这些兼容逻辑只在 provider 层读取可选字段，字段不存在或格式不匹配时会忽略。Anthropic provider 目前使用非 streaming 的 Messages 调用，只在完整响应后返回文本和 tool call，尚未把 Claude thinking block / delta 归一为 `ReasoningContent`；因此 Anthropic thinking 暂不能触发 Runner 的 30 分钟动态 reasoning idle timeout。若要支持，需要先把 Anthropic provider 改为 streaming，并在 provider 层输出 `Chunk{ReasoningContent: ...}`。
 
 当前多模型智能选择主要用于 subtask：主 Agent 可查看经过 `subtask_for` 可见性过滤后的可用模型、上下文窗口、strengths 和多模态能力，然后在 `spawn` 时选择模型。主对话、Guard Smart Review、Skill LLM Review、上下文压缩、记忆提取等单独 LLM 请求默认仍使用 active model。
 
-`llm.log` 中的 `request_prepare` 由 Runner 记录，用于对比 Suna 请求前的 `estimated_context_tokens`、`estimator_safety_tokens`、`compact_context_tokens` 和 `input_limit`；canonical `request` 由 Router 统一记录，覆盖 chat、subtask、Guard、Skill、compact 和 memory 等所有经 Router 的 LLM 请求，并包含 `provider`、`model_ref`、`model` 以及 provider 返回的 usage。
+`llm.log` 中的 `request_prepare` 由 Runner 记录，用于对比 Suna 请求前的 `estimated_context_tokens`、`estimator_safety_tokens`、`compact_context_tokens` 和 `input_limit`；canonical `request` 由 Router 统一记录，覆盖 chat、subtask、Guard、Skill、compact 和 memory 等所有经 Router 的单次物理 LLM 请求，并包含 `provider`、`model_ref`、`model` 以及 provider 返回的 usage。Runner recovery 语义另由 `llm/recovery` 记录，避免把 retry attempt 等 runner 状态塞进 Router 或 `CompletionRequest`。
 
 ## Agent / Runner / Tool
 

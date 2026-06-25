@@ -1,5 +1,7 @@
 package agent
 
+import "github.com/alanchenchen/suna/internal/model"
+
 const eventBuffer = 2048
 
 type EventType int
@@ -24,6 +26,8 @@ const (
 	StatusCompactRunning EventStatusKind = "compact_running"
 	StatusCompactDone    EventStatusKind = "compact_done"
 	StatusCompactError   EventStatusKind = "compact_error"
+	StatusWaitingLLM     EventStatusKind = "waiting_llm"
+	StatusLLMRetrying    EventStatusKind = "llm_retrying"
 	StatusDone           EventStatusKind = "done"
 )
 
@@ -73,4 +77,8 @@ type Event struct {
 	DurationMs             int64
 
 	ResumeAvailable bool
+	Attempt         int
+	MaxAttempts     int
+	DelayMs         int64
+	ModelError      *model.ModelError
 }

@@ -39,7 +39,7 @@ TUI 不应直接调用 runner、agent、tools、memory、guard 等业务包。
 
 ## Protocol 与 local transport
 
-TUI 和 daemon 通过 `internal/protocol` 定义的方法、参数和通知通信。
+TUI 和 daemon 通过 `internal/protocol` 定义的方法、参数和通知通信。Agent 输出按职责拆分为三类通知：`agent.delta` 只承载 assistant/reasoning 文本增量，`agent.run` 承载 run 生命周期、retry、失败错误和恢复能力，`agent.usage` 承载 token/context/耗时统计。
 
 本地连接由 `internal/transport/local` 承载，TUI 侧只保留适配层：
 

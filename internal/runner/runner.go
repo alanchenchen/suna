@@ -3,6 +3,7 @@ package runner
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -109,18 +110,7 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 		}
 		requestStarted := time.Now()
 		estimatedContextTokens := logRequestPrepare(req, completionReq, contextWindow, turns)
-		ch, err := r.Router.Complete(ctx, req.ModelRef, completionReq)
-		if err != nil {
-			return result, err
-		}
-		streamTimeout := req.StreamTimeout
-		dynamicReasoningTimeout := false
-		if streamTimeout <= 0 {
-			streamTimeout = defaultChatIdleTimeout
-			dynamicReasoningTimeout = true
-		}
-
-		fullContent, toolCalls, usage, err := r.readStream(ctx, ch, streamTimeout, dynamicReasoningTimeout, req)
+		fullContent, toolCalls, usage, err := r.completeWithRecovery(ctx, req.ModelRef, completionReq, req)
 		if err != nil {
 			return result, err
 		}
@@ -208,10 +198,127 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 	}
 }
 
-func (r *Runner) readStream(ctx context.Context, ch <-chan model.Chunk, streamTimeout time.Duration, dynamicReasoningTimeout bool, req Request) (string, []model.ToolCall, *model.Usage, error) {
+func (r *Runner) completeWithRecovery(ctx context.Context, modelRef string, completionReq *model.CompletionRequest, req Request) (string, []model.ToolCall, *model.Usage, error) {
+	const maxAttempts = 3
+	const retryDelay = 8 * time.Second
+	streamTimeout := req.StreamTimeout
+	dynamicReasoningTimeout := false
+	if streamTimeout <= 0 {
+		streamTimeout = defaultChatIdleTimeout
+		dynamicReasoningTimeout = true
+	}
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		ch, err := r.Router.Complete(ctx, modelRef, completionReq)
+		if err != nil {
+			lastErr = err
+		} else {
+			content, toolCalls, usage, streamErr, visibleOutput := r.readStream(ctx, ch, streamTimeout, dynamicReasoningTimeout, req)
+			if streamErr == nil {
+				return content, toolCalls, usage, nil
+			}
+			if visibleOutput {
+				return content, toolCalls, usage, streamErr
+			}
+			lastErr = streamErr
+		}
+		if attempt >= maxAttempts || !retryableModelRequestError(lastErr) {
+			if attempt > 1 || retryableModelRequestError(lastErr) {
+				logModelRecovery("exhausted", completionReq, modelRef, attempt, maxAttempts, 0, lastErr)
+			}
+			return "", nil, nil, lastErr
+		}
+		logModelRecovery("retrying", completionReq, modelRef, attempt, maxAttempts, retryDelay, lastErr)
+		if r.Sink != nil {
+			r.Sink.Status(StatusEvent{Kind: StatusLLMRetrying, Attempt: attempt + 1, MaxAttempts: maxAttempts, Delay: retryDelay, Error: model.NewModelError(lastErr)})
+		}
+		select {
+		case <-time.After(retryDelay):
+		case <-ctx.Done():
+			return "", nil, nil, ctx.Err()
+		}
+		if r.Sink != nil {
+			r.Sink.Status(StatusEvent{Kind: StatusWaitingLLM})
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("model request failed without an error")
+	}
+	return "", nil, nil, lastErr
+}
+
+func logModelRecovery(status string, req *model.CompletionRequest, modelRef string, attempt, maxAttempts int, delay time.Duration, err error) {
+	fields := logging.Event{
+		"request_id":   requestIDForRecovery(req),
+		"status":       status,
+		"attempt":      attempt,
+		"max_attempts": maxAttempts,
+		"model_ref":    modelRef,
+	}
+	if req != nil {
+		fields["model"] = req.Model
+		fields["purpose"] = req.Purpose
+	}
+	if delay > 0 {
+		fields["retry_delay_ms"] = delay.Milliseconds()
+	}
+	me := model.NewModelError(err)
+	if me != nil {
+		fields["error_kind"] = me.Kind
+		if me.StatusCode > 0 {
+			fields["status_code"] = me.StatusCode
+		}
+		if me.Code != "" {
+			fields["provider_code"] = me.Code
+		}
+		if me.Type != "" {
+			fields["provider_type"] = me.Type
+		}
+	}
+	if status == "exhausted" {
+		logging.Error("llm", "recovery", err, fields)
+		return
+	}
+	logging.Info("llm", "recovery", fields)
+}
+
+func requestIDForRecovery(req *model.CompletionRequest) string {
+	if req != nil && req.RequestID != "" {
+		return req.RequestID
+	}
+	return ""
+}
+
+func retryableModelRequestError(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	me := model.NewModelError(err)
+	if me == nil {
+		return false
+	}
+	if me.Kind == model.ModelErrorNetwork {
+		return true
+	}
+	if me.Kind != model.ModelErrorHTTP {
+		return false
+	}
+	switch me.StatusCode {
+	case 408, 429, 500, 502, 503, 504:
+		return true
+	default:
+		return false
+	}
+}
+
+func (r *Runner) readStream(ctx context.Context, ch <-chan model.Chunk, streamTimeout time.Duration, dynamicReasoningTimeout bool, req Request) (string, []model.ToolCall, *model.Usage, error, bool) {
 	var contentBuilder strings.Builder
 	var toolCalls []model.ToolCall
 	var lastUsage *model.Usage
+	var visibleOutput bool
 	timer := time.NewTimer(streamTimeout)
 	defer timer.Stop()
 
@@ -219,7 +326,7 @@ func (r *Runner) readStream(ctx context.Context, ch <-chan model.Chunk, streamTi
 		select {
 		case chunk, ok := <-ch:
 			if !ok {
-				return contentBuilder.String(), toolCalls, lastUsage, nil
+				return contentBuilder.String(), toolCalls, lastUsage, nil, visibleOutput
 			}
 			if dynamicReasoningTimeout && chunk.ReasoningContent != "" {
 				streamTimeout = defaultReasoningIdleTimeout
@@ -232,33 +339,36 @@ func (r *Runner) readStream(ctx context.Context, ch <-chan model.Chunk, streamTi
 			}
 			timer.Reset(streamTimeout)
 			if ctx.Err() != nil {
-				return contentBuilder.String(), toolCalls, lastUsage, ctx.Err()
+				return contentBuilder.String(), toolCalls, lastUsage, ctx.Err(), visibleOutput
 			}
-			if chunk.Error != "" {
-				return contentBuilder.String(), toolCalls, lastUsage, fmt.Errorf("%s", readableLLMStreamError(chunk.Error))
+			if chunk.Error != nil {
+				return contentBuilder.String(), toolCalls, lastUsage, chunk.Error, visibleOutput
 			}
 			if chunk.ReasoningContent != "" && req.EmitReasoning && r.Sink != nil {
+				visibleOutput = true
 				r.Sink.Reasoning(chunk.ReasoningContent)
 			}
 			if chunk.Content != "" {
+				visibleOutput = true
 				contentBuilder.WriteString(chunk.Content)
 				if req.EmitStream && r.Sink != nil {
 					r.Sink.Stream(chunk.Content)
 				}
 			}
 			if len(chunk.ToolCalls) > 0 {
+				visibleOutput = true
 				toolCalls = append(toolCalls, chunk.ToolCalls...)
 			}
 			if chunk.Usage != nil {
 				lastUsage = chunk.Usage
 			}
 			if chunk.Done {
-				return contentBuilder.String(), toolCalls, lastUsage, nil
+				return contentBuilder.String(), toolCalls, lastUsage, nil, visibleOutput
 			}
 		case <-timer.C:
-			return contentBuilder.String(), toolCalls, lastUsage, fmt.Errorf("LLM stream idle timeout (%s). The model may still be thinking; continue or retry if needed", streamTimeout)
+			return contentBuilder.String(), toolCalls, lastUsage, fmt.Errorf("LLM stream idle timeout (%s). The model may still be thinking; continue or retry if needed", streamTimeout), visibleOutput
 		case <-ctx.Done():
-			return contentBuilder.String(), toolCalls, lastUsage, ctx.Err()
+			return contentBuilder.String(), toolCalls, lastUsage, ctx.Err(), visibleOutput
 		}
 	}
 }
@@ -361,13 +471,4 @@ func extractToolIntent(fullContent string) string {
 		}
 	}
 	return ""
-}
-
-func readableLLMStreamError(errText string) string {
-	text := strings.TrimSpace(errText)
-	lower := strings.ToLower(text)
-	if strings.Contains(lower, "unexpected end of json input") {
-		return "LLM stream interrupted: the upstream model service returned incomplete JSON. Please retry, or switch model/provider and try again."
-	}
-	return text
 }

@@ -11,7 +11,7 @@ func TestStreamErrorUsesStructuredResumeFlag(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 18}
 	tui.initChatComponents()
 
-	tui.handleStreamNotification(protocol.StreamParams{Done: true, Error: true, Chunk: "502 Bad Gateway", ResumeAvailable: true})
+	tui.handleAgentRunNotification(protocol.AgentRunParams{State: protocol.AgentRunFailed, Error: &protocol.ModelError{Kind: protocol.ModelErrorHTTP, StatusCode: 502, Message: "Bad Gateway"}, ResumeAvailable: true})
 
 	if !tui.chat.ResumeAvailable {
 		t.Fatal("ResumeAvailable = false, want true")
@@ -22,8 +22,9 @@ func TestStreamErrorUsesStructuredResumeFlag(t *testing.T) {
 	if got := tui.chat.Messages[0].Role; got != "error" {
 		t.Fatalf("message role = %q, want error", got)
 	}
-	if got := tui.chat.Messages[0].Content; got != "502 Bad Gateway" {
-		t.Fatalf("message content = %v, want structured error chunk", got)
+	content, _ := tui.chat.Messages[0].Content.(string)
+	if !strings.Contains(content, "模型请求失败：HTTP 502") || !strings.Contains(content, "按 Enter") {
+		t.Fatalf("message content = %v, want structured retryable model error", content)
 	}
 }
 

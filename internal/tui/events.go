@@ -13,8 +13,8 @@ import (
 // Root reducer 使用 events 子包的强类型消息；handler 留在 root，负责分发到 page models。
 type notificationMsg = tuievents.NotificationMsg
 
-type streamMsg = tuievents.StreamMsg
-type reasoningMsg = tuievents.ReasoningMsg
+type agentDeltaMsg = tuievents.AgentDeltaMsg
+type agentRunMsg = tuievents.AgentRunMsg
 type usageMsg = tuievents.UsageMsg
 type askUserMsg = tuievents.AskUserMsg
 type guardConfirmMsg = tuievents.GuardConfirmMsg
@@ -53,10 +53,10 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 
 func (t *TUI) handleNotificationMsg(msg notificationMsg) {
 	switch m := msg.(type) {
-	case streamMsg:
-		t.handleStreamNotification(m.Params)
-	case reasoningMsg:
-		t.handleReasoningNotification(m.Params)
+	case agentDeltaMsg:
+		t.handleAgentDeltaNotification(m.Params)
+	case agentRunMsg:
+		t.handleAgentRunNotification(m.Params)
 	case usageMsg:
 		t.handleUsageNotification(m.Params)
 	case toolStartMsg:
@@ -98,33 +98,105 @@ func (t *TUI) handleNotificationMsg(msg notificationMsg) {
 	}
 }
 
-func (t *TUI) handleStreamNotification(p protocol.StreamParams) {
-	if p.Done {
-		t.finishStreamingMessages()
-		if p.Error {
-			t.appendNonToolMessage(chatMsg{Role: "error", Content: p.Chunk})
-			t.chat.ResumeAvailable = p.ResumeAvailable
-		} else {
-			t.chat.ResumeAvailable = false
-		}
-		t.resetPhase()
-		t.applyContextStats(p.ContextTokens, p.ContextWindow)
-		return
-	}
+func (t *TUI) handleAgentDeltaNotification(p protocol.AgentDeltaParams) {
 	t.chat.Compacting = false
 	t.compactAuto = false
 	t.chat.ResumeAvailable = false
 	t.lastTextStreamAt = time.Now()
-	t.chat.HandleStreamStart(t.lastTextStreamAt)
-	t.appendStreamMessage("assistant", p.Chunk)
+	switch p.Kind {
+	case protocol.AgentDeltaReasoning:
+		t.chat.HandleReasoningStart(t.lastTextStreamAt)
+		t.appendStreamMessage("reasoning", p.Content)
+	default:
+		t.chat.HandleStreamStart(t.lastTextStreamAt)
+		t.appendStreamMessage("assistant", p.Content)
+	}
 }
 
-func (t *TUI) handleReasoningNotification(p protocol.StreamParams) {
-	t.chat.Compacting = false
-	t.compactAuto = false
-	t.lastTextStreamAt = time.Now()
-	t.chat.HandleReasoningStart(t.lastTextStreamAt)
-	t.appendStreamMessage("reasoning", p.Chunk)
+func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
+	switch p.State {
+	case protocol.AgentRunRetrying:
+		t.chat.SetStatusLabel(t.formatRunRetryStatus(p), time.Now())
+	case protocol.AgentRunFailed, protocol.AgentRunCancelled:
+		t.finishStreamingMessages()
+		if p.State == protocol.AgentRunCancelled {
+			t.appendNonToolMessage(chatMsg{Role: "error", Content: t.tr("model_error.cancelled")})
+		} else {
+			t.appendNonToolMessage(chatMsg{Role: "error", Content: t.formatModelError(p)})
+		}
+		t.chat.ResumeAvailable = p.ResumeAvailable
+		t.resetPhase()
+	case protocol.AgentRunDone:
+		t.finishStreamingMessages()
+		t.chat.ResumeAvailable = false
+		t.resetPhase()
+	case protocol.AgentRunRunning:
+		if p.Phase == protocol.AgentRunPhaseModel {
+			t.chat.SetStatusLabel(t.tr("status.waiting_model"), time.Now())
+		}
+	}
+}
+
+func (t *TUI) formatRunRetryStatus(p protocol.AgentRunParams) string {
+	if p.Attempt > 0 && p.MaxAttempts > 0 && p.DelayMs > 0 {
+		seconds := max(1, int((p.DelayMs+999)/1000))
+		return t.i18n.Tf("status.model_retrying", seconds, p.Attempt, p.MaxAttempts)
+	}
+	return t.tr("status.model_retrying_simple")
+}
+
+func (t *TUI) formatModelError(p protocol.AgentRunParams) string {
+	summary := t.tr("model_error.unknown")
+	detail := strings.TrimSpace(p.Message)
+	if p.Error != nil {
+		summary = t.modelErrorSummary(*p.Error)
+		detail = strings.TrimSpace(p.Error.Message)
+	}
+	lines := []string{t.i18n.Tf("model_error.failed", summary)}
+	if detail != "" && detail != summary && !strings.Contains(summary, detail) {
+		lines = append(lines, t.i18n.Tf("model_error.detail", detail))
+	}
+	if p.ResumeAvailable {
+		lines = append(lines, t.tr("model_error.action_retry"))
+	} else {
+		lines = append(lines, t.tr("model_error.action_check"))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (t *TUI) modelErrorSummary(err protocol.ModelError) string {
+	switch err.Kind {
+	case protocol.ModelErrorHTTP:
+		if err.StatusCode > 0 {
+			label := strings.TrimSpace(firstNonEmpty(err.Code, err.Type, err.Message))
+			if label == "" {
+				return fmt.Sprintf("HTTP %d", err.StatusCode)
+			}
+			return fmt.Sprintf("HTTP %d · %s", err.StatusCode, label)
+		}
+	case protocol.ModelErrorNetwork:
+		if strings.TrimSpace(err.Message) != "" {
+			return t.i18n.Tf("model_error.network_with_message", err.Message)
+		}
+		return t.tr("model_error.network")
+	case protocol.ModelErrorCancelled:
+		return t.tr("model_error.cancelled")
+	case protocol.ModelErrorInternal:
+		if strings.TrimSpace(err.Message) != "" {
+			return err.Message
+		}
+		return t.tr("model_error.internal")
+	}
+	return firstNonEmpty(err.Message, t.tr("model_error.unknown"))
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func (t *TUI) handleUsageNotification(p protocol.UsageParams) {

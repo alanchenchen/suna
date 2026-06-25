@@ -24,8 +24,8 @@ type Notification struct {
 // NotificationMsg 是进入 Bubble Tea Update 后的强类型 daemon 事件。
 type NotificationMsg interface{ isNotificationMsg() }
 
-type StreamMsg struct{ Params protocol.StreamParams }
-type ReasoningMsg struct{ Params protocol.StreamParams }
+type AgentDeltaMsg struct{ Params protocol.AgentDeltaParams }
+type AgentRunMsg struct{ Params protocol.AgentRunParams }
 type UsageMsg struct{ Params protocol.UsageParams }
 type AskUserMsg struct{ Params protocol.AskUserParams }
 type GuardConfirmMsg struct{ Params protocol.GuardConfirmParams }
@@ -57,8 +57,8 @@ type RequestErrorMsg struct {
 }
 type UnknownNotificationMsg struct{ Raw Notification }
 
-func (StreamMsg) isNotificationMsg()                {}
-func (ReasoningMsg) isNotificationMsg()             {}
+func (AgentDeltaMsg) isNotificationMsg()            {}
+func (AgentRunMsg) isNotificationMsg()              {}
 func (UsageMsg) isNotificationMsg()                 {}
 func (AskUserMsg) isNotificationMsg()               {}
 func (GuardConfirmMsg) isNotificationMsg()          {}
@@ -82,10 +82,10 @@ func (UnknownNotificationMsg) isNotificationMsg()   {}
 
 func Decode(notif Notification) tea.Msg {
 	switch notif.Method {
-	case protocol.NotifyStream:
-		return decodeParams[protocol.StreamParams](notif, func(p protocol.StreamParams) tea.Msg { return StreamMsg{Params: p} })
-	case protocol.NotifyReasoning:
-		return decodeParams[protocol.StreamParams](notif, func(p protocol.StreamParams) tea.Msg { return ReasoningMsg{Params: p} })
+	case protocol.NotifyAgentDelta:
+		return decodeParams[protocol.AgentDeltaParams](notif, func(p protocol.AgentDeltaParams) tea.Msg { return AgentDeltaMsg{Params: p} })
+	case protocol.NotifyAgentRun:
+		return decodeParams[protocol.AgentRunParams](notif, func(p protocol.AgentRunParams) tea.Msg { return AgentRunMsg{Params: p} })
 	case protocol.NotifyUsage:
 		return decodeParams[protocol.UsageParams](notif, func(p protocol.UsageParams) tea.Msg { return UsageMsg{Params: p} })
 	case protocol.NotifyToolStart:
@@ -142,17 +142,16 @@ func decodeParams[T any](notif Notification, wrap func(T) tea.Msg) tea.Msg {
 }
 
 const StreamFlushInterval = 8 * time.Millisecond
+const maxStreamBatchBytes = 32 * 1024
 
 type Batcher struct {
-	Send   func(tea.Msg)
-	stream streamAccumulator
-	reason streamAccumulator
-	order  []string
-	timer  *time.Timer
+	Send  func(tea.Msg)
+	delta deltaAccumulator
+	timer *time.Timer
 }
 
-type streamAccumulator struct {
-	params protocol.StreamParams
+type deltaAccumulator struct {
+	params protocol.AgentDeltaParams
 	has    bool
 }
 
@@ -183,52 +182,35 @@ func (b *Batcher) handle(notif Notification) {
 }
 
 func (b *Batcher) accumulate(notif Notification) {
-	var p protocol.StreamParams
+	var p protocol.AgentDeltaParams
 	if err := json.Unmarshal(notif.Params, &p); err != nil {
 		b.flushAll()
 		b.send(notif)
 		return
 	}
-	if p.Done {
-		b.flushAll()
-		b.send(notif)
-		return
-	}
-	if len(b.order) > 0 && b.order[len(b.order)-1] != notif.Method {
+	if b.delta.has && b.delta.params.Kind != p.Kind {
 		b.flushAll()
 	}
-	acc := &b.stream
-	if notif.Method == protocol.NotifyReasoning {
-		acc = &b.reason
+	if !b.delta.has {
+		b.delta.params.Kind = p.Kind
+		b.delta.params.RunID = p.RunID
 	}
-	if !acc.has {
-		b.order = append(b.order, notif.Method)
+	b.delta.params.Content += p.Content
+	b.delta.has = true
+	if len(b.delta.params.Content) >= maxStreamBatchBytes {
+		b.flushAll()
 	}
-	acc.params.Chunk += p.Chunk
-	acc.params.ID = p.ID
-	acc.has = true
 }
 
 func (b *Batcher) flushAll() {
 	b.stopTimer()
-	for _, method := range b.order {
-		b.flush(method)
-	}
-	b.order = nil
-}
-
-func (b *Batcher) flush(method string) {
-	acc := &b.stream
-	if method == protocol.NotifyReasoning {
-		acc = &b.reason
-	}
-	if !acc.has {
+	if !b.delta.has {
 		return
 	}
-	params := acc.params
-	*acc = streamAccumulator{}
+	params := b.delta.params
+	b.delta = deltaAccumulator{}
 	data, _ := json.Marshal(params)
-	b.send(Notification{Method: method, Params: data})
+	b.send(Notification{Method: protocol.NotifyAgentDelta, Params: data})
 }
 
 func (b *Batcher) send(notif Notification) {
@@ -264,5 +246,5 @@ func (b *Batcher) timerC() <-chan time.Time {
 }
 
 func IsTextStreamNotification(notif Notification) bool {
-	return notif.Method == protocol.NotifyStream || notif.Method == protocol.NotifyReasoning
+	return notif.Method == protocol.NotifyAgentDelta
 }

@@ -194,6 +194,31 @@ api_key = "sk-xxx..."
   → 用配置中的 base_url 调用（所有 provider 都必须有 base_url）
 ```
 
+### OAuth / 登录型凭证（未来规划）
+
+当前不实现 OAuth。Suna 的默认 provider 接入仍以 API key、显式 `base_url` 和模型配置为主，避免把登录流程、浏览器回调和 token 生命周期过早引入 daemon。
+
+未来如需支持官方 OAuth、device code 或第三方授权平台，应作为统一 credential manager 能力设计，而不是放进 runner 或 provider adapter：
+
+```
+TUI / CLI:
+  只负责发起登录、展示授权 URL / device code、展示成功或失败
+
+Daemon / core credential manager:
+  负责 OAuth flow 状态、token 持久化、refresh、logout 和权限边界
+
+Provider adapter:
+  只消费统一 credential / token source，不关心凭证来自 API key 还是 OAuth
+```
+
+设计约束：
+- daemon 仍保持 headless 可用；TUI 不是唯一登录入口，CLI 可提供 `suna auth login <provider>` 一类命令。
+- runner 不直接处理 OAuth、refresh token 或交互流程。
+- provider adapter 不保存 token，只通过 credential manager 获取当前可用凭证。
+- token 存储必须沿用凭证目录和权限边界，不写入 `config.toml`。
+- 不支持非官方消费端账号复用或网页会话抓取；只考虑官方、稳定、可维护的授权机制。
+- OAuth 能力等待明确用户需求后再排期，不作为 Gemini 等新 provider 的前置条件。
+
 ### 设计说明
 
 - **唯一标识：`provider/model`** — 如 `glm/glm-4`、`anthropic/claude-sonnet-4-20250514`，全局唯一

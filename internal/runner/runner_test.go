@@ -66,7 +66,7 @@ func TestReadStreamExtendsTimeoutAfterReasoningChunk(t *testing.T) {
 		close(ch)
 	}()
 
-	_, _, _, err := (&Runner{}).readStream(context.Background(), ch, 5*time.Millisecond, true, Request{})
+	_, _, _, err, _ := (&Runner{}).readStream(context.Background(), ch, 5*time.Millisecond, true, Request{})
 	if err != nil {
 		t.Fatalf("readStream() error = %v, want nil", err)
 	}
@@ -77,8 +77,49 @@ func TestReadStreamKeepsChatTimeoutWithoutReasoningChunk(t *testing.T) {
 	ch := make(chan model.Chunk, 1)
 	ch <- model.Chunk{Content: "hello"}
 
-	_, _, _, err := (&Runner{}).readStream(context.Background(), ch, 5*time.Millisecond, true, Request{})
+	_, _, _, err, visible := (&Runner{}).readStream(context.Background(), ch, 5*time.Millisecond, true, Request{})
 	if err == nil {
 		t.Fatal("readStream() error = nil, want idle timeout")
+	}
+	if !visible {
+		t.Fatal("visible = false after content chunk, want true")
+	}
+}
+
+func TestReadStreamReportsNoVisibleOutputBeforeInitialError(t *testing.T) {
+	t.Parallel()
+	ch := make(chan model.Chunk, 1)
+	ch <- model.Chunk{Error: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 503, Message: "unavailable"}}
+	close(ch)
+
+	_, _, _, err, visible := (&Runner{}).readStream(context.Background(), ch, time.Second, false, Request{})
+	if err == nil {
+		t.Fatal("readStream() error = nil, want model error")
+	}
+	if visible {
+		t.Fatal("visible = true before content, want false")
+	}
+}
+
+func TestRetryableModelRequestErrorUsesStructuredStatus(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "rate limit", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 429}, want: true},
+		{name: "server unavailable", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 503}, want: true},
+		{name: "bad request", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 400}, want: false},
+		{name: "network", err: &model.ModelError{Kind: model.ModelErrorNetwork, Message: "temporary network failure"}, want: true},
+		{name: "unknown", err: &model.ModelError{Kind: model.ModelErrorUnknown, Message: "temporarily unavailable"}, want: false},
+	}
+	for _, tt := range cases {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			if got := retryableModelRequestError(tt.err); got != tt.want {
+				t.Fatalf("retryableModelRequestError() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

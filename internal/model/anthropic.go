@@ -136,7 +136,7 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req *CompletionRequest
 		}
 
 		if err := stream.Err(); err != nil {
-			ch <- Chunk{Done: true, Error: err.Error()}
+			ch <- Chunk{Done: true, Error: modelErrorFromProvider(err, "anthropic", modelName)}
 			return
 		}
 

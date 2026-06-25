@@ -6,15 +6,73 @@ type SendMessageParams struct {
 	Parts []MessagePart `json:"parts,omitempty"`
 }
 
-type StreamParams struct {
-	Chunk string `json:"chunk"`
-	ID    string `json:"id"`
-	Done  bool   `json:"done,omitempty"`
-	// Error / ResumeAvailable 是结构化运行结果；TUI 不解析 Chunk 文本来判断错误或重试能力。
-	Error           bool `json:"error,omitempty"`
-	ResumeAvailable bool `json:"resume_available,omitempty"`
-	ContextTokens   int  `json:"context_tokens,omitempty"`
-	ContextWindow   int  `json:"context_window,omitempty"`
+type AgentDeltaKind string
+
+const (
+	AgentDeltaAssistant AgentDeltaKind = "assistant"
+	AgentDeltaReasoning AgentDeltaKind = "reasoning"
+)
+
+type AgentDeltaParams struct {
+	RunID   string         `json:"run_id,omitempty"`
+	Kind    AgentDeltaKind `json:"kind"`
+	Content string         `json:"content"`
+}
+
+type AgentRunState string
+
+const (
+	AgentRunRunning   AgentRunState = "running"
+	AgentRunRetrying  AgentRunState = "retrying"
+	AgentRunDone      AgentRunState = "done"
+	AgentRunFailed    AgentRunState = "failed"
+	AgentRunCancelled AgentRunState = "cancelled"
+)
+
+type AgentRunPhase string
+
+const (
+	AgentRunPhaseModel   AgentRunPhase = "model"
+	AgentRunPhaseTool    AgentRunPhase = "tool"
+	AgentRunPhaseCompact AgentRunPhase = "compact"
+	AgentRunPhaseGuard   AgentRunPhase = "guard"
+	AgentRunPhaseAsk     AgentRunPhase = "ask"
+	AgentRunPhaseSkill   AgentRunPhase = "skill"
+)
+
+type ModelErrorKind string
+
+const (
+	ModelErrorUnknown   ModelErrorKind = "unknown"
+	ModelErrorHTTP      ModelErrorKind = "http"
+	ModelErrorNetwork   ModelErrorKind = "network"
+	ModelErrorCancelled ModelErrorKind = "cancelled"
+	ModelErrorInternal  ModelErrorKind = "internal"
+)
+
+type ModelError struct {
+	Kind       ModelErrorKind `json:"kind"`
+	Message    string         `json:"message"`
+	StatusCode int            `json:"status_code,omitempty"`
+	Code       string         `json:"code,omitempty"`
+	Type       string         `json:"type,omitempty"`
+	Provider   string         `json:"provider,omitempty"`
+	Model      string         `json:"model,omitempty"`
+}
+
+type AgentRunParams struct {
+	RunID string        `json:"run_id,omitempty"`
+	State AgentRunState `json:"state"`
+	Phase AgentRunPhase `json:"phase,omitempty"`
+
+	Message string `json:"message,omitempty"`
+
+	Attempt     int   `json:"attempt,omitempty"`
+	MaxAttempts int   `json:"max_attempts,omitempty"`
+	DelayMs     int64 `json:"delay_ms,omitempty"`
+
+	Error           *ModelError `json:"error,omitempty"`
+	ResumeAvailable bool        `json:"resume_available,omitempty"`
 }
 
 type SessionRestoreStatus struct {
@@ -45,6 +103,7 @@ type ToolSummaryItem struct {
 }
 
 type UsageParams struct {
+	RunID                  string  `json:"run_id,omitempty"`
 	InputTokens            int     `json:"input_tokens"`
 	OutputTokens           int     `json:"output_tokens"`
 	CachedTokens           int     `json:"cached_tokens,omitempty"`

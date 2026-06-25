@@ -662,8 +662,8 @@ func readGuardReviewStream(ctx context.Context, ch <-chan model.Chunk, timeout t
 				return result.String(), nil
 			}
 			resetTimer()
-			if chunk.Error != "" {
-				return "", fmt.Errorf("%s", chunk.Error)
+			if chunk.Error != nil {
+				return "", chunk.Error
 			}
 			if chunk.Content != "" {
 				result.WriteString(chunk.Content)

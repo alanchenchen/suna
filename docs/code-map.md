@@ -10,7 +10,7 @@
 | daemon 自动拉起 | `daemon_cmd.go`, `internal/transport/local` | TUI 连接失败时后台启动同一可执行文件作为 daemon。 |
 | daemon 服务 | `internal/daemon` | 协调配置、会话、Agent、附件、Skill、MCP、状态通知。 |
 | daemon 生命周期 | `internal/daemon/lifecycle.go` | 最后客户端断开后短暂等待并退出；停止时取消当前 run。 |
-| protocol | `internal/protocol` | 定义 request、notification、事件和多模态消息结构。 |
+| protocol | `internal/protocol`, `docs/protocol.md` | 定义 request、notification、事件和多模态消息结构。 |
 | 本地 transport | `internal/transport/local` | macOS/Linux Unix socket，Windows Named Pipe。 |
 | TUI 主体 | `internal/tui` | Bubble Tea app、页面切换、事件适配、主题、i18n。 |
 | Chat 页面 | `internal/tui/pages/chat`, `internal/tui/chat*.go` | 对话、输入、附件、工具展示、Guard、AskUser、模型/Skill/MCP 浮层；transcript 使用全局 offset + visible window 渲染长历史。 |
@@ -52,7 +52,7 @@ TUI 不应直接调用 `agent`、`runner`、`tools`、`guard`、`memory`、`skil
 
 ### 通信和 daemon
 
-- `internal/protocol`：TUI 与 daemon 的方法、参数和通知类型。
+- `internal/protocol`：TUI 与 daemon 的方法、参数和通知类型；事件语义见 [Protocol](protocol.md)。
 - `internal/transport/local`：Unix socket / Named Pipe 本地 transport。
 - `internal/daemon`：长期运行服务，协调配置、会话、Agent、附件和状态通知。
 

@@ -181,7 +181,7 @@ func TestAutoCompactRunningClearsWhenStreamStarts(t *testing.T) {
 	tui.initChatComponents()
 	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: []byte(`{"running":true}`)})
 
-	tui.handleLocalNotification(localNotification{method: protocol.NotifyStream, params: []byte(`{"chunk":"hello"}`)})
+	tui.handleLocalNotification(localNotification{method: protocol.NotifyAgentDelta, params: []byte(`{"kind":"assistant","content":"hello"}`)})
 	if tui.chat.Compacting {
 		t.Fatalf("compacting = true after stream starts, want false")
 	}

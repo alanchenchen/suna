@@ -190,7 +190,7 @@ func wrapLLMLogStream(raw <-chan Chunk, req *CompletionRequest, route llmRoute, 
 	out := make(chan Chunk, providerChunkBuffer)
 	go func() {
 		defer close(out)
-		usage, stats, failed, errText := collectAndForwardLLMChunks(raw, out, started)
+		usage, stats, failed, modelErr := collectAndForwardLLMChunks(raw, out, started)
 		fields := loggingFields(started, usage)
 		fields["tool_calls"] = stats.toolCalls
 		fields["chunk_count"] = stats.chunkCount
@@ -199,7 +199,7 @@ func wrapLLMLogStream(raw <-chan Chunk, req *CompletionRequest, route llmRoute, 
 		fields["usage_received"] = stats.usageReceived
 		if failed {
 			fields["last_chunk_age_ms"] = time.Since(stats.lastChunkAt).Milliseconds()
-			logRoutedLLMFailure(req, route, fmt.Errorf("%s", errText), fields)
+			logRoutedLLMFailure(req, route, modelErr, fields)
 			return
 		}
 		logRoutedLLMSuccess(req, route, fields)
@@ -207,11 +207,11 @@ func wrapLLMLogStream(raw <-chan Chunk, req *CompletionRequest, route llmRoute, 
 	return out
 }
 
-func collectAndForwardLLMChunks(raw <-chan Chunk, out chan<- Chunk, started time.Time) (*Usage, llmStreamStats, bool, string) {
+func collectAndForwardLLMChunks(raw <-chan Chunk, out chan<- Chunk, started time.Time) (*Usage, llmStreamStats, bool, *ModelError) {
 	stats := llmStreamStats{lastChunkAt: started}
 	var usage *Usage
 	for chunk := range raw {
-		if chunk.Error != "" {
+		if chunk.Error != nil {
 			out <- chunk
 			return usage, stats, true, chunk.Error
 		}
@@ -226,7 +226,7 @@ func collectAndForwardLLMChunks(raw <-chan Chunk, out chan<- Chunk, started time
 		}
 		out <- chunk
 	}
-	return usage, stats, false, ""
+	return usage, stats, false, nil
 }
 
 func (r *Router) MaxOutputTokens(ref string) int {

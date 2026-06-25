@@ -16,7 +16,7 @@ Suna 的性能目标不是通过降低交互体验来省资源，而是在保持
 
 ### 文本 micro-batching
 
-daemon 在 agent 事件出口对 `agent.stream` 和 `agent.reasoning` 做传输级 micro-batching：
+daemon 在 agent 事件出口对 `agent.delta` 文本做传输级 micro-batching：
 
 - 默认 8ms flush 一次。
 - 单类文本 batch 超过 32KB 立即 flush。
@@ -188,7 +188,7 @@ user profile memory 不保存完整对话，也不保存项目任务日志。主
 
 ### TUI notification batching
 
-TUI notification pump 会合并连续 `agent.stream` / `agent.reasoning` 文本：
+TUI notification pump 会合并连续 `agent.delta` 文本：
 
 - 默认约 8ms flush 一次。
 - 非文本事件前先 flush pending 文本。

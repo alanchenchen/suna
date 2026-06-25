@@ -87,7 +87,7 @@ func (p *OpenAIChatProvider) Complete(ctx context.Context, req *CompletionReques
 			mergeChatToolDeltas(choice.Delta.ToolCalls, &toolCallsAcc)
 		}
 		if err := stream.Err(); err != nil {
-			ch <- Chunk{Done: true, Error: err.Error()}
+			ch <- Chunk{Done: true, Error: modelErrorFromProvider(err, "openai-compatible", p.resolveModel(req.Model))}
 			return
 		}
 		toolCalls := accumulateChatToolCalls(toolCallsAcc)

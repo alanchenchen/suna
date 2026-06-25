@@ -27,8 +27,6 @@ type Request struct {
 
 	MaxTurns     int
 	MaxToolCalls int
-
-	Retry RetryPolicy
 }
 
 type Result struct {
@@ -40,14 +38,6 @@ type Result struct {
 	Usage         *model.Usage
 }
 
-type RetryPolicy struct {
-	MaxAttempts int
-	BaseDelay   time.Duration
-	MaxDelay    time.Duration
-	Multiplier  float64
-	Jitter      bool
-}
-
 type StatusKind string
 
 const (
@@ -55,11 +45,16 @@ const (
 	StatusCompactDone    StatusKind = "compact_done"
 	StatusCompactError   StatusKind = "compact_error"
 	StatusWaitingLLM     StatusKind = "waiting_llm"
+	StatusLLMRetrying    StatusKind = "llm_retrying"
 )
 
 type StatusEvent struct {
-	Kind    StatusKind
-	Message string
+	Kind        StatusKind
+	Message     string
+	Attempt     int
+	MaxAttempts int
+	Delay       time.Duration
+	Error       *model.ModelError
 }
 
 type EventSink interface {

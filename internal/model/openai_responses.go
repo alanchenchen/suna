@@ -86,12 +86,12 @@ func (p *OpenAIResponsesProvider) Complete(ctx context.Context, req *CompletionR
 				}
 			case "error":
 				err := fmt.Errorf("responses error: %s", event.Message)
-				ch <- Chunk{Done: true, Error: err.Error()}
+				ch <- Chunk{Done: true, Error: modelErrorFromProvider(err, "openai", p.resolveModel(req.Model))}
 				return
 			}
 		}
 		if err := stream.Err(); err != nil {
-			ch <- Chunk{Done: true, Error: err.Error()}
+			ch <- Chunk{Done: true, Error: modelErrorFromProvider(err, "openai", p.resolveModel(req.Model))}
 			return
 		}
 		toolCalls := orderedResponseToolCalls(toolCallsByID, toolCallOrder)

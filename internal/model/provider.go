@@ -131,12 +131,12 @@ type CompletionRequest struct {
 
 // Chunk 是 provider 流式输出的原子片段；Error 非空时调用方必须停止并按失败处理。
 type Chunk struct {
-	Content          string     `json:"content,omitempty"`
-	ReasoningContent string     `json:"reasoning_content,omitempty"`
-	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`
-	Done             bool       `json:"done"`
-	Usage            *Usage     `json:"usage,omitempty"`
-	Error            string     `json:"error,omitempty"`
+	Content          string      `json:"content,omitempty"`
+	ReasoningContent string      `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
+	Done             bool        `json:"done"`
+	Usage            *Usage      `json:"usage,omitempty"`
+	Error            *ModelError `json:"error,omitempty"`
 }
 
 // Usage 记录一次模型调用的 token 用量，用于 TUI 状态栏和 usage_log。

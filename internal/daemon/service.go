@@ -13,6 +13,7 @@ import (
 	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/mcp"
 	"github.com/alanchenchen/suna/internal/memory"
+	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/protocol"
 	"github.com/alanchenchen/suna/internal/skill"
 )
@@ -233,17 +234,25 @@ func (s *service) runAgentEvents(ctx context.Context, connID, inputLabel string,
 				case agent.StatusCompactError:
 					running := false
 					emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running, Error: evt.Content})
-					// compact 失败已经通过专用通知展示；不要再发送通用 stream error，避免 TUI 重复报错。
+					// compact 失败已经通过专用通知展示；不要再发送通用错误，避免 TUI 重复报错。
 					return
+				case agent.StatusWaitingLLM:
+					emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
+				case agent.StatusLLMRetrying:
+					emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{State: protocol.AgentRunRetrying, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Attempt: evt.Attempt, MaxAttempts: evt.MaxAttempts, DelayMs: evt.DelayMs, Error: protocolModelError(evt.ModelError)})
 				case agent.StatusDone:
 					logging.Info("agent", "run_done", logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()})
-					emit(ctx, sink, protocol.NotifyStream, protocol.StreamParams{Done: true, ContextWindow: evt.ContextWindow})
+					emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{State: protocol.AgentRunDone})
 					emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
 				default:
 					if evt.Error {
 						resumeAvailable := evt.ResumeAvailable
 						logging.Error("agent", "run_failed", fmt.Errorf("%s", evt.Content), logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()})
-						emit(ctx, sink, protocol.NotifyStream, protocol.StreamParams{Chunk: evt.Content, Done: true, Error: true, ResumeAvailable: resumeAvailable})
+						state := protocol.AgentRunFailed
+						if evt.ModelError != nil && evt.ModelError.Kind == model.ModelErrorCancelled {
+							state = protocol.AgentRunCancelled
+						}
+						emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{State: state, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Error: protocolModelError(evt.ModelError), ResumeAvailable: resumeAvailable})
 						emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
 					}
 				}
@@ -546,4 +555,19 @@ func (e protocolError) Code() int     { return e.code }
 
 func invalidParams(message string) protocolError {
 	return protocolError{code: -32602, message: message}
+}
+
+func protocolModelError(err *model.ModelError) *protocol.ModelError {
+	if err == nil {
+		return nil
+	}
+	return &protocol.ModelError{
+		Kind:       protocol.ModelErrorKind(err.Kind),
+		Message:    err.Message,
+		StatusCode: err.StatusCode,
+		Code:       err.Code,
+		Type:       err.Type,
+		Provider:   err.Provider,
+		Model:      err.Model,
+	}
 }

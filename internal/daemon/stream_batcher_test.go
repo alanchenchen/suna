@@ -31,12 +31,15 @@ func TestStreamBatcherMergesStream(t *testing.T) {
 	if got := len(sink.events); got != 1 {
 		t.Fatalf("len(events) = %d, want %d", got, 1)
 	}
-	if got := sink.events[0].Method; got != protocol.NotifyStream {
-		t.Fatalf("events[0].Method = %q, want %q", got, protocol.NotifyStream)
+	if got := sink.events[0].Method; got != protocol.NotifyAgentDelta {
+		t.Fatalf("events[0].Method = %q, want %q", got, protocol.NotifyAgentDelta)
 	}
-	params := sink.events[0].Params.(protocol.StreamParams)
-	if got := params.Chunk; got != "hello" {
-		t.Fatalf("StreamParams.Chunk = %q, want %q", got, "hello")
+	params := sink.events[0].Params.(protocol.AgentDeltaParams)
+	if got := params.Content; got != "hello" {
+		t.Fatalf("AgentDeltaParams.Content = %q, want %q", got, "hello")
+	}
+	if got := params.Kind; got != protocol.AgentDeltaAssistant {
+		t.Fatalf("AgentDeltaParams.Kind = %q, want %q", got, protocol.AgentDeltaAssistant)
 	}
 }
 
@@ -51,11 +54,19 @@ func TestStreamBatcherFlushesOnTypeSwitch(t *testing.T) {
 	if got := len(sink.events); got != 2 {
 		t.Fatalf("len(events) = %d, want %d", got, 2)
 	}
-	if got := sink.events[0].Method; got != protocol.NotifyStream {
-		t.Fatalf("events[0].Method = %q, want %q", got, protocol.NotifyStream)
+	if got := sink.events[0].Method; got != protocol.NotifyAgentDelta {
+		t.Fatalf("events[0].Method = %q, want %q", got, protocol.NotifyAgentDelta)
 	}
-	if got := sink.events[1].Method; got != protocol.NotifyReasoning {
-		t.Fatalf("events[1].Method = %q, want %q", got, protocol.NotifyReasoning)
+	first := sink.events[0].Params.(protocol.AgentDeltaParams)
+	if got := first.Kind; got != protocol.AgentDeltaAssistant {
+		t.Fatalf("first kind = %q, want %q", got, protocol.AgentDeltaAssistant)
+	}
+	if got := sink.events[1].Method; got != protocol.NotifyAgentDelta {
+		t.Fatalf("events[1].Method = %q, want %q", got, protocol.NotifyAgentDelta)
+	}
+	second := sink.events[1].Params.(protocol.AgentDeltaParams)
+	if got := second.Kind; got != protocol.AgentDeltaReasoning {
+		t.Fatalf("second kind = %q, want %q", got, protocol.AgentDeltaReasoning)
 	}
 }
 

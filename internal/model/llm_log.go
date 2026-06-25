@@ -64,6 +64,17 @@ func logRoutedLLMSuccess(req *CompletionRequest, route llmRoute, fields logging.
 }
 
 func logRoutedLLMFailure(req *CompletionRequest, route llmRoute, err error, fields logging.Event) {
+	if modelErr, ok := err.(*ModelError); ok && modelErr != nil {
+		if modelErr.StatusCode > 0 {
+			fields["status_code"] = modelErr.StatusCode
+		}
+		if modelErr.Code != "" {
+			fields["provider_code"] = modelErr.Code
+		}
+		if modelErr.Type != "" {
+			fields["provider_type"] = modelErr.Type
+		}
+	}
 	logRoutedLLM("ERROR", req, route, "failed", err, fields)
 }
 

@@ -255,12 +255,14 @@ func (a *Agent) runCurrentWorking(runCtx context.Context, inputText string, even
 	})
 	if err != nil {
 		content := err.Error()
+		modelErr := model.NewModelError(err)
 		resumeAvailable := a.canResumeRunLocked()
 		if runCtx.Err() != nil {
 			content = "cancelled"
+			modelErr = &model.ModelError{Kind: model.ModelErrorCancelled, Message: content}
 			resumeAvailable = false
 		}
-		events <- Event{Type: EventStatus, Content: content, Error: true, ResumeAvailable: resumeAvailable}
+		events <- Event{Type: EventStatus, Content: content, Error: true, ResumeAvailable: resumeAvailable, ModelError: modelErr}
 		return
 	}
 
@@ -376,6 +378,10 @@ func (s eventSink) Status(status runner.StatusEvent) {
 		s.events <- Event{Type: EventStatus, Status: StatusCompactDone}
 	case runner.StatusCompactError:
 		s.events <- Event{Type: EventStatus, Status: StatusCompactError, Content: status.Message}
+	case runner.StatusWaitingLLM:
+		s.events <- Event{Type: EventStatus, Status: StatusWaitingLLM}
+	case runner.StatusLLMRetrying:
+		s.events <- Event{Type: EventStatus, Status: StatusLLMRetrying, Content: status.Message, Attempt: status.Attempt, MaxAttempts: status.MaxAttempts, DelayMs: status.Delay.Milliseconds(), ModelError: status.Error}
 	}
 }
 func (s eventSink) Stream(content string) { s.events <- Event{Type: EventStream, Content: content} }
