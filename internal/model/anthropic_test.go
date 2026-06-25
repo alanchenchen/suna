@@ -162,3 +162,53 @@ func TestResolveAnthropicTemperatureDefaultsLikeOpenAIProviders(t *testing.T) {
 		t.Fatalf("resolveAnthropicTemperature(0.2) = %v, want %v", got, want)
 	}
 }
+
+func TestAnthropicToolInputSchemaPreservesRequiredAndProperties(t *testing.T) {
+	p := NewAnthropicProvider("test-key", "", "claude-test", 128000, 8192, nil)
+	tools := p.buildTools([]ToolDef{{
+		Name:        "readfile",
+		Description: "read a file",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path":     map[string]any{"type": "string"},
+				"encoding": map[string]any{"type": "string", "enum": []string{"text", "base64"}},
+			},
+			"required":             []string{"path"},
+			"additionalProperties": false,
+		},
+	}})
+	if got, want := len(tools), 1; got != want {
+		t.Fatalf("len(tools) = %d, want %d", got, want)
+	}
+	b, err := tools[0].MarshalJSON()
+	if err != nil {
+		t.Fatalf("MarshalJSON() error = %v", err)
+	}
+	var got struct {
+		InputSchema struct {
+			Type                 string         `json:"type"`
+			Properties           map[string]any `json:"properties"`
+			Required             []string       `json:"required"`
+			AdditionalProperties bool           `json:"additionalProperties"`
+		} `json:"input_schema"`
+	}
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("Unmarshal() error = %v; json = %s", err, string(b))
+	}
+	if got.InputSchema.Type != "object" {
+		t.Fatalf("input_schema.type = %q, want object; json = %s", got.InputSchema.Type, string(b))
+	}
+	if _, ok := got.InputSchema.Properties["path"]; !ok {
+		t.Fatalf("properties missing path; json = %s", string(b))
+	}
+	if _, nested := got.InputSchema.Properties["properties"]; nested {
+		t.Fatalf("properties contains nested root schema; json = %s", string(b))
+	}
+	if got.InputSchema.Required == nil || len(got.InputSchema.Required) != 1 || got.InputSchema.Required[0] != "path" {
+		t.Fatalf("required = %v, want [path]; json = %s", got.InputSchema.Required, string(b))
+	}
+	if got.InputSchema.AdditionalProperties {
+		t.Fatalf("additionalProperties = true, want false; json = %s", string(b))
+	}
+}

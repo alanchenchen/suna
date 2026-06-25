@@ -413,15 +413,57 @@ func (p *AnthropicProvider) buildTools(tools []ToolDef) []anthropic.ToolUnionPar
 	}
 	result := make([]anthropic.ToolUnionParam, len(tools))
 	for i, t := range tools {
+		inputSchema := anthropicToolInputSchema(t.Parameters)
 		result[i] = anthropic.ToolUnionParam{
 			OfTool: &anthropic.ToolParam{
 				Name:        t.Name,
 				Description: anthropic.String(t.Description),
-				InputSchema: anthropic.ToolInputSchemaParam{
-					Properties: t.Parameters,
-				},
+				InputSchema: inputSchema,
 			},
 		}
 	}
 	return result
+}
+
+func anthropicToolInputSchema(params map[string]any) anthropic.ToolInputSchemaParam {
+	schema := anthropic.ToolInputSchemaParam{}
+	if len(params) == 0 {
+		return schema
+	}
+	if properties, ok := params["properties"]; ok {
+		schema.Properties = properties
+	} else {
+		schema.Properties = map[string]any{}
+	}
+	schema.Required = stringList(params["required"])
+	extra := make(map[string]any)
+	for key, value := range params {
+		switch key {
+		case "type", "properties", "required":
+			continue
+		default:
+			extra[key] = value
+		}
+	}
+	if len(extra) > 0 {
+		schema.ExtraFields = extra
+	}
+	return schema
+}
+
+func stringList(value any) []string {
+	switch v := value.(type) {
+	case []string:
+		return append([]string(nil), v...)
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }

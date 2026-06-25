@@ -163,6 +163,42 @@ func TestGPTReasoningUsesChatForCompatible(t *testing.T) {
 	}
 }
 
+func TestClaudeReasoningPresetsMatchClaudeCodeStyleBudgets(t *testing.T) {
+	options := tuiconfig.ReasoningOptions("claude", "anthropic")
+	if got, want := len(options), 5; got != want {
+		t.Fatalf("len(options) = %d, want %d", got, want)
+	}
+	wants := []struct {
+		label  string
+		budget int
+	}{
+		{label: "Think", budget: 4096},
+		{label: "Think Hard", budget: 10000},
+		{label: "Think Harder", budget: 20000},
+		{label: "Ultrathink", budget: 32000},
+	}
+	if got := options[0].Label; got != "Disabled" {
+		t.Fatalf("options[0].Label = %q, want Disabled", got)
+	}
+	disabled := options[0].Reasoning["thinking"].(map[string]any)
+	if got := disabled["type"]; got != "disabled" {
+		t.Fatalf("disabled thinking.type = %#v, want disabled", got)
+	}
+	for i, want := range wants {
+		opt := options[i+1]
+		if got := opt.Label; got != want.label {
+			t.Fatalf("options[%d].Label = %q, want %q", i+1, got, want.label)
+		}
+		thinking := opt.Reasoning["thinking"].(map[string]any)
+		if got := thinking["type"]; got != "enabled" {
+			t.Fatalf("%s thinking.type = %#v, want enabled", want.label, got)
+		}
+		if got := thinking["budget_tokens"]; got != want.budget {
+			t.Fatalf("%s budget_tokens = %#v, want %d", want.label, got, want.budget)
+		}
+	}
+}
+
 func TestReasoningLabelMatch(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleEN), config: tuiconfig.Model{DetailRef: "deepseek/deepseek-v4-pro"}, configState: testReasoningConfig("deepseek", "deepseek-v4-pro")}
 	mc := tui.configModelsSnapshot()[0]

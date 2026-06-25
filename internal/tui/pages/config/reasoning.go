@@ -106,9 +106,11 @@ func ReasoningOptions(family, provider string) []ReasoningOption {
 		return out
 	case "claude":
 		return []ReasoningOption{
-			{Family: "Claude", Label: "Fast", Reasoning: ThinkingBudget(1024)},
-			{Family: "Claude", Label: "Balanced", Reasoning: ThinkingBudget(2048)},
-			{Family: "Claude", Label: "Deep", Reasoning: ThinkingBudget(3072)},
+			{Family: "Claude", Label: "Disabled", Reasoning: map[string]any{"thinking": map[string]any{"type": "disabled"}}},
+			{Family: "Claude", Label: "Think", Reasoning: ThinkingBudget(4096)},
+			{Family: "Claude", Label: "Think Hard", Reasoning: ThinkingBudget(10000)},
+			{Family: "Claude", Label: "Think Harder", Reasoning: ThinkingBudget(20000)},
+			{Family: "Claude", Label: "Ultrathink", Reasoning: ThinkingBudget(32000)},
 		}
 	case "deepseek":
 		return []ReasoningOption{
