@@ -84,6 +84,8 @@ type TUI struct {
 
 	// 输入区空态光标由 TUI 自己定时闪烁，避免依赖终端 ANSI blink 支持。
 	inputCursorVisible bool
+	// inputCursorBlinking 保证全局只存在一条闪烁 tick 链，避免多次启动累积出多条链相互打架。
+	inputCursorBlinking bool
 
 	// transcript 同步由 daemon 通知触发时按帧合并，避免流式输出和工具事件风暴反复完整重渲染。
 	transcriptSyncDirty     bool

@@ -20,7 +20,8 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, nil
 	}
 	if _, ok := msg.(inputCursorBlinkMsg); ok {
-		if t.mode == uipage.Chat && t.ready {
+		// tick 链永不断：不论当前是哪个页面都要继续重排，否则离开 chat 后闪烁链会永久停止。
+		if t.inputCursorBlinking {
 			return t, t.updateInputCursorBlink()
 		}
 		return t, nil
