@@ -26,10 +26,10 @@ TUI 纯前端，无业务逻辑。
 */
 type TUI struct {
 	// Bubble Tea 运行时与 daemon I/O。副作用必须通过 tea.Cmd 或 notification pump 回到 Update。
-	localCli *tuitransport.Client
-	i18n     *translator
-	program  *tea.Program
-	notifyCh chan localNotification
+	localCli    *tuitransport.Client
+	i18n        *translator
+	program     *tea.Program
+	notifyQueue *notificationQueue
 
 	// 根应用状态：只负责页面路由和全局尺寸/复制模式。
 	mode     uipage.Page

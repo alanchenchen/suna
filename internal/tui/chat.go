@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/protocol"
 	"github.com/alanchenchen/suna/internal/tui/clipboard"
 	attachmentmodel "github.com/alanchenchen/suna/internal/tui/components/attachment"
@@ -101,6 +102,7 @@ func (t *TUI) initChatComponents() tea.Cmd {
 }
 
 func (t *TUI) syncContent() {
+	started := time.Now()
 	t.transcriptSyncDirty = false
 	t.chat.SyncTranscript(chatpage.TranscriptDeps{
 		Width:         t.width,
@@ -140,6 +142,9 @@ func (t *TUI) syncContent() {
 		RenderCompactStatusLine: t.renderCompactStatusLine,
 		HasVisibleProgress:      t.hasVisibleActiveProgress,
 	})
+	if elapsed := time.Since(started); elapsed >= chatpage.SlowPerfLogThreshold() {
+		logging.Info("perf", "slow_tui_sync_content", logging.Event{"component": "tui", "duration_ms": elapsed.Milliseconds(), "messages": len(t.chat.Messages), "total_lines": t.chat.TranscriptTotalLines, "streaming": t.chat.HasStreamingMessage()})
+	}
 }
 
 func (t *TUI) scheduleTranscriptSync() tea.Cmd {
@@ -1471,14 +1476,18 @@ func truncateDisplay(s string, maxWidth int) string {
 	if maxWidth <= 1 {
 		return "…"
 	}
-	out := ""
+	var out strings.Builder
+	width := 0
+	ellipsisWidth := lipgloss.Width("…")
 	for _, r := range s {
-		if lipgloss.Width(out+string(r)+"…") > maxWidth {
+		rw := lipgloss.Width(string(r))
+		if width+rw+ellipsisWidth > maxWidth {
 			break
 		}
-		out += string(r)
+		out.WriteRune(r)
+		width += rw
 	}
-	return out + "…"
+	return out.String() + "…"
 }
 
 func clampSkillCursor(cursor, n int) int {

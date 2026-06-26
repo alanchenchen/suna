@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"strings"
 
 	openai "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -62,7 +63,7 @@ func (p *OpenAIResponsesProvider) Complete(ctx context.Context, req *CompletionR
 		defer stream.Close()
 
 		var usage *Usage
-		toolCallsByID := map[string]*ToolCall{}
+		toolCallsByID := map[string]*responseToolCall{}
 		var toolCallOrder []string
 
 		for stream.Next() {
@@ -237,7 +238,12 @@ func (p *OpenAIResponsesProvider) buildTools(tools []ToolDef) []responses.ToolUn
 	return result
 }
 
-func mergeResponseToolCall(event responses.ResponseStreamEventUnion, calls map[string]*ToolCall, order *[]string) {
+type responseToolCall struct {
+	ID, Name  string
+	Arguments strings.Builder
+}
+
+func mergeResponseToolCall(event responses.ResponseStreamEventUnion, calls map[string]*responseToolCall, order *[]string) {
 	if event.Type == "response.output_item.added" || event.Type == "response.output_item.done" {
 		if event.Item.Type == "function_call" {
 			upsertResponseToolCall(calls, order, event.Item.ID, event.Item.CallID, event.Item.Name, event.Item.Arguments.OfString, false)
@@ -251,7 +257,7 @@ func mergeResponseToolCall(event responses.ResponseStreamEventUnion, calls map[s
 	}
 }
 
-func collectResponseOutputToolCalls(items []responses.ResponseOutputItemUnion, calls map[string]*ToolCall, order *[]string) {
+func collectResponseOutputToolCalls(items []responses.ResponseOutputItemUnion, calls map[string]*responseToolCall, order *[]string) {
 	for _, item := range items {
 		if item.Type == "function_call" {
 			upsertResponseToolCall(calls, order, item.ID, item.CallID, item.Name, item.Arguments.OfString, false)
@@ -259,17 +265,17 @@ func collectResponseOutputToolCalls(items []responses.ResponseOutputItemUnion, c
 	}
 }
 
-func orderedResponseToolCalls(calls map[string]*ToolCall, order []string) []ToolCall {
+func orderedResponseToolCalls(calls map[string]*responseToolCall, order []string) []ToolCall {
 	toolCalls := make([]ToolCall, 0, len(order))
 	for _, id := range order {
 		if tc := calls[id]; tc != nil && tc.Name != "" {
-			toolCalls = append(toolCalls, *tc)
+			toolCalls = append(toolCalls, ToolCall{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments.String()})
 		}
 	}
 	return toolCalls
 }
 
-func upsertResponseToolCall(calls map[string]*ToolCall, order *[]string, itemID, callID, name, args string, appendArgs bool) {
+func upsertResponseToolCall(calls map[string]*responseToolCall, order *[]string, itemID, callID, name, args string, appendArgs bool) {
 	key := callID
 	if key == "" {
 		key = itemID
@@ -277,9 +283,21 @@ func upsertResponseToolCall(calls map[string]*ToolCall, order *[]string, itemID,
 	if key == "" {
 		key = fmt.Sprintf("call_%d", len(*order))
 	}
+	if callID != "" && itemID != "" && callID != itemID {
+		if existing := calls[itemID]; existing != nil {
+			delete(calls, itemID)
+			calls[callID] = existing
+			for i, id := range *order {
+				if id == itemID {
+					(*order)[i] = callID
+					break
+				}
+			}
+		}
+	}
 	tc, ok := calls[key]
 	if !ok {
-		calls[key] = &ToolCall{ID: key}
+		calls[key] = &responseToolCall{ID: key}
 		*order = append(*order, key)
 		tc = calls[key]
 	}
@@ -290,8 +308,9 @@ func upsertResponseToolCall(calls map[string]*ToolCall, order *[]string, itemID,
 		tc.ID = callID
 	}
 	if appendArgs {
-		tc.Arguments += args
+		tc.Arguments.WriteString(args)
 	} else if args != "" {
-		tc.Arguments = args
+		tc.Arguments.Reset()
+		tc.Arguments.WriteString(args)
 	}
 }

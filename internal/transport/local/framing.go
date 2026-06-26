@@ -1,5 +1,3 @@
-//go:build windows
-
 package local
 
 import (
@@ -12,7 +10,7 @@ import (
 )
 
 // sendFrame 按 JSON-RPC line framing 写出完整一帧。
-// 写 deadline 由调用方 ctx 控制，避免 Windows pipe 慢写长期占住业务协程。
+// 使用连接写 deadline 而不是每次 Send 创建 goroutine，避免慢写时 goroutine 堆积。
 func sendFrame(ctx context.Context, mu *sync.Mutex, conn net.Conn, msg []byte) error {
 	mu.Lock()
 	defer mu.Unlock()

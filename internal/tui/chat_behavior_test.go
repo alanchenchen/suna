@@ -1124,3 +1124,29 @@ func TestCachedStreamingStateKeepsOnlyTailLines(t *testing.T) {
 		t.Fatal("dropped lines = 0, want tail window to drop early rendered lines")
 	}
 }
+
+func TestAppendStreamingDeltaLongLineMatchesFullRender(t *testing.T) {
+	chunk := strings.Repeat("abcdefghijklmnopqrstuvwxyz", 400)
+	lines := []string{""}
+	lastWidth := 0
+	pendingNewlines := 0
+
+	appendStreamingDelta(&lines, &lastWidth, &pendingNewlines, chunk, 40)
+
+	got := strings.Join(lines, "\n")
+	want := renderStreamingText(chunk, 40)
+	if got != want {
+		t.Fatalf("stream render mismatch\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+func BenchmarkAppendStreamingDeltaLongLine(b *testing.B) {
+	chunk := strings.Repeat("abcdefghijklmnopqrstuvwxyz", 1000)
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		lines := []string{""}
+		lastWidth := 0
+		pendingNewlines := 0
+		appendStreamingDelta(&lines, &lastWidth, &pendingNewlines, chunk, 120)
+	}
+}

@@ -36,39 +36,27 @@ func (t *TUI) Connect(client *tuitransport.Client) {
 }
 
 func (t *TUI) startNotificationPump() {
-	if t.notifyCh != nil {
+	if t.notifyQueue != nil {
 		return
 	}
-	t.notifyCh = make(chan localNotification, 4096)
 	// 单独 goroutine 串行转发通知；文本流在这里按帧合并，UI 状态仍只在 Bubble Tea 事件循环里更新。
-	go (&tuievents.Batcher{Send: func(msg tea.Msg) {
+	batcher := &tuievents.Batcher{Send: func(msg tea.Msg) {
 		if t.program != nil {
 			t.program.Send(msg)
 		}
-	}}).Run(eventNotificationChan(t.notifyCh))
-}
-
-func eventNotificationChan(in <-chan localNotification) <-chan tuievents.Notification {
-	out := make(chan tuievents.Notification)
-	go func() {
-		defer close(out)
-		for notif := range in {
-			out <- notif.toEvent()
-		}
-	}()
-	return out
+	}}
+	eventCh := make(chan tuievents.Notification, notificationQueueSize)
+	go batcher.Run(eventCh)
+	t.notifyQueue = newNotificationQueue(func(notif localNotification) {
+		eventCh <- notif.toEvent()
+	})
 }
 
 func (t *TUI) enqueueNotification(notif localNotification) {
-	if t.notifyCh == nil {
+	if t.notifyQueue == nil {
 		return
 	}
-	select {
-	case t.notifyCh <- notif:
-	default:
-		// 队列满时也不能阻塞 local receiveLoop；让后台 goroutine 等待入队。
-		go func() { t.notifyCh <- notif }()
-	}
+	t.notifyQueue.enqueue(notif)
 }
 
 func (t *TUI) daemonStatusCmd() tea.Cmd {

@@ -1,7 +1,9 @@
 package logging
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -11,7 +13,10 @@ import (
 	"time"
 )
 
-const maxLogSizeBytes = 10 * 1024 * 1024
+const (
+	maxLogSizeBytes    = 10 * 1024 * 1024
+	retainLogSizeBytes = 5 * 1024 * 1024
+)
 
 type Event map[string]any
 
@@ -104,19 +109,48 @@ func quoteValue(v any) string {
 }
 
 func (l *Logger) truncateIfNeeded(path string) {
+	compactLogFileIfNeeded(path, maxLogSizeBytes, retainLogSizeBytes)
+}
+
+func compactLogFileIfNeeded(path string, maxSize, retainSize int64) {
+	if maxSize <= 0 || retainSize <= 0 {
+		return
+	}
 	info, err := os.Stat(path)
+	if err != nil || info.Size() < maxSize {
+		return
+	}
+	if retainSize > maxSize {
+		retainSize = maxSize
+	}
+	start := info.Size() - retainSize
+	if start < 0 {
+		start = 0
+	}
+	f, err := os.Open(path)
 	if err != nil {
 		return
 	}
-	if info.Size() < maxLogSizeBytes {
+	defer f.Close()
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
 		return
 	}
-	_ = os.WriteFile(path, nil, 0644)
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return
+	}
+	// 从换行后开始保留，避免日志文件开头出现半行；如果只有一条超长行，则保留尾部内容。
+	if start > 0 {
+		if idx := bytes.IndexByte(data, '\n'); idx >= 0 && idx+1 < len(data) {
+			data = data[idx+1:]
+		}
+	}
+	_ = os.WriteFile(path, data, 0644)
 }
 
 func normalizeCategory(category string) string {
 	switch strings.ToLower(strings.TrimSpace(category)) {
-	case "llm", "ipc", "memory", "agent", "config", "app":
+	case "llm", "ipc", "memory", "agent", "config", "app", "perf":
 		return strings.ToLower(strings.TrimSpace(category))
 	default:
 		return "app"

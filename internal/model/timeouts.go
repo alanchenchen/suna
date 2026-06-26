@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -33,20 +34,20 @@ func ReadStreamTextWithIdle(ctx context.Context, ch <-chan Chunk, timeout time.D
 		timer.Reset(timeout)
 	}
 
-	var out string
+	var out strings.Builder
 	for {
 		select {
 		case chunk, ok := <-ch:
 			if !ok {
-				return out, nil
+				return out.String(), nil
 			}
 			resetTimer()
 			if chunk.Error != nil {
 				return "", chunk.Error
 			}
-			out += chunk.Content
+			out.WriteString(chunk.Content)
 			if chunk.Done {
-				return out, nil
+				return out.String(), nil
 			}
 		case <-timer.C:
 			return "", fmt.Errorf("%s", timeoutMessage)

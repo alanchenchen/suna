@@ -3,6 +3,7 @@
 package local
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"net"
@@ -30,9 +31,10 @@ type UnixSocketTransport struct {
 }
 
 type socketConn struct {
-	id   string
-	conn net.Conn
-	mu   sync.Mutex
+	id     string
+	conn   net.Conn
+	reader *bufio.Reader
+	mu     sync.Mutex
 }
 
 // DefaultEndpoint 返回当前平台 local transport 使用的默认监听地址。
@@ -91,7 +93,7 @@ func (t *UnixSocketTransport) acceptLoop() {
 			}
 			continue
 		}
-		sc := &socketConn{id: uuid.New().String()[:8], conn: conn}
+		sc := &socketConn{id: uuid.New().String()[:8], conn: conn, reader: bufio.NewReader(conn)}
 		t.mu.Lock()
 		t.conns[sc.id] = sc
 		t.mu.Unlock()
@@ -133,38 +135,11 @@ func (t *UnixSocketTransport) ConnectionCount() int {
 func (c *socketConn) ID() string { return c.id }
 
 func (c *socketConn) Send(ctx context.Context, msg []byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	done := make(chan error, 1)
-	go func() {
-		data := append(msg, '\n')
-		_, err := c.conn.Write(data)
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return sendFrame(ctx, &c.mu, c.conn, msg)
 }
 
 func (c *socketConn) Receive() ([]byte, error) {
-	var buf [1]byte
-	var line []byte
-	for {
-		_, err := c.conn.Read(buf[:])
-		if err != nil {
-			return nil, err
-		}
-		if buf[0] == '\n' {
-			if len(line) > 0 {
-				return line, nil
-			}
-			continue
-		}
-		line = append(line, buf[0])
-	}
+	return receiveFrame(c.reader)
 }
 
 func (c *socketConn) Close() error { return c.conn.Close() }

@@ -9,8 +9,9 @@ import (
 )
 
 const (
-	streamBatchInterval = 8 * time.Millisecond
-	maxStreamBatchBytes = 32 * 1024
+	streamBatchInterval       = 8 * time.Millisecond
+	maxStreamBatchBytes       = 32 * 1024
+	maxRetainedStreamBufBytes = maxStreamBatchBytes * 2
 )
 
 type streamBatcher struct {
@@ -45,5 +46,9 @@ func (b *streamBatcher) flush(ctx context.Context, sink protocol.EventSink) {
 	}
 	emit(ctx, sink, protocol.NotifyAgentDelta, protocol.AgentDeltaParams{Kind: b.kind, Content: b.buf.String()})
 	b.kind = ""
+	if b.buf.Cap() > maxRetainedStreamBufBytes {
+		b.buf = strings.Builder{}
+		return
+	}
 	b.buf.Reset()
 }

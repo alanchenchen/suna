@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/protocol"
 	"github.com/alanchenchen/suna/internal/tui/components/toolview"
 )
@@ -16,6 +17,8 @@ const (
 	// Markdown 渲染缓存只保留有界输出；原始消息始终保留，淘汰后可按需重新渲染。
 	markdownRenderCacheBudgetBytes = 32 * 1024 * 1024
 	markdownRenderCacheRecentKeep  = 6
+	// 性能慢日志只记录异常慢帧，避免日志本身影响流式渲染。
+	slowPerfLogThreshold = 40 * time.Millisecond
 )
 
 type TranscriptDeps struct {
@@ -93,6 +96,17 @@ func (m *Model) SyncTranscript(deps TranscriptDeps) {
 		}
 		m.SetTranscriptYOffset(m.TranscriptYOffset)
 	}
+}
+
+func SlowPerfLogThreshold() time.Duration { return slowPerfLogThreshold }
+
+func (m Model) HasStreamingMessage() bool {
+	for i := range m.Messages {
+		if m.Messages[i].Streaming {
+			return true
+		}
+	}
+	return false
 }
 
 type ResponseNavInfo struct {
@@ -339,6 +353,7 @@ func (m *Model) applyTranscriptWindow() {
 
 func (m *Model) applyTranscriptWindowLines(start, end int, lines []string) {
 	// 内容签名不包含滚动偏移：在 overscan 窗口内滚动时复用同一批内容，只移动 viewport offset。
+	slowStarted := time.Now()
 	sig := transcriptWindowSignature{
 		Start:      start,
 		End:        end,
@@ -354,6 +369,9 @@ func (m *Model) applyTranscriptWindowLines(start, end int, lines []string) {
 		m.Viewport.SetContentLines(lines)
 	}
 	m.Viewport.SetYOffset(m.TranscriptYOffset - start)
+	if elapsed := time.Since(slowStarted); elapsed >= slowPerfLogThreshold {
+		logging.Info("perf", "slow_tui_apply_window", logging.Event{"component": "tui", "duration_ms": elapsed.Milliseconds(), "window_lines": len(lines), "total_lines": m.TranscriptTotalLines, "start": start, "end": end})
+	}
 }
 
 func (m Model) visibleTranscriptLines(start, end int) []string {

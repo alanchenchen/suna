@@ -13,6 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/protocol"
 	attachmentmodel "github.com/alanchenchen/suna/internal/tui/components/attachment"
 	textutil "github.com/alanchenchen/suna/internal/tui/components/text"
@@ -533,6 +534,7 @@ func (t *TUI) cachedMarkdown(msg *chatMsg, content string, width int) string {
 }
 
 func (t *TUI) cachedStreamingState(msg *chatMsg, width int) string {
+	started := time.Now()
 	state := msg.Stream
 	if state == nil {
 		return ""
@@ -541,6 +543,12 @@ func (t *TUI) cachedStreamingState(msg *chatMsg, width int) string {
 		width = 20
 	}
 	tailLines := t.streamingRenderTailLines()
+	pendingDeltas := len(state.Pending)
+	defer func() {
+		if elapsed := time.Since(started); elapsed >= chatpage.SlowPerfLogThreshold() {
+			logging.Info("perf", "slow_tui_stream_render", logging.Event{"component": "tui", "duration_ms": elapsed.Milliseconds(), "pending_deltas": pendingDeltas, "lines": len(state.Lines), "raw_bytes": state.Raw.Len(), "width": width})
+		}
+	}()
 	if state.Width != width {
 		content := state.Text()
 		out := renderStreamingText(content, width)
@@ -619,13 +627,8 @@ func (t *TUI) cachedStreamingText(msg *chatMsg, content string, width int) strin
 
 func appendStreamingDelta(lines *[]string, lastWidth *int, pendingNewlines *int, delta string, width int) {
 	state := byte(0)
-	for i := 0; i < len(delta); {
-		if delta[i] == '\n' {
-			(*pendingNewlines)++
-			i++
-			state = 0
-			continue
-		}
+	segmentStart := 0
+	ensureLine := func() {
 		for *pendingNewlines > 0 {
 			*lines = append(*lines, "")
 			*lastWidth = 0
@@ -635,21 +638,42 @@ func appendStreamingDelta(lines *[]string, lastWidth *int, pendingNewlines *int,
 			*lines = append(*lines, "")
 			*lastWidth = 0
 		}
+	}
+	flushSegment := func(end int) {
+		if end <= segmentStart {
+			return
+		}
+		ensureLine()
+		last := len(*lines) - 1
+		// 流式渲染可能遇到超长 JSON/代码行。按连续片段追加，避免逐 grapheme 字符串拼接退化。
+		(*lines)[last] += delta[segmentStart:end]
+		segmentStart = end
+	}
+	for i := 0; i < len(delta); {
+		if delta[i] == '\n' {
+			flushSegment(i)
+			(*pendingNewlines)++
+			i++
+			segmentStart = i
+			state = 0
+			continue
+		}
+		ensureLine()
 		_, cellWidth, n, newState := ansi.GraphemeWidth.DecodeSequenceInString(delta[i:], state, nil)
 		if n <= 0 {
 			n = 1
 			cellWidth = 1
 		}
 		if width > 0 && cellWidth > 0 && *lastWidth > 0 && *lastWidth+cellWidth > width {
+			flushSegment(i)
 			*lines = append(*lines, "")
 			*lastWidth = 0
 		}
-		last := len(*lines) - 1
-		(*lines)[last] += delta[i : i+n]
 		*lastWidth += cellWidth
 		state = newState
 		i += n
 	}
+	flushSegment(len(delta))
 }
 
 func splitRenderedLines(out string) []string {

@@ -2,6 +2,7 @@ package events
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -151,8 +152,10 @@ type Batcher struct {
 }
 
 type deltaAccumulator struct {
-	params protocol.AgentDeltaParams
-	has    bool
+	params     protocol.AgentDeltaParams
+	content    strings.Builder
+	contentLen int
+	has        bool
 }
 
 func (b *Batcher) Run(ch <-chan Notification) {
@@ -195,9 +198,10 @@ func (b *Batcher) accumulate(notif Notification) {
 		b.delta.params.Kind = p.Kind
 		b.delta.params.RunID = p.RunID
 	}
-	b.delta.params.Content += p.Content
+	b.delta.content.WriteString(p.Content)
+	b.delta.contentLen += len(p.Content)
 	b.delta.has = true
-	if len(b.delta.params.Content) >= maxStreamBatchBytes {
+	if b.delta.contentLen >= maxStreamBatchBytes {
 		b.flushAll()
 	}
 }
@@ -208,9 +212,21 @@ func (b *Batcher) flushAll() {
 		return
 	}
 	params := b.delta.params
-	b.delta = deltaAccumulator{}
+	params.Content = b.delta.content.String()
+	b.delta.reset()
 	data, _ := json.Marshal(params)
 	b.send(Notification{Method: protocol.NotifyAgentDelta, Params: data})
+}
+
+func (d *deltaAccumulator) reset() {
+	if d.content.Cap() > maxStreamBatchBytes*2 {
+		*d = deltaAccumulator{}
+		return
+	}
+	d.params = protocol.AgentDeltaParams{}
+	d.content.Reset()
+	d.contentLen = 0
+	d.has = false
 }
 
 func (b *Batcher) send(notif Notification) {

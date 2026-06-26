@@ -289,7 +289,10 @@ func (p *OpenAIChatProvider) buildTools(tools []ToolDef) []openai.ChatCompletion
 	return result
 }
 
-type chatToolCallAccum struct{ ID, Name, Arguments string }
+type chatToolCallAccum struct {
+	ID, Name  string
+	Arguments strings.Builder
+}
 
 func mergeChatToolDeltas(toolCalls []openai.ChatCompletionChunkChoiceDeltaToolCall, acc *map[int]*chatToolCallAccum) {
 	for _, tc := range toolCalls {
@@ -309,7 +312,7 @@ func mergeChatToolDeltas(toolCalls []openai.ChatCompletionChunkChoiceDeltaToolCa
 			existing.Name = tc.Function.Name
 		}
 		if tc.Function.Arguments != "" {
-			existing.Arguments += tc.Function.Arguments
+			existing.Arguments.WriteString(tc.Function.Arguments)
 		}
 	}
 }
@@ -330,7 +333,7 @@ func accumulateChatToolCalls(acc map[int]*chatToolCallAccum) []ToolCall {
 		if id == "" {
 			id = fmt.Sprintf("call_%d", idx)
 		}
-		result = append(result, ToolCall{ID: id, Name: tc.Name, Arguments: tc.Arguments})
+		result = append(result, ToolCall{ID: id, Name: tc.Name, Arguments: tc.Arguments.String()})
 	}
 	return result
 }

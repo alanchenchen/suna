@@ -105,6 +105,8 @@ func (c *Client) Close() error {
 	return nil
 }
 
+const maxRetainedClientLineBuffer = 256 * 1024
+
 func (c *Client) receiveLoop() {
 	var buf [4096]byte
 	var lineBuf []byte
@@ -121,7 +123,11 @@ func (c *Client) receiveLoop() {
 			if buf[i] == '\n' {
 				if len(lineBuf) > 0 {
 					c.handleMessage(lineBuf)
-					lineBuf = lineBuf[:0]
+					if cap(lineBuf) > maxRetainedClientLineBuffer {
+						lineBuf = nil
+					} else {
+						lineBuf = lineBuf[:0]
+					}
 				}
 				continue
 			}
