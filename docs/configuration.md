@@ -94,6 +94,15 @@ reasoning = { reasoning_split = true }
 subtask_for = ["openai/*", "anthropic/claude-*"]
 
 [[models]]
+provider = "anthropic"
+protocol = "anthropic"
+model = "claude-opus-4-8"
+base_url = "https://api.anthropic.com"
+context_window = 200000
+max_output_tokens = 64000
+reasoning = { thinking = { type = "adaptive", display = "summarized" }, output_config = { effort = "xhigh" } }
+
+[[models]]
 provider = "dreamfield"
 protocol = "openai_chat"
 model = "kimi-k2.6"
@@ -300,7 +309,7 @@ compact_context_tokens = estimated_context_tokens + estimator_safety_tokens
 
 ### reasoning 写法
 
-`models.reasoning` 会作为额外 JSON 字段透传给上游请求。Suna 只检查不要覆盖它已经生成的字段，例如 `model`、`messages`、`tools`、`temperature` 等。
+`models.reasoning` 是 Suna 对各模型协议“思考/推理强度相关参数”的统一抽象入口。Provider 会把这些字段映射/注入到对应协议请求体；Suna 只检查不要覆盖它已经生成的字段，例如 `model`、`messages`、`tools`、`temperature` 等。
 
 推荐写成 inline table，便于和对应 `[[models]]` 绑定：
 

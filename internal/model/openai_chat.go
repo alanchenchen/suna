@@ -55,7 +55,7 @@ func (p *OpenAIChatProvider) Complete(ctx context.Context, req *CompletionReques
 		params.Tools = tools
 		params.ParallelToolCalls = openai.Bool(true)
 	}
-	opts, err := reasoningRequestOptions(req.Reasoning, chatGeneratedKeys())
+	opts, err := openAIReasoningFieldOptions(req.Reasoning, chatGeneratedKeys())
 	if err != nil {
 		return nil, err
 	}

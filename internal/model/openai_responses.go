@@ -51,7 +51,7 @@ func (p *OpenAIResponsesProvider) Complete(ctx context.Context, req *CompletionR
 	if tools := p.buildTools(req.Tools); len(tools) > 0 {
 		params.Tools = tools
 	}
-	opts, err := reasoningRequestOptions(req.Reasoning, responsesGeneratedKeys())
+	opts, err := openAIReasoningFieldOptions(req.Reasoning, responsesGeneratedKeys())
 	if err != nil {
 		return nil, err
 	}

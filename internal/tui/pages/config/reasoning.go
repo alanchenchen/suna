@@ -107,10 +107,11 @@ func ReasoningOptions(family, protocol string) []ReasoningOption {
 	case "claude":
 		return []ReasoningOption{
 			{Family: "Claude", Label: "Disabled", Reasoning: map[string]any{"thinking": map[string]any{"type": "disabled"}}},
-			{Family: "Claude", Label: "Think", Reasoning: ThinkingBudget(4096)},
-			{Family: "Claude", Label: "Think Hard", Reasoning: ThinkingBudget(10000)},
-			{Family: "Claude", Label: "Think Harder", Reasoning: ThinkingBudget(20000)},
-			{Family: "Claude", Label: "Ultrathink", Reasoning: ThinkingBudget(32000)},
+			{Family: "Claude", Label: "Adaptive Low", Reasoning: ClaudeAdaptiveReasoning("low")},
+			{Family: "Claude", Label: "Adaptive Medium", Reasoning: ClaudeAdaptiveReasoning("medium")},
+			{Family: "Claude", Label: "Adaptive High", Reasoning: ClaudeAdaptiveReasoning("high")},
+			{Family: "Claude", Label: "Adaptive XHigh", Reasoning: ClaudeAdaptiveReasoning("xhigh")},
+			{Family: "Claude", Label: "Adaptive Max", Reasoning: ClaudeAdaptiveReasoning("max")},
 		}
 	case "deepseek":
 		return []ReasoningOption{
@@ -134,8 +135,8 @@ func GPTReasoning(protocol, effort string) map[string]any {
 	return map[string]any{"reasoning_effort": effort}
 }
 
-func ThinkingBudget(tokens int) map[string]any {
-	return map[string]any{"thinking": map[string]any{"type": "enabled", "budget_tokens": tokens}}
+func ClaudeAdaptiveReasoning(effort string) map[string]any {
+	return map[string]any{"thinking": map[string]any{"type": "adaptive", "display": "summarized"}, "output_config": map[string]any{"effort": effort}}
 }
 
 func DeepSeekReasoning(effort string) map[string]any {

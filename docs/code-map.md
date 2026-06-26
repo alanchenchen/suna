@@ -22,7 +22,7 @@
 | 附件存储 | `internal/media`, `internal/daemon/attachments.go` | 本地附件缓存和消息附件提交。 |
 | 模型路由 | `internal/model/router.go` | 根据 `models.protocol` 选择请求适配器，`provider` 只作为厂商/凭证命名空间。 |
 | OpenAI Responses | `internal/model/openai_responses.go` | `protocol = "openai_responses"` 的请求和流式响应适配。 |
-| Anthropic Messages | `internal/model/anthropic.go` | `protocol = "anthropic"` 的 Messages 请求适配；当前为非 streaming 调用，尚未归一输出 thinking chunk。 |
+| Anthropic Messages | `internal/model/anthropic.go` | `protocol = "anthropic"` 的 Messages 流式请求和响应适配，会把 thinking/text/tool use 归一为 Suna `Chunk`。 |
 | OpenAI-compatible | `internal/model/openai_chat.go` | `protocol = "openai_chat"` 的 Chat Completions 兼容协议。 |
 | Agent 编排 | `internal/agent` | 构造上下文、处理工具、Guard、记忆、Skill、MCP、Subtask。 |
 | Runner | `internal/runner` | 模型流式调用、tool call 循环、上下文压缩。 |
@@ -61,6 +61,18 @@ TUI 不应直接调用 `agent`、`runner`、`tools`、`guard`、`memory`、`skil
 - `internal/agent`：主 Agent 编排、上下文、工具执行入口、Guard、Skill/MCP/Subtask 适配。
 - `internal/runner`：模型调用循环、流式输出、工具调用循环和上下文压缩。
 - `internal/model`：模型 provider、路由、请求/响应适配和 token 估算。
+
+#### `internal/model` 分层约定
+
+`internal/model` 只保留两类核心职责：协议 provider 和服务 provider/router 的公共支撑。新增模型协议时应优先遵守以下分层，避免把某个 SDK 或某个厂商的特殊字段泄漏到公共逻辑里：
+
+- `provider.go`：定义 Suna 统一模型请求、消息、工具调用、流式 `Chunk` 和 `Provider` 接口；这里不能依赖任何具体 SDK。
+- `router.go`：根据 `models.protocol` 选择具体 provider，应用模型默认配置、记录统一 LLM 日志；router 不理解 provider 私有请求字段。
+- `openai_chat.go`、`openai_responses.go`、`anthropic.go`：具体协议实现，只负责把 `CompletionRequest` 转成对应协议请求，并把流式响应归一为 `Chunk`。
+- `reasoning_fields.go`：公共 reasoning 字段校验/合并逻辑，不依赖 OpenAI、Anthropic 或其他 SDK。`models.reasoning` 是 Suna 对各协议“思考/推理强度相关参数”的统一抽象入口，Suna 只防止它覆盖 core 已生成字段。
+- `reasoning_fields_openai.go`、`reasoning_fields_anthropic.go`：SDK adapter，只负责把公共 reasoning fields 转成对应 SDK 的 request option；后续新增协议应新增自己的 adapter，而不是在公共文件里 import 该 SDK。
+
+Provider 不应解析 TUI preset 的业务含义，例如“Adaptive XHigh”、“xhigh” 或 “max”。TUI preset 只生成 `map[string]any`；provider 只做协议注入和响应归一。
 - `internal/subtask`：独立上下文的子任务执行器，由主 Agent 通过 `spawn` 动态分配模型、输入和工具白名单。
 
 ### 工具、安全和扩展

@@ -66,18 +66,19 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req *CompletionRequest
 	if len(tools) > 0 {
 		params.Tools = tools
 	}
-	hasReasoning := len(req.Reasoning) > 0
-	if err := p.applyReasoning(&params, req.Reasoning); err != nil {
-		return nil, err
-	}
-	if !hasReasoning {
+	hasThinking := anthropicReasoningHasThinking(req.Reasoning)
+	if !hasThinking {
 		params.Temperature = anthropic.Float(resolveAnthropicTemperature(req.Temperature))
+	}
+	opts, err := anthropicReasoningFieldOptions(req.Reasoning, anthropicGeneratedKeys(!hasThinking))
+	if err != nil {
+		return nil, err
 	}
 
 	ch := make(chan Chunk, providerChunkBuffer)
 	go func() {
 		defer close(ch)
-		stream := p.client.Messages.NewStreaming(ctx, params)
+		stream := p.client.Messages.NewStreaming(ctx, params, opts...)
 		defer stream.Close()
 
 		var usage *Usage
@@ -154,53 +155,20 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req *CompletionRequest
 	return ch, nil
 }
 
-func (p *AnthropicProvider) applyReasoning(params *anthropic.MessageNewParams, reasoning map[string]any) error {
-	if len(reasoning) == 0 {
-		return nil
+func anthropicGeneratedKeys(hasTemperature bool) map[string]bool {
+	generated := map[string]bool{"model": true, "max_tokens": true, "messages": true, "system": true, "tools": true, "stream": true}
+	if hasTemperature {
+		generated["temperature"] = true
 	}
-	if len(reasoning) != 1 {
-		return fmt.Errorf("anthropic reasoning supports only thinking")
-	}
-	raw, ok := reasoning["thinking"]
-	if !ok {
-		return fmt.Errorf("anthropic reasoning supports only thinking")
-	}
-	thinking, ok := raw.(map[string]any)
-	if !ok {
-		return fmt.Errorf("anthropic thinking must be an object")
-	}
-	switch fmt.Sprint(thinking["type"]) {
-	case "enabled":
-		budget, ok := numericInt64(thinking["budget_tokens"])
-		if !ok {
-			return fmt.Errorf("anthropic thinking.budget_tokens is required")
-		}
-		params.Thinking = anthropic.ThinkingConfigParamOfEnabled(budget)
-	case "disabled":
-		disabled := anthropic.NewThinkingConfigDisabledParam()
-		params.Thinking = anthropic.ThinkingConfigParamUnion{OfDisabled: &disabled}
-	case "adaptive":
-		params.Thinking = anthropic.ThinkingConfigParamUnion{OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{}}
-	default:
-		return fmt.Errorf("anthropic thinking.type is invalid")
-	}
-	return nil
+	return generated
 }
 
-func numericInt64(v any) (int64, bool) {
-	switch n := v.(type) {
-	case int:
-		return int64(n), true
-	case int64:
-		return n, true
-	case float64:
-		return int64(n), true
-	case json.Number:
-		i, err := n.Int64()
-		return i, err == nil
-	default:
-		return 0, false
+func anthropicReasoningHasThinking(reasoning map[string]any) bool {
+	if len(reasoning) == 0 {
+		return false
 	}
+	_, ok := reasoning["thinking"]
+	return ok
 }
 
 func resolveAnthropicTemperature(t float64) float64 {

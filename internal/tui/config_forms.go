@@ -23,7 +23,7 @@ func (t *TUI) updateProviderForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "left":
 				t.cycleProviderProtocol(-1)
 				return t, nil
-			case "right", " ":
+			case "right":
 				t.cycleProviderProtocol(1)
 				return t, nil
 			}
@@ -395,10 +395,6 @@ func (t *TUI) reasoningOptions(family string) []reasoningOption {
 func (t *TUI) gptReasoning(effort string) map[string]any {
 	mc, _ := t.modelByRef(t.config.DetailRef)
 	return tuiconfig.GPTReasoning(string(mc.Protocol), effort)
-}
-
-func thinkingBudget(tokens int) map[string]any {
-	return tuiconfig.ThinkingBudget(tokens)
 }
 
 func deepSeekReasoning(effort string) map[string]any {

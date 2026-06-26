@@ -20,7 +20,7 @@ Suna 是本地终端 AI Agent：CLI 启动 TUI，TUI 通过 protocol/local trans
 - `internal/daemon`：长期运行服务，协调配置、会话、Agent、附件和状态通知。
 - `internal/agent`：主 Agent 编排、上下文、工具执行入口、Guard 协调、subtask 委派。
 - `internal/runner`：模型调用循环、流式输出、工具调用、上下文压缩和模型请求自动恢复。
-- `internal/model`：模型 provider、路由、请求/响应适配、结构化模型错误和 token 估算。
+- `internal/model`：模型 provider、路由、请求/响应适配、结构化模型错误和 token 估算；provider 只实现具体协议，router 只做路由，公共 reasoning fields 逻辑不得依赖具体 SDK。
 - `internal/tools`：统一工具目录、Provider、schema 和执行路由。
 - `internal/tools/builtin`：文件、命令、HTTP 等内置工具。
 - `internal/tools/agenttools`：`askuser`、`spawn` 等 Agent runtime 工具。
@@ -39,6 +39,7 @@ Suna 是本地终端 AI Agent：CLI 启动 TUI，TUI 通过 protocol/local trans
 - Runner 负责模型请求自动恢复；Router/provider 只表示单次物理模型请求，retry 判断依赖结构化 `ModelError` 的 status code / kind，不靠错误字符串匹配。
 - 项目指令只从当前工作目录读取第一个非空文件，优先级为 `AGENTS.md`、`CLAUDE.md`、`GEMINI.md`、`.cursorrules`、`.windsurfrules`；不向父目录递归，不读取 `.suna/`。
 - 新模型可见工具优先以 `tools.Provider` 接入，不在 Agent/Runner 中手动拼 schema。
+- 新模型协议应以 `model.Provider` 接入：`router` 只选择 provider，具体协议文件只做请求/响应适配，公共 reasoning fields 校验/合并不得 import OpenAI、Anthropic 等具体 SDK。
 - Guard 决策由 Agent 统一处理，工具只声明自身 Guard policy。
 - Subtask 必须保持独立上下文，只能看到主 Agent 显式传入的任务、上下文、图片和授权工具；可分析也可行动，但应保持边界清晰并向主 Agent 返回精简结果与副作用披露。
 - Subtask 可见模型由模型配置和 `subtask_for` 过滤，提示词只展示当前可用候选；执行 spawn 时仍需二次校验。

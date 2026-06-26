@@ -163,19 +163,20 @@ func TestGPTReasoningUsesChatForCompatible(t *testing.T) {
 	}
 }
 
-func TestClaudeReasoningPresetsMatchClaudeCodeStyleBudgets(t *testing.T) {
+func TestClaudeReasoningPresetsUseAdaptiveEffort(t *testing.T) {
 	options := tuiconfig.ReasoningOptions("claude", "anthropic")
-	if got, want := len(options), 5; got != want {
+	if got, want := len(options), 6; got != want {
 		t.Fatalf("len(options) = %d, want %d", got, want)
 	}
 	wants := []struct {
 		label  string
-		budget int
+		effort string
 	}{
-		{label: "Think", budget: 4096},
-		{label: "Think Hard", budget: 10000},
-		{label: "Think Harder", budget: 20000},
-		{label: "Ultrathink", budget: 32000},
+		{label: "Adaptive Low", effort: "low"},
+		{label: "Adaptive Medium", effort: "medium"},
+		{label: "Adaptive High", effort: "high"},
+		{label: "Adaptive XHigh", effort: "xhigh"},
+		{label: "Adaptive Max", effort: "max"},
 	}
 	if got := options[0].Label; got != "Disabled" {
 		t.Fatalf("options[0].Label = %q, want Disabled", got)
@@ -190,11 +191,15 @@ func TestClaudeReasoningPresetsMatchClaudeCodeStyleBudgets(t *testing.T) {
 			t.Fatalf("options[%d].Label = %q, want %q", i+1, got, want.label)
 		}
 		thinking := opt.Reasoning["thinking"].(map[string]any)
-		if got := thinking["type"]; got != "enabled" {
-			t.Fatalf("%s thinking.type = %#v, want enabled", want.label, got)
+		if got := thinking["type"]; got != "adaptive" {
+			t.Fatalf("%s thinking.type = %#v, want adaptive", want.label, got)
 		}
-		if got := thinking["budget_tokens"]; got != want.budget {
-			t.Fatalf("%s budget_tokens = %#v, want %d", want.label, got, want.budget)
+		if got := thinking["display"]; got != "summarized" {
+			t.Fatalf("%s thinking.display = %#v, want summarized", want.label, got)
+		}
+		outputConfig := opt.Reasoning["output_config"].(map[string]any)
+		if got := outputConfig["effort"]; got != want.effort {
+			t.Fatalf("%s output_config.effort = %#v, want %q", want.label, got, want.effort)
 		}
 	}
 }
