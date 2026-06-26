@@ -64,13 +64,13 @@ TUI 仍依赖 Bubble Tea/Bubbles 负责 terminal renderer、alt screen、mouse/k
 
 ## 模型与请求
 
-当前支持三类 provider 路由：
+当前支持三类模型协议：
 
-- `provider = "openai"`：OpenAI Responses 协议。
-- `provider = "anthropic"`：Anthropic Messages 协议。
-- 其它 provider：OpenAI-compatible Chat Completions 协议。
+- `protocol = "openai_responses"`：OpenAI Responses 协议。
+- `protocol = "anthropic"`：Anthropic Messages 协议。
+- `protocol = "openai_chat"`：OpenAI-compatible Chat Completions 协议。
 
-模型 ref 为 `<provider>/<model>`。`provider` 同时用于匹配 `credentials.toml` 中的 API Key 分组。
+模型 ref 为 `<provider>/<model>`。`provider` 用于厂商/凭证命名空间和匹配 `credentials.toml` 中的 API Key 分组，不再决定请求协议。
 
 `models.reasoning` 是透传字段，Suna 不提供跨供应商统一 preset；是否生效由上游 API 决定。Suna 会避免该字段覆盖请求核心字段。
 
@@ -82,7 +82,7 @@ Runner 对主循环中的 model request 做内置 recovery：在尚未产生 ass
 
 当前多模型智能选择主要用于 subtask：主 Agent 可查看经过 `subtask_for` 可见性过滤后的可用模型、上下文窗口、strengths 和多模态能力，然后在 `spawn` 时选择模型。主对话、Guard Smart Review、Skill LLM Review、上下文压缩、记忆提取等单独 LLM 请求默认仍使用 active model。
 
-`llm.log` 中的 `request_prepare` 由 Runner 记录，用于对比 Suna 请求前的 `estimated_context_tokens`、`estimator_safety_tokens`、`compact_context_tokens` 和 `input_limit`；canonical `request` 由 Router 统一记录，覆盖 chat、subtask、Guard、Skill、compact 和 memory 等所有经 Router 的单次物理 LLM 请求，并包含 `provider`、`model_ref`、`model` 以及 provider 返回的 usage。Runner recovery 语义另由 `llm/recovery` 记录，避免把 retry attempt 等 runner 状态塞进 Router 或 `CompletionRequest`。
+`llm.log` 中的 `request_prepare` 由 Runner 记录，用于对比 Suna 请求前的 `estimated_context_tokens`、`estimator_safety_tokens`、`compact_context_tokens` 和 `input_limit`；canonical `request` 由 Router 统一记录，覆盖 chat、subtask、Guard、Skill、compact 和 memory 等所有经 Router 的单次物理 LLM 请求，并包含 `provider`、`protocol`、`model_ref`、`model` 以及 provider 返回的 usage。Runner recovery 语义另由 `llm/recovery` 记录，避免把 retry attempt 等 runner 状态塞进 Router 或 `CompletionRequest`。
 
 ## Agent / Runner / Tool
 

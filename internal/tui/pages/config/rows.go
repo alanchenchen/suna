@@ -116,6 +116,7 @@ func (m *Model) DetailRows(deps RowsDeps) []Row {
 	rows := []Row{
 		{"info", "", deps.Tr("tui.config.status"), status},
 		{"info", "", deps.Tr("tui.config.provider.type"), mc.Provider},
+		{"info", "", deps.Tr("tui.config.provider.protocol"), modelProtocolDisplay(mc, deps.Tr)},
 		{"info", "", deps.Tr("tui.config.provider.endpoint"), deps.DisplayEndpoint(mc.BaseURL)},
 		{"info", "", deps.Tr("tui.config.provider.api_key"), apiKey},
 		{"info", "", deps.Tr("tui.config.provider.model"), ModelStatusMark(mc, deps.IsActive != nil && deps.IsActive(mc.Ref())) + " " + mc.Model},
@@ -132,6 +133,14 @@ func (m *Model) DetailRows(deps RowsDeps) []Row {
 	}
 	rows = append(rows, Row{"delete_model", "", "  " + deps.Tr("tui.config.delete_model"), ""})
 	return rows
+}
+
+func modelProtocolDisplay(mc ModelConfig, tr func(string) string) string {
+	label := tr("tui.config.protocol." + string(mc.Protocol))
+	if strings.HasPrefix(label, "tui.config.protocol.") {
+		return string(mc.Protocol)
+	}
+	return label
 }
 
 func subtaskForDisplay(mc ModelConfig, tr func(string) string) string {

@@ -26,6 +26,7 @@ type ConfigSetParams struct {
 
 type ConfigModel struct {
 	Provider        string
+	Protocol        config.ModelProtocol
 	Model           string
 	BaseURL         string
 	ContextWindow   int
@@ -87,7 +88,7 @@ func (a *Agent) UpdateConfig(params ConfigSetParams) (*config.Config, error) {
 	}
 	switch params.Action {
 	case protocol.ConfigActionUpsertModel:
-		mc := config.ModelConfig{Provider: params.Model.Provider, Model: params.Model.Model, BaseURL: params.Model.BaseURL, ContextWindow: params.Model.ContextWindow, MaxOutputTokens: params.Model.MaxOutputTokens, Strengths: append([]string(nil), params.Model.Strengths...), SubtaskFor: append([]string(nil), params.Model.SubtaskFor...), Reasoning: cloneMap(params.Model.Reasoning)}
+		mc := config.ModelConfig{Provider: params.Model.Provider, Protocol: config.ModelProtocol(params.Model.Protocol), Model: params.Model.Model, BaseURL: params.Model.BaseURL, ContextWindow: params.Model.ContextWindow, MaxOutputTokens: params.Model.MaxOutputTokens, Strengths: append([]string(nil), params.Model.Strengths...), SubtaskFor: append([]string(nil), params.Model.SubtaskFor...), Reasoning: cloneMap(params.Model.Reasoning)}
 		if mc.Provider == "" || mc.Model == "" {
 			return nil, fmt.Errorf("provider and model are required")
 		}

@@ -95,13 +95,13 @@ func (m *Model) SelectReasoningOption(options []ReasoningOption) (map[string]any
 	return options[m.ReasoningCursor].Reasoning, true
 }
 
-func ReasoningOptions(family, provider string) []ReasoningOption {
+func ReasoningOptions(family, protocol string) []ReasoningOption {
 	switch family {
 	case "gpt":
 		var out []ReasoningOption
 		for _, effort := range []string{"none", "minimal", "low", "medium", "high", "xhigh"} {
 			label := strings.ToUpper(effort[:1]) + effort[1:]
-			out = append(out, ReasoningOption{Family: "GPT", Label: label, Reasoning: GPTReasoning(provider, effort)})
+			out = append(out, ReasoningOption{Family: "GPT", Label: label, Reasoning: GPTReasoning(protocol, effort)})
 		}
 		return out
 	case "claude":
@@ -127,8 +127,8 @@ func ReasoningOptions(family, provider string) []ReasoningOption {
 	}
 }
 
-func GPTReasoning(provider, effort string) map[string]any {
-	if provider == "openai" {
+func GPTReasoning(protocol, effort string) map[string]any {
+	if protocol == "openai_responses" {
 		return map[string]any{"reasoning": map[string]any{"effort": effort}}
 	}
 	return map[string]any{"reasoning_effort": effort}
@@ -158,7 +158,7 @@ func ReasoningDisplay(mc ModelConfig, customLabel string) string {
 
 func MatchReasoningLabel(mc ModelConfig) (string, bool) {
 	for _, family := range []string{"gpt", "claude", "deepseek", "minimax"} {
-		for _, opt := range ReasoningOptions(family, mc.Provider) {
+		for _, opt := range ReasoningOptions(family, string(mc.Protocol)) {
 			if SameJSON(mc.Reasoning, opt.Reasoning) {
 				return fmt.Sprintf("%s / %s", opt.Family, opt.Label), true
 			}
@@ -204,6 +204,7 @@ func (m *Model) BuildReasoningSave(mc ModelConfig, reasoning map[string]any) pro
 		ModelRef: mc.Ref(),
 		Model: protocol.ConfigModel{
 			Provider:        mc.Provider,
+			Protocol:        string(mc.Protocol),
 			Model:           mc.Model,
 			BaseURL:         mc.BaseURL,
 			ContextWindow:   mc.ContextWindow,

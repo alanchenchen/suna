@@ -9,14 +9,14 @@ import (
 
 func TestProviderFormRoundTripsSubtaskFor(t *testing.T) {
 	m := Model{EditingName: "DF/MiniMax-M3"}
-	mc := &ModelConfig{Provider: "DF", Model: "MiniMax-M3", BaseURL: "https://api.example.com/v1", ContextWindow: 1000000, MaxOutputTokens: 8192, Strengths: []string{"fast"}, SubtaskFor: []string{"openai/**", "anthropic/**"}}
-	labels := ProviderFormLabels{Provider: "Provider", Model: "Model", APIKey: "API", Endpoint: "Endpoint", ContextWindow: "Context", MaxOutputTokens: "Output", Strengths: "Strengths", SubtaskFor: "Subtask for", StrengthsHint: "strengths", SubtaskForHint: "patterns"}
+	mc := &ModelConfig{Provider: "DF", Protocol: "openai_chat", Model: "MiniMax-M3", BaseURL: "https://api.example.com/v1", ContextWindow: 1000000, MaxOutputTokens: 8192, Strengths: []string{"fast"}, SubtaskFor: []string{"openai/**", "anthropic/**"}}
+	labels := ProviderFormLabels{Provider: "Provider", Protocol: "Protocol", Model: "Model", APIKey: "API", Endpoint: "Endpoint", ContextWindow: "Context", MaxOutputTokens: "Output", Strengths: "Strengths", SubtaskFor: "Subtask for", StrengthsHint: "strengths", SubtaskForHint: "patterns"}
 
 	spec := m.ProviderFormSpec(labels, mc)
 	if len(spec.Values) != ProviderFormFieldCount {
 		t.Fatalf("values len = %d, want %d", len(spec.Values), ProviderFormFieldCount)
 	}
-	if got := spec.Values[7]; got != "openai/**, anthropic/**" {
+	if got := spec.Values[8]; got != "openai/**, anthropic/**" {
 		t.Fatalf("SubtaskFor form value = %q", got)
 	}
 	values := ProviderFormValuesFromStrings(spec.Values)
@@ -29,7 +29,7 @@ func TestProviderFormRoundTripsSubtaskFor(t *testing.T) {
 
 func TestBuildReasoningSavePreservesSubtaskFor(t *testing.T) {
 	m := Model{}
-	mc := ModelConfig{Provider: "DF", Model: "MiniMax-M3", BaseURL: "https://api.example.com/v1", ContextWindow: 1000000, MaxOutputTokens: 8192, SubtaskFor: []string{"openai/**"}}
+	mc := ModelConfig{Provider: "DF", Protocol: "openai_chat", Model: "MiniMax-M3", BaseURL: "https://api.example.com/v1", ContextWindow: 1000000, MaxOutputTokens: 8192, SubtaskFor: []string{"openai/**"}}
 
 	params := m.BuildReasoningSave(mc, map[string]any{"reasoning_split": true})
 	want := []string{"openai/**"}

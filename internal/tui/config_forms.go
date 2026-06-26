@@ -18,6 +18,16 @@ func (t *TUI) updateProviderForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, nil
 	case tea.KeyPressMsg:
 		t.config.Error = ""
+		if t.config.InputFocus == tuiconfig.ProviderFormProtocolIndex {
+			switch m.String() {
+			case "left":
+				t.cycleProviderProtocol(-1)
+				return t, nil
+			case "right", " ":
+				t.cycleProviderProtocol(1)
+				return t, nil
+			}
+		}
 		switch m.String() {
 		case "ctrl+c":
 			t.doQuit()
@@ -46,6 +56,9 @@ func (t *TUI) updateProviderForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return t, nil
 		}
+	}
+	if t.config.InputFocus == tuiconfig.ProviderFormProtocolIndex {
+		return t, nil
 	}
 	var cmd tea.Cmd
 	t.config.Inputs[t.config.InputFocus], cmd = t.config.Inputs[t.config.InputFocus].Update(msg)
@@ -81,6 +94,7 @@ func (t *TUI) initProviderForm(mc *tuiconfig.ModelConfig) {
 func (t *TUI) providerFormLabels() tuiconfig.ProviderFormLabels {
 	return tuiconfig.ProviderFormLabels{
 		Provider:        t.tr("tui.config.provider.type"),
+		Protocol:        t.tr("tui.config.provider.protocol"),
 		Model:           t.tr("tui.config.provider.model"),
 		APIKey:          t.tr("tui.config.provider.api_key"),
 		Endpoint:        t.tr("tui.config.provider.endpoint"),
@@ -100,7 +114,9 @@ func (t *TUI) focusConfigInput(idx int) tea.Cmd {
 	var cmds []tea.Cmd
 	for i := range t.config.Inputs {
 		if i == t.config.InputFocus {
-			cmds = append(cmds, t.config.Inputs[i].Focus())
+			if i != tuiconfig.ProviderFormProtocolIndex {
+				cmds = append(cmds, t.config.Inputs[i].Focus())
+			}
 		} else {
 			t.config.Inputs[i].Blur()
 		}
@@ -136,6 +152,7 @@ func (t *TUI) validateProviderForm(v tuiconfig.ProviderFormValues) error {
 		InvalidEndpoint:        t.tr("tui.error.invalid_endpoint"),
 		InvalidContextWindow:   t.tr("tui.error.invalid_context_window"),
 		InvalidMaxOutputTokens: t.tr("tui.error.invalid_max_output_tokens"),
+		InvalidProtocol:        t.tr("tui.error.invalid_protocol"),
 	})
 }
 
@@ -372,12 +389,12 @@ func (t *TUI) saveReasoning(reasoning map[string]any) tea.Cmd {
 
 func (t *TUI) reasoningOptions(family string) []reasoningOption {
 	mc, _ := t.modelByRef(t.config.DetailRef)
-	return tuiconfig.ReasoningOptions(family, mc.Provider)
+	return tuiconfig.ReasoningOptions(family, string(mc.Protocol))
 }
 
 func (t *TUI) gptReasoning(effort string) map[string]any {
 	mc, _ := t.modelByRef(t.config.DetailRef)
-	return tuiconfig.GPTReasoning(mc.Provider, effort)
+	return tuiconfig.GPTReasoning(string(mc.Protocol), effort)
 }
 
 func thinkingBudget(tokens int) map[string]any {
@@ -398,4 +415,13 @@ func (t *TUI) matchReasoningLabel(mc tuiconfig.ModelConfig) (string, bool) {
 
 func sameJSON(a, b map[string]any) bool {
 	return tuiconfig.SameJSON(a, b)
+}
+
+func (t *TUI) cycleProviderProtocol(delta int) {
+	if len(t.config.Inputs) <= tuiconfig.ProviderFormProtocolIndex {
+		return
+	}
+	current := tuiconfig.ModelProtocolValue(t.config.Inputs[tuiconfig.ProviderFormProtocolIndex].Value())
+	next := tuiconfig.NextProviderProtocol(current, delta)
+	t.config.Inputs[tuiconfig.ProviderFormProtocolIndex].SetValue(string(next))
 }

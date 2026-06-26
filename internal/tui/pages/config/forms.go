@@ -5,9 +5,13 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	coreconfig "github.com/alanchenchen/suna/internal/config"
 )
 
-const ProviderFormFieldCount = 8
+const ProviderFormFieldCount = 9
+
+const ProviderFormProtocolIndex = 1
 
 type ProviderFormSpec struct {
 	Labels       []string
@@ -18,6 +22,7 @@ type ProviderFormSpec struct {
 
 type ProviderFormLabels struct {
 	Provider        string
+	Protocol        string
 	Model           string
 	APIKey          string
 	Endpoint        string
@@ -40,36 +45,39 @@ func (m *Model) OpenProviderForm(ref string, mc *ModelConfig) {
 }
 
 func (m *Model) ProviderFormSpec(labels ProviderFormLabels, mc *ModelConfig) ProviderFormSpec {
-	fieldLabels := []string{labels.Provider, labels.Model, labels.APIKey, labels.Endpoint, labels.ContextWindow, labels.MaxOutputTokens, labels.Strengths, labels.SubtaskFor}
-	placeholders := []string{"Zhipu", "glm-5.1", "sk-...", "https://api.example.com/v1", "128000", "8192", labels.StrengthsHint, labels.SubtaskForHint}
-	values := []string{"", "", "", "", "", "", "", ""}
+	fieldLabels := []string{labels.Provider, labels.Protocol, labels.Model, labels.APIKey, labels.Endpoint, labels.ContextWindow, labels.MaxOutputTokens, labels.Strengths, labels.SubtaskFor}
+	placeholders := []string{"Zhipu", "OpenAI Chat", "glm-5.1", "sk-...", "https://api.example.com/v1", "128000", "8192", labels.StrengthsHint, labels.SubtaskForHint}
+	values := []string{"", string(coreconfig.ModelProtocolOpenAIChat), "", "", "", "", "", "", ""}
 	if mc != nil {
 		values[0] = mc.Provider
-		values[1] = mc.Model
-		values[3] = mc.BaseURL
+		values[1] = string(coreconfig.NormalizeModelProtocol(mc.Protocol))
+		values[2] = mc.Model
+		values[4] = mc.BaseURL
 		if mc.ContextWindow > 0 {
-			values[4] = strconv.Itoa(mc.ContextWindow)
+			values[5] = strconv.Itoa(mc.ContextWindow)
 		}
 		if mc.MaxOutputTokens > 0 {
-			values[5] = strconv.Itoa(mc.MaxOutputTokens)
+			values[6] = strconv.Itoa(mc.MaxOutputTokens)
 		}
-		values[6] = strings.Join(mc.Strengths, ", ")
-		values[7] = strings.Join(mc.SubtaskFor, ", ")
+		values[7] = strings.Join(mc.Strengths, ", ")
+		values[8] = strings.Join(mc.SubtaskFor, ", ")
 	} else {
 		switch m.ProviderKind {
 		case "openai":
 			values[0] = "openai"
-			values[3] = "https://api.openai.com/v1"
-			placeholders[1] = "gpt-4o-mini"
+			values[1] = string(coreconfig.ModelProtocolOpenAIResponses)
+			values[4] = "https://api.openai.com/v1"
+			placeholders[2] = "gpt-4o-mini"
 		case "anthropic":
 			values[0] = "anthropic"
-			values[3] = "https://api.anthropic.com"
-			placeholders[1] = "claude-sonnet-4-20250514"
-			placeholders[4] = "200000"
-			placeholders[5] = "8192"
+			values[1] = string(coreconfig.ModelProtocolAnthropic)
+			values[4] = "https://api.anthropic.com"
+			placeholders[2] = "claude-sonnet-4-20250514"
+			placeholders[5] = "200000"
+			placeholders[6] = "8192"
 		}
 	}
-	return ProviderFormSpec{Labels: fieldLabels, Placeholders: placeholders, Values: values, PasswordAt: 2}
+	return ProviderFormSpec{Labels: fieldLabels, Placeholders: placeholders, Values: values, PasswordAt: 3}
 }
 
 func ProviderFormValuesFromStrings(values []string) ProviderFormValues {
@@ -79,7 +87,7 @@ func ProviderFormValuesFromStrings(values []string) ProviderFormValues {
 			vals[i] = strings.TrimSpace(values[i])
 		}
 	}
-	return ProviderFormValues{Provider: vals[0], Model: vals[1], APIKey: vals[2], Endpoint: vals[3], ContextWindow: vals[4], MaxOutputTokens: vals[5], Strengths: vals[6], SubtaskFor: vals[7]}
+	return ProviderFormValues{Provider: vals[0], Protocol: coreconfig.NormalizeModelProtocol(coreconfig.ModelProtocol(vals[1])), Model: vals[2], APIKey: vals[3], Endpoint: vals[4], ContextWindow: vals[5], MaxOutputTokens: vals[6], Strengths: vals[7], SubtaskFor: vals[8]}
 }
 
 type ProviderValidationLabels struct {
@@ -89,11 +97,15 @@ type ProviderValidationLabels struct {
 	InvalidEndpoint        string
 	InvalidContextWindow   string
 	InvalidMaxOutputTokens string
+	InvalidProtocol        string
 }
 
 func ValidateProviderForm(v ProviderFormValues, setupMode bool, labels ProviderValidationLabels) error {
 	if v.Provider == "" || v.Model == "" {
 		return fmt.Errorf("%s", labels.Required)
+	}
+	if !coreconfig.IsSupportedModelProtocol(v.Protocol) {
+		return fmt.Errorf("%s", labels.InvalidProtocol)
 	}
 	if setupMode && v.APIKey == "" {
 		return fmt.Errorf("%s", labels.APIKeyRequired)
@@ -169,4 +181,32 @@ func (m *Model) CloseFormToWelcome() {
 func (m *Model) CloseForm() {
 	m.FormOpen = false
 	m.WorkspaceOpen = false
+}
+
+func ProviderProtocolOptions() []coreconfig.ModelProtocol {
+	return coreconfig.SupportedModelProtocols()
+}
+
+func NextProviderProtocol(current coreconfig.ModelProtocol, delta int) coreconfig.ModelProtocol {
+	options := ProviderProtocolOptions()
+	if len(options) == 0 {
+		return coreconfig.ModelProtocolOpenAIChat
+	}
+	current = coreconfig.NormalizeModelProtocol(current)
+	idx := 0
+	for i, option := range options {
+		if option == current {
+			idx = i
+			break
+		}
+	}
+	idx = (idx + delta) % len(options)
+	if idx < 0 {
+		idx += len(options)
+	}
+	return options[idx]
+}
+
+func ModelProtocolValue(value string) coreconfig.ModelProtocol {
+	return coreconfig.ModelProtocol(value)
 }

@@ -433,3 +433,52 @@ func TestConfigSubtaskForRoundTrips(t *testing.T) {
 		t.Fatalf("SubtaskFor = %#v, want %#v", got, want)
 	}
 }
+
+func TestLoadDefaultsMissingModelProtocolToOpenAIChat(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(`active_model = "vendor/model"
+
+[[models]]
+provider = "vendor"
+model = "model"
+base_url = "https://api.example.com/v1"
+context_window = 128000
+max_output_tokens = 8192
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "credentials.toml"), []byte(`["vendor"]
+api_key = "sk-test"
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(filepath.Join(dir, "config.toml"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.Models[0].Protocol; got != ModelProtocolOpenAIChat {
+		t.Fatalf("Protocol = %q, want %q", got, ModelProtocolOpenAIChat)
+	}
+}
+
+func TestLoadRejectsUnsupportedModelProtocol(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(`active_model = "vendor/model"
+
+[[models]]
+provider = "vendor"
+protocol = "bad_protocol"
+model = "model"
+base_url = "https://api.example.com/v1"
+context_window = 128000
+max_output_tokens = 8192
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(filepath.Join(dir, "config.toml"))
+	if err == nil || !strings.Contains(err.Error(), "protocol") {
+		t.Fatalf("Load() error = %v, want protocol error", err)
+	}
+}

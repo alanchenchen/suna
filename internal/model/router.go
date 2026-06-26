@@ -166,6 +166,7 @@ func (r *Router) Complete(ctx context.Context, ref string, req *CompletionReques
 	started := time.Now()
 	route := llmRoute{
 		Provider: mc.Provider,
+		Protocol: string(mc.ProtocolOrDefault()),
 		ModelRef: ref,
 		Model:    resolvedRequestModel(mc, req),
 	}
@@ -306,12 +307,14 @@ func createProvider(mc config.ModelConfig, resolver MediaResolver) (Provider, er
 	if strings.TrimSpace(mc.BaseURL) == "" {
 		return nil, fmt.Errorf("provider %q requires base_url", mc.Provider)
 	}
-	switch {
-	case mc.IsAnthropic():
+	switch mc.ProtocolOrDefault() {
+	case config.ModelProtocolAnthropic:
 		return NewAnthropicProvider(apiKey, mc.BaseURL, mc.Model, mc.ContextWindow, mc.MaxOutputTokens, resolver), nil
-	case mc.IsOpenAI():
+	case config.ModelProtocolOpenAIResponses:
 		return NewOpenAIResponsesProvider(apiKey, mc.BaseURL, mc.Model, mc.ContextWindow, mc.MaxOutputTokens, resolver), nil
-	default:
+	case config.ModelProtocolOpenAIChat:
 		return NewOpenAIChatProvider(apiKey, mc.BaseURL, mc.Model, mc.ContextWindow, mc.MaxOutputTokens, resolver), nil
+	default:
+		return nil, fmt.Errorf("protocol %q is not supported", mc.Protocol)
 	}
 }

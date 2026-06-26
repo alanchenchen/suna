@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 
+	coreconfig "github.com/alanchenchen/suna/internal/config"
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 )
 
@@ -57,6 +58,7 @@ func (r Row) Selectable() bool {
 
 type ProviderFormValues struct {
 	Provider        string
+	Protocol        coreconfig.ModelProtocol
 	Model           string
 	APIKey          string
 	Endpoint        string
@@ -68,6 +70,7 @@ type ProviderFormValues struct {
 
 type ModelConfig struct {
 	Provider        string
+	Protocol        coreconfig.ModelProtocol
 	Model           string
 	BaseURL         string
 	ContextWindow   int

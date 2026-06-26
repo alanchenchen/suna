@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
 
 	overlay "github.com/alanchenchen/suna/internal/tui/components/overlay"
@@ -115,7 +116,11 @@ func (t *TUI) configHelp(rows []tuiconfig.Row) string {
 func (t *TUI) viewProviderForm() string {
 	view := t.config.ProviderFormView(t.tr(t.config.FormTitle), t.tr("tui.config.setup_title"), t.tr("tui.config.form_help"), min(max(48, t.width-8), 72))
 	var lines []string
-	for _, in := range t.config.Inputs {
+	for i, in := range t.config.Inputs {
+		if i == tuiconfig.ProviderFormProtocolIndex {
+			lines = append(lines, t.providerProtocolInputView(in))
+			continue
+		}
 		lines = append(lines, in.View())
 	}
 	if view.Error != "" {
@@ -223,4 +228,18 @@ func (t *TUI) renderConfigInfoRow(sb *strings.Builder, label, value string) {
 		return
 	}
 	sb.WriteString("    " + styleDim.Render(fmt.Sprintf("%-12s", label)) + " " + value + "\n")
+}
+
+func (t *TUI) providerProtocolInputView(in textinput.Model) string {
+	label := t.tr("tui.config.protocol." + in.Value())
+	if strings.HasPrefix(label, "tui.config.protocol.") {
+		label = in.Value()
+	}
+	prompt := in.Prompt
+	style := styleDim
+	if t.config.InputFocus == tuiconfig.ProviderFormProtocolIndex {
+		prompt = styleBrand.Render(prompt)
+		style = styleHL
+	}
+	return prompt + style.Render("‹ "+label+" ›")
 }

@@ -19,6 +19,7 @@ active_model = "openai/gpt-4o-mini"
 
 [[models]]
 provider = "openai"
+protocol = "openai_chat"
 model = "gpt-4o-mini"
 base_url = "https://api.openai.com/v1"
 context_window = 128000
@@ -51,7 +52,8 @@ active_model = "openai/gpt-4o-mini"
 max_model_rps = 10
 
 [[models]]
-provider = "openai"                         # OpenAI Responses 协议
+provider = "openai"                         # 凭证命名空间 / ref 前缀
+protocol = "openai_responses"                # 模型协议：openai_chat | openai_responses | anthropic
 model = "gpt-4o-mini"
 base_url = "https://api.openai.com/v1"
 context_window = 128000
@@ -61,7 +63,8 @@ strengths = ["general", "fast", "multimodal"]
 reasoning = { reasoning = { effort = "medium" } }
 
 [[models]]
-provider = "anthropic"                      # Anthropic Messages 协议
+provider = "anthropic"
+protocol = "anthropic"
 model = "claude-sonnet-4-20250514"
 base_url = "https://api.anthropic.com"
 context_window = 200000
@@ -69,7 +72,8 @@ max_output_tokens = 8192
 strengths = ["reasoning", "code review", "writing"]
 
 [[models]]
-provider = "deepseek"                       # 其它 provider 走 OpenAI-compatible Chat Completions
+provider = "deepseek"
+protocol = "openai_chat"
 model = "deepseek-chat"
 base_url = "https://api.deepseek.com/v1"
 context_window = 64000
@@ -80,6 +84,7 @@ reasoning = { reasoning_effort = "high" }
 
 [[models]]
 provider = "minimax"
+protocol = "openai_chat"
 model = "MiniMax-M3"
 base_url = "https://api.minimax.io/v1"
 context_window = 1000000
@@ -90,6 +95,7 @@ subtask_for = ["openai/*", "anthropic/claude-*"]
 
 [[models]]
 provider = "dreamfield"
+protocol = "openai_chat"
 model = "kimi-k2.6"
 base_url = "https://example.com/v1"
 context_window = 256000
@@ -194,7 +200,8 @@ api_key = "..."
 | `active_model` | string | 否 | 第一个 `[[models]]` | 主 Agent 默认模型，格式为 `provider/model`，必须匹配某个模型配置。 |
 | `max_model_rps` | int | 否 | `10` | 每个模型 ref 的请求限速，避免 subtask 并发打爆供应商。保存时值为 0 会被省略。 |
 | `[[models]]` | array | 是 | 无 | 至少一个模型，否则配置不可用。 |
-| `models.provider` | string | 是 | 无 | provider 协议名，也是 credentials 分组名。`openai` 走 OpenAI Responses，`anthropic` 走 Anthropic Messages，其它名称走 OpenAI-compatible Chat Completions。 |
+| `models.provider` | string | 是 | 无 | 厂商/凭证命名空间，也是模型 ref 前缀；必须和 `credentials.toml` 分组名一致。 |
+| `models.protocol` | string | 否 | `openai_chat` | 模型协议，决定使用哪个请求适配器：`openai_chat` / `openai_responses` / `anthropic`。旧配置缺失时按 `openai_chat` 使用。 |
 | `models.model` | string | 是 | 无 | 上游模型 ID。模型 ref 为 `provider/model`。 |
 | `models.base_url` | string | 是 | 无 | API endpoint。当前所有 provider 都要求显式配置，Suna 不依赖 SDK 默认地址。 |
 | `models.context_window` | int | 是 | 无 | 模型服务声明的总上下文窗口，按 `input + output` 理解；用于 status、usage 展示和 compact 预算。 |
@@ -232,13 +239,29 @@ api_key = "..."
 
 ## 模型配置细节
 
-### provider 与协议
+### provider 与模型协议
 
-- `provider = "openai"`：使用 OpenAI Responses 协议。
-- `provider = "anthropic"`：使用 Anthropic Messages 协议。
-- 其它 provider 值：使用 OpenAI-compatible Chat Completions 协议。
+`provider` 表示厂商/凭证命名空间/ref 前缀；`protocol` 表示实际 API 协议。二者独立：同一个协议可以用于不同厂商，同一个厂商也可以按需要配置不同协议。
 
-`provider` 不是厂商名的固定枚举。你可以写 `deepseek`、`glm`、`dreamfield` 等，只要：
+支持的 `protocol`：
+
+- `openai_chat`：OpenAI-compatible Chat Completions，默认值，适合大多数兼容服务。
+- `openai_responses`：OpenAI Responses。
+- `anthropic`：Anthropic Messages。
+
+例如第三方厂商提供 Anthropic Messages 兼容接口时，可以写：
+
+```toml
+[[models]]
+provider = "some-vendor"
+protocol = "anthropic"
+model = "claude-sonnet-4"
+base_url = "https://some-vendor.example.com"
+context_window = 200000
+max_output_tokens = 8192
+```
+
+`provider` 不是固定枚举。你可以写 `deepseek`、`glm`、`dreamfield` 等，只要：
 
 1. `base_url` 指向兼容服务；
 2. `credentials.toml` 中存在同名 table；
@@ -284,6 +307,7 @@ compact_context_tokens = estimated_context_tokens + estimator_safety_tokens
 ```toml
 [[models]]
 provider = "openai"
+protocol = "openai_responses"
 model = "gpt-5"
 base_url = "https://api.openai.com/v1"
 context_window = 400000
@@ -292,6 +316,7 @@ reasoning = { reasoning = { effort = "high" } }
 
 [[models]]
 provider = "deepseek"
+protocol = "openai_chat"
 model = "deepseek-reasoner"
 base_url = "https://api.deepseek.com/v1"
 context_window = 64000
@@ -300,6 +325,7 @@ reasoning = { reasoning_effort = "high" }
 
 [[models]]
 provider = "dreamfield"
+protocol = "openai_chat"
 model = "kimi-k2.6"
 base_url = "https://example.com/v1"
 context_window = 256000

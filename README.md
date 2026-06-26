@@ -85,7 +85,7 @@ suna help            # 查看帮助
 1. 启动 `suna`。
 2. 如果还没有模型配置，进入 Config / Setup 页面。
 3. 添加一个 Model Connection。
-4. 选择 Provider 类型：
+4. 选择初始 Provider 类型，表单会预设对应的模型协议；后续也可以在“模型协议”字段中切换：
    - **OpenAI**：OpenAI Responses 协议。
    - **Anthropic**：Anthropic Messages 协议。
    - **OpenAI Compatible**：兼容 OpenAI Chat Completions 的第三方服务或网关。

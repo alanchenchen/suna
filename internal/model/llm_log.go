@@ -11,6 +11,7 @@ import (
 
 type llmRoute struct {
 	Provider string
+	Protocol string
 	ModelRef string
 	Model    string
 }
@@ -87,6 +88,9 @@ func logRoutedLLM(level string, req *CompletionRequest, route llmRoute, status s
 	fields["status"] = status
 	if route.Provider != "" {
 		fields["provider"] = route.Provider
+	}
+	if route.Protocol != "" {
+		fields["protocol"] = route.Protocol
 	}
 	if route.ModelRef != "" {
 		fields["model_ref"] = route.ModelRef

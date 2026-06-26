@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -125,6 +124,7 @@ func (c *Config) GetMaxModelRPS() int {
 
 type ModelConfig struct {
 	Provider        string         `toml:"provider"`
+	Protocol        ModelProtocol  `toml:"protocol,omitempty"`
 	Model           string         `toml:"model"`
 	BaseURL         string         `toml:"base_url,omitempty"`
 	ContextWindow   int            `toml:"context_window,omitempty"`
@@ -145,6 +145,7 @@ type configTOML struct {
 
 type modelConfigTOML struct {
 	Provider        string          `toml:"provider"`
+	Protocol        ModelProtocol   `toml:"protocol"`
 	Model           string          `toml:"model"`
 	BaseURL         string          `toml:"base_url,omitempty"`
 	ContextWindow   int             `toml:"context_window,omitempty"`
@@ -203,7 +204,8 @@ type credentialsFile map[string]struct {
 	APIKey string `toml:"api_key"`
 }
 
-// Load 从 TOML 加载配置并校验模型引用；缺失或非法字段直接返回错误，不做旧格式兼容。
+// Load 从 TOML 加载配置并校验模型引用；缺失或非法字段直接返回错误。
+// 旧配置兼容只允许模型 protocol 缺省，并在 NormalizeModels 中显式归一为 openai_chat。
 func Load(path string) (*Config, error) {
 	cfg := &Config{UI: UIConfig{Theme: "auto", Locale: "en"}}
 	cfg.DataDir = DefaultDataDir()
@@ -216,6 +218,9 @@ func Load(path string) (*Config, error) {
 	}
 	cfg.NormalizeUI()
 	if err := cfg.NormalizeGuard(); err != nil {
+		return nil, err
+	}
+	if err := cfg.NormalizeModels(); err != nil {
 		return nil, err
 	}
 	if len(cfg.Models) == 0 {
@@ -312,6 +317,9 @@ func (c *Config) Save(path string) error {
 		return err
 	}
 	c.NormalizeUI()
+	if err := c.NormalizeModels(); err != nil {
+		return err
+	}
 	if err := c.ValidateModelLimits(); err != nil {
 		return err
 	}
@@ -333,6 +341,7 @@ func (c *Config) tomlView() configTOML {
 	for _, mc := range c.Models {
 		models = append(models, modelConfigTOML{
 			Provider:        mc.Provider,
+			Protocol:        mc.ProtocolOrDefault(),
 			Model:           mc.Model,
 			BaseURL:         mc.BaseURL,
 			ContextWindow:   mc.ContextWindow,
@@ -576,200 +585,3 @@ func isBareTOMLKey(key string) bool {
 	}
 	return true
 }
-
-// SaveCredential 按 provider 保存密钥；同一 provider 下的多模型共享同一个 API key。
-func SaveCredential(dataDir, provider, apiKey string) error {
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		return err
-	}
-	creds, err := readCredentials(dataDir)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if creds == nil {
-		creds = credentialsFile{}
-	}
-	creds[provider] = struct {
-		APIKey string `toml:"api_key"`
-	}{APIKey: apiKey}
-	return writeCredentials(dataDir, creds)
-}
-
-// DeleteCredential removes a stored provider credential. Missing files or absent providers are no-ops.
-func DeleteCredential(dataDir, provider string) error {
-	creds, err := readCredentials(dataDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	if _, ok := creds[provider]; !ok {
-		return nil
-	}
-	delete(creds, provider)
-	return writeCredentials(dataDir, creds)
-}
-
-// LoadCredentials 将 credentials.toml 中的密钥注入到对应 ModelConfig；解析错误会直接返回。
-func LoadCredentials(cfg *Config) error {
-	creds, err := readCredentials(cfg.DataDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	for i := range cfg.Models {
-		if c, ok := creds[cfg.Models[i].Provider]; ok {
-			cfg.Models[i].APIKey = c.APIKey
-		}
-	}
-	return nil
-}
-
-func readCredentials(dataDir string) (credentialsFile, error) {
-	credPath := filepath.Join(dataDir, "credentials.toml")
-	var creds credentialsFile
-	if _, err := toml.DecodeFile(credPath, &creds); err != nil {
-		return nil, err
-	}
-	return creds, nil
-}
-
-func writeCredentials(dataDir string, creds credentialsFile) error {
-	var buf strings.Builder
-	keys := make([]string, 0, len(creds))
-	for k := range creds {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, ref := range keys {
-		buf.WriteString(fmt.Sprintf("[%q]\n", ref))
-		buf.WriteString(fmt.Sprintf("api_key = %q\n\n", creds[ref].APIKey))
-	}
-	return os.WriteFile(filepath.Join(dataDir, "credentials.toml"), []byte(buf.String()), 0600)
-}
-
-func (c *Config) ValidateAPIKeys() error {
-	seen := map[string]bool{}
-	for _, mc := range c.Models {
-		if seen[mc.Provider] {
-			continue
-		}
-		seen[mc.Provider] = true
-		if mc.APIKey == "" {
-			return fmt.Errorf("provider %q: missing api_key in credentials.toml", mc.Provider)
-		}
-	}
-	return nil
-}
-
-func (c *Config) EnsureDataDir() error {
-	dirs := []string{c.DataDir, c.SkillsDir(), c.LogsDir()}
-	for _, d := range dirs {
-		if err := os.MkdirAll(d, 0755); err != nil {
-			return fmt.Errorf("create dir %s: %w", d, err)
-		}
-	}
-	return nil
-}
-
-func (c *Config) EnsureDataDirs() error {
-	for _, d := range []string{
-		c.DataDir,
-		c.LogsDir(),
-		c.SkillsDir(),
-	} {
-		if err := os.MkdirAll(d, 0755); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (c *Config) LoadSkillRecords() map[string]skill.Record {
-	return cloneSkillRecords(c.Skills)
-}
-
-func (c *Config) SaveSkillRecords(trust map[string]skill.Record) error {
-	c.Skills = cloneSkillRecords(trust)
-	return c.Save(c.ConfigPath())
-}
-
-func (c *Config) ModelByRef(ref string) (ModelConfig, bool) {
-	for _, mc := range c.Models {
-		if mc.Ref() == ref {
-			return mc, true
-		}
-	}
-	return ModelConfig{}, false
-}
-
-func (c *Config) ActiveModelConfig() (ModelConfig, bool) { return c.ModelByRef(c.ActiveModel) }
-
-func (mc ModelConfig) Ref() string { return mc.Provider + "/" + mc.Model }
-
-// AvailableAsSubtaskFor 判断当前模型是否应作为 activeRef 的子任务候选展示；
-// subtask_for 仅是可见性过滤器，不改变 strengths 或工具授权语义。
-func (mc ModelConfig) AvailableAsSubtaskFor(activeRef string) bool {
-	ref := mc.Ref()
-	if strings.TrimSpace(activeRef) == "" || activeRef == ref {
-		return true
-	}
-	if len(mc.SubtaskFor) == 0 {
-		return true
-	}
-	for _, pattern := range mc.SubtaskFor {
-		if matchModelRefPattern(strings.TrimSpace(pattern), activeRef) {
-			return true
-		}
-	}
-	return false
-}
-
-func matchModelRefPattern(pattern, ref string) bool {
-	if pattern == "" {
-		return false
-	}
-	if pattern == "*" || pattern == "**" {
-		return true
-	}
-	re, err := modelRefGlobRegexp(pattern)
-	return err == nil && re.MatchString(ref)
-}
-
-func modelRefGlobRegexp(pattern string) (*regexp.Regexp, error) {
-	var b strings.Builder
-	b.WriteString("^")
-	for i := 0; i < len(pattern); {
-		switch pattern[i] {
-		case '*':
-			if i+1 < len(pattern) && pattern[i+1] == '*' {
-				b.WriteString(".*")
-				i += 2
-				continue
-			}
-			b.WriteString("[^/]*")
-			i++
-		case '?':
-			b.WriteString("[^/]")
-			i++
-		default:
-			b.WriteString(regexp.QuoteMeta(string(pattern[i])))
-			i++
-		}
-	}
-	b.WriteString("$")
-	return regexp.Compile(b.String())
-}
-
-func (mc ModelConfig) ResolveAPIKey() (string, error) {
-	if mc.APIKey == "" {
-		return "", fmt.Errorf("provider %q missing api_key in credentials.toml", mc.Provider)
-	}
-	return mc.APIKey, nil
-}
-
-func (mc ModelConfig) IsAnthropic() bool { return mc.Provider == "anthropic" }
-func (mc ModelConfig) IsOpenAI() bool    { return mc.Provider == "openai" }

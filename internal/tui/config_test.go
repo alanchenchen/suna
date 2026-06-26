@@ -94,7 +94,7 @@ func TestSwitchModelRefUpdatesActiveProviderModel(t *testing.T) {
 func TestConfigModelRefAfterEditUsesNewRef(t *testing.T) {
 	tui := &TUI{
 		i18n:   newTranslator(LocaleEN),
-		config: tuiconfig.Model{EditingName: "openai/gpt-4o-mini", Inputs: providerInputsForTest("openai", "gpt-4o", "", "https://api.openai.com/v1", "128000", "")},
+		config: tuiconfig.Model{EditingName: "openai/gpt-4o-mini", Inputs: providerInputsForTest("openai", "openai_responses", "gpt-4o", "", "https://api.openai.com/v1", "128000", "", "", "")},
 		configState: protocol.ConfigParams{ActiveModel: "openai/gpt-4o", Models: []protocol.ConfigModel{
 			{Provider: "openai", Model: "gpt-4o", BaseURL: "https://api.openai.com/v1", ContextWindow: 128000},
 		}},
@@ -144,7 +144,7 @@ func providerInputsForTest(values ...string) []textinput.Model {
 }
 
 func TestGPTReasoningUsesResponsesForOpenAI(t *testing.T) {
-	tui := &TUI{config: tuiconfig.Model{DetailRef: "openai/gpt-5"}, configState: testReasoningConfig("openai", "gpt-5")}
+	tui := &TUI{config: tuiconfig.Model{DetailRef: "openai/gpt-5"}, configState: testReasoningConfigWithProtocol("openai", "gpt-5", "openai_responses")}
 	got := tui.gptReasoning("high")
 	reasoning, ok := got["reasoning"].(map[string]any)
 	if !ok {
@@ -243,5 +243,9 @@ func TestSaveReasoningUpdatesDetailStateImmediately(t *testing.T) {
 }
 
 func testReasoningConfig(provider, model string) protocol.ConfigParams {
-	return protocol.ConfigParams{Models: []protocol.ConfigModel{{Provider: provider, Model: model, ContextWindow: 128000, MaxOutputTokens: 8192}}}
+	return testReasoningConfigWithProtocol(provider, model, "openai_chat")
+}
+
+func testReasoningConfigWithProtocol(provider, model, modelProtocol string) protocol.ConfigParams {
+	return protocol.ConfigParams{Models: []protocol.ConfigModel{{Provider: provider, Protocol: modelProtocol, Model: model, ContextWindow: 128000, MaxOutputTokens: 8192}}}
 }

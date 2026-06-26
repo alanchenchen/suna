@@ -20,10 +20,10 @@
 | Help 页面 | `internal/tui/pages/help` | 快捷键和 slash commands。 |
 | 附件识别 | `internal/tui/components/attachment`, `internal/tui/clipboard` | 识别本地图片路径、图片 URL、data URI，并在收到 `ctrl+v` fallback 时读取系统剪贴板图片。 | |
 | 附件存储 | `internal/media`, `internal/daemon/attachments.go` | 本地附件缓存和消息附件提交。 |
-| 模型路由 | `internal/model/router.go` | 根据 provider / model 配置选择 provider。 |
-| OpenAI Responses | `internal/model/openai_responses.go` | `provider = "openai"` 的请求和流式响应适配。 |
-| Anthropic Messages | `internal/model/anthropic.go` | `provider = "anthropic"` 的 Messages 请求适配；当前为非 streaming 调用，尚未归一输出 thinking chunk。 |
-| OpenAI-compatible | `internal/model/openai_chat.go` | 其它 provider 默认走 Chat Completions 兼容协议。 |
+| 模型路由 | `internal/model/router.go` | 根据 `models.protocol` 选择请求适配器，`provider` 只作为厂商/凭证命名空间。 |
+| OpenAI Responses | `internal/model/openai_responses.go` | `protocol = "openai_responses"` 的请求和流式响应适配。 |
+| Anthropic Messages | `internal/model/anthropic.go` | `protocol = "anthropic"` 的 Messages 请求适配；当前为非 streaming 调用，尚未归一输出 thinking chunk。 |
+| OpenAI-compatible | `internal/model/openai_chat.go` | `protocol = "openai_chat"` 的 Chat Completions 兼容协议。 |
 | Agent 编排 | `internal/agent` | 构造上下文、处理工具、Guard、记忆、Skill、MCP、Subtask。 |
 | Runner | `internal/runner` | 模型流式调用、tool call 循环、上下文压缩。 |
 | 工具目录 | `internal/tools` | 工具 Provider、schema、Manager、执行路由。 |

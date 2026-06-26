@@ -204,6 +204,7 @@ type ConfigParams struct {
 
 type ConfigModel struct {
 	Provider        string         `json:"provider"`
+	Protocol        string         `json:"protocol"`
 	Model           string         `json:"model"`
 	BaseURL         string         `json:"base_url,omitempty"`
 	ContextWindow   int            `json:"context_window,omitempty"`

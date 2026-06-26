@@ -1,6 +1,9 @@
 package config
 
-import "github.com/alanchenchen/suna/internal/protocol"
+import (
+	coreconfig "github.com/alanchenchen/suna/internal/config"
+	"github.com/alanchenchen/suna/internal/protocol"
+)
 
 // SnapshotFromProtocol 将 daemon 配置快照转成 Config 页面自己的展示模型。
 func SnapshotFromProtocol(p protocol.ConfigParams) []ModelConfig {
@@ -8,6 +11,7 @@ func SnapshotFromProtocol(p protocol.ConfigParams) []ModelConfig {
 	for _, cm := range p.Models {
 		models = append(models, ModelConfig{
 			Provider:        cm.Provider,
+			Protocol:        coreconfig.ModelProtocol(cm.Protocol),
 			Model:           cm.Model,
 			BaseURL:         cm.BaseURL,
 			ContextWindow:   cm.ContextWindow,
