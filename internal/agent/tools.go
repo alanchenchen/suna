@@ -257,7 +257,7 @@ func spawnToolResult(content string, res subtask.Result) tools.Result {
 }
 
 func (a *Agent) newSubtaskRunner(events chan<- Event, spawnID string, allowedTools map[string]bool) *runner.Runner {
-	return &runner.Runner{Router: a.router, Compressor: a.compressor, Executor: subtaskExecutor{agent: a, events: events, allowedTools: allowedTools, spawnID: spawnID}, Sink: subtaskSink{events: events, spawnID: spawnID}, UsageSink: a, Hooks: runner.Hooks{CleanToolParams: a.cleanToolParams}}
+	return &runner.Runner{Router: a.router, Compressor: a.compressor, Calibrator: a.calibrator, Executor: subtaskExecutor{agent: a, events: events, allowedTools: allowedTools, spawnID: spawnID}, Sink: subtaskSink{events: events, spawnID: spawnID}, UsageSink: a, Hooks: runner.Hooks{CleanToolParams: a.cleanToolParams}}
 }
 
 type subtaskExecutor struct {

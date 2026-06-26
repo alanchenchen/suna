@@ -8,14 +8,14 @@ func TestManualCompactRecentBudgetUsesOutputAndEstimatorSafety(t *testing.T) {
 
 	got := manualCompactRecentBudget(contextWindow, outputBudget)
 	usable := usableInputBudget(contextWindow, outputBudget)
-	want := usable - estimatorSafetyTokens(usable) - 3000 // session state budget is capped at 3000.
+	want := usable - estimatorSafetyTokens(usable, false) - 3000 // session state budget is capped at 3000.
 	if got != want {
 		t.Fatalf("manualCompactRecentBudget() = %d, want %d", got, want)
 	}
 }
 
 func TestRecentMessageTokenBudgetHasMinimum(t *testing.T) {
-	got := recentMessageTokenBudget(1000, 900, 1000)
+	got := recentMessageTokenBudget(1000, 900, 1000, 1.0, false)
 	if got != 1 {
 		t.Fatalf("recentMessageTokenBudget() = %d, want 1", got)
 	}

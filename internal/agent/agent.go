@@ -38,6 +38,7 @@ type Agent struct {
 	mediaStore   *media.Store
 	conversation *memory.ConversationStore
 	compressor   *memory.Compressor
+	calibrator   *model.TokenCalibrator
 	prompts      *prompt.Loader
 	store        *memory.Store
 	skills       *skill.Runtime
@@ -116,6 +117,7 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 		mediaStore:    mediaStore,
 		conversation:  conversation,
 		compressor:    memory.NewCompressor(extractProvider),
+		calibrator:    model.NewTokenCalibrator(),
 		prompts:       prompts,
 		store:         store,
 		skills:        skillRuntime,
@@ -305,6 +307,7 @@ func (a *Agent) newRunner(events chan<- Event) *runner.Runner {
 	return &runner.Runner{
 		Router:     a.router,
 		Compressor: a.compressor,
+		Calibrator: a.calibrator,
 		Executor:   mainExecutor{agent: a, events: events},
 		Sink:       eventSink{events: events},
 		UsageSink:  a,

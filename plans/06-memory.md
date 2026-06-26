@@ -366,6 +366,26 @@ estimated_request_tokens =
 
 失败时不修改 working memory，不写坏 Session State，不继续主模型请求。
 
+### Token 估算校准与动态安全垫
+
+本地 token 估算公式按通用 tokenizer 调参，不同 provider 会有系统性偏差：Claude 等模型的真实 tokenizer 对中文和代码切分更细，本地估算会明显低估，导致 compact 触发过晚、接近窗口才压缩甚至撞窗口报错。为此引入按模型的 token 估算校准（`model.TokenCalibrator`）：
+
+```text
+校准系数 coef = 真实 input token / 当轮原始本地估算
+```
+
+- 数据来源：每次 LLM 请求返回后，用真实 `usage.InputTokens`（已含 cache 创建/读取）与该轮未校准的原始估算回喂校准器。
+- 异常防护（防止中转站 usage 回传错误带偏系数）：硬区间过滤（ratio 落在 [0.25,4.0] 外直接丢弃）+ 相对离群过滤（已有稳定系数后单次大幅偏离视为抖动跳过）+ EMA 平滑（单次观测只挪动系数一小步）。
+- 归属：校准器由 Agent 持有一份，注入主 Agent 与 subtask 的 runner，按 modelRef 共享。它是模型 tokenizer 的校准常数，不是会话上下文，因此 subtask 复用不违反上下文隔离，反而加快收敛。
+- 应用：compact 触发判断（`estimated_request_tokens`）在物理尺度乘上 coef 再与窗口比；传给压缩器的 recent 预算除回估算尺度（压缩器内部仍用未校准估算填预算）。无校准数据或校准器未注入时 coef=1.0，行为与未校准完全一致。
+
+安全垫（`estimator_safety_tokens`）随校准状态自适应：
+
+- 未校准或校准刚回退（中转站异常）：维持 1/16（约 6.25%，最低 8192）厚垫兜底。
+- 已有稳定校准数据：收到 1/40（约 2.5%，最低 2048），释放出更多可用上下文。
+
+安全垫只补偿校准器管不到的瞬时偏差（本轮新增消息、单次波动、系数回退），不能归零；手动 `/compact` 不依赖校准状态，保守使用未校准口径。
+
 ## 缓存友好上下文结构
 
 每次主模型请求尽量保持稳定前缀：

@@ -38,19 +38,19 @@ func (r *Runner) Compact(ctx context.Context, working *memory.WorkingMemory, ses
 	return before, after, turnsCompressed, truncated, state, nil
 }
 
-func (r *Runner) compactForRequest(ctx context.Context, working *memory.WorkingMemory, req *model.CompletionRequest, contextWindow int, sessionState string) (string, error) {
+func (r *Runner) compactForRequest(ctx context.Context, working *memory.WorkingMemory, req *model.CompletionRequest, contextWindow int, sessionState string, coef float64, calibrated bool) (string, error) {
 	if r.Compressor == nil || working == nil {
 		return sessionState, nil
 	}
-	if !shouldCompactRequest(req, contextWindow) {
+	if !shouldCompactRequest(req, contextWindow, coef, calibrated) {
 		return sessionState, nil
 	}
 	started := time.Now()
 	msgs := working.Messages()
 	before := working.EstimatedTokens()
-	requestTokens := estimateRequestTokens(req)
+	requestTokens := estimateRequestTokens(req, coef)
 	logging.Info("memory", "session_compact_start", logging.Event{"mode": "auto", "purpose": req.Purpose, "model": req.Model, "context_window": contextWindow, "before_tokens": before, "request_tokens": requestTokens, "messages": len(msgs)})
-	recentBudget := compactRecentBudget(req, contextWindow)
+	recentBudget := compactRecentBudget(req, contextWindow, coef, calibrated)
 	compressed, state, folded, err := r.Compressor.CompressHistoryWithStateBudget(ctx, msgs, sessionState, contextWindow, recentBudget)
 	if err != nil {
 		logging.Error("memory", "session_compact_failed", err, logging.Event{"mode": "auto", "purpose": req.Purpose, "model": req.Model, "context_window": contextWindow, "before_tokens": before, "request_tokens": requestTokens, "duration_ms": time.Since(started).Milliseconds()})
@@ -66,28 +66,38 @@ func (r *Runner) compactForRequest(ctx context.Context, working *memory.WorkingM
 	return state, nil
 }
 
-func shouldCompactRequest(req *model.CompletionRequest, contextWindow int) bool {
+func shouldCompactRequest(req *model.CompletionRequest, contextWindow int, coef float64, calibrated bool) bool {
 	if req == nil || contextWindow <= 0 {
 		return false
 	}
-	estimated := estimateInputTokens(req)
-	return compactContextTokens(estimated) > usableInputBudget(contextWindow, req.MaxTokens)
+	estimated := estimateInputTokens(req, coef)
+	return compactContextTokens(estimated, calibrated) > usableInputBudget(contextWindow, req.MaxTokens)
 }
 
-func compactContextTokens(estimatedInputTokens int) int {
+func compactContextTokens(estimatedInputTokens int, calibrated bool) int {
 	if estimatedInputTokens <= 0 {
 		return 0
 	}
-	return estimatedInputTokens + estimatorSafetyTokens(estimatedInputTokens)
+	return estimatedInputTokens + estimatorSafetyTokens(estimatedInputTokens, calibrated)
 }
 
-func estimatorSafetyTokens(estimatedInputTokens int) int {
+// estimatorSafetyTokens 返回压缩边界的额外安全垫，补偿估算偏差。
+// calibrated 为 true 时（该模型已有稳定校准数据），估算已贴近真实，
+// 安全垫从 1/16（6.25%）收到 1/40（2.5%），释放出更多可用上下文；
+// 未校准或校准刚回退（中转站异常）时维持原有较厚垫作为兑底。
+// 该安全垫只补偿 calibrator 管不到的瞬时偏差（本轮新增、单次波动、系数回退），
+// 不能归零。UI 仅展示 raw estimate，不叠加该 safety。
+func estimatorSafetyTokens(estimatedInputTokens int, calibrated bool) int {
 	if estimatedInputTokens <= 0 {
 		return 0
 	}
-	// token 估算会随上下文结构变化产生偏差；后期代码、JSON、工具结果占比升高时
-	// 当前轻量估算可能低估约 5%。压缩边界需要额外安全垫，避免接近模型窗口时
-	// 因 raw estimate 偏低而触发过晚。UI 仍展示 raw estimate，不叠加该 safety。
+	if calibrated {
+		safety := estimatedInputTokens / 40
+		if safety < 2048 {
+			return 2048
+		}
+		return safety
+	}
 	safety := estimatedInputTokens / 16
 	if safety < 8192 {
 		return 8192
@@ -95,14 +105,16 @@ func estimatorSafetyTokens(estimatedInputTokens int) int {
 	return safety
 }
 
-func estimateRequestTokens(req *model.CompletionRequest) int {
+func estimateRequestTokens(req *model.CompletionRequest, coef float64) int {
 	if req == nil {
 		return 0
 	}
-	return estimateInputTokens(req) + req.MaxTokens
+	return estimateInputTokens(req, coef) + req.MaxTokens
 }
 
-func estimateInputTokens(req *model.CompletionRequest) int {
+// estimateInputTokens 返回校准后的 input token 估算；coef 为校准系数（1.0 等价未校准）。
+// 压缩触发判断需要物理尺度（贴近模型真实计数），因此在此处乘上系数。
+func estimateInputTokens(req *model.CompletionRequest, coef float64) int {
 	if req == nil {
 		return 0
 	}
@@ -114,7 +126,7 @@ func estimateInputTokens(req *model.CompletionRequest) int {
 			total += model.EstimateTokens(string(data))
 		}
 	}
-	return total
+	return model.ApplyCoefficient(total, coef)
 }
 
 func usableInputBudget(contextWindow, outputBudget int) int {
@@ -133,7 +145,7 @@ func contextMargin(contextWindow int) int {
 	return margin
 }
 
-func compactRecentBudget(req *model.CompletionRequest, contextWindow int) int {
+func compactRecentBudget(req *model.CompletionRequest, contextWindow int, coef float64, calibrated bool) int {
 	if req == nil || contextWindow <= 0 {
 		return 0
 	}
@@ -143,19 +155,26 @@ func compactRecentBudget(req *model.CompletionRequest, contextWindow int) int {
 			fixed += model.EstimateTokens(string(data))
 		}
 	}
-	return recentMessageTokenBudget(contextWindow, req.MaxTokens, fixed)
+	return recentMessageTokenBudget(contextWindow, req.MaxTokens, fixed, coef, calibrated)
 }
 
 func manualCompactRecentBudget(contextWindow, outputBudget int) int {
 	if contextWindow <= 0 {
 		return 0
 	}
-	return recentMessageTokenBudget(contextWindow, outputBudget, memory.SessionStateTokenBudget(contextWindow))
+	// 手动 compact 不依赖校准状态，保守使用未校准口径（coef=1.0、calibrated=false）。
+	return recentMessageTokenBudget(contextWindow, outputBudget, memory.SessionStateTokenBudget(contextWindow), 1.0, false)
 }
 
-func recentMessageTokenBudget(contextWindow, outputBudget, fixedInputTokens int) int {
+// recentMessageTokenBudget 返回传给压缩器的 recent 窗口预算。
+// 可用空间按物理尺度计算，但压缩器内部用未校准估算填预算，
+// 因此需除以系数转回估算尺度，fixed 本就是估算值不参与换算。
+func recentMessageTokenBudget(contextWindow, outputBudget, fixedInputTokens int, coef float64, calibrated bool) int {
 	budget := usableInputBudget(contextWindow, outputBudget)
-	budget -= estimatorSafetyTokens(budget)
+	budget -= estimatorSafetyTokens(budget, calibrated)
+	if coef > 1.0 {
+		budget = int(float64(budget) / coef)
+	}
 	budget -= fixedInputTokens
 	if budget < 1 {
 		return 1

@@ -58,6 +58,10 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 		}
 		tools := buildToolDefs(req)
 		contextWindow := r.contextWindow(req.ModelRef)
+		// 校准系数与校准状态在每轮开始时读取：Observe 会随真实 usage 演进，后续轮次自然用上更准的系数；
+		// calibrated 决定安全垫大小——已校准时收小、未校准或回退时维持厚垫兜底。
+		coef := r.calibrationCoefficient(req.ModelRef)
+		calibrated := r.calibrationReady(req.ModelRef)
 		completionReq := &model.CompletionRequest{
 			Model:        req.ModelID,
 			Purpose:      req.Purpose,
@@ -70,13 +74,13 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 		}
 		if req.AutoCompress {
 			completionReq.Messages = trimToolResultsForContext(completionReq.Messages)
-			needCompact := shouldCompactRequest(completionReq, contextWindow)
+			needCompact := shouldCompactRequest(completionReq, contextWindow, coef, calibrated)
 			if needCompact && r.Sink != nil {
 				r.Sink.Status(StatusEvent{Kind: StatusCompactRunning})
 			}
 			var compactErr error
 			if needCompact {
-				req.SessionState, compactErr = r.compactForRequest(ctx, req.Working, completionReq, contextWindow, req.SessionState)
+				req.SessionState, compactErr = r.compactForRequest(ctx, req.Working, completionReq, contextWindow, req.SessionState, coef, calibrated)
 				completionReq.SessionState = req.SessionState
 				if compactErr == nil && r.Hooks.OnCompactCommit != nil {
 					compactErr = r.Hooks.OnCompactCommit(ctx, req.SessionState)
@@ -96,8 +100,8 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 				messages = req.Messages(ctx)
 			}
 			completionReq.Messages = trimToolResultsForContext(messages)
-			if shouldCompactRequest(completionReq, contextWindow) {
-				estimated := estimateRequestTokens(completionReq)
+			if shouldCompactRequest(completionReq, contextWindow, coef, calibrated) {
+				estimated := estimateRequestTokens(completionReq, coef)
 				inputLimit := usableInputBudget(contextWindow, completionReq.MaxTokens)
 				logging.Error("memory", "session_compact_still_oversized", nil, logging.Event{"mode": "auto", "purpose": req.Purpose, "model": req.ModelID, "context_window": contextWindow, "request_tokens": estimated, "input_limit": inputLimit, "compacted": needCompact})
 				if needCompact && r.Sink != nil {
@@ -115,13 +119,17 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			r.Sink.Status(StatusEvent{Kind: StatusWaitingLLM})
 		}
 		requestStarted := time.Now()
-		estimatedContextTokens := logRequestPrepare(req, completionReq, contextWindow, turns)
+		rawEstimatedTokens, estimatedContextTokens := logRequestPrepare(req, completionReq, contextWindow, turns, coef, calibrated)
 		fullContent, toolCalls, usage, err := r.completeWithRecovery(ctx, req.ModelRef, completionReq, req)
 		if err != nil {
 			return result, err
 		}
 		if usage != nil {
 			result.Usage = usage
+			// 用真实 input token 回喂校准器；Observe 内部做异常过滤与 EMA 平滑，中转站偏差不会带偏系数。
+			if r.Calibrator != nil && usage.InputTokens > 0 {
+				r.Calibrator.Observe(req.ModelRef, rawEstimatedTokens, usage.InputTokens)
+			}
 			if r.Sink != nil {
 				contextTokens := usage.TotalTokens
 				if contextTokens <= 0 {
@@ -432,6 +440,22 @@ func cloneMessages(msgs []model.Message) []model.Message {
 	cp := make([]model.Message, len(msgs))
 	copy(cp, msgs)
 	return cp
+}
+
+// calibrationCoefficient 读取指定模型的 token 估算校准系数；calibrator 未注入时返回 1.0（等价未校准）。
+func (r *Runner) calibrationCoefficient(modelRef string) float64 {
+	if r.Calibrator == nil {
+		return 1.0
+	}
+	return r.Calibrator.Coefficient(modelRef)
+}
+
+// calibrationReady 表示指定模型是否已有有效校准数据，用于决定是否收小安全垫。
+func (r *Runner) calibrationReady(modelRef string) bool {
+	if r.Calibrator == nil {
+		return false
+	}
+	return r.Calibrator.Calibrated(modelRef)
 }
 
 func (r *Runner) resolveMaxTokens(modelRef string, requested int) int {
