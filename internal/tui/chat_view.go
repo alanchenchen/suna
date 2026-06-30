@@ -78,10 +78,13 @@ func (t *TUI) viewChat() string {
 		GuardOverlay:       guardOverlay,
 		Overlay:            overlay.OverlayBlock,
 	})
+	// spinnerPlaceholder 在渲染阶段写入 transcript，此处统一替换为当前 spinner 帧字符。
+	// 替换发生在 View() 阶段，不触发 transcript 重建，spinner 动画仍然正常工作。
+	spinChar := t.chat.Spinner.View()
 	if imagePasteOverlay != "" {
-		return t.overlayImagePasteAboveInput(view, imagePasteOverlay, cmdSuggestions)
+		return strings.ReplaceAll(t.overlayImagePasteAboveInput(view, imagePasteOverlay, cmdSuggestions), spinnerPlaceholder, spinChar)
 	}
-	return view
+	return strings.ReplaceAll(view, spinnerPlaceholder, spinChar)
 }
 
 func (t *TUI) layoutChat() {
@@ -762,7 +765,8 @@ func (t *TUI) subtaskStatusCounts(ids []string) (done, running, failed int) {
 
 func (t *TUI) subtaskBlockStatusIcon(done, running, failed, total int) string {
 	if running > 0 {
-		return t.chat.Spinner.View()
+		// 使用占位符，避免 spinner tick 触发全量 transcript 重建；viewChat() 统一替换。
+		return spinnerPlaceholder
 	}
 	if failed > 0 {
 		return "✗"

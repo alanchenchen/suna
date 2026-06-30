@@ -22,8 +22,10 @@ func (t *TUI) renderToolEntry(te *toolEntry, nested bool) string {
 
 func (t *TUI) toolRenderDeps() toolview.RenderDeps {
 	return toolview.RenderDeps{
-		Width:   t.width,
-		Spinner: t.chat.Spinner.View(),
+		Width: t.width,
+		// 使用占位符代替实时 spinner 字符，渲染结果缓存在 transcript 里；
+		// viewChat() 最终输出时统一替换为当前帧，避免 spinner tick 触发全量重建。
+		Spinner: spinnerPlaceholder,
 		Labels: toolview.RenderLabels{
 			Tools:                t.tr("tui.tool.tools"),
 			Subtask:              t.tr("tui.tool.subtask"),

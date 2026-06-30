@@ -248,10 +248,8 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if t.chat.Loading || t.chat.Compacting {
 			var cmd tea.Cmd
 			t.chat.Spinner, cmd = t.chat.Spinner.Update(msg)
-			// 文本流本身会高频刷新 transcript；短时间内不再让 spinner tick 额外触发完整同步。
-			if !t.recentTextStreamActive(time.Now()) {
-				t.syncContent()
-			}
+			// spinner 字符已用 spinnerPlaceholder 占位，viewChat() 最终输出时替换；
+			// 此处只需推进 spinner 帧状态，不触发 transcript 全量重建。
 			return t, cmd
 		}
 		return t, nil
