@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/alanchenchen/suna/internal/config"
@@ -25,5 +26,25 @@ func TestCreateProviderDefaultsMissingProtocolToOpenAIChat(t *testing.T) {
 	}
 	if _, ok := p.(*OpenAIChatProvider); !ok {
 		t.Fatalf("createProvider() = %T, want *OpenAIChatProvider", p)
+	}
+}
+
+func TestValidateToolResultPairsRejectsOrphanToolResult(t *testing.T) {
+	err := validateToolResultPairs([]Message{{Role: RoleTool, ToolCallID: "call-1", TextContent: "result"}})
+	if err == nil {
+		t.Fatal("validateToolResultPairs() error = nil, want orphan tool result error")
+	}
+	if !strings.Contains(err.Error(), "orphan tool result") || !strings.Contains(err.Error(), "call-1") {
+		t.Fatalf("validateToolResultPairs() error = %v, want orphan call_id detail", err)
+	}
+}
+
+func TestValidateToolResultPairsAllowsMatchedToolResult(t *testing.T) {
+	err := validateToolResultPairs([]Message{
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call-1", Name: "readfile", Arguments: `{"path":"a"}`}}},
+		{Role: RoleTool, ToolCallID: "call-1", TextContent: "result"},
+	})
+	if err != nil {
+		t.Fatalf("validateToolResultPairs() error = %v, want nil", err)
 	}
 }

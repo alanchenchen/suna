@@ -174,6 +174,7 @@ func (c *Compressor) compressHistoryKeepingState(ctx context.Context, messages [
 			keepStart = 1
 		}
 	}
+	keepStart = expandRecentStartForToolCalls(cleanMessages, keepStart)
 	compressRegion := cleanMessages[:keepStart]
 	keepRegion := cleanMessages[keepStart:]
 
@@ -216,6 +217,57 @@ func (c *Compressor) compressHistoryKeepingState(ctx context.Context, messages [
 	}
 
 	return keepRegion, state, len(compressRegion), nil
+}
+
+func expandRecentStartForToolCalls(messages []model.Message, keepStart int) int {
+	if keepStart <= 0 || keepStart >= len(messages) {
+		return keepStart
+	}
+	for {
+		retainedCalls := make(map[string]struct{})
+		for _, msg := range messages[keepStart:] {
+			if msg.Role != model.RoleAssistant {
+				continue
+			}
+			for _, tc := range msg.ToolCalls {
+				if strings.TrimSpace(tc.ID) != "" {
+					retainedCalls[tc.ID] = struct{}{}
+				}
+			}
+		}
+
+		newStart := keepStart
+		for _, msg := range messages[keepStart:] {
+			if msg.Role != model.RoleTool || strings.TrimSpace(msg.ToolCallID) == "" {
+				continue
+			}
+			if _, ok := retainedCalls[msg.ToolCallID]; ok {
+				continue
+			}
+			if parent := findToolCallParent(messages, keepStart, msg.ToolCallID); parent >= 0 && parent < newStart {
+				newStart = parent
+			}
+		}
+		if newStart == keepStart {
+			return keepStart
+		}
+		keepStart = newStart
+	}
+}
+
+func findToolCallParent(messages []model.Message, before int, id string) int {
+	for i := before - 1; i >= 0; i-- {
+		msg := messages[i]
+		if msg.Role != model.RoleAssistant {
+			continue
+		}
+		for _, tc := range msg.ToolCalls {
+			if tc.ID == id {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func sessionStateMaxTokens(contextWindow int) int {

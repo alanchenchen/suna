@@ -64,6 +64,68 @@ func TestCompressHistoryBuildsSessionState(t *testing.T) {
 	}
 }
 
+func TestCompressHistoryPreservesToolCallParentForRecentToolResult(t *testing.T) {
+	provider := &captureCompressProvider{text: "# Session State\n\n## Active context\n- compacted"}
+	compressor := NewCompressor(provider)
+	loader, err := prompt.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	compressor.SetPrompts(loader)
+
+	messages := []model.Message{
+		model.NewTextMessage(model.RoleUser, "older request"),
+		{Role: model.RoleAssistant, ToolCalls: []model.ToolCall{{ID: "call-1", Name: "readfile", Arguments: `{"path":"a"}`}}},
+		{Role: model.RoleTool, ToolCallID: "call-1", TextContent: "result"},
+	}
+	compressed, _, _, err := compressor.compressHistoryKeepingState(context.Background(), messages, "", 1, 400000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(compressed) != 2 {
+		t.Fatalf("len(compressed) = %d, want parent assistant and tool result", len(compressed))
+	}
+	if compressed[0].Role != model.RoleAssistant || len(compressed[0].ToolCalls) != 1 || compressed[0].ToolCalls[0].ID != "call-1" {
+		t.Fatalf("compressed[0] = %+v, want assistant tool_call call-1", compressed[0])
+	}
+	if compressed[1].Role != model.RoleTool || compressed[1].ToolCallID != "call-1" {
+		t.Fatalf("compressed[1] = %+v, want tool result call-1", compressed[1])
+	}
+}
+
+func TestCompressHistoryPreservesParallelToolCallParentForRecentToolResult(t *testing.T) {
+	provider := &captureCompressProvider{text: "# Session State\n\n## Active context\n- compacted"}
+	compressor := NewCompressor(provider)
+	loader, err := prompt.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	compressor.SetPrompts(loader)
+
+	messages := []model.Message{
+		model.NewTextMessage(model.RoleUser, "older request"),
+		{Role: model.RoleAssistant, ToolCalls: []model.ToolCall{
+			{ID: "call-a", Name: "readfile", Arguments: `{"path":"a"}`},
+			{ID: "call-b", Name: "readfile", Arguments: `{"path":"b"}`},
+		}},
+		{Role: model.RoleTool, ToolCallID: "call-a", TextContent: "result a"},
+		{Role: model.RoleTool, ToolCallID: "call-b", TextContent: "result b"},
+	}
+	compressed, _, _, err := compressor.compressHistoryKeepingState(context.Background(), messages, "", 1, 400000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(compressed) != 3 {
+		t.Fatalf("len(compressed) = %d, want assistant and both retained tool results", len(compressed))
+	}
+	if compressed[0].Role != model.RoleAssistant || len(compressed[0].ToolCalls) != 2 {
+		t.Fatalf("compressed[0] = %+v, want assistant with parallel tool calls", compressed[0])
+	}
+	if compressed[2].Role != model.RoleTool || compressed[2].ToolCallID != "call-b" {
+		t.Fatalf("compressed[2] = %+v, want recent tool result call-b", compressed[2])
+	}
+}
+
 func TestFormatCompressInputDenoisesToolOutput(t *testing.T) {
 	longToolOutput := strings.Repeat("tool-log-line\n", 800)
 	messages := []model.Message{

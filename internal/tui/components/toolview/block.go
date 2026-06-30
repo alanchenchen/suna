@@ -25,7 +25,7 @@ func VisibleMainEntries(block *Block) []*Entry {
 	entries := make([]*Entry, 0, len(block.Order))
 	for _, id := range block.Order {
 		te := block.Entries[id]
-		if te == nil || IsSubtask(te) || IsSubtaskChild(te) {
+		if te == nil || IsSubtask(te) || hasValidSubtaskParent(block, te) {
 			continue
 		}
 		entries = append(entries, te)
@@ -46,7 +46,7 @@ func VisibleEntries(block *Block) []*Entry {
 		entries = append(entries, te)
 		for _, childID := range block.Order {
 			child := block.Entries[childID]
-			if child == nil || child.ParentID != te.ID {
+			if child == nil || child.ParentID != te.ID || !HasSubtaskParent(block, child.ParentID) {
 				continue
 			}
 			entries = append(entries, child)
@@ -54,7 +54,7 @@ func VisibleEntries(block *Block) []*Entry {
 	}
 	for _, id := range block.Order {
 		te := block.Entries[id]
-		if te == nil || te.ParentID == "" || block.Entries[te.ParentID] != nil {
+		if te == nil || te.ParentID == "" || HasSubtaskParent(block, te.ParentID) {
 			continue
 		}
 		entries = append(entries, te)
@@ -112,6 +112,17 @@ func IsSubtaskChild(te *Entry) bool {
 	return te != nil && te.ParentID != ""
 }
 
+func HasSubtaskParent(block *Block, parentID string) bool {
+	if block == nil || parentID == "" || block.Entries == nil {
+		return false
+	}
+	return IsSubtask(block.Entries[parentID])
+}
+
+func hasValidSubtaskParent(block *Block, te *Entry) bool {
+	return te != nil && te.ParentID != "" && HasSubtaskParent(block, te.ParentID)
+}
+
 // SubtaskChildren 返回某个子任务的内部工具调用，顺序与工具块事件顺序一致。
 func SubtaskChildren(block *Block, parentID string) []*Entry {
 	if block == nil || parentID == "" {
@@ -120,7 +131,7 @@ func SubtaskChildren(block *Block, parentID string) []*Entry {
 	entries := make([]*Entry, 0)
 	for _, childID := range block.Order {
 		child := block.Entries[childID]
-		if child == nil || child.ParentID != parentID {
+		if child == nil || child.ParentID != parentID || !HasSubtaskParent(block, parentID) {
 			continue
 		}
 		entries = append(entries, child)

@@ -97,7 +97,7 @@ func (m *Model) VisibleToolIDs() []string {
 	ids := make([]string, 0, len(block.Order))
 	for _, id := range block.Order {
 		te := block.Entries[id]
-		if te == nil || toolview.IsSubtask(te) || toolview.IsSubtaskChild(te) {
+		if te == nil || toolview.IsSubtask(te) || toolview.HasSubtaskParent(block, te.ParentID) {
 			continue
 		}
 		ids = append(ids, id)

@@ -159,6 +159,9 @@ func (r *Router) Complete(ctx context.Context, ref string, req *CompletionReques
 		if len(req.Reasoning) == 0 && len(mc.Reasoning) > 0 {
 			req.Reasoning = mc.Reasoning
 		}
+		if err := validateToolResultPairs(req.Messages); err != nil {
+			return nil, err
+		}
 	}
 	if err := r.rateLimit.Wait(ctx, ref); err != nil {
 		return nil, err
@@ -178,6 +181,30 @@ func (r *Router) Complete(ctx context.Context, ref string, req *CompletionReques
 		return nil, err
 	}
 	return wrapLLMLogStream(raw, req, route, started), nil
+}
+
+func validateToolResultPairs(messages []Message) error {
+	seen := make(map[string]struct{})
+	for _, m := range messages {
+		switch m.Role {
+		case RoleAssistant:
+			for _, tc := range m.ToolCalls {
+				id := strings.TrimSpace(tc.ID)
+				if id != "" {
+					seen[id] = struct{}{}
+				}
+			}
+		case RoleTool:
+			id := strings.TrimSpace(m.ToolCallID)
+			if id == "" {
+				return fmt.Errorf("model request contains tool result without tool_call_id")
+			}
+			if _, ok := seen[id]; !ok {
+				return fmt.Errorf("model request contains orphan tool result call_id %q; compact the session or start a new session", id)
+			}
+		}
+	}
+	return nil
 }
 
 func resolvedRequestModel(mc config.ModelConfig, req *CompletionRequest) string {

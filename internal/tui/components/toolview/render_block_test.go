@@ -8,6 +8,20 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+func TestInvalidSubtaskParentRendersAsMainEntry(t *testing.T) {
+	block := &Block{}
+	block.Add(&Entry{ID: "spawn-1", Name: "Search", RawName: "search", Intent: "主工具", Status: StatusDone})
+	block.Add(&Entry{ID: "spawn:spawn-1:read-1", ParentID: "spawn-1", Name: "Readfile", RawName: "readfile", Intent: "不应归入子任务", Status: StatusDone})
+
+	if children := SubtaskChildren(block, "spawn-1"); len(children) != 0 {
+		t.Fatalf("SubtaskChildren() = %d, want 0 for non-spawn parent", len(children))
+	}
+	entries := VisibleMainEntries(block)
+	if got, want := len(entries), 2; got != want {
+		t.Fatalf("len(VisibleMainEntries) = %d, want %d", got, want)
+	}
+}
+
 func TestRenderBlockUsesTitledContainerWithoutChangingEntryContent(t *testing.T) {
 	block := &Block{}
 	block.Add(&Entry{ID: "tool-1", Name: "Search", RawName: "search", Intent: "查找文件", Summary: "内容 \"prompt\" in .", Status: StatusDone})

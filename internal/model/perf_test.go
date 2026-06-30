@@ -71,6 +71,20 @@ func BenchmarkOpenAIResponsesToolCallAccumLongArgs(b *testing.B) {
 	}
 }
 
+func TestOpenAIResponsesBuildInputAllowsMatchedToolResult(t *testing.T) {
+	p := NewOpenAIResponsesProvider("test-key", "", "gpt-test", 128000, 8192, nil)
+	input, err := p.buildInput(context.Background(), &CompletionRequest{Messages: []Message{
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call-1", Name: "readfile", Arguments: `{"path":"a"}`}}},
+		{Role: RoleTool, ToolCallID: "call-1", TextContent: "result"},
+	}})
+	if err != nil {
+		t.Fatalf("buildInput() error = %v, want nil", err)
+	}
+	if got, want := len(input), 2; got != want {
+		t.Fatalf("len(input) = %d, want %d", got, want)
+	}
+}
+
 func TestResponseToolCallDoneReplacesDeltaArguments(t *testing.T) {
 	calls := map[string]*responseToolCall{}
 	var order []string

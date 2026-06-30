@@ -43,6 +43,10 @@ func (m *Model) StartTool(p protocol.ToolStartParams, id string, now time.Time) 
 	m.LastWaitingTool = ""
 	m.Loading = true
 	parentID, localID := toolview.ParseSubtaskID(id)
+	if parentID != "" && !toolview.HasSubtaskParent(m.CurrentToolBlock, parentID) {
+		parentID = ""
+		localID = id
+	}
 	m.LastAssistantText = ""
 	te := &toolview.Entry{
 		ID:        id,

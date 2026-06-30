@@ -15,6 +15,18 @@ import (
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 )
 
+func TestStartToolTreatsInvalidSpawnPrefixAsMainTool(t *testing.T) {
+	m := &chatpage.Model{}
+	te := m.StartTool(protocol.ToolStartParams{ID: "spawn:missing:read-1", Tool: "readfile", Intent: "读取文件"}, "spawn:missing:read-1", time.Now())
+	if te.ParentID != "" {
+		t.Fatalf("ParentID = %q, want empty for missing spawn parent", te.ParentID)
+	}
+	ids := m.VisibleToolIDs()
+	if len(ids) != 1 || ids[0] != "spawn:missing:read-1" {
+		t.Fatalf("VisibleToolIDs() = %v, want invalid spawn-prefixed tool as main tool", ids)
+	}
+}
+
 func TestSubtaskPanelKeyboardAndToolDetail(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 30, mode: uipage.Chat}
 	tui.initChatComponents()
