@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,7 +59,7 @@ func (t *TUI) viewChat() string {
 		cmdSuggestions = t.renderCommandSuggestions()
 	}
 	preInputHint := t.renderPreInputHint()
-	view := t.chat.View(chatpage.ViewDeps{
+	view := t.replaceLiveTranscriptPlaceholders(t.chat.View(chatpage.ViewDeps{
 		Width:              t.width,
 		MiniPet:            renderMiniPet(petState),
 		TopMeta:            t.chatTopMeta(),
@@ -77,14 +78,100 @@ func (t *TUI) viewChat() string {
 		MemoryOverlay:      memoryOverlay,
 		GuardOverlay:       guardOverlay,
 		Overlay:            overlay.OverlayBlock,
-	})
-	// spinnerPlaceholder 在渲染阶段写入 transcript，此处统一替换为当前 spinner 帧字符。
-	// 替换发生在 View() 阶段，不触发 transcript 重建，spinner 动画仍然正常工作。
-	spinChar := t.chat.Spinner.View()
+	}))
 	if imagePasteOverlay != "" {
-		return strings.ReplaceAll(t.overlayImagePasteAboveInput(view, imagePasteOverlay, cmdSuggestions), spinnerPlaceholder, spinChar)
+		return t.replaceLiveTranscriptPlaceholders(t.overlayImagePasteAboveInput(view, imagePasteOverlay, cmdSuggestions))
 	}
-	return strings.ReplaceAll(view, spinnerPlaceholder, spinChar)
+	return view
+}
+
+func (t *TUI) replaceLiveTranscriptPlaceholders(view string) string {
+	if view == "" {
+		return view
+	}
+	view = strings.ReplaceAll(view, spinnerPlaceholder, t.liveSpinnerFrame())
+	return t.replaceElapsedPlaceholders(view)
+}
+
+func (t *TUI) liveSpinnerFrame() string {
+	// Bubble spinner.View() 自带一个尾随空格；transcript 占位符只预留 1 列，
+	// 因此这里截成单列 frame，避免最终替换后把圆角边框撑宽。
+	return ansi.Truncate(t.chat.Spinner.View(), 1, "")
+}
+
+func liveElapsedPlaceholder(startedAt time.Time) string {
+	if startedAt.IsZero() {
+		return elapsedPlaceholderText + elapsedMarkerPrefix + "0" + elapsedMarkerSuffix
+	}
+	return elapsedPlaceholderText + elapsedMarkerPrefix + strconv.FormatInt(startedAt.UnixNano(), 10) + elapsedMarkerSuffix
+}
+
+func (t *TUI) replaceElapsedPlaceholders(view string) string {
+	for {
+		start := strings.Index(view, elapsedMarkerPrefix)
+		if start < 0 {
+			return view
+		}
+		payloadStart := start + len(elapsedMarkerPrefix)
+		payloadEndRel := strings.Index(view[payloadStart:], elapsedMarkerSuffix)
+		if payloadEndRel < 0 {
+			return view
+		}
+		payloadEnd := payloadStart + payloadEndRel
+		payload := view[payloadStart:payloadEnd]
+		if placeholderStart := start - len(elapsedPlaceholderText); placeholderStart >= 0 && view[placeholderStart:start] == elapsedPlaceholderText {
+			replacement := t.formatElapsedPayload(payload, true)
+			view = view[:placeholderStart] + replacement + view[payloadEnd+len(elapsedMarkerSuffix):]
+			continue
+		}
+		plainText := strings.TrimSpace(elapsedPlaceholderText)
+		if placeholderStart := start - len(plainText); placeholderStart >= 0 && view[placeholderStart:start] == plainText {
+			replacement := t.formatElapsedPayload(payload, false)
+			view = view[:placeholderStart] + replacement + view[payloadEnd+len(elapsedMarkerSuffix):]
+			continue
+		}
+		view = view[:start] + view[payloadEnd+len(elapsedMarkerSuffix):]
+	}
+}
+
+func (t *TUI) formatElapsedPayload(payload string, padded bool) string {
+	var formatted string
+	if payload == phaseElapsedPayload {
+		formatted = t.formatElapsedSince(t.chat.PhaseStart)
+	} else {
+		nano, err := strconv.ParseInt(payload, 10, 64)
+		if err != nil || nano <= 0 {
+			formatted = " 0.0s"
+		} else {
+			formatted = t.formatElapsedSince(time.Unix(0, nano))
+		}
+	}
+	if !padded {
+		return strings.TrimSpace(formatted)
+	}
+	return formatted
+}
+
+func (t *TUI) formatElapsedSince(startedAt time.Time) string {
+	if startedAt.IsZero() {
+		return " 0.0s"
+	}
+	return formatElapsedSeconds(time.Since(startedAt).Seconds())
+}
+
+func formatElapsedSeconds(seconds float64) string {
+	if seconds < 0 {
+		seconds = 0
+	}
+	if seconds < 100 {
+		// live elapsed 必须始终保持 5 列；这里截断到 0.1s，避免 99.95s 四舍五入成 100.0s。
+		tenths := int(seconds * 10)
+		return fmt.Sprintf("%4.1fs", float64(tenths)/10)
+	}
+	if seconds < 1000 {
+		return fmt.Sprintf("%4ds", int(seconds))
+	}
+	return "999+s"
 }
 
 func (t *TUI) layoutChat() {
@@ -556,7 +643,7 @@ func (t *TUI) renderSubtaskRows(ids []string, innerWidth int, selected int) []st
 		dur := t.subtaskDuration(te)
 		durWidth := 0
 		if dur != "" {
-			durWidth = lipgloss.Width(" · " + dur)
+			durWidth = lipgloss.Width(subtaskDurationSep(dur) + dur)
 		}
 		rawLabel := toolview.PlainIntentLabel(te)
 		rawActivity := t.subtaskActivity(te, innerWidth)
@@ -566,7 +653,7 @@ func (t *TUI) renderSubtaskRows(ids []string, innerWidth int, selected int) []st
 			line += styleDim.Render(" · " + activity)
 		}
 		if dur != "" {
-			line += styleDim.Render(" · " + dur)
+			line += styleDim.Render(subtaskDurationSep(dur) + dur)
 		}
 		rows = append(rows, line)
 	}
@@ -597,7 +684,7 @@ func (t *TUI) renderSelectedSubtaskTools(innerWidth int) []string {
 	children := t.selectedSubtaskTools()
 	if len(children) == 0 {
 		if t.selectedSubtaskWaitingForTool() {
-			return []string{styleToolRun.Render("◐ ") + styleDim.Render(t.tr("tui.subtask_panel.waiting_tool"))}
+			return []string{styleToolRun.Render(spinnerPlaceholder+" ") + styleDim.Render(t.tr("tui.subtask_panel.waiting_tool"))}
 		}
 		return []string{styleDim.Render(t.tr("tui.subtask_panel.no_tools"))}
 	}
@@ -626,25 +713,27 @@ func (t *TUI) renderSelectedSubtaskTools(innerWidth int) []string {
 		icon := t.subtaskStatusIcon(child)
 		prefixWidth := 4 // cursor(2) + icon(1) + space(1)
 		dur := ""
-		if child.Duration > 0 {
-			dur = fmt.Sprintf("%.1fs", child.Duration.Seconds())
+		if child.Status == toolview.StatusRunning && !child.StartedAt.IsZero() {
+			dur = liveElapsedPlaceholder(child.StartedAt)
+		} else if fixed := fixedToolDuration(child); fixed > 0 {
+			dur = fmt.Sprintf("%.1fs", fixed.Seconds())
 		}
 		durWidth := 0
 		if dur != "" {
-			durWidth = lipgloss.Width(" · " + dur)
+			durWidth = lipgloss.Width(subtaskDurationSep(dur) + dur)
 		}
 		remaining := max(0, innerWidth-prefixWidth-durWidth)
 		label := t.subtaskToolTimelineLabel(child, max(4, remaining))
 		line := fmt.Sprintf("%s%s %s", cursor, icon, labelStyle.Render(label))
 		if dur != "" {
-			line += styleDim.Render(" · " + dur)
+			line += styleDim.Render(subtaskDurationSep(dur) + dur)
 		}
 		rows = append(rows, line)
 	}
 	if end < len(children) {
 		rows = append(rows, styleDim.Render(fmt.Sprintf(t.tr("tui.subtask_panel.more_below"), len(children)-end)))
 	} else if t.selectedSubtaskWaitingForTool() {
-		rows = append(rows, styleToolRun.Render("◐ ")+styleDim.Render(" "+t.tr("tui.subtask_panel.waiting_tool")))
+		rows = append(rows, styleToolRun.Render(spinnerPlaceholder)+styleDim.Render(" "+t.tr("tui.subtask_panel.waiting_tool")))
 	}
 	return rows
 }
@@ -787,7 +876,7 @@ func (t *TUI) subtaskStatusIcon(te *toolEntry) string {
 	case toolview.StatusError:
 		return styleToolErr.Render("✗")
 	default:
-		return styleToolRun.Render("◐")
+		return styleToolRun.Render(spinnerPlaceholder)
 	}
 }
 
@@ -850,17 +939,37 @@ func (t *TUI) subtaskFailureReason(te *toolEntry) string {
 	return toolview.ShortToolError(te.Result)
 }
 
+func subtaskDurationSep(dur string) string {
+	if strings.HasPrefix(dur, " ") {
+		return " ·"
+	}
+	return " · "
+}
+
 func (t *TUI) subtaskDuration(te *toolEntry) string {
 	if te == nil {
 		return ""
 	}
-	if te.Duration > 0 {
-		return fmt.Sprintf("%.1fs", te.Duration.Seconds())
+	if te.Status == toolview.StatusRunning && !te.StartedAt.IsZero() {
+		return liveElapsedPlaceholder(te.StartedAt)
 	}
-	if !te.StartedAt.IsZero() {
-		return fmt.Sprintf("%.0fs", time.Since(te.StartedAt).Seconds())
+	if fixed := fixedToolDuration(te); fixed > 0 {
+		return fmt.Sprintf("%.1fs", fixed.Seconds())
 	}
 	return ""
+}
+
+func fixedToolDuration(te *toolEntry) time.Duration {
+	if te == nil {
+		return 0
+	}
+	if te.Duration > 0 {
+		return te.Duration
+	}
+	if te.StartedAt.IsZero() || te.EndedAt.IsZero() || !te.EndedAt.After(te.StartedAt) {
+		return 0
+	}
+	return te.EndedAt.Sub(te.StartedAt)
 }
 
 func (t *TUI) resumeHint() string {

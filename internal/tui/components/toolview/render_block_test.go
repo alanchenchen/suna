@@ -39,6 +39,15 @@ func TestRenderBlockUsesTitledContainerWithoutChangingEntryContent(t *testing.T)
 	}
 }
 
+func TestRenderBlockUsesSpinnerForRunningEntry(t *testing.T) {
+	entry := &Entry{ID: "tool-1", Name: "Search", RawName: "search", Intent: "查找文件", Status: StatusRunning}
+
+	rendered := RenderEntry(entry, false, RenderDeps{Spinner: "⣾", Styles: RenderStyles{}})
+	if !strings.Contains(rendered, "⣾ 查找文件") {
+		t.Fatalf("RenderEntry() = %q, want injected running spinner", rendered)
+	}
+}
+
 func TestRenderBlockTitleShowsFailureStatus(t *testing.T) {
 	block := &Block{}
 	block.Add(&Entry{ID: "tool-1", Name: "Search", RawName: "search", Intent: "查找文件", Status: StatusError, Result: "boom"})

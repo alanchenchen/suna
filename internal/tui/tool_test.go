@@ -253,20 +253,36 @@ func TestRenderToolBlockHidesSubtaskTree(t *testing.T) {
 
 func stripANSIForTest(s string) string {
 	var b strings.Builder
-	inEsc := false
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if inEsc {
-			if c >= '@' && c <= '~' {
-				inEsc = false
+		if c != 0x1b {
+			b.WriteByte(c)
+			continue
+		}
+		if i+1 >= len(s) {
+			break
+		}
+		i++
+		switch s[i] {
+		case '[':
+			for i+1 < len(s) {
+				i++
+				if s[i] >= '@' && s[i] <= '~' {
+					break
+				}
 			}
-			continue
+		case ']':
+			for i+1 < len(s) {
+				i++
+				if s[i] == 0x07 {
+					break
+				}
+				if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '\\' {
+					i++
+					break
+				}
+			}
 		}
-		if c == 0x1b {
-			inEsc = true
-			continue
-		}
-		b.WriteByte(c)
 	}
 	return b.String()
 }

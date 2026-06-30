@@ -292,6 +292,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case tea.MouseWheelDown:
 					t.scrollSubtaskToolDetail(t.chat.Viewport.MouseWheelDelta)
 				}
+				t.syncContent()
 				return t, nil
 			}
 		}
@@ -572,6 +573,7 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 		if t.hasActiveSubtaskPanel() {
 			t.chat.SubtaskToolDetailExpanded = !t.chat.SubtaskToolDetailExpanded
 			t.chat.SubtaskToolDetailScroll = 0
+			t.syncContent()
 			return t, nil
 		}
 		t.chat.ClearResponseNav()
@@ -590,6 +592,7 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ks == "tab":
 		if t.hasActiveSubtaskPanel() {
 			t.moveSubtaskCursor(1)
+			t.syncContent()
 			return t, nil
 		}
 	case ks == "ctrl+r":
@@ -605,6 +608,7 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ks == "pgup":
 		if t.chat.SubtaskToolDetailExpanded && t.hasActiveSubtaskPanel() {
 			t.scrollSubtaskToolDetail(-max(1, t.subtaskToolDetailHeight()-1))
+			t.syncContent()
 			return t, nil
 		}
 		t.scrollChatPage(-1)
@@ -612,6 +616,7 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ks == "pgdown":
 		if t.chat.SubtaskToolDetailExpanded && t.hasActiveSubtaskPanel() {
 			t.scrollSubtaskToolDetail(max(1, t.subtaskToolDetailHeight()-1))
+			t.syncContent()
 			return t, nil
 		}
 		t.scrollChatPage(1)
@@ -619,6 +624,7 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ks == "up":
 		if t.hasActiveSubtaskPanel() {
 			t.moveSubtaskToolCursor(-1)
+			t.syncContent()
 			return t, nil
 		}
 		t.moveChatCursor(-1)
@@ -626,6 +632,7 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ks == "down":
 		if t.hasActiveSubtaskPanel() {
 			t.moveSubtaskToolCursor(1)
+			t.syncContent()
 			return t, nil
 		}
 		t.moveChatCursor(1)
@@ -671,6 +678,7 @@ func (t *TUI) updateChatEsc() (tea.Model, tea.Cmd) {
 	if t.chat.SubtaskToolDetailExpanded && t.hasActiveSubtaskPanel() {
 		t.chat.SubtaskToolDetailExpanded = false
 		t.chat.SubtaskToolDetailScroll = 0
+		t.syncContent()
 		return t, nil
 	}
 	if t.chat.ShowToolDetail {

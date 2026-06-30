@@ -44,6 +44,9 @@ func (m Model) SelectedCommandSuggestion() (CommandSpec, bool) {
 }
 
 func (m *Model) SetStatusLabel(label string, now time.Time) {
+	if m.Loading && m.StatusLabel == label && !m.PhaseStart.IsZero() {
+		return
+	}
 	m.StatusLabel = label
 	m.Loading = true
 	m.PhaseStart = now

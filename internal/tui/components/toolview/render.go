@@ -127,6 +127,13 @@ func toolBlockStatusIcon(entries []*Entry, deps RenderDeps) string {
 	return "✓"
 }
 
+func runningStatusIcon(deps RenderDeps) string {
+	if strings.TrimSpace(deps.Spinner) != "" {
+		return deps.Spinner
+	}
+	return "◐"
+}
+
 func renderToolTitledBox(width int, title string, lines []string, styles RenderStyles) string {
 	maxOuterWidth := maxInt(20, width-4)
 	maxContentWidth := maxInt(8, maxOuterWidth-2)
@@ -169,7 +176,7 @@ func RenderEntry(te *Entry, nested bool, deps RenderDeps) string {
 	case StatusError:
 		statusIcon = s.Err.Render("✗")
 	default:
-		statusIcon = s.Run.Render("◐")
+		statusIcon = s.Run.Render(runningStatusIcon(deps))
 	}
 	prefix := "      "
 	if nested {

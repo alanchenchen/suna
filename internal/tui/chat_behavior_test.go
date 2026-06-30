@@ -295,7 +295,7 @@ func TestWaitingAfterSubtaskShowsSpecificStatusLine(t *testing.T) {
 	tui.chat.PhaseStart = time.Now().Add(-time.Second)
 
 	tui.syncContent()
-	view := stripANSIForTest(tui.chat.Viewport.View())
+	view := stripANSIForTest(tui.replaceLiveTranscriptPlaceholders(tui.chat.Viewport.View()))
 	if !strings.Contains(view, "子任务已完成，等待主模型继续") {
 		t.Fatalf("view = %q, want subtask waiting status line", view)
 	}
@@ -312,7 +312,7 @@ func TestRunningToolShowsCompactStatusLine(t *testing.T) {
 	tui.chat.ActiveTools = map[string]*toolEntry{"1": block.Entries["1"]}
 
 	tui.syncContent()
-	view := stripANSIForTest(tui.chat.Viewport.View())
+	view := stripANSIForTest(tui.replaceLiveTranscriptPlaceholders(tui.chat.Viewport.View()))
 	if strings.Contains(view, "执行工具中") {
 		t.Fatalf("view = %q, should not repeat tool-specific global status", view)
 	}
@@ -908,7 +908,7 @@ func TestWaitingAfterToolWithCompletedToolShowsCompactSpinner(t *testing.T) {
 	block.Add(&toolEntry{ID: "1", Name: "Read", Intent: "读取文件", Status: toolDone, StartedAt: time.Now().Add(-2 * time.Second), EndedAt: time.Now().Add(-time.Second)})
 
 	tui.syncContent()
-	view := stripANSIForTest(tui.chat.Viewport.View())
+	view := stripANSIForTest(tui.replaceLiveTranscriptPlaceholders(tui.chat.Viewport.View()))
 	if strings.Contains(view, "工具已完成") || strings.Contains(view, "子任务已完成") {
 		t.Fatalf("view = %q, waiting after completed tool should use compact empty spinner", view)
 	}
@@ -1029,12 +1029,82 @@ func TestSubtaskSectionDividerReachesRightEdge(t *testing.T) {
 	tui.chat.CurrentToolBlock = block
 	got := stripANSIForTest(tui.renderSubtaskBlock(block))
 	for _, line := range strings.Split(got, "\n") {
-		if !strings.Contains(line, "当前子任务") && !strings.Contains(line, "工具调用") {
+		if !strings.Contains(line, "─ 当前子任务") && !strings.Contains(line, "─ 工具调用") {
 			continue
 		}
 		if strings.Contains(line, "   │") {
 			t.Fatalf("subtask section divider has a visible right gap: %q", line)
 		}
+	}
+}
+
+func TestRunningSubtaskLiveElapsedKeepsBoxWidth(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 72, height: 40}
+	tui.initChatComponents()
+	block := &toolBlock{}
+	block.Add(&toolEntry{ID: "spawn-1", Name: "Spawn", RawName: "spawn", Intent: strings.Repeat("调研渲染稳定性", 4), Status: toolRunning, StartedAt: time.Now().Add(-12 * time.Second)})
+	block.Add(&toolEntry{ID: "spawn:spawn-1:read-1", ParentID: "spawn-1", Name: "Readfile", RawName: "readfile", Intent: strings.Repeat("读取很长的上下文文件", 4), Status: toolRunning, StartedAt: time.Now().Add(-12 * time.Second)})
+	tui.chat.CurrentToolBlock = block
+
+	raw := tui.renderSubtaskBlock(block)
+	if !strings.Contains(raw, elapsedMarkerPrefix) {
+		t.Fatalf("renderSubtaskBlock() = %q, want live elapsed marker", raw)
+	}
+	rendered := tui.replaceLiveTranscriptPlaceholders(raw)
+	if strings.Contains(rendered, elapsedMarkerPrefix) || strings.Contains(rendered, "suna-spinner") {
+		t.Fatalf("rendered subtask block still contains live marker: %q", rendered)
+	}
+	plain := stripANSIForTest(rendered)
+	if !strings.Contains(plain, "12.") {
+		t.Fatalf("rendered subtask block = %q, want dynamic elapsed around 12s", plain)
+	}
+	lines := strings.Split(strings.TrimRight(plain, "\n"), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("rendered subtask block has %d lines, want box", len(lines))
+	}
+	wantWidth := lipgloss.Width(lines[0])
+	for _, line := range lines[1:] {
+		if got := lipgloss.Width(line); got != wantWidth {
+			t.Fatalf("subtask box line width mismatch: got %d want %d line=%q\n%s", got, wantWidth, line, plain)
+		}
+	}
+}
+
+func TestLiveElapsedFormatKeepsFixedWidth(t *testing.T) {
+	cases := []struct {
+		name    string
+		seconds float64
+		want    string
+	}{
+		{name: "negative", seconds: -1, want: " 0.0s"},
+		{name: "zero", seconds: 0, want: " 0.0s"},
+		{name: "sub ten", seconds: 9.99, want: " 9.9s"},
+		{name: "near hundred", seconds: 99.95, want: "99.9s"},
+		{name: "hundred", seconds: 100, want: " 100s"},
+		{name: "near thousand", seconds: 999.9, want: " 999s"},
+		{name: "thousand plus", seconds: 1000, want: "999+s"},
+	}
+	for _, tt := range cases {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			got := formatElapsedSeconds(tt.seconds)
+			if got != tt.want {
+				t.Fatalf("formatElapsedSeconds(%v) = %q, want %q", tt.seconds, got, tt.want)
+			}
+			if width := lipgloss.Width(got); width != lipgloss.Width(elapsedPlaceholderText) {
+				t.Fatalf("formatElapsedSeconds(%v) width = %d, want %d", tt.seconds, width, lipgloss.Width(elapsedPlaceholderText))
+			}
+		})
+	}
+}
+
+func TestSubtaskDurationFallsBackToEndedAt(t *testing.T) {
+	tui := &TUI{}
+	started := time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC)
+	entry := &toolEntry{Status: toolDone, StartedAt: started, EndedAt: started.Add(1500 * time.Millisecond)}
+
+	if got := tui.subtaskDuration(entry); got != "1.5s" {
+		t.Fatalf("subtaskDuration() = %q, want 1.5s", got)
 	}
 }
 

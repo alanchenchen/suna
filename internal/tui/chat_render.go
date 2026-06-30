@@ -24,11 +24,20 @@ const maxSystemMarkdownBytes = 4000
 // transcriptBlockIndent 统一主流程 block（tool/thinking/subtask）的左缩进，避免同级块左右错位。
 const transcriptBlockIndent = "  "
 
-// spinnerPlaceholder 是渲染阶段写入 transcript 的占位符。
-// viewChat() 最终输出时用当前 spinner 字符做字符串替换，避免 spinner tick
-// 触发整个 transcript 重建（O(N) 全量渲染）。
-// 使用 U+FFFD（替换字符）作为前缀，确保在正常文本中不会误匹配。
-const spinnerPlaceholder = "\uFFFD\x00SPIN\x00"
+const (
+	// spinnerPlaceholder 是渲染阶段写入 transcript 的等宽占位符。
+	// 前半段是终端宽度稳定为 1 的可见字符，后半段是零宽 OSC 标记；viewChat()
+	// 最终输出时整体替换为当前 spinner 帧，避免私有区字符在不同终端中造成边框错位。
+	spinnerPlaceholder = "⠿\x1b]777;suna-spinner\x07"
+
+	// elapsedPlaceholderText 宽度固定为 5，隐藏 OSC 标记携带动态耗时来源。
+	// 这样耗时能随 spinner tick 实时刷新，同时 transcript 内容签名保持稳定。
+	elapsedPlaceholderText  = " 0.0s"
+	elapsedMarkerPrefix     = "\x1b]777;suna-elapsed:"
+	elapsedMarkerSuffix     = "\x07"
+	phaseElapsedPayload     = "phase"
+	phaseElapsedPlaceholder = elapsedPlaceholderText + elapsedMarkerPrefix + phaseElapsedPayload + elapsedMarkerSuffix
+)
 
 const (
 	// 思考框本身只展示少量行，流式阶段先裁剪源文本，避免每帧对完整思考链 wrap/markdown。
@@ -113,10 +122,8 @@ func (t *TUI) renderThinkingBox(content string, running bool, startedAt, endedAt
 	elapsed := reasoningElapsed(running, startedAt, endedAt)
 	title := t.tr("tui.chat.thinking")
 	if running {
-		// 使用占位符代替实时 spinner 字符，避免 spinner tick 触发全量 transcript 重建。
-		// viewChat() 最终输出时会将占位符替换为当前 spinner 帧字符。
-		// elapsed 截断为整秒，使得每秒才变化一次，减少签名变化频率。
-		title = fmt.Sprintf("%s %s %ds", spinnerPlaceholder, t.tr("tui.chat.thinking"), int(elapsed.Seconds()))
+		// spinner 与耗时都使用等宽占位符，最终在 viewChat() 中替换，避免 tick 触发全量重建。
+		title = fmt.Sprintf("%s %s%s", spinnerPlaceholder, t.tr("tui.chat.thinking"), liveElapsedPlaceholder(startedAt))
 	} else if elapsed > 0 {
 		// completed 状态保留精确时长，不含 spinner，不会因 tick 变化。
 		title = fmt.Sprintf("✓ %s %.1fs", t.tr("tui.chat.thinking"), elapsed.Seconds())
@@ -281,24 +288,12 @@ func (t *TUI) renderCurrentStatusLine() string {
 	if label == "" {
 		label = t.tr("status.responding")
 	}
-	// elapsed 截断到整秒：每秒才变化一次，使签名稳定，减少 viewport 替换频率。
-	// 格式保留一位小数（%.1fs），与原来的显示风格一致。
-	elapsedSec := 0.0
-	if !t.chat.PhaseStart.IsZero() {
-		elapsedSec = float64(int(time.Since(t.chat.PhaseStart).Seconds()))
-	}
-	// 使用占位符代替实时 spinner 字符，避免 spinner tick 触发全量 transcript 重建。
-	// viewChat() 最终输出时统一替换为当前 spinner 帧。
-	return fmt.Sprintf("    %s %s %s\n", spinnerPlaceholder, styleDim.Render(label), styleDim.Render(fmt.Sprintf("%.1fs", elapsedSec)))
+	// spinner 与耗时都延迟到 viewChat() 中替换，保持 transcript 签名稳定且耗时实时更新。
+	return fmt.Sprintf("    %s %s%s\n", spinnerPlaceholder, styleDim.Render(label), styleDim.Render(phaseElapsedPlaceholder))
 }
 func (t *TUI) renderCompactStatusLine() string {
-	// elapsed 截断到整秒，格式保留一位小数，与 renderCurrentStatusLine 保持一致。
-	elapsedSec := 0.0
-	if !t.chat.PhaseStart.IsZero() {
-		elapsedSec = float64(int(time.Since(t.chat.PhaseStart).Seconds()))
-	}
-	// 同 renderCurrentStatusLine，使用占位符延迟 spinner 字符替换。
-	return fmt.Sprintf("    %s %s\n", spinnerPlaceholder, styleDim.Render(fmt.Sprintf("%.1fs", elapsedSec)))
+	// 同 renderCurrentStatusLine，spinner 与耗时都延迟到 viewChat() 中替换。
+	return fmt.Sprintf("    %s%s\n", spinnerPlaceholder, styleDim.Render(phaseElapsedPlaceholder))
 }
 func (t *TUI) currentInputStatusLabel() string {
 	if t.hasVisibleActiveProgress() && !t.chat.Compacting {
