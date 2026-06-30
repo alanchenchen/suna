@@ -13,7 +13,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/protocol"
 	attachmentmodel "github.com/alanchenchen/suna/internal/tui/components/attachment"
 	textutil "github.com/alanchenchen/suna/internal/tui/components/text"
@@ -534,7 +533,6 @@ func (t *TUI) cachedMarkdown(msg *chatMsg, content string, width int) string {
 }
 
 func (t *TUI) cachedStreamingState(msg *chatMsg, width int) string {
-	started := time.Now()
 	state := msg.Stream
 	if state == nil {
 		return ""
@@ -543,12 +541,6 @@ func (t *TUI) cachedStreamingState(msg *chatMsg, width int) string {
 		width = 20
 	}
 	tailLines := t.streamingRenderTailLines()
-	pendingDeltas := len(state.Pending)
-	defer func() {
-		if elapsed := time.Since(started); elapsed >= chatpage.SlowPerfLogThreshold() {
-			logging.Info("perf", "slow_tui_stream_render", logging.Event{"component": "tui", "duration_ms": elapsed.Milliseconds(), "pending_deltas": pendingDeltas, "lines": len(state.Lines), "raw_bytes": state.Raw.Len(), "width": width})
-		}
-	}()
 	if state.Width != width {
 		content := state.Text()
 		out := renderStreamingText(content, width)

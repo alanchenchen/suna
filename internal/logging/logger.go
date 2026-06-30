@@ -150,7 +150,7 @@ func compactLogFileIfNeeded(path string, maxSize, retainSize int64) {
 
 func normalizeCategory(category string) string {
 	switch strings.ToLower(strings.TrimSpace(category)) {
-	case "llm", "ipc", "memory", "agent", "config", "app", "perf":
+	case "llm", "ipc", "memory", "agent", "config", "app":
 		return strings.ToLower(strings.TrimSpace(category))
 	default:
 		return "app"

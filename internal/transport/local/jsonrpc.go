@@ -62,7 +62,7 @@ func (s connSink) Emit(ctx context.Context, event protocol.Event) error {
 	sendCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := s.conn.Send(sendCtx, data); err != nil {
-		logging.Error("transport", "send_failed", err, logging.Event{"conn_id": s.conn.ID(), "method": event.Method})
+		logging.Error("ipc", "send_failed", err, logging.Event{"conn_id": s.conn.ID(), "method": event.Method})
 		return err
 	}
 	return nil
@@ -115,7 +115,7 @@ func sendResult(conn localConn, id int, result any) {
 }
 
 func sendError(conn localConn, id int, code int, message string) {
-	logging.Error("transport", "response_error", fmt.Errorf("%s", message), logging.Event{"conn_id": conn.ID(), "request_id": id, "error_code": code})
+	logging.Error("ipc", "response_error", fmt.Errorf("%s", message), logging.Event{"conn_id": conn.ID(), "request_id": id, "error_code": code})
 	resp := Response{JSONRPC: "2.0", ID: id, Error: &Error{Code: code, Message: message}}
 	data, err := json.Marshal(resp)
 	if err != nil {

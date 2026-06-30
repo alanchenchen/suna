@@ -42,7 +42,7 @@ func (s *service) OnDisconnect(ctx context.Context, connID string) {
 }
 
 func (s *service) Handle(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
-	logging.Info("transport", "request", logging.Event{"conn_id": req.ConnID, "method": req.Method, "request_id": req.ID})
+	logging.Info("ipc", "request", logging.Event{"conn_id": req.ConnID, "method": req.Method, "request_id": req.ID})
 	sink = s.daemon.sinkFor(req.ConnID, sink)
 	s.ensureConfigLoaded()
 	if skill.IsProtocolMethod(req.Method) {

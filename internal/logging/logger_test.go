@@ -7,15 +7,15 @@ import (
 	"testing"
 )
 
-func TestNormalizeCategoryAllowsPerf(t *testing.T) {
-	if got, want := normalizeCategory("perf"), "perf"; got != want {
-		t.Fatalf("normalizeCategory(perf) = %q, want %q", got, want)
+func TestNormalizeCategoryAllowsIPC(t *testing.T) {
+	if got, want := normalizeCategory("ipc"), "ipc"; got != want {
+		t.Fatalf("normalizeCategory(ipc) = %q, want %q", got, want)
 	}
 }
 
 func TestCompactLogFileKeepsTailLines(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "perf.log")
+	path := filepath.Join(dir, "app.log")
 	content := strings.Join([]string{
 		"old-1",
 		"old-2",
