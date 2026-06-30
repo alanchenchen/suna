@@ -29,6 +29,7 @@ type Model struct {
 	Inputs          []textinput.Model
 	InputFocus      int
 	Error           string
+	Notice          string
 	FromMode        uipage.Page
 	Models          []string
 	EditingName     string

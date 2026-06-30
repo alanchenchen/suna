@@ -34,6 +34,7 @@ func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.width, t.height, t.ready = m.Width, m.Height, true
 		return t, nil
 	case tea.KeyPressMsg:
+		t.config.Notice = ""
 		if t.config.SetupMode && !t.config.FormOpen && len(t.configState.Models) == 0 {
 			t.openProviderForm("", nil)
 			return t, t.config.Inputs[t.config.InputFocus].Focus()

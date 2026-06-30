@@ -59,6 +59,8 @@ type TUI struct {
 
 	// Config 页面状态。页面内部状态归属 pages/config.Model；root 只负责 daemon/configState glue。
 	config tuiconfig.Model
+	// 等待 daemon 确认配置写入后展示的一次性配置提示，避免保存失败时提前提示。
+	pendingConfigNotice string
 
 	// Help overlay 状态。
 	showHelp bool

@@ -313,6 +313,8 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"tui.config.delete_model_and_api_key":      {LocaleEN: "Delete model + API key", LocaleZH: "删除模型 + API Key"},
 		"tui.config.delete_last_provider_key_hint": {LocaleEN: "This is the last model for provider {}; you can also remove its stored API key.", LocaleZH: "这是 provider {} 的最后一个模型；也可以同时移除已保存的 API Key。"},
 
+		"tui.config.reasoning.cleared_on_protocol_change": {LocaleEN: "Protocol changed; reasoning settings were cleared. Reconfigure reasoning if needed.", LocaleZH: "模型协议已变更，思考参数已自动清空；如需使用请重新配置。"},
+
 		"tui.help.title":             {LocaleEN: "Help", LocaleZH: "帮助"},
 		"tui.help.common":            {LocaleEN: "Common", LocaleZH: "常用"},
 		"tui.help.more":              {LocaleEN: "More", LocaleZH: "更多"},

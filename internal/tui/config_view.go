@@ -79,6 +79,9 @@ func (t *TUI) viewConfigPage() string {
 	if t.config.Error != "" {
 		sb.WriteString("\n" + styleError.Render("  ✗ "+t.config.Error) + "\n")
 	}
+	if t.config.Notice != "" {
+		sb.WriteString("\n" + styleDim.Render("  • "+t.config.Notice) + "\n")
+	}
 	if t.config.DeleteConfirm != "" {
 		sb.WriteString("\n" + t.renderConfigDeleteConfirm() + "\n")
 	}
@@ -125,6 +128,9 @@ func (t *TUI) viewProviderForm() string {
 	}
 	if view.Error != "" {
 		lines = append(lines, "", styleError.Render("✗ "+view.Error))
+	}
+	if view.Notice != "" {
+		lines = append(lines, "", styleDim.Render("• "+view.Notice))
 	}
 	lines = append(lines, "", styleDim.Render(view.Help))
 	body := strings.Join(lines, "\n")

@@ -247,6 +247,78 @@ func TestSaveReasoningUpdatesDetailStateImmediately(t *testing.T) {
 	}
 }
 
+func TestProviderProtocolChangeClearsReasoningForSave(t *testing.T) {
+	tui := &TUI{
+		i18n:   newTranslator(LocaleEN),
+		config: tuiconfig.Model{EditingName: "openai/gpt-5"},
+		configState: protocol.ConfigParams{Models: []protocol.ConfigModel{{
+			Provider:        "openai",
+			Protocol:        "openai_chat",
+			Model:           "gpt-5",
+			ContextWindow:   128000,
+			MaxOutputTokens: 8192,
+			Reasoning:       map[string]any{"reasoning_effort": "high"},
+		}}},
+	}
+	values := tuiconfig.ProviderFormValuesFromStrings([]string{"openai", "openai_responses", "gpt-5", "", "https://api.openai.com/v1", "128000", "8192", "", ""})
+
+	reasoning, cleared := tui.providerFormReasoningForSave(values)
+	if !cleared {
+		t.Fatalf("cleared = false, want true")
+	}
+	if reasoning != nil {
+		t.Fatalf("reasoning = %#v, want nil", reasoning)
+	}
+}
+
+func TestProviderProtocolUnchangedKeepsReasoningForSave(t *testing.T) {
+	existingReasoning := map[string]any{"reasoning_effort": "high"}
+	tui := &TUI{
+		i18n:   newTranslator(LocaleEN),
+		config: tuiconfig.Model{EditingName: "openai/gpt-5"},
+		configState: protocol.ConfigParams{Models: []protocol.ConfigModel{{
+			Provider:        "openai",
+			Protocol:        "openai_chat",
+			Model:           "gpt-5",
+			ContextWindow:   128000,
+			MaxOutputTokens: 8192,
+			Reasoning:       existingReasoning,
+		}}},
+	}
+	values := tuiconfig.ProviderFormValuesFromStrings([]string{"openai", "openai_chat", "gpt-5", "", "https://api.openai.com/v1", "128000", "8192", "", ""})
+
+	reasoning, cleared := tui.providerFormReasoningForSave(values)
+	if cleared {
+		t.Fatalf("cleared = true, want false")
+	}
+	if got := reasoning["reasoning_effort"]; got != "high" {
+		t.Fatalf("reasoning[reasoning_effort] = %#v, want %q", got, "high")
+	}
+}
+
+func TestProviderProtocolChangeWithEmptyReasoningDoesNotShowClearNotice(t *testing.T) {
+	tui := &TUI{
+		i18n:   newTranslator(LocaleEN),
+		config: tuiconfig.Model{EditingName: "openai/gpt-5"},
+		configState: protocol.ConfigParams{Models: []protocol.ConfigModel{{
+			Provider:        "openai",
+			Protocol:        "openai_chat",
+			Model:           "gpt-5",
+			ContextWindow:   128000,
+			MaxOutputTokens: 8192,
+		}}},
+	}
+	values := tuiconfig.ProviderFormValuesFromStrings([]string{"openai", "openai_responses", "gpt-5", "", "https://api.openai.com/v1", "128000", "8192", "", ""})
+
+	reasoning, cleared := tui.providerFormReasoningForSave(values)
+	if cleared {
+		t.Fatalf("cleared = true, want false")
+	}
+	if reasoning != nil {
+		t.Fatalf("reasoning = %#v, want nil", reasoning)
+	}
+}
+
 func testReasoningConfig(provider, model string) protocol.ConfigParams {
 	return testReasoningConfigWithProtocol(provider, model, "openai_chat")
 }

@@ -350,6 +350,10 @@ func (t *TUI) handleDaemonFullStatusNotification(p protocol.DaemonStatusParams) 
 func (t *TUI) handleConfigStateNotification(p protocol.ConfigParams) {
 	t.configState = p
 	t.config.Error = ""
+	if t.pendingConfigNotice != "" {
+		t.config.Notice = t.pendingConfigNotice
+		t.pendingConfigNotice = ""
+	}
 	if t.configState.Locale != "" {
 		t.i18n.SetLocale(LocaleID(t.configState.Locale))
 	}
@@ -492,6 +496,7 @@ func (t *TUI) handleRequestErrorNotification(p requestErrorMsg) {
 		t.chat.SetMCPError(p.Message)
 		return
 	}
+	t.pendingConfigNotice = ""
 	t.config.Error = p.Message
 }
 

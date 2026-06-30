@@ -18,6 +18,7 @@ func (t *TUI) updateProviderForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, nil
 	case tea.KeyPressMsg:
 		t.config.Error = ""
+		t.config.Notice = ""
 		if t.config.InputFocus == tuiconfig.ProviderFormProtocolIndex {
 			switch m.String() {
 			case "left":
@@ -66,6 +67,7 @@ func (t *TUI) updateProviderForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 func (t *TUI) openProviderForm(ref string, mc *tuiconfig.ModelConfig) {
 	t.config.OpenProviderForm(ref, mc)
+	t.config.Notice = ""
 	t.initProviderForm(mc)
 }
 func (t *TUI) initProviderForm(mc *tuiconfig.ModelConfig) {
@@ -129,12 +131,24 @@ func (t *TUI) saveProviderForm() tea.Cmd {
 		t.config.Error = err.Error()
 		return nil
 	}
-	var reasoning map[string]any
-	if existing, ok := t.modelByRef(t.config.EditingName); ok {
-		reasoning = existing.Reasoning
+	reasoning, cleared := t.providerFormReasoningForSave(v)
+	t.pendingConfigNotice = ""
+	if cleared {
+		t.pendingConfigNotice = t.tr("tui.config.reasoning.cleared_on_protocol_change")
 	}
 	save := t.config.BuildProviderSave(v, reasoning)
 	return t.sendConfigSet(save.Params)
+}
+
+func (t *TUI) providerFormReasoningForSave(v tuiconfig.ProviderFormValues) (map[string]any, bool) {
+	existing, ok := t.modelByRef(t.config.EditingName)
+	if !ok {
+		return nil, false
+	}
+	if existing.Protocol != v.Protocol && len(existing.Reasoning) > 0 {
+		return nil, true
+	}
+	return existing.Reasoning, false
 }
 func (t *TUI) providerFormValues() tuiconfig.ProviderFormValues {
 	values := make([]string, len(t.config.Inputs))
