@@ -82,6 +82,7 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req *CompletionRequest
 		defer stream.Close()
 
 		var usage *Usage
+		var finish *FinishInfo
 		toolCalls := map[int64]*anthropicToolCallAccum{}
 
 		for stream.Next() {
@@ -93,6 +94,9 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req *CompletionRequest
 			case "message_delta":
 				delta := event.AsMessageDelta()
 				usage = mergeAnthropicUsage(usage, anthropicUsageFromDelta(delta.Usage))
+				if delta.Delta.StopReason != "" || delta.Delta.StopSequence != "" {
+					finish = &FinishInfo{Reason: string(delta.Delta.StopReason), NativeReason: string(delta.Delta.StopReason), StopSequence: delta.Delta.StopSequence}
+				}
 			case "content_block_start":
 				start := event.AsContentBlockStart()
 				block := start.ContentBlock
@@ -146,10 +150,10 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req *CompletionRequest
 			ch <- Chunk{ToolCalls: calls, Done: false}
 		}
 		if usage != nil {
-			ch <- Chunk{Done: true, Usage: usage}
+			ch <- Chunk{Done: true, Usage: usage, Finish: finish}
 			return
 		}
-		ch <- Chunk{Done: true}
+		ch <- Chunk{Done: true, Finish: finish}
 	}()
 
 	return ch, nil

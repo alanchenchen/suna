@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/logging"
 )
 
@@ -16,12 +17,13 @@ type llmRoute struct {
 	Model    string
 }
 
-type llmStreamStats struct {
+type llmRequestStreamStats struct {
 	chunkCount     int
 	assistantBytes int
 	reasoningBytes int
 	toolCalls      int
 	usageReceived  bool
+	finish         *FinishInfo
 	lastChunkAt    time.Time
 }
 
@@ -35,14 +37,80 @@ func ensureRequestID(req *CompletionRequest) string {
 	return req.RequestID
 }
 
-func requestID(req *CompletionRequest) string {
-	if req != nil && req.RequestID != "" {
-		return req.RequestID
+func newLLMRoute(ref string, mc config.ModelConfig, req *CompletionRequest) llmRoute {
+	return llmRoute{
+		Provider: mc.Provider,
+		Protocol: string(mc.ProtocolOrDefault()),
+		ModelRef: ref,
+		Model:    resolvedRequestModel(mc, req),
 	}
-	return uuid.New().String()
 }
 
-func loggingFields(started time.Time, usage *Usage) logging.Event {
+func resolvedRequestModel(mc config.ModelConfig, req *CompletionRequest) string {
+	if req != nil && req.Model != "" {
+		return req.Model
+	}
+	return mc.Model
+}
+
+func logLLMRequestStartFailure(req *CompletionRequest, route llmRoute, started time.Time, err error) {
+	fields := llmRequestFields(started, nil)
+	fields["usage_received"] = false
+	logLLMRequestFailure(req, route, err, fields)
+}
+
+// logAndForwardLLMRequestStream 消费 provider 原始 stream，统计日志后原样转发给调用方。
+// Go channel 不能被旁路监听；如果日志 goroutine 直接读取 raw，会和正常流程抢 chunk。
+func logAndForwardLLMRequestStream(raw <-chan Chunk, req *CompletionRequest, route llmRoute, started time.Time) <-chan Chunk {
+	out := make(chan Chunk, providerChunkBuffer)
+	go func() {
+		defer close(out)
+		usage, stats, failed, modelErr := collectLLMRequestStream(raw, out, started)
+		fields := llmRequestFields(started, usage)
+		fields["tool_calls"] = stats.toolCalls
+		fields["chunk_count"] = stats.chunkCount
+		fields["assistant_bytes"] = stats.assistantBytes
+		fields["reasoning_bytes"] = stats.reasoningBytes
+		fields["usage_received"] = stats.usageReceived
+		fields["finish_shape"] = inferLLMFinishShape(stats, failed)
+		addLLMRequestFinishFields(fields, stats.finish)
+		if failed {
+			fields["last_chunk_age_ms"] = time.Since(stats.lastChunkAt).Milliseconds()
+			logLLMRequestFailure(req, route, modelErr, fields)
+			return
+		}
+		logLLMRequestSuccess(req, route, fields)
+	}()
+	return out
+}
+
+// collectLLMRequestStream 只旁路统计并转发 chunk，不改变 provider 返回内容。
+func collectLLMRequestStream(raw <-chan Chunk, out chan<- Chunk, started time.Time) (*Usage, llmRequestStreamStats, bool, *ModelError) {
+	stats := llmRequestStreamStats{lastChunkAt: started}
+	var usage *Usage
+	for chunk := range raw {
+		if chunk.Error != nil {
+			out <- chunk
+			return usage, stats, true, chunk.Error
+		}
+		stats.chunkCount++
+		stats.lastChunkAt = time.Now()
+		stats.assistantBytes += len(chunk.Content)
+		stats.reasoningBytes += len(chunk.ReasoningContent)
+		stats.toolCalls += len(chunk.ToolCalls)
+		if chunk.Usage != nil {
+			usage = chunk.Usage
+			stats.usageReceived = true
+		}
+		if chunk.Finish != nil {
+			stats.finish = chunk.Finish
+		}
+		out <- chunk
+	}
+	return usage, stats, false, nil
+}
+
+func llmRequestFields(started time.Time, usage *Usage) logging.Event {
 	fields := logging.Event{"duration_ms": time.Since(started).Milliseconds()}
 	if usage != nil {
 		fields["input_tokens"] = usage.InputTokens
@@ -53,6 +121,53 @@ func loggingFields(started time.Time, usage *Usage) logging.Event {
 	return fields
 }
 
+func addLLMRequestFinishFields(fields logging.Event, finish *FinishInfo) {
+	if fields == nil || finish == nil {
+		return
+	}
+	if finish.Reason != "" {
+		fields["finish_reason"] = finish.Reason
+	}
+	if finish.Status != "" {
+		fields["finish_status"] = finish.Status
+	}
+	if finish.NativeReason != "" && finish.NativeReason != finish.Reason {
+		fields["native_finish_reason"] = finish.NativeReason
+	}
+	if finish.IncompleteReason != "" {
+		fields["incomplete_reason"] = finish.IncompleteReason
+	}
+	if finish.StopSequence != "" {
+		fields["stop_sequence"] = finish.StopSequence
+	}
+}
+
+func inferLLMFinishShape(stats llmRequestStreamStats, failed bool) string {
+	if failed {
+		return "failed"
+	}
+	if stats.assistantBytes > 0 && stats.toolCalls > 0 {
+		return "text_tool_call"
+	}
+	if stats.assistantBytes > 0 {
+		return "text"
+	}
+	if stats.toolCalls > 0 {
+		return "tool_call"
+	}
+	if stats.reasoningBytes > 0 {
+		return "reasoning_only"
+	}
+	return "empty"
+}
+
+func requestID(req *CompletionRequest) string {
+	if req != nil && req.RequestID != "" {
+		return req.RequestID
+	}
+	return uuid.New().String()
+}
+
 func purpose(req *CompletionRequest) string {
 	if req != nil && req.Purpose != "" {
 		return req.Purpose
@@ -60,11 +175,14 @@ func purpose(req *CompletionRequest) string {
 	return "unknown"
 }
 
-func logRoutedLLMSuccess(req *CompletionRequest, route llmRoute, fields logging.Event) {
-	logRoutedLLM("INFO", req, route, "success", nil, fields)
+func logLLMRequestSuccess(req *CompletionRequest, route llmRoute, fields logging.Event) {
+	logLLMRequest("INFO", req, route, "success", nil, fields)
 }
 
-func logRoutedLLMFailure(req *CompletionRequest, route llmRoute, err error, fields logging.Event) {
+func logLLMRequestFailure(req *CompletionRequest, route llmRoute, err error, fields logging.Event) {
+	if fields == nil {
+		fields = logging.Event{}
+	}
 	if modelErr, ok := err.(*ModelError); ok && modelErr != nil {
 		if modelErr.StatusCode > 0 {
 			fields["status_code"] = modelErr.StatusCode
@@ -76,10 +194,10 @@ func logRoutedLLMFailure(req *CompletionRequest, route llmRoute, err error, fiel
 			fields["provider_type"] = modelErr.Type
 		}
 	}
-	logRoutedLLM("ERROR", req, route, "failed", err, fields)
+	logLLMRequest("ERROR", req, route, "failed", err, fields)
 }
 
-func logRoutedLLM(level string, req *CompletionRequest, route llmRoute, status string, err error, fields logging.Event) {
+func logLLMRequest(level string, req *CompletionRequest, route llmRoute, status string, err error, fields logging.Event) {
 	if fields == nil {
 		fields = logging.Event{}
 	}

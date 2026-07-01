@@ -167,20 +167,13 @@ func (r *Router) Complete(ctx context.Context, ref string, req *CompletionReques
 		return nil, err
 	}
 	started := time.Now()
-	route := llmRoute{
-		Provider: mc.Provider,
-		Protocol: string(mc.ProtocolOrDefault()),
-		ModelRef: ref,
-		Model:    resolvedRequestModel(mc, req),
-	}
+	route := newLLMRoute(ref, mc, req)
 	raw, err := p.Complete(ctx, req)
 	if err != nil {
-		fields := loggingFields(started, nil)
-		fields["usage_received"] = false
-		logRoutedLLMFailure(req, route, err, fields)
+		logLLMRequestStartFailure(req, route, started, err)
 		return nil, err
 	}
-	return wrapLLMLogStream(raw, req, route, started), nil
+	return logAndForwardLLMRequestStream(raw, req, route, started), nil
 }
 
 func validateToolResultPairs(messages []Message) error {
@@ -205,56 +198,6 @@ func validateToolResultPairs(messages []Message) error {
 		}
 	}
 	return nil
-}
-
-func resolvedRequestModel(mc config.ModelConfig, req *CompletionRequest) string {
-	if req != nil && req.Model != "" {
-		return req.Model
-	}
-	return mc.Model
-}
-
-func wrapLLMLogStream(raw <-chan Chunk, req *CompletionRequest, route llmRoute, started time.Time) <-chan Chunk {
-	out := make(chan Chunk, providerChunkBuffer)
-	go func() {
-		defer close(out)
-		usage, stats, failed, modelErr := collectAndForwardLLMChunks(raw, out, started)
-		fields := loggingFields(started, usage)
-		fields["tool_calls"] = stats.toolCalls
-		fields["chunk_count"] = stats.chunkCount
-		fields["assistant_bytes"] = stats.assistantBytes
-		fields["reasoning_bytes"] = stats.reasoningBytes
-		fields["usage_received"] = stats.usageReceived
-		if failed {
-			fields["last_chunk_age_ms"] = time.Since(stats.lastChunkAt).Milliseconds()
-			logRoutedLLMFailure(req, route, modelErr, fields)
-			return
-		}
-		logRoutedLLMSuccess(req, route, fields)
-	}()
-	return out
-}
-
-func collectAndForwardLLMChunks(raw <-chan Chunk, out chan<- Chunk, started time.Time) (*Usage, llmStreamStats, bool, *ModelError) {
-	stats := llmStreamStats{lastChunkAt: started}
-	var usage *Usage
-	for chunk := range raw {
-		if chunk.Error != nil {
-			out <- chunk
-			return usage, stats, true, chunk.Error
-		}
-		stats.chunkCount++
-		stats.lastChunkAt = time.Now()
-		stats.assistantBytes += len(chunk.Content)
-		stats.reasoningBytes += len(chunk.ReasoningContent)
-		stats.toolCalls += len(chunk.ToolCalls)
-		if chunk.Usage != nil {
-			usage = chunk.Usage
-			stats.usageReceived = true
-		}
-		out <- chunk
-	}
-	return usage, stats, false, nil
 }
 
 func (r *Router) MaxOutputTokens(ref string) int {

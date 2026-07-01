@@ -129,6 +129,16 @@ type CompletionRequest struct {
 	Reasoning    map[string]any `json:"reasoning,omitempty"`
 }
 
+// FinishInfo 是 provider 从协议原生响应中透传的结束信息。
+// Provider 只做字段映射，不在这里判断空回复、reasoning-only 等业务语义。
+type FinishInfo struct {
+	Reason           string `json:"reason,omitempty"`
+	Status           string `json:"status,omitempty"`
+	NativeReason     string `json:"native_reason,omitempty"`
+	IncompleteReason string `json:"incomplete_reason,omitempty"`
+	StopSequence     string `json:"stop_sequence,omitempty"`
+}
+
 // Chunk 是 provider 流式输出的原子片段；Error 非空时调用方必须停止并按失败处理。
 type Chunk struct {
 	Content          string      `json:"content,omitempty"`
@@ -136,6 +146,7 @@ type Chunk struct {
 	ToolCalls        []ToolCall  `json:"tool_calls,omitempty"`
 	Done             bool        `json:"done"`
 	Usage            *Usage      `json:"usage,omitempty"`
+	Finish           *FinishInfo `json:"finish,omitempty"`
 	Error            *ModelError `json:"error,omitempty"`
 }
 

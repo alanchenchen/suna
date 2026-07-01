@@ -63,6 +63,7 @@ func (p *OpenAIResponsesProvider) Complete(ctx context.Context, req *CompletionR
 		defer stream.Close()
 
 		var usage *Usage
+		var finish *FinishInfo
 		toolCallsByID := map[string]*responseToolCall{}
 		var toolCallOrder []string
 
@@ -83,6 +84,7 @@ func (p *OpenAIResponsesProvider) Complete(ctx context.Context, req *CompletionR
 				u := event.Response.Usage
 				if event.JSON.Response.Valid() {
 					usage = &Usage{InputTokens: int(u.InputTokens), OutputTokens: int(u.OutputTokens), CachedTokens: int(u.InputTokensDetails.CachedTokens), TotalTokens: int(u.TotalTokens)}
+					finish = responseFinishInfo(event.Response.Status, event.Response.IncompleteDetails.Reason)
 					collectResponseOutputToolCalls(event.Response.Output, toolCallsByID, &toolCallOrder)
 				}
 			case "error":
@@ -100,10 +102,10 @@ func (p *OpenAIResponsesProvider) Complete(ctx context.Context, req *CompletionR
 			ch <- Chunk{ToolCalls: toolCalls, Done: false}
 		}
 		if usage != nil {
-			ch <- Chunk{Done: true, Usage: usage}
+			ch <- Chunk{Done: true, Usage: usage, Finish: finish}
 			return
 		}
-		ch <- Chunk{Done: true}
+		ch <- Chunk{Done: true, Finish: finish}
 	}()
 	return ch, nil
 }
@@ -119,6 +121,19 @@ func responseReasoningContent(event responses.ResponseStreamEventUnion) string {
 	default:
 		return ""
 	}
+}
+
+func responseFinishInfo(status responses.ResponseStatus, incompleteReason string) *FinishInfo {
+	finish := &FinishInfo{Status: string(status)}
+	if incompleteReason != "" {
+		finish.Reason = incompleteReason
+		finish.NativeReason = incompleteReason
+		finish.IncompleteReason = incompleteReason
+	}
+	if finish.Status == "" && finish.Reason == "" {
+		return nil
+	}
+	return finish
 }
 
 func (p *OpenAIResponsesProvider) EstimateTokens(text string) int { return len(text) / 4 }

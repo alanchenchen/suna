@@ -67,6 +67,7 @@ func (p *OpenAIChatProvider) Complete(ctx context.Context, req *CompletionReques
 		defer stream.Close()
 
 		var usage *Usage
+		var finish *FinishInfo
 		var toolCallsAcc map[int]*chatToolCallAccum
 		for stream.Next() {
 			chunk := stream.Current()
@@ -78,6 +79,9 @@ func (p *OpenAIChatProvider) Complete(ctx context.Context, req *CompletionReques
 				continue
 			}
 			choice := chunk.Choices[0]
+			if choice.FinishReason != "" {
+				finish = &FinishInfo{Reason: choice.FinishReason, NativeReason: choice.FinishReason}
+			}
 			if choice.Delta.Content != "" {
 				ch <- Chunk{Content: choice.Delta.Content, Done: false}
 			}
@@ -95,10 +99,10 @@ func (p *OpenAIChatProvider) Complete(ctx context.Context, req *CompletionReques
 			ch <- Chunk{ToolCalls: toolCalls, Done: false}
 		}
 		if usage != nil {
-			ch <- Chunk{Done: true, Usage: usage}
+			ch <- Chunk{Done: true, Usage: usage, Finish: finish}
 			return
 		}
-		ch <- Chunk{Done: true}
+		ch <- Chunk{Done: true, Finish: finish}
 	}()
 	return ch, nil
 }
