@@ -22,7 +22,7 @@ TUI 纯前端，无业务逻辑。
   - TUI 不持有任何业务逻辑、状态、数据库连接
   - TUI 只做两件事：渲染 UI、通过 local transport 与 daemon 通信
   - 所有输入 → protocol request → local JSON-RPC framing → daemon
-  - daemon protocol event → typed tea.Msg → 渲染到终端
+  - daemon protocol notification 和 method response → typed tea.Msg → 渲染到终端
 */
 type TUI struct {
 	// Bubble Tea 运行时与 daemon I/O。副作用必须通过 tea.Cmd 或 notification pump 回到 Update。

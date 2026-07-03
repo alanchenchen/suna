@@ -27,9 +27,9 @@ Suna 的目标是在本地终端里提供一个可实际完成开发任务的通
 Suna 没有把所有逻辑塞进 TUI，而是拆成：
 
 ```text
-TUI
-  ↓ protocol + local transport
-Daemon
+TUI / 第三方客户端
+  ↓ protocol + local / stdio transport
+Daemon / Runtime
   ↓
 Agent / Runner / Tools / Guard / Memory / Skill / MCP
 ```
@@ -41,7 +41,7 @@ Agent / Runner / Tools / Guard / Memory / Skill / MCP
 - **协议边界清晰**：TUI 与 daemon 通过 `internal/protocol` 交互，新增用户可见状态时需要显式建模。
 - **便于未来扩展**：如果后续引入更多客户端或更复杂运行态，可以复用 daemon 侧能力。
 
-当前 daemon 是按需运行的本地服务，不是长期任务调度器。最后一个客户端断开后，daemon 会短暂等待重连；如果没有新客户端，会取消当前运行并退出。
+当前 daemon / runtime 是按需运行的本地服务，不是长期任务调度器。local transport 最后一个客户端断开后，daemon 会短暂等待重连；如果没有新客户端，会取消当前运行并退出。stdio runtime 绑定父进程 stdio 连接，连接结束后退出。
 
 ## 智能模型路由
 

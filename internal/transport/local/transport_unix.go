@@ -17,6 +17,7 @@ import (
 
 	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/protocol"
+	transportjsonrpc "github.com/alanchenchen/suna/internal/transport/jsonrpc"
 )
 
 type UnixSocketTransport struct {
@@ -52,6 +53,11 @@ func NewPlatformTransport(socketPath string) *UnixSocketTransport {
 }
 
 func (t *UnixSocketTransport) Name() string { return "local" }
+
+func (t *UnixSocketTransport) Info() protocol.TransportInfo {
+	// 官方 TUI 使用后台 local daemon，最后一个客户端断开后保留短暂宽限期，便于 status/stop 等短连接复用。
+	return protocol.TransportInfo{Retention: protocol.RetentionIdleExit, IdleTimeout: 2 * time.Second}
+}
 
 func (t *UnixSocketTransport) Mount(ctx context.Context, svc protocol.Service) error {
 	t.svc = svc
@@ -97,8 +103,8 @@ func (t *UnixSocketTransport) acceptLoop() {
 		t.mu.Lock()
 		t.conns[sc.id] = sc
 		t.mu.Unlock()
-		// 每个连接独立处理 JSON-RPC 流，业务逻辑通过 protocol.Service 进入 daemon。
-		go serveConn(t.ctx, sc, t.svc, func() {
+		// 每个连接必须独立 goroutine 处理；否则首个长连接会阻塞 accept loop，导致 status/stop 等后续 local 请求超时。
+		go transportjsonrpc.ServeConn(t.ctx, sc, t.svc, transportjsonrpc.Options{Transport: t.Name()}, func() {
 			t.mu.Lock()
 			delete(t.conns, sc.id)
 			t.mu.Unlock()

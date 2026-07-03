@@ -7,8 +7,8 @@
 ```text
 CLI / main.go
     ↓
-TUI / 命令入口
-    ↓ protocol + local transport
+TUI / runtime 命令入口
+    ↓ protocol + local / stdio transport
 Daemon
     ↓
 Agent / Runner / Model / Tools / Guard / Memory / Skill / MCP
@@ -23,6 +23,7 @@ Agent / Runner / Model / Tools / Guard / Memory / Skill / MCP
 - `suna`：启动 TUI，必要时自动拉起 daemon。
 - `suna status`：查询 daemon 状态。
 - `suna stop`：停止 daemon。
+- `suna runtime --transport stdio`：启动单进程 headless runtime，供第三方 UI / 客户端通过 stdio 接入。
 
 CLI 不承载业务逻辑，只做进程管理、入口适配和本地 transport 连接。
 
@@ -33,15 +34,21 @@ TUI 是用户交互层，职责包括：
 - 渲染聊天、配置、帮助、欢迎页。
 - 接收键盘、粘贴、窗口尺寸等终端事件；剪贴板图片读取只作为 TUI 用户输入 fallback，不进入 daemon。
 - 将用户操作转换成 protocol request。
-- 将 daemon notification 转成 Bubble Tea 消息并更新 UI 状态。
+- 将 daemon notification 和 method response 转成 Bubble Tea 消息并更新 UI 状态。
 
 TUI 不应直接调用 runner、agent、tools、memory、guard 等业务包。
 
-## Protocol 与 local transport
+## Protocol 与 transport
 
-TUI 和 daemon 通过 `internal/protocol` 定义的方法、参数和通知通信。Agent 输出按职责拆分为三类通知：`agent.delta` 只承载 assistant/reasoning 文本增量，`agent.run` 承载 run 生命周期、retry、失败错误和恢复能力，`agent.usage` 承载 token/context/耗时统计。
+TUI、第三方 runtime 客户端和 daemon 通过 `internal/protocol` 定义统一的方法、参数、结果和通知通信。Agent 输出按职责拆分为三类通知：`agent.delta` 只承载 assistant/reasoning 文本增量，`agent.run` 承载 run 生命周期、retry、失败错误和恢复能力，`agent.usage` 承载 token/context/耗时统计。
 
-本地连接由 `internal/transport/local` 承载，TUI 侧只保留适配层：
+Transport 只负责连接、framing、握手策略和生命周期策略，不改变业务语义：
+
+- `internal/transport/local`：Unix socket / Named Pipe，供官方 TUI 和本地 CLI 管理命令使用。
+- `internal/transport/stdio`：`suna runtime --transport stdio`，供第三方 UI / 客户端使用。
+- `internal/transport/jsonrpc`：local / stdio 共用的 JSON-RPC request、response、notification、结构化错误和 hello gate。
+
+TUI 侧只保留适配层：
 
 ```text
 internal/tui/transport
@@ -50,11 +57,10 @@ internal/tui/transport
 该适配层只负责：
 
 - 连接 daemon。
-- 发起 protocol request。
+- 发起 protocol request 并接收 method response。
 - 接收 daemon notification。
-- 将少量同步查询结果转换为 TUI 可消费的通知。
 
-连接建立本身只注册本地 event sink；TUI 初始展示状态通过 `daemon.status`、`config.get` 等 request 主动拉取，后续运行过程再消费 daemon notification。
+连接建立本身只注册本地 event sink；TUI 初始展示状态通过 `daemon.status`、`config.get` 等 request 主动拉取，后续运行过程再消费 daemon notification。method response 不会被伪装成 daemon notification，而是转换为 TUI 本地 typed message。
 
 ## Daemon
 
@@ -71,13 +77,11 @@ TUI 重构或 UI 交互调整不应改变 daemon 的业务语义。
 
 ## Daemon 生命周期
 
-当前版本是单 agent、单会话形态，没有 trigger/cowork/perception 等长期后台任务。daemon 生命周期按客户端连接驱动：
+当前版本是单 agent、单会话形态，没有 trigger/cowork/perception 等长期后台任务。daemon 生命周期由 transport 声明的 retention policy 和当前连接数共同决定：
 
-- 打开 TUI 或执行需要 daemon 的 CLI 命令时，如果 daemon 未运行，会自动后台启动。
-- 每个 local transport 连接建立时注册 event sink，断开时注销；连接数是 daemon 是否继续运行的主要依据。
-- 最后一个客户端断开后，daemon 进入短暂宽限期；如果没有新连接，会取消当前 agent run 并退出。
-- `Close` 语义只释放资源，不启动新的业务工作；记忆整理需要由 worker 正常批量策略或未来显式 drain 流程触发。
-- 未开始处理的 `memory_queue` 持久化在 SQLite 中，daemon 退出时不强制 compaction，下次启动后通过 recover signal 继续按批量策略处理。
+- local transport 使用 `idle_exit`：打开 TUI 或执行需要 daemon 的 CLI 命令时，如果 daemon 未运行，会自动后台启动；最后一个客户端断开后，daemon 进入短暂宽限期，如果没有新连接，会取消当前 agent run 并退出。
+- stdio runtime 使用 `client_bound`：父进程关闭 stdio / 连接结束后，runtime 退出。runtime v0 不支持多个 Suna 进程同时写入同一数据目录；第三方 UI 应独占启动 runtime，未来如需强制单 owner，应使用系统级文件锁或 named mutex，而不是普通 lock 文件。
+- 未来 server transport 可使用 `persistent`：即使暂时没有客户端也保持监听。
 - `suna stop`、`SIGTERM`、`SIGINT` 也会进入同一类关闭流程。
 
 未来如果引入 trigger/cowork/perception，再通过明确的 activity/drain 机制扩展生命周期，不应把业务收尾隐式塞进资源 `Close`。
@@ -130,6 +134,8 @@ Suna 当前是单用户单当前会话形态，不提供多会话管理或完整
 
 - `README.md`：项目门面，突出亮点、快速开始、常用操作、安全提醒和 docs 入口。
 - `docs/README.md`：文档索引和推荐阅读路径。
+- `docs/runtime-stdio.md`：第三方 UI / 客户端通过 stdio runtime 接入 Suna。
+- `docs/protocol.md`：统一 method、result、notification、错误和消息 schema。
 - `docs/design.md`：关键设计和取舍，包括架构、安全、上下文、性能、记忆、Skill、MCP 等。
 - `docs/architecture.md`：稳定架构、模块边界和 daemon 生命周期。
 - `docs/code-map.md`：功能到代码位置、主要包职责和核心流程。

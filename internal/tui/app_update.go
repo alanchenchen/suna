@@ -19,6 +19,9 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return t, nil
 	}
+	if cmd := t.handleProtocolResultMsg(msg); cmd != nil {
+		return t, cmd
+	}
 	if _, ok := msg.(inputCursorBlinkMsg); ok {
 		// tick 链永不断：不论当前是哪个页面都要继续重排，否则离开 chat 后闪烁链会永久停止。
 		if t.inputCursorBlinking {

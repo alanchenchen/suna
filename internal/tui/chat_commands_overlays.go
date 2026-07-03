@@ -165,10 +165,11 @@ func (t *TUI) setSkillOverlayCmd(name string, enabled bool) tea.Cmd {
 		if err := t.localCli.SetSkill(protocol.SkillSetParams{Name: strings.TrimSpace(name), Enabled: enabled}); err != nil {
 			return ipcErrorNotification(notifyConfigError, err)
 		}
-		if err := t.localCli.ListSkills(); err != nil {
+		result, err := t.localCli.ListSkills()
+		if err != nil {
 			return ipcErrorNotification(notifyConfigError, err)
 		}
-		return nil
+		return skillListResultMsg{Params: result}
 	}
 }
 
@@ -286,10 +287,11 @@ func (t *TUI) setMCPOverlayCmd(name string, active bool) tea.Cmd {
 		if err := t.localCli.ToggleMCP(protocol.MCPSetParams{Name: strings.TrimSpace(name), Active: active}); err != nil {
 			return ipcErrorNotification(notifyMCPError, err)
 		}
-		if err := t.localCli.ListMCP(); err != nil {
+		result, err := t.localCli.ListMCP()
+		if err != nil {
 			return ipcErrorNotification(notifyMCPError, err)
 		}
-		return nil
+		return mcpListResultMsg{Params: result}
 	}
 }
 
@@ -301,10 +303,11 @@ func (t *TUI) reloadMCPOverlayCmd(name string) tea.Cmd {
 		if err := t.localCli.ReloadMCP(protocol.MCPReloadParams{Name: strings.TrimSpace(name)}); err != nil {
 			return ipcErrorNotification(notifyMCPError, err)
 		}
-		if err := t.localCli.ListMCP(); err != nil {
+		result, err := t.localCli.ListMCP()
+		if err != nil {
 			return ipcErrorNotification(notifyMCPError, err)
 		}
-		return nil
+		return mcpListResultMsg{Params: result}
 	}
 }
 

@@ -312,6 +312,35 @@ func TestDeleteCredentialMissingProviderIsNoop(t *testing.T) {
 	}
 }
 
+func TestSaveCredentialTrimsWhitespace(t *testing.T) {
+	dir := t.TempDir()
+
+	if err := SaveCredential(dir, "openai", " \n\tsk-openai\r\n "); err != nil {
+		t.Fatalf("SaveCredential() error = %v", err)
+	}
+
+	creds := loadCredentials(t, dir)
+	if got := creds["openai"].APIKey; got != "sk-openai" {
+		t.Fatalf("credentials[openai].APIKey = %q, want %q", got, "sk-openai")
+	}
+}
+
+func TestLoadCredentialsTrimsStoredWhitespace(t *testing.T) {
+	dir := t.TempDir()
+	body := "[openai]\napi_key = \" \\n\\tsk-openai\\r\\n \"\n"
+	if err := os.WriteFile(filepath.Join(dir, "credentials.toml"), []byte(body), 0600); err != nil {
+		t.Fatalf("WriteFile(credentials.toml) error = %v", err)
+	}
+	cfg := &Config{DataDir: dir, Models: []ModelConfig{{Provider: "openai", Model: "gpt-4o-mini"}}}
+
+	if err := LoadCredentials(cfg); err != nil {
+		t.Fatalf("LoadCredentials() error = %v", err)
+	}
+	if got := cfg.Models[0].APIKey; got != "sk-openai" {
+		t.Fatalf("loaded APIKey = %q, want %q", got, "sk-openai")
+	}
+}
+
 func newSaveTestConfig(t *testing.T, maxModelRPS int) (*Config, string, string) {
 	t.Helper()
 	dir := t.TempDir()

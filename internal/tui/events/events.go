@@ -109,7 +109,7 @@ func Decode(notif Notification) tea.Msg {
 		}
 		_ = json.Unmarshal(notif.Params, &p)
 		return RequestErrorMsg{Scope: notif.Method, Message: p.Message}
-	case protocol.NotifyMemoryListResult:
+	case protocol.NotifyMemoryState:
 		return decodeParams[protocol.MemoryListResult](notif, func(p protocol.MemoryListResult) tea.Msg { return MemoryListMsg{Params: p} })
 	case protocol.NotifySessionRestoreMsg:
 		return decodeParams[SessionRestoreMessageMsg](notif, func(p SessionRestoreMessageMsg) tea.Msg { return p })
@@ -119,16 +119,10 @@ func Decode(notif Notification) tea.Msg {
 		return decodeParams[protocol.DaemonStatusParams](notif, func(p protocol.DaemonStatusParams) tea.Msg { return DaemonFullStatusMsg{Params: p} })
 	case protocol.NotifyConfigState:
 		return decodeParams[protocol.ConfigParams](notif, func(p protocol.ConfigParams) tea.Msg { return ConfigStateMsg{Params: p} })
-	case protocol.MethodSkillList:
-		return decodeParams[protocol.SkillListResult](notif, func(p protocol.SkillListResult) tea.Msg { return SkillListMsg{Params: p} })
-	case protocol.MethodMCPList:
-		return decodeParams[protocol.MCPListResult](notif, func(p protocol.MCPListResult) tea.Msg { return MCPListMsg{Params: p} })
 	case protocol.NotifySkillLoad:
 		return decodeParams[protocol.SkillLoadParams](notif, func(p protocol.SkillLoadParams) tea.Msg { return SkillLoadMsg{Params: p} })
 	case protocol.NotifySkillReview:
 		return decodeParams[protocol.SkillReviewParams](notif, func(p protocol.SkillReviewParams) tea.Msg { return SkillReviewMsg{Params: p} })
-	case protocol.MethodAttachmentStatus:
-		return decodeParams[protocol.AttachmentStatusResult](notif, func(p protocol.AttachmentStatusResult) tea.Msg { return AttachmentStatusMsg{Params: p} })
 	default:
 		return UnknownNotificationMsg{Raw: notif}
 	}

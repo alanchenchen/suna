@@ -402,10 +402,11 @@ func (t *TUI) sendConfigSet(params protocol.ConfigSetParams) tea.Cmd {
 		if t.localCli == nil || !t.localCli.Connected() {
 			return localNotification{method: notifyConfigError, params: []byte(fmt.Sprintf(`{"message":%q}`, t.tr("tui.error.daemon_not_connected")))}
 		}
-		if err := t.localCli.ConfigSet(params); err != nil {
+		result, err := t.localCli.ConfigSet(params)
+		if err != nil {
 			return localNotification{method: notifyConfigError, params: []byte(fmt.Sprintf(`{"message":%q}`, err.Error()))}
 		}
-		return nil
+		return configResultMsg{Params: result}
 	}
 }
 func (t *TUI) leaveConfig() tea.Cmd {

@@ -3,12 +3,14 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
-	tuievents "github.com/alanchenchen/suna/internal/tui/events"
-	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
-	tuitransport "github.com/alanchenchen/suna/internal/tui/transport"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/alanchenchen/suna/internal/protocol"
+	tuievents "github.com/alanchenchen/suna/internal/tui/events"
+	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
+	tuitransport "github.com/alanchenchen/suna/internal/tui/transport"
 )
 
 type localNotification struct {
@@ -64,10 +66,11 @@ func (t *TUI) daemonStatusCmd() tea.Cmd {
 		if t.localCli == nil {
 			return nil
 		}
-		if err := t.localCli.DaemonStatus(); err != nil {
+		result, err := t.localCli.DaemonStatus()
+		if err != nil {
 			return ipcErrorNotification(notifyConfigError, err)
 		}
-		return nil
+		return daemonStatusResultMsg{Params: result}
 	}
 }
 
@@ -76,10 +79,11 @@ func (t *TUI) configGetCmd() tea.Cmd {
 		if t.localCli == nil {
 			return nil
 		}
-		if err := t.localCli.ConfigGet(); err != nil {
+		result, err := t.localCli.ConfigGet()
+		if err != nil {
 			return ipcErrorNotification(notifyConfigError, err)
 		}
-		return nil
+		return configResultMsg{Params: result}
 	}
 }
 
@@ -88,10 +92,11 @@ func (t *TUI) attachmentStatusCmd() tea.Cmd {
 		if t.localCli == nil {
 			return nil
 		}
-		if err := t.localCli.AttachmentStatus(); err != nil {
+		result, err := t.localCli.AttachmentStatus()
+		if err != nil {
 			return ipcErrorNotification(notifyConfigError, err)
 		}
-		return nil
+		return attachmentStatusResultMsg{Params: result}
 	}
 }
 
@@ -100,10 +105,11 @@ func (t *TUI) attachmentClearCmd() tea.Cmd {
 		if t.localCli == nil {
 			return ipcErrorNotification(notifyConfigError, fmt.Errorf("%s", t.tr("error.not_connected")))
 		}
-		if err := t.localCli.AttachmentClear(); err != nil {
+		result, err := t.localCli.AttachmentClear()
+		if err != nil {
 			return ipcErrorNotification(notifyConfigError, err)
 		}
-		return nil
+		return attachmentStatusResultMsg{Params: protocol.AttachmentStatusResult{Root: result.Root, Bytes: result.Bytes, Count: result.Count}}
 	}
 }
 
@@ -197,10 +203,11 @@ func (t *TUI) listSkillsCmd() tea.Cmd {
 		if t.localCli == nil {
 			return ipcErrorNotification(notifyConfigError, fmt.Errorf("%s", t.tr("error.not_connected")))
 		}
-		if err := t.localCli.ListSkills(); err != nil {
+		result, err := t.localCli.ListSkills()
+		if err != nil {
 			return ipcErrorNotification(notifyConfigError, err)
 		}
-		return nil
+		return skillListResultMsg{Params: result}
 	}
 }
 
@@ -209,10 +216,11 @@ func (t *TUI) listMCPCmd() tea.Cmd {
 		if t.localCli == nil {
 			return ipcErrorNotification(notifyMCPError, fmt.Errorf("%s", t.tr("error.not_connected")))
 		}
-		if err := t.localCli.ListMCP(); err != nil {
+		result, err := t.localCli.ListMCP()
+		if err != nil {
 			return ipcErrorNotification(notifyMCPError, err)
 		}
-		return nil
+		return mcpListResultMsg{Params: result}
 	}
 }
 
@@ -239,10 +247,11 @@ func (t *TUI) listMemoryCmd() tea.Cmd {
 		if t.localCli == nil {
 			return ipcErrorNotification(notifyConfigError, fmt.Errorf("%s", t.tr("error.not_connected")))
 		}
-		if err := t.localCli.ListMemory(); err != nil {
+		result, err := t.localCli.ListMemory()
+		if err != nil {
 			return ipcErrorNotification(notifyConfigError, err)
 		}
-		return nil
+		return memoryListResultMsg{Params: result}
 	}
 }
 

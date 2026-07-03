@@ -35,6 +35,17 @@ type skillReviewMsg = tuievents.SkillReviewMsg
 type attachmentStatusMsg = tuievents.AttachmentStatusMsg
 type requestErrorMsg = tuievents.RequestErrorMsg
 
+type daemonStatusResultMsg struct{ Params protocol.DaemonStatusParams }
+type configResultMsg struct{ Params protocol.ConfigParams }
+
+// attachmentStatusResultMsg 等 resultMsg 只表示 method response，不进入 daemon notification 解码路径。
+type attachmentStatusResultMsg struct {
+	Params protocol.AttachmentStatusResult
+}
+type memoryListResultMsg struct{ Params protocol.MemoryListResult }
+type skillListResultMsg struct{ Params protocol.SkillListResult }
+type mcpListResultMsg struct{ Params protocol.MCPListResult }
+
 const (
 	notifyCompactError = tuievents.NotifyCompactError
 	notifyConfigError  = tuievents.NotifyConfigError

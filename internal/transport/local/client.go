@@ -8,15 +8,19 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	transportjsonrpc "github.com/alanchenchen/suna/internal/transport/jsonrpc"
 )
 
 type Client struct {
-	conn    net.Conn
-	mu      sync.Mutex
-	reqID   int
+	conn  net.Conn
+	mu    sync.Mutex
+	reqID int
+	// pending 保存 request id 到响应 channel 的映射；notification 不进入这个表。
 	pending map[int]chan clientResult
-	notify  func(method string, params json.RawMessage)
-	closed  bool
+	// notify 只接收 daemon 主动 notification，method response 必须走 pending response 路径。
+	notify func(method string, params json.RawMessage)
+	closed bool
 }
 
 type clientResult struct {
@@ -24,7 +28,7 @@ type clientResult struct {
 	err    error
 }
 
-// DialDefault connects to the current platform's default local daemon endpoint.
+// DialDefault 连接当前平台默认 local daemon endpoint。
 func DialDefault(timeout time.Duration) (*Client, error) {
 	return Dial(DefaultEndpoint(), timeout)
 }
@@ -46,6 +50,7 @@ func (c *Client) OnNotify(fn func(method string, params json.RawMessage)) {
 }
 
 func (c *Client) InvokeRaw(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	// 同一个连接允许并发 Invoke；写入请求和 pending 表登记必须在同一把锁内完成，避免 response 先到而找不到 channel。
 	c.mu.Lock()
 	if c.closed || c.conn == nil {
 		c.mu.Unlock()
@@ -55,7 +60,7 @@ func (c *Client) InvokeRaw(ctx context.Context, method string, params any) (json
 	id := c.reqID
 	ch := make(chan clientResult, 1)
 	c.pending[id] = ch
-	req := Request{JSONRPC: "2.0", ID: id, Method: method, Params: params}
+	req := transportjsonrpc.Request{JSONRPC: "2.0", ID: id, Method: method, Params: params}
 	data, err := json.Marshal(req)
 	if err != nil {
 		delete(c.pending, id)
@@ -107,6 +112,7 @@ func (c *Client) Close() error {
 
 const maxRetainedClientLineBuffer = 256 * 1024
 
+// receiveLoop 按 NDJSON 分帧读取 daemon 输出；超大行处理后释放 buffer，避免长期保留异常大容量。
 func (c *Client) receiveLoop() {
 	var buf [4096]byte
 	var lineBuf []byte
@@ -145,6 +151,7 @@ func (c *Client) handleMessage(raw []byte) {
 		return
 	}
 	if meta.Method != "" && meta.ID == 0 {
+		// 没有 id 且带 method 的消息是 daemon notification；不能再伪装成 method response。
 		var rawMsg map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &rawMsg); err != nil {
 			return
@@ -159,9 +166,9 @@ func (c *Client) handleMessage(raw []byte) {
 	}
 
 	var resp struct {
-		ID     int             `json:"id"`
-		Result json.RawMessage `json:"result,omitempty"`
-		Error  *Error          `json:"error,omitempty"`
+		ID     int                     `json:"id"`
+		Result json.RawMessage         `json:"result,omitempty"`
+		Error  *transportjsonrpc.Error `json:"error,omitempty"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return

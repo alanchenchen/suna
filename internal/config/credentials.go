@@ -24,7 +24,7 @@ func SaveCredential(dataDir, provider, apiKey string) error {
 	}
 	creds[provider] = struct {
 		APIKey string `toml:"api_key"`
-	}{APIKey: apiKey}
+	}{APIKey: strings.TrimSpace(apiKey)}
 	return writeCredentials(dataDir, creds)
 }
 
@@ -55,7 +55,7 @@ func LoadCredentials(cfg *Config) error {
 	}
 	for i := range cfg.Models {
 		if c, ok := creds[cfg.Models[i].Provider]; ok {
-			cfg.Models[i].APIKey = c.APIKey
+			cfg.Models[i].APIKey = strings.TrimSpace(c.APIKey)
 		}
 	}
 	return nil

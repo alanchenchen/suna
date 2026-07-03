@@ -155,8 +155,8 @@ Ctrl+C             退出
 ## 核心设计一眼看懂
 
 ```text
-CLI / TUI
-   ↓ protocol + local transport
+CLI / TUI / Runtime
+   ↓ protocol + local / stdio transport
 Daemon
    ↓
 Agent / Runner
@@ -252,6 +252,12 @@ C:\Users\<你>\.suna\logs\app.log
 排查问题时优先查看 `~/.suna/logs/app.log`。
 
 ## 开发者阅读入口
+
+如果你想开发第三方 UI、桌面端、IDE 插件或本地 Web 服务，先看：
+
+- [stdio runtime 接入指南](docs/runtime-stdio.md)：第三方客户端如何启动 `suna runtime --transport stdio` 并通过 JSON-RPC/NDJSON 通信。
+- [Protocol](docs/protocol.md)：统一 method / notification / schema 语义。
+- [配置说明](docs/configuration.md)：需要做模型、Guard、MCP、Skill 配置页时再看。
 
 如果你想了解 Suna 的关键设计、架构、性能取舍和代码位置，建议从 docs 入口开始：
 

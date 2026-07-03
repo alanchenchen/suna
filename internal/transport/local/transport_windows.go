@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/alanchenchen/suna/internal/protocol"
+	transportjsonrpc "github.com/alanchenchen/suna/internal/transport/jsonrpc"
 )
 
 type NamedPipeTransport struct {
@@ -72,6 +73,11 @@ func NewPlatformTransport(pipePath string) *NamedPipeTransport {
 
 func (t *NamedPipeTransport) Name() string { return "local" }
 
+func (t *NamedPipeTransport) Info() protocol.TransportInfo {
+	// 官方 TUI 使用后台 local daemon，最后一个客户端断开后保留短暂宽限期，便于 status/stop 等短连接复用。
+	return protocol.TransportInfo{Retention: protocol.RetentionIdleExit, IdleTimeout: 2 * time.Second}
+}
+
 func (t *NamedPipeTransport) Mount(ctx context.Context, svc protocol.Service) error {
 	t.svc = svc
 	t.ctx, t.cancel = context.WithCancel(ctx)
@@ -107,8 +113,8 @@ func (t *NamedPipeTransport) acceptLoop() {
 		t.mu.Lock()
 		t.conns[pc.id] = pc
 		t.mu.Unlock()
-		// 每个连接独立处理 JSON-RPC 流，业务逻辑通过 protocol.Service 进入 daemon。
-		go serveConn(t.ctx, pc, t.svc, func() {
+		// 每个连接必须独立 goroutine 处理；否则首个长连接会阻塞 accept loop，导致 status/stop 等后续 local 请求超时。
+		go transportjsonrpc.ServeConn(t.ctx, pc, t.svc, transportjsonrpc.Options{Transport: t.Name()}, func() {
 			t.mu.Lock()
 			delete(t.conns, pc.id)
 			t.mu.Unlock()

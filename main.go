@@ -25,6 +25,8 @@ func main() {
 	switch cmd {
 	case "tui":
 		runTUI()
+	case "runtime":
+		runRuntime(os.Args[2:])
 	case "help":
 		printHelp()
 	case "stop":
@@ -63,6 +65,8 @@ func parseCLI(args []string) string {
 		return "status"
 	case "update":
 		return "update"
+	case "runtime":
+		return "runtime"
 	default:
 		return fs.Arg(0)
 	}
@@ -76,6 +80,8 @@ Usage:
   suna stop            Stop the running daemon.
   suna status          Show daemon status.
   suna update          Check for updates, show release notes, and ask before installing.
+  suna runtime --transport stdio
+                        Start headless Suna runtime for third-party clients.
   suna help            Show this help.
 
 Notes:
@@ -95,7 +101,7 @@ func runDaemon(configPath string) {
 	initLogging(cfg.DataDir)
 
 	transports := []protocol.Transport{local.NewPlatformTransport(local.DefaultEndpoint())}
-	d, err := daemon.New(cfg, transports)
+	d, err := daemon.New(cfg, transports, daemon.Options{RegisterPID: true})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sunad: create error: %s\n", err)
 		os.Exit(1)

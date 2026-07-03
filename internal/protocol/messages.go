@@ -1,5 +1,34 @@
 package protocol
 
+type RuntimeHelloParams struct {
+	// ProtocolVersion 是客户端期望的协议版本；为空时按当前默认 0.1 处理。
+	ProtocolVersion string `json:"protocol_version,omitempty"`
+	// Transport 由 JSON-RPC transport 层注入并覆盖客户端输入，用于 runtime.hello 返回真实承载方式。
+	Transport string `json:"transport,omitempty"`
+	// Client 是第三方 UI/插件的自描述信息，只用于诊断和未来能力协商。
+	Client RuntimeClient `json:"client,omitempty"`
+}
+
+type RuntimeClient struct {
+	Name    string `json:"name,omitempty"`
+	Version string `json:"version,omitempty"`
+	Type    string `json:"type,omitempty"`
+}
+
+type RuntimeHelloResult struct {
+	ProtocolVersion string `json:"protocol_version"`
+	RuntimeVersion  string `json:"runtime_version"`
+	Transport       string `json:"transport"`
+	// Capabilities 是运行时能力开关；客户端应按 key 判断，不要从版本号推断能力。
+	Capabilities map[string]bool `json:"capabilities"`
+	// ContentSources 声明 agent.sendMessage 支持的内容来源，第三方 UI v0 主要使用 text/path/url。
+	ContentSources map[string]bool `json:"content_sources"`
+	// Limits 暴露协议层稳定限制，例如 tool result 截断阈值。
+	Limits map[string]int `json:"limits,omitempty"`
+	// Metadata 预留给未来非关键诊断字段；客户端不应依赖其存在。
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+}
+
 type SendMessageParams struct {
 	ClientMsgID string `json:"client_msg_id,omitempty"`
 	// Parts 是唯一输入载体；纯文本也必须作为 text part 传入，避免回到旧的 content string 分支。
@@ -39,6 +68,17 @@ const (
 	AgentRunPhaseAsk     AgentRunPhase = "ask"
 	AgentRunPhaseSkill   AgentRunPhase = "skill"
 )
+
+type ProtocolErrorData struct {
+	// Kind 是稳定错误分类，UI/SDK 只能依赖它做分支，不应解析 message。
+	Kind string `json:"kind"`
+	// Reason 是可选机器可读补充原因，例如 unsupported protocol_version。
+	Reason string `json:"reason,omitempty"`
+	// Retryable 表示同一请求在条件不变时是否值得重试。
+	Retryable bool `json:"retryable,omitempty"`
+	// StatusCode 保留上游 HTTP/模型错误状态码，便于客户端展示和诊断。
+	StatusCode int `json:"status_code,omitempty"`
+}
 
 type ModelErrorKind string
 

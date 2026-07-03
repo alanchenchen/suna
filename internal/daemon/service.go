@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/protocol"
 	"github.com/alanchenchen/suna/internal/skill"
+	"github.com/alanchenchen/suna/internal/version"
 )
 
 const maxToolResultBytes = 16 * 1024
@@ -79,6 +81,8 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 		return result, nil
 	}
 	switch req.Method {
+	case protocol.MethodRuntimeHello:
+		return s.handleRuntimeHello(req)
 	case protocol.MethodSendMessage:
 		return s.handleSendMessage(ctx, req, sink)
 	case protocol.MethodResumeRun:
@@ -128,6 +132,32 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 	default:
 		return nil, protocolError{code: -32601, message: fmt.Sprintf("method not found: %s", req.Method)}
 	}
+}
+
+func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHelloResult, error) {
+	var params protocol.RuntimeHelloParams
+	if err := decodeParams(req.Params, &params); err != nil {
+		return protocol.RuntimeHelloResult{}, invalidParams(err.Error())
+	}
+	requestedVersion := strings.TrimSpace(params.ProtocolVersion)
+	if requestedVersion != "" && requestedVersion != "0.1" {
+		return protocol.RuntimeHelloResult{}, protocolError{code: -32602, message: "unsupported protocol version", data: protocol.ProtocolErrorData{Kind: "unsupported_capability", Reason: "protocol_version"}}
+	}
+	transport := strings.TrimSpace(params.Transport)
+	if transport == "" {
+		transport = "unknown"
+	}
+	return protocol.RuntimeHelloResult{
+		ProtocolVersion: "0.1",
+		RuntimeVersion:  version.Current(),
+		Transport:       transport,
+		Capabilities: map[string]bool{
+			"agent": true, "streaming": true, "tools": true, "guard": true, "ask_user": true,
+			"session": true, "config": true, "memory": true, "skills": true, "mcp": true,
+		},
+		ContentSources: map[string]bool{"text": true, "image_path": true, "image_url": true},
+		Limits:         map[string]int{"max_tool_result_bytes": maxToolResultBytes},
+	}, nil
 }
 
 func (s *service) handleSendMessage(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
@@ -302,8 +332,7 @@ func (s *service) handleMemoryList(ctx context.Context, sink protocol.EventSink)
 	for _, m := range memories {
 		result.Memories = append(result.Memories, protocol.MemoryItem{ID: m.ID, Content: m.Content, Kind: m.Kind, Tags: m.Tags, Priority: m.Priority, IsCore: m.IsCore})
 	}
-	emit(ctx, sink, protocol.NotifyMemoryListResult, result)
-	return map[string]string{"status": "ok"}, nil
+	return result, nil
 }
 
 func (s *service) handleMemoryDelete(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
@@ -341,7 +370,7 @@ func (s *service) emitMemoryList(ctx context.Context, sink protocol.EventSink) e
 	for _, m := range memories {
 		result.Memories = append(result.Memories, protocol.MemoryItem{ID: m.ID, Content: m.Content, Kind: m.Kind, Tags: m.Tags, Priority: m.Priority, IsCore: m.IsCore})
 	}
-	emit(ctx, sink, protocol.NotifyMemoryListResult, result)
+	emit(ctx, sink, protocol.NotifyMemoryState, result)
 	return nil
 }
 
@@ -548,13 +577,27 @@ func truncateUTF8(s string, maxBytes int) string {
 type protocolError struct {
 	code    int
 	message string
+	data    any
 }
 
 func (e protocolError) Error() string { return e.message }
 func (e protocolError) Code() int     { return e.code }
+func (e protocolError) Data() any {
+	if e.data != nil {
+		return e.data
+	}
+	switch e.code {
+	case -32601:
+		return protocol.ProtocolErrorData{Kind: "unsupported_method"}
+	case -32602:
+		return protocol.ProtocolErrorData{Kind: "invalid_request"}
+	default:
+		return protocol.ProtocolErrorData{Kind: "internal_error"}
+	}
+}
 
 func invalidParams(message string) protocolError {
-	return protocolError{code: -32602, message: message}
+	return protocolError{code: -32602, message: message, data: protocol.ProtocolErrorData{Kind: "invalid_request"}}
 }
 
 func protocolModelError(err *model.ModelError) *protocol.ModelError {
