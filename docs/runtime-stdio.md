@@ -1,59 +1,202 @@
-# Suna stdio runtime 接入指南
+# Suna stdio runtime 开发者接入手册
 
-本文面向想开发第三方 UI、桌面端、IDE 插件或本地 Web 服务的开发者。第一阶段官方对外接入方式是：启动一个 headless Suna runtime，并通过 stdio 与它通信。
+本文面向第三方 UI、桌面端、IDE 插件、本地 Web 服务或脚本开发者。目标是让你不需要 import Go 包、不需要理解 Suna 的 local socket / Named Pipe，也能通过一个子进程接入 Suna Agent 能力。
 
-```bash
-suna runtime --transport stdio
+推荐架构：
+
+```txt
+你的 UI / Web Backend / Electron Main / IDE Extension
+  -> spawn `suna runtime --transport stdio`
+  -> stdin/stdout JSON-RPC + NDJSON
+  -> Suna Agent / Tools / Memory / Skills / MCP
 ```
 
-必须显式传入 `--transport stdio`。只运行 `suna runtime` 会打印 usage 并退出，避免后续新增 transport 时让入口语义变得隐式。
+Suna runtime 负责 Agent 能力；文件浏览、终端、HTTP/WebSocket 服务、模型列表拉取等 UI 辅助能力由你的项目自己实现。
 
-这个命令会在前台启动一个单进程 Suna runtime。父进程通过 JSON-RPC 2.0 + NDJSON 与它通信：
+---
 
-- `stdin`：客户端写入 JSON-RPC request，一行一个 JSON。
-- `stdout`：Suna 输出 JSON-RPC response / notification，一行一个 JSON。
-- `stderr`：人类可读诊断信息和错误提示。
+## 0. 一分钟跑通
 
-> 重要：`stdout` 只会输出协议消息。第三方客户端应只解析 stdout，不要从 stderr 解析协议。
+先确认 runtime 能握手：
 
-runtime 会使用进程当前工作目录作为项目工作区。第三方程序 spawn Suna 时，应把 child process 的 `cwd` 设置为用户要操作的项目目录。
+```bash
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.1","client":{"name":"smoke","version":"0.1.0","type":"shell"}}}' \
+  | suna runtime --transport stdio
+```
 
-> 注意：runtime v0 不支持多个 Suna 进程同时写入同一个数据目录。第三方 UI 应独占启动 `suna runtime --transport stdio`；不要同时打开官方 TUI 和第三方 runtime 使用同一套 `~/.suna` 数据。
+你应该在 stdout 看到一行 JSON-RPC response，形如：
+
+```json
+{"jsonrpc":"2.0","id":1,"result":{"protocol_version":"0.1","runtime_version":"v0.8.0","transport":"stdio","capabilities":{"agent":true,"streaming":true,"tools":true,"guard":true,"ask_user":true,"session":true,"config":true,"memory":true,"skills":true,"mcp":true},"content_sources":{"text":true,"image_path":true,"image_url":true},"limits":{"max_tool_result_bytes":16384}}}
+```
+
+stderr 可能有：
+
+```txt
+runtime: started (pid 12345)
+```
+
+这是人类诊断日志，不是协议消息。客户端只解析 stdout。
 
 ---
 
 ## 1. 启动 runtime
 
-Node.js 示例：
+命令：
 
-```ts
-import { spawn } from "node:child_process"
-
-const proc = spawn("suna", ["runtime", "--transport", "stdio"], {
-  cwd: "/path/to/project",
-  stdio: ["pipe", "pipe", "inherit"],
-})
+```bash
+suna runtime --transport stdio
 ```
 
-如果同时打开官方 TUI 和第三方 runtime 并使用同一套数据目录，当前版本不保证状态一致性；这不是 v0 支持场景。
+必须显式传入 `--transport stdio`。只运行 `suna runtime` 会打印 usage 并退出，避免未来新增 transport 后入口语义变得隐式。
+
+Node.js 启动示例：
+
+```js
+import { spawn } from "node:child_process";
+
+const proc = spawn("suna", ["runtime", "--transport", "stdio"], {
+  cwd: projectRoot, // 用户当前项目目录；runtime 会把子进程 cwd 作为工作区
+  stdio: ["pipe", "pipe", "pipe"],
+});
+```
+
+stdio 约定：
+
+| 流 | 用途 |
+|---|---|
+| stdin | 客户端写入 JSON-RPC request，一行一个 JSON。 |
+| stdout | Suna 输出 JSON-RPC response / notification，一行一个 JSON。 |
+| stderr | 人类可读诊断日志，不参与协议。 |
+
+生命周期：
+
+- stdio runtime 是前台单进程 headless runtime。
+- 父进程关闭 stdin 后，runtime 会退出。
+- stdio runtime 不写 `sunad.pid`；`sunad.pid` 只属于官方 TUI 使用的后台 local daemon。
+- v0 不支持多个 Suna 进程同时写入同一个数据目录。第三方 UI 应独占启动 runtime；不要同时打开官方 TUI 和第三方 runtime 操作同一套 `~/.suna` 数据。
 
 ---
 
-## 2. 必须先握手：`runtime.hello`
+## 2. JSON-RPC / NDJSON 规则
 
-stdio runtime 要求第一条 request 必须是：
+Suna stdio runtime 使用 JSON-RPC 风格消息，外层 framing 是 NDJSON：**每一行是一条完整 JSON**。
 
-```json
-{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.1","client":{"name":"example-ui","version":"0.1.0","type":"node"}}}
-```
-
-返回示例：
+### 2.1 Request
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"protocol_version":"0.1","runtime_version":"0.5.0","transport":"stdio","capabilities":{"agent":true,"streaming":true,"tools":true,"guard":true,"ask_user":true,"session":true,"config":true,"memory":true,"skills":true,"mcp":true},"content_sources":{"text":true,"image_path":true,"image_url":true}}}
+{"jsonrpc":"2.0","id":1,"method":"config.get","params":{}}
 ```
 
-如果未握手就调用其它 method，会返回结构化错误：
+字段：
+
+| 字段 | 说明 |
+|---|---|
+| `jsonrpc` | 固定为 `"2.0"`。 |
+| `id` | v0 只支持整数 id；response 会原样回传同一个整数。 |
+| `method` | 方法名，例如 `agent.sendMessage`。 |
+| `params` | 方法参数。建议总是传对象；无参数时传 `{}`。 |
+
+v0 限制：
+
+- 客户端 request 必须带整数 `id`。
+- 暂不支持 string id。
+- 暂不支持客户端 notification。
+
+### 2.2 Response
+
+成功：
+
+```json
+{"jsonrpc":"2.0","id":1,"result":{"models":[],"active_model":""}}
+```
+
+失败：
+
+```json
+{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"content is required","data":{"kind":"invalid_request"}}}
+```
+
+客户端逻辑：
+
+- 有 `id` 的消息是 response，应匹配 pending request。
+- response 要么有 `result`，要么有 `error`。
+
+### 2.3 Notification
+
+```json
+{"jsonrpc":"2.0","method":"agent.delta","params":{"kind":"assistant","content":"你好"}}
+```
+
+客户端逻辑：
+
+- 没有 `id`、有 `method` 的消息是 notification。
+- notification 是 daemon 主动推送的异步事件，不对应某个 request 的直接返回。
+- 不要把 method response 当 notification，也不要等待 `agent.sendMessage` response 里出现模型回复；模型回复来自后续 notification。
+
+---
+
+## 3. 第一步必须握手：`runtime.hello`
+
+stdio runtime 要求第一条 request 必须是 `runtime.hello`。
+
+Request params：
+
+| 字段 | 必填 | 说明 |
+|---|---:|---|
+| `protocol_version` | 否 | 当前公开版本是 `"0.1"`；为空时按当前默认版本处理。 |
+| `client.name` | 否 | 客户端名称，用于诊断和未来能力协商。 |
+| `client.version` | 否 | 客户端版本。 |
+| `client.type` | 否 | 客户端类型，例如 `web`、`desktop`、`ide`、`node`。 |
+
+Request 示例：
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.1","client":{"name":"my-web-ui","version":"0.1.0","type":"web"}}}
+```
+
+Result 字段：
+
+| 字段 | 说明 |
+|---|---|
+| `protocol_version` | runtime 选择的协议版本。 |
+| `runtime_version` | Suna 版本。 |
+| `transport` | 真实承载层，stdio runtime 下是 `"stdio"`。这个值由 Suna 注入，客户端不能通过 params 声明。 |
+| `capabilities` | 能力开关，客户端应按 key 判断能力，不要从版本号推断。 |
+| `content_sources` | `agent.sendMessage` 支持的内容来源。 |
+| `limits` | 协议层稳定限制，例如 tool result 截断阈值。 |
+
+Result 示例：
+
+```json
+{
+  "protocol_version":"0.1",
+  "runtime_version":"v0.8.0",
+  "transport":"stdio",
+  "capabilities":{
+    "agent":true,
+    "streaming":true,
+    "tools":true,
+    "guard":true,
+    "ask_user":true,
+    "session":true,
+    "config":true,
+    "memory":true,
+    "skills":true,
+    "mcp":true
+  },
+  "content_sources":{
+    "text":true,
+    "image_path":true,
+    "image_url":true
+  },
+  "limits":{
+    "max_tool_result_bytes":16384
+  }
+}
+```
+
+未握手直接调用其它 method，会返回：
 
 ```json
 {"jsonrpc":"2.0","id":2,"error":{"code":-32010,"message":"runtime.hello is required before other methods","data":{"kind":"handshake_required"}}}
@@ -61,271 +204,49 @@ stdio runtime 要求第一条 request 必须是：
 
 ---
 
-## 3. 通信模型
+## 4. 最小 Node.js 客户端
 
-Suna Protocol 统一遵循：
-
-```txt
-method request  = 客户端主动请求，必须返回 result 或 error
-notification    = daemon 主动推送的异步事件或状态变化
-```
-
-不要把 method response 当成 notification。客户端应同时实现：
-
-1. `request(method, params)`：通过 `id` 等待对应 response。
-2. `on(method, handler)`：持续监听没有 `id` 的 notification。
-
----
-
-## 4. 常用 method
-
-### Runtime
-
-```txt
-runtime.hello
-```
-
-### Agent
-
-```txt
-agent.sendMessage
-agent.cancel
-agent.resumeRun
-agent.askReply
-agent.guardReply
-```
-
-### Session
-
-```txt
-session.new
-session.restore
-session.compact
-session.usage
-```
-
-### Config
-
-```txt
-config.get
-config.set
-```
-
-### Memory
-
-```txt
-memory.list
-memory.delete
-memory.clear
-```
-
-### Skill
-
-```txt
-skill.list
-skill.set
-```
-
-### MCP
-
-```txt
-mcp.list
-mcp.toggle
-mcp.reload
-```
-
----
-
-## 5. 常用 notification
-
-```txt
-agent.delta
-agent.run
-agent.usage
-agent.tool_start
-agent.tool_guard
-agent.tool_end
-agent.ask_user
-agent.guard_confirm
-session.restore_message
-session.restore_status
-session.compact_result
-config.state
-memory.state
-skill.load
-skill.review
-```
-
-其中：
-
-- `agent.delta`：assistant / reasoning 的流式文本增量。
-- `agent.run`：run 生命周期，例如 running / retrying / done / failed / cancelled。
-- `agent.usage`：token、上下文窗口、耗时和速度统计。
-- `agent.tool_*`：工具开始、Guard 状态、工具结束。
-- `agent.ask_user`：Agent 请求用户输入。
-- `agent.guard_confirm`：高风险工具操作请求用户确认。
-
----
-
-## 6. 发送文本消息
-
-```json
-{"jsonrpc":"2.0","id":2,"method":"agent.sendMessage","params":{"parts":[{"type":"text","text":"hello"}]}}
-```
-
-请求成功后，response 只表示任务已被接收：
-
-```json
-{"jsonrpc":"2.0","id":2,"result":{"status":"processing"}}
-```
-
-实际回复通过 notification 持续推送，例如：
-
-```json
-{"jsonrpc":"2.0","method":"agent.delta","params":{"kind":"assistant","content":"你好"}}
-{"jsonrpc":"2.0","method":"agent.run","params":{"state":"done"}}
-```
-
----
-
-## 7. 发送图片
-
-Suna runtime 不负责第三方 UI 的上传管理。第三方 UI 可以自己维护文件，然后把本地路径或 URL 传给 Suna。
-
-### 图片路径
-
-```json
-{"jsonrpc":"2.0","id":3,"method":"agent.sendMessage","params":{"parts":[{"type":"text","text":"分析这张图片"},{"type":"image","source":{"kind":"path","path":"/absolute/path/image.png","mime_type":"image/png"}}]}}
-```
-
-### 图片 URL
-
-```json
-{"jsonrpc":"2.0","id":4,"method":"agent.sendMessage","params":{"parts":[{"type":"text","text":"分析这张图片"},{"type":"image","source":{"kind":"url","url":"https://example.com/image.png","mime_type":"image/png"}}]}}
-```
-
----
-
-## 8. 处理 askuser
-
-收到：
-
-```json
-{"jsonrpc":"2.0","method":"agent.ask_user","params":{"id":"ask_1","question":"请选择目标","options":["A","B"],"allow_custom":true}}
-```
-
-回复：
-
-```json
-{"jsonrpc":"2.0","id":5,"method":"agent.askReply","params":{"id":"ask_1","answer":"A"}}
-```
-
----
-
-## 9. 处理 Guard 确认
-
-收到：
-
-```json
-{"jsonrpc":"2.0","method":"agent.guard_confirm","params":{"id":"guard_1","tool":"exec","risk":"high","reason":"即将执行命令","params":{"command":"..."}}}
-```
-
-允许：
-
-```json
-{"jsonrpc":"2.0","id":6,"method":"agent.guardReply","params":{"id":"guard_1","decision":"approve"}}
-```
-
-拒绝：
-
-```json
-{"jsonrpc":"2.0","id":7,"method":"agent.guardReply","params":{"id":"guard_1","decision":"deny"}}
-```
-
----
-
-## 10. 错误结构
-
-JSON-RPC error 会包含结构化 `data`：
-
-```json
-{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"content is required","data":{"kind":"invalid_request"}}}
-```
-
-常见 `data.kind`：
-
-```txt
-handshake_required
-invalid_request
-unsupported_method
-unsupported_capability
-internal_error
-```
-
----
-
-## 11. 最小客户端实现要点
-
-第三方客户端至少需要实现：
-
-1. 启动 `suna runtime --transport stdio`。
-2. 按行读取 stdout，并 `JSON.parse`。
-3. 如果消息有 `id`，把它匹配到 pending request。
-4. 如果消息没有 `id` 但有 `method`，当成 notification 分发。
-5. 第一条 request 发送 `runtime.hello`。
-6. 调用 `agent.sendMessage` 后持续监听 `agent.delta`、`agent.run`、`agent.tool_*`、`agent.ask_user`、`agent.guard_confirm`。
-
-这就是开发第三方 UI 的最小闭环。
-
----
-
-## 12. Node.js 最小 SDK Demo
-
-下面是一段可直接运行的最小客户端。它只做只读 smoke test：启动 runtime、发送 `runtime.hello`、再调用 `daemon.status`。不会发送用户消息、不会触发模型请求、不会执行工具。
-
-保存为 `suna-stdio-smoke.mjs`，然后运行：
-
-```bash
-node suna-stdio-smoke.mjs /path/to/project
-```
+这段代码展示一个 UI 层 SDK 的最小形状：启动 runtime、发送 request、分发 notification、处理错误和退出。
 
 ```js
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 
-class SunaRuntime {
+export class SunaRuntime {
   constructor({ bin = "suna", cwd = process.cwd() } = {}) {
-    this.nextID = 1;
+    this.nextId = 1;
     this.pending = new Map();
     this.handlers = new Map();
+
     this.proc = spawn(bin, ["runtime", "--transport", "stdio"], {
       cwd,
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    const stdout = createInterface({ input: this.proc.stdout });
-    stdout.on("line", (line) => this.#handleLine(line));
+    createInterface({ input: this.proc.stdout }).on("line", (line) => {
+      this.#handleLine(line);
+    });
 
-    // stderr 只用于人类诊断和日志，不要从这里解析协议消息。
+    // stderr 只用于日志，不要从 stderr 解析协议。
     this.proc.stderr.on("data", (chunk) => {
       process.stderr.write(`[suna] ${chunk}`);
     });
 
     this.proc.on("error", (err) => this.#rejectAll(err));
     this.proc.on("close", (code, signal) => {
-      this.#rejectAll(new Error(`suna runtime closed: code=${code} signal=${signal}`));
+      this.#rejectAll(new Error(`suna closed: code=${code} signal=${signal}`));
     });
   }
 
-  async hello() {
+  hello() {
     return this.request("runtime.hello", {
       protocol_version: "0.1",
-      client: { name: "node-smoke", version: "0.1.0", type: "node" },
+      client: { name: "example-ui", version: "0.1.0", type: "node" },
     });
   }
 
   request(method, params = {}, { timeoutMs = 30_000 } = {}) {
-    const id = this.nextID++;
+    const id = this.nextId++;
     const payload = { jsonrpc: "2.0", id, method, params };
 
     return new Promise((resolve, reject) => {
@@ -356,20 +277,14 @@ class SunaRuntime {
 
   #handleLine(line) {
     if (!line.trim()) return;
-
-    let msg;
-    try {
-      msg = JSON.parse(line);
-    } catch (err) {
-      console.error("invalid JSON from Suna stdout:", line);
-      return;
-    }
+    const msg = JSON.parse(line);
 
     if (typeof msg.id === "number") {
       const pending = this.pending.get(msg.id);
       if (!pending) return;
       clearTimeout(pending.timer);
       this.pending.delete(msg.id);
+
       if (msg.error) {
         const err = new Error(msg.error.message);
         err.code = msg.error.code;
@@ -396,33 +311,45 @@ class SunaRuntime {
     }
   }
 }
+```
 
-const cwd = process.argv[2] ?? process.cwd();
-const suna = new SunaRuntime({ cwd });
+只读 smoke test：
 
+```js
+const suna = new SunaRuntime({ cwd: "/path/to/project" });
 try {
   const hello = await suna.hello();
-  console.log("hello:", hello);
+  console.log("hello", hello);
 
   const status = await suna.request("daemon.status", {});
-  console.log("status:", status);
+  console.log("status", status);
 } finally {
   suna.close();
 }
 ```
 
-如果要发送真实用户消息，最小流程是在 `hello()` 之后注册 notification handler，再调用 `agent.sendMessage`：
+发送一条用户消息：
 
 ```js
+const suna = new SunaRuntime({ cwd: "/path/to/project" });
+await suna.hello();
+
 let assistant = "";
 
-suna.on("agent.delta", (params) => {
-  if (params.kind === "assistant") assistant += params.content;
+suna.on("agent.delta", (p) => {
+  if (p.kind === "assistant") assistant += p.content;
 });
 
-suna.on("agent.run", (params) => {
-  if (params.state === "done") console.log("assistant:", assistant);
-  if (params.state === "failed") console.error("run failed:", params.error ?? params.message);
+suna.on("agent.run", (p) => {
+  if (p.state === "retrying") {
+    console.log(`retrying ${p.attempt}/${p.max_attempts}, wait ${p.delay_ms}ms`);
+  }
+  if (p.state === "done") {
+    console.log("assistant:", assistant);
+  }
+  if (p.state === "failed") {
+    console.error("run failed:", p.error ?? p.message);
+  }
 });
 
 await suna.request("agent.sendMessage", {
@@ -430,4 +357,789 @@ await suna.request("agent.sendMessage", {
 });
 ```
 
-UI 层应把 `agent.sendMessage` 的 response 只当成“已接收”，真正的文本、工具状态、askuser、guard 和终态都来自后续 notification。
+---
+
+## 5. 接入流程建议
+
+一个完整 UI 通常按这个顺序接入：
+
+1. spawn `suna runtime --transport stdio`，设置 `cwd` 为项目目录。
+2. 建立 JSON-RPC pending map 和 notification dispatcher。
+3. 发送 `runtime.hello`。
+4. 调用 `config.get`，检查是否已有可用模型。
+5. 调用 `session.restore`，恢复最近会话展示状态。
+6. 用户发送消息时调用 `agent.sendMessage`。
+7. 持续监听：
+   - `agent.delta`：流式文本。
+   - `agent.run`：running / retrying / done / failed / cancelled。
+   - `agent.tool_start` / `agent.tool_guard` / `agent.tool_end`：工具展示。
+   - `agent.ask_user`：弹出用户输入。
+   - `agent.guard_confirm`：弹出高风险操作确认。
+   - `agent.usage`：用量统计。
+8. UI 关闭时 `stdin.end()`，让 runtime 退出。
+
+---
+
+## 6. Method 列表
+
+本节的 Request 示例是完整 JSON-RPC request；Result 示例默认只展示 `result` 对象。真实 stdout response 外层仍然是：`{"jsonrpc":"2.0","id":请求ID,"result":...}`。
+
+### 6.1 Runtime
+
+#### `runtime.hello`
+
+用途：stdio runtime 握手和能力发现。必须作为第一条 request。
+
+Params：见 [第 3 节](#3-第一步必须握手runtimehello)。
+
+Result：见 [第 3 节](#3-第一步必须握手runtimehello)。
+
+---
+
+### 6.2 Agent
+
+#### `agent.sendMessage`
+
+用途：发送用户消息。response 只表示任务已接收；实际模型输出来自 notification。
+
+Params：
+
+| 字段 | 必填 | 说明 |
+|---|---:|---|
+| `client_msg_id` | 否 | UI 自己生成的消息 ID，便于未来做去重或关联。 |
+| `parts` | 是 | 消息内容数组。纯文本也必须放在 text part 中。 |
+
+`parts` 支持：
+
+| 类型 | 示例 |
+|---|---|
+| 文本 | `{"type":"text","text":"hello"}` |
+| 图片路径 | `{"type":"image","source":{"kind":"path","path":"/absolute/path/a.png","mime_type":"image/png"}}` |
+| 图片 URL | `{"type":"image","source":{"kind":"url","url":"https://example.com/a.png","mime_type":"image/png"}}` |
+
+Request 示例：
+
+```json
+{"jsonrpc":"2.0","id":10,"method":"agent.sendMessage","params":{"parts":[{"type":"text","text":"hello"}]}}
+```
+
+Result 示例：
+
+```json
+{"status":"processing"}
+```
+
+随后可能收到：
+
+```json
+{"jsonrpc":"2.0","method":"agent.run","params":{"state":"running","phase":"model"}}
+{"jsonrpc":"2.0","method":"agent.delta","params":{"kind":"assistant","content":"你好"}}
+{"jsonrpc":"2.0","method":"agent.run","params":{"state":"done"}}
+```
+
+#### `agent.cancel`
+
+用途：取消当前 run。
+
+Params：`{}`
+
+Result：
+
+```json
+{"status":"cancelled"}
+```
+
+#### `agent.resumeRun`
+
+用途：当前 run 因模型错误失败且 `agent.run.resume_available=true` 时，不新增用户消息，继续未完成 turn。
+
+Params：`{}`
+
+Result：
+
+```json
+{"status":"processing"}
+```
+
+#### `agent.askReply`
+
+用途：回复 `agent.ask_user` notification。
+
+Params：
+
+| 字段 | 必填 | 说明 |
+|---|---:|---|
+| `id` | 是 | `agent.ask_user.params.id`。 |
+| `answer` | 是 | 用户回答。 |
+
+Request 示例：
+
+```json
+{"jsonrpc":"2.0","id":11,"method":"agent.askReply","params":{"id":"conn_123_ask_1","answer":"A"}}
+```
+
+Result：
+
+```json
+{"status":"ok"}
+```
+
+#### `agent.guardReply`
+
+用途：回复 `agent.guard_confirm` notification。
+
+Params：
+
+| 字段 | 必填 | 说明 |
+|---|---:|---|
+| `id` | 是 | `agent.guard_confirm.params.id`。 |
+| `decision` | 是 | `"approve"` 或 `"deny"`。 |
+
+Request 示例：
+
+```json
+{"jsonrpc":"2.0","id":12,"method":"agent.guardReply","params":{"id":"conn_123_guard_1","decision":"approve"}}
+```
+
+Result：
+
+```json
+{"status":"ok"}
+```
+
+---
+
+### 6.3 Session
+
+#### `session.new`
+
+用途：新建会话。
+
+Params：`{}`
+
+Result：
+
+```json
+{"status":"ok"}
+```
+
+可能额外收到 `daemon.full_status`，用于刷新状态面板。
+
+#### `session.restore`
+
+用途：恢复最近会话的可见展示状态。
+
+Params：`{}`
+
+Result：
+
+```json
+{"messages":2}
+```
+
+同时通过 notification 下发内容：
+
+```json
+{"jsonrpc":"2.0","method":"session.restore_message","params":{"role":"user","content":"hello"}}
+{"jsonrpc":"2.0","method":"session.restore_message","params":{"role":"assistant","content":"Hi"}}
+{"jsonrpc":"2.0","method":"session.restore_status","params":{"messages":2,"compacted":false}}
+```
+
+#### `session.compact`
+
+用途：手动压缩当前会话上下文。
+
+Params：`{}`
+
+Result：
+
+```json
+{"status":"ok"}
+```
+
+压缩详情通过 `session.compact_result` 推送。
+
+#### `session.usage`
+
+用途：查询用量摘要。
+
+Params：`{}`
+
+Result 示例：
+
+```json
+{
+  "today":{"input_tokens":1000,"output_tokens":200,"requests":3},
+  "week":{"input_tokens":5000,"output_tokens":1200,"requests":12},
+  "month":{"input_tokens":12000,"output_tokens":3000,"requests":30}
+}
+```
+
+---
+
+### 6.4 Config
+
+#### `config.get`
+
+用途：读取当前配置。
+
+Params：`{}`
+
+Result 示例：
+
+```json
+{
+  "models":[
+    {
+      "provider":"openai",
+      "protocol":"openai_chat",
+      "model":"gpt-4o-mini",
+      "base_url":"https://api.openai.com/v1",
+      "context_window":128000,
+      "max_output_tokens":8192,
+      "has_api_key":true
+    }
+  ],
+  "active_model":"openai/gpt-4o-mini",
+  "locale":"zh",
+  "theme":"dark",
+  "guard_mode":"ask",
+  "workspace":"/path/to/project"
+}
+```
+
+说明：`has_api_key` 只表示已保存 key；不会返回真实 API key。
+
+#### `config.set`
+
+用途：更新模型配置、激活模型、通用设置。
+
+公共 Params：
+
+| 字段 | 说明 |
+|---|---|
+| `action` | 必填。取值：`upsert_model`、`delete_model`、`activate_model`、`update_general`。 |
+| `model` | `upsert_model` 使用。 |
+| `model_ref` | 更新/删除已有模型时使用，例如 `openai/gpt-4o-mini`。 |
+| `active_model` | 激活模型或 upsert 后指定 active。 |
+| `api_key` | 新增/更新 provider API key。Suna 会自动 trim 首尾空白。 |
+| `delete_api_key` | 删除模型时，如果该 provider 不再被其它模型使用，可同时删除 key。 |
+| `locale` / `theme` / `guard_mode` / `workspace` | `update_general` 使用。 |
+
+新增或更新模型：
+
+```json
+{
+  "action":"upsert_model",
+  "model":{
+    "provider":"openai",
+    "protocol":"openai_chat",
+    "model":"gpt-4o-mini",
+    "base_url":"https://api.openai.com/v1",
+    "context_window":128000,
+    "max_output_tokens":8192,
+    "strengths":["chat","coding"],
+    "subtask_for":["analysis"]
+  },
+  "api_key":"sk-..."
+}
+```
+
+激活模型：
+
+```json
+{"action":"activate_model","active_model":"openai/gpt-4o-mini"}
+```
+
+删除模型：
+
+```json
+{"action":"delete_model","model_ref":"openai/gpt-4o-mini","delete_api_key":true}
+```
+
+更新通用设置：
+
+```json
+{"action":"update_general","locale":"zh","theme":"dark","guard_mode":"ask","workspace":"/path/to/project"}
+```
+
+Result：返回更新后的 `ConfigParams`，结构同 `config.get`。
+
+注意：Suna runtime 不提供 `config.list_models`。模型列表拉取本质是 UI 对 provider 的 HTTP 请求，第三方 UI 应自行实现。
+
+---
+
+### 6.5 Memory
+
+#### `memory.list`
+
+用途：查询 user profile memory。
+
+Params：`{}`
+
+Result 示例：
+
+```json
+{
+  "memories":[
+    {"id":"mem_1","content":"用户偏好中文回答","kind":"communication","tags":["preference"],"priority":80,"is_core":true}
+  ]
+}
+```
+
+#### `memory.delete`
+
+Params：
+
+```json
+{"id":"mem_1"}
+```
+
+Result：
+
+```json
+{"deleted":true}
+```
+
+成功后会推送 `memory.state`。
+
+#### `memory.clear`
+
+Params：`{}`
+
+Result：
+
+```json
+{"deleted_count":3}
+```
+
+成功后会推送 `memory.state`。
+
+---
+
+### 6.6 Skill
+
+#### `skill.list`
+
+用途：查询 Skill 状态。
+
+Params：`{}`
+
+Result 示例：
+
+```json
+{
+  "skills":[
+    {"name":"demo","description":"示例技能","enabled":true,"valid":true,"path":"/Users/me/.suna/skills/demo"}
+  ]
+}
+```
+
+#### `skill.set`
+
+用途：启用或禁用 Skill。
+
+Params：
+
+```json
+{"name":"demo","enabled":true}
+```
+
+Result：
+
+```json
+{"status":"ok"}
+```
+
+---
+
+### 6.7 MCP
+
+#### `mcp.list`
+
+用途：查询 MCP server 状态。
+
+Params：`{}`
+
+Result 示例：
+
+```json
+{
+  "servers":[
+    {"id":"filesystem","name":"filesystem","transport":"stdio","command":"npx ...","active":true,"configured":true,"tool_count":5}
+  ]
+}
+```
+
+#### `mcp.toggle`
+
+用途：启用或禁用 MCP server。
+
+Params：
+
+```json
+{"name":"filesystem","active":false}
+```
+
+Result：
+
+```json
+{"status":"ok"}
+```
+
+#### `mcp.reload`
+
+用途：重载 MCP server。
+
+Params：
+
+```json
+{"name":"filesystem"}
+```
+
+Result：
+
+```json
+{"status":"ok"}
+```
+
+---
+
+### 6.8 诊断和 TUI 内部方法
+
+这些 method 当前可用，但第三方 UI v0 通常不需要依赖：
+
+| Method | 说明 |
+|---|---|
+| `daemon.status` | 只读诊断状态，适合 smoke test 或状态面板。 |
+| `daemon.stop` | local daemon 管理语义；stdio runtime 下通常关闭 stdin 即可退出，不建议第三方 UI 使用。 |
+| `attachment.status` / `attachment.clear` | 官方 TUI 附件缓存管理。第三方 UI 应自行管理上传和缓存，然后向 `agent.sendMessage` 传 image path/url。 |
+
+`daemon.status` Result 示例：
+
+```json
+{
+  "pid":12345,
+  "uptime":"10s",
+  "connections":1,
+  "triggers":0,
+  "agent_status":"idle",
+  "provider":"openai",
+  "model":"gpt-4o-mini",
+  "context_tokens":1200,
+  "context_window":128000
+}
+```
+
+---
+
+## 7. Notification 列表
+
+### 7.1 `agent.delta`
+
+用途：assistant / reasoning 的流式文本增量。
+
+Params：
+
+| 字段 | 说明 |
+|---|---|
+| `run_id` | 可选，预留给未来持久 Run。 |
+| `kind` | `assistant` 或 `reasoning`。 |
+| `content` | 本次文本增量。 |
+
+示例：
+
+```json
+{"kind":"assistant","content":"你好"}
+```
+
+### 7.2 `agent.run`
+
+用途：run 生命周期、retry、失败、取消和恢复能力。
+
+Params：
+
+| 字段 | 说明 |
+|---|---|
+| `state` | `running`、`retrying`、`done`、`failed`、`cancelled`。 |
+| `phase` | 可选：`model`、`tool`、`compact`、`guard`、`ask`、`skill`。 |
+| `message` | 可选人类可读说明。 |
+| `attempt` / `max_attempts` / `delay_ms` | `retrying` 使用。 |
+| `error` | 失败时的结构化 `ModelError`。 |
+| `resume_available` | 失败后是否可调用 `agent.resumeRun`。 |
+
+示例：
+
+```json
+{"state":"running","phase":"model"}
+{"state":"retrying","phase":"model","attempt":2,"max_attempts":4,"delay_ms":8000}
+{"state":"done"}
+```
+
+失败示例：
+
+```json
+{
+  "state":"failed",
+  "phase":"model",
+  "resume_available":true,
+  "error":{"kind":"http","message":"rate limit exceeded","status_code":429,"type":"rate_limit_error"}
+}
+```
+
+说明：`retrying` 不是终态；不要把它当最终错误显示。只有 `failed` / `cancelled` / `done` 表示当前 run 结束。
+
+### 7.3 `agent.usage`
+
+用途：token、上下文、耗时和速度统计。
+
+示例：
+
+```json
+{
+  "input_tokens":1000,
+  "output_tokens":120,
+  "cached_tokens":0,
+  "context_tokens":3000,
+  "estimated_context_tokens":2900,
+  "context_window":128000,
+  "duration_ms":2500,
+  "tokens_per_sec":48
+}
+```
+
+### 7.4 `agent.tool_start`
+
+用途：工具开始执行。
+
+Params：
+
+| 字段 | 说明 |
+|---|---|
+| `id` | tool call id。 |
+| `tool` | 工具名。 |
+| `params` | 工具参数。 |
+| `intent` | 可选，模型声明的调用意图。 |
+
+示例：
+
+```json
+{"id":"tool_1","tool":"readfile","params":{"path":"README.md"},"intent":"查看项目说明"}
+```
+
+### 7.5 `agent.tool_guard`
+
+用途：工具执行前 Guard 决策状态。
+
+示例：
+
+```json
+{"tool_call_id":"tool_1","tool":"exec","risk":"medium","decision":"ask","source":"guard","reason":"命令可能修改文件"}
+```
+
+### 7.6 `agent.tool_end`
+
+用途：工具执行结束。`result` 是给 UI 展示的结果，可能被截断；不是模型内部完整 tool result。
+
+示例：
+
+```json
+{"id":"tool_1","tool":"readfile","result":"# README\n...","error":false,"result_truncated":false,"result_bytes":1280}
+```
+
+### 7.7 `agent.ask_user`
+
+用途：Agent 请求用户输入。UI 应弹窗或表单收集答案，然后调用 `agent.askReply`。
+
+示例：
+
+```json
+{"id":"ask_1","question":"请选择目标环境","options":["dev","prod"],"allow_custom":true}
+```
+
+回复：
+
+```json
+{"jsonrpc":"2.0","id":20,"method":"agent.askReply","params":{"id":"ask_1","answer":"dev"}}
+```
+
+### 7.8 `agent.guard_confirm`
+
+用途：高风险工具操作请求用户确认。UI 应展示工具名、参数、风险和原因，然后调用 `agent.guardReply`。
+
+示例：
+
+```json
+{"id":"guard_1","tool_call_id":"tool_2","tool":"exec","params":{"command":"rm -rf build"},"risk":"high","reason":"即将删除目录"}
+```
+
+允许：
+
+```json
+{"jsonrpc":"2.0","id":21,"method":"agent.guardReply","params":{"id":"guard_1","decision":"approve"}}
+```
+
+拒绝：
+
+```json
+{"jsonrpc":"2.0","id":22,"method":"agent.guardReply","params":{"id":"guard_1","decision":"deny"}}
+```
+
+### 7.9 Session notifications
+
+#### `session.restore_message`
+
+恢复可见 user/assistant 消息。
+
+```json
+{"role":"user","content":"hello"}
+```
+
+#### `session.restore_status`
+
+恢复结束状态。
+
+```json
+{"messages":2,"compacted":false,"tool_summary":{"total":3,"success":3,"failed":0}}
+```
+
+#### `session.compact_result`
+
+手动 compact 结果或运行状态。
+
+```json
+{"running":true}
+{"before_tokens":120000,"after_tokens":30000,"context_window":128000,"turns_compressed":8,"summary_tokens":45000,"truncated_outputs":2}
+```
+
+### 7.10 State notifications
+
+#### `config.state`
+
+配置变更后的主动状态通知。params 结构同 `config.get` result。
+
+#### `memory.state`
+
+memory 变更后的主动状态通知。params 结构同 `memory.list` result。
+
+#### `skill.load`
+
+Skill load 生命周期通知。
+
+```json
+{"name":"demo","status":"loaded"}
+```
+
+#### `skill.review`
+
+Skill review 生命周期通知。
+
+```json
+{"name":"demo","status":"done","review":"Looks good"}
+```
+
+#### `daemon.full_status`
+
+daemon 聚合快照，主要供官方 TUI 使用。第三方 UI 可以用于状态面板，但不应依赖它完成聊天主流程。
+
+---
+
+## 8. 错误结构
+
+JSON-RPC error 使用统一外层：
+
+```json
+{
+  "jsonrpc":"2.0",
+  "id":10,
+  "error":{
+    "code":-32602,
+    "message":"content is required",
+    "data":{"kind":"invalid_request"}
+  }
+}
+```
+
+常见 code：
+
+| code | 含义 |
+|---:|---|
+| `-32700` | parse error，stdin 某一行不是合法 JSON。 |
+| `-32600` | invalid request，JSON-RPC 外层结构不合法。 |
+| `-32601` | method not found。 |
+| `-32602` | invalid params。 |
+| `-32603` | internal error。 |
+| `-32010` | stdio runtime 未先握手。 |
+
+`error.data`：
+
+| 字段 | 说明 |
+|---|---|
+| `kind` | 稳定错误分类。UI/SDK 应优先根据它做分支，不要解析 message。 |
+| `reason` | 可选机器可读补充原因。 |
+| `retryable` | 可选，表示同一请求是否值得重试。 |
+| `status_code` | 可选，上游 HTTP/模型错误状态码。 |
+
+常见 `data.kind`：
+
+| kind | 含义 |
+|---|---|
+| `parse_error` | 输入行不是合法 JSON。 |
+| `invalid_request` | 请求或参数无效。 |
+| `unsupported_method` | method 不存在。 |
+| `unsupported_capability` | 当前 runtime 或协议版本不支持。 |
+| `handshake_required` | 未先调用 `runtime.hello`。 |
+| `internal_error` | daemon 内部错误。 |
+
+模型请求失败不会作为 `agent.sendMessage` response error 返回，因为 `agent.sendMessage` 只表示“已接收”。模型失败通过 `agent.run state=failed` 的 `error` 字段通知：
+
+```json
+{
+  "state":"failed",
+  "phase":"model",
+  "resume_available":true,
+  "error":{
+    "kind":"http",
+    "message":"Service Unavailable",
+    "status_code":503,
+    "code":"overloaded",
+    "type":"server_error",
+    "provider":"anthropic",
+    "model":"claude-..."
+  }
+}
+```
+
+---
+
+## 9. UI 层不应该放进 Suna runtime 的能力
+
+为了保持 Suna runtime 边界清晰，下面能力由第三方 UI 自己实现：
+
+| 能力 | 建议 |
+|---|---|
+| WebSocket / HTTP server | UI 后端自己做，再桥接到 stdio runtime。 |
+| 文件浏览 | UI 后端自己读文件系统。 |
+| 终端 / PTY | UI 后端自己管理。 |
+| 上传缓存 | UI 自己管理文件，然后向 Suna 传 image path/url。 |
+| provider 模型列表拉取 | UI 自己请求 provider `/models` 或对应 API。Suna 只保存最终模型配置。 |
+| 多 UI 协作 / event replay | v0 不支持；未来单独设计。 |
+
+---
+
+## 10. 最小实现清单
+
+第三方 UI 的最小闭环：
+
+- [ ] spawn `suna runtime --transport stdio`。
+- [ ] 设置 child process `cwd` 为用户项目目录。
+- [ ] stdout 按行 `JSON.parse`。
+- [ ] stderr 只做日志。
+- [ ] request pending map：`id -> resolve/reject`。
+- [ ] notification dispatcher：`method -> handlers`。
+- [ ] 第一条 request 发送 `runtime.hello`。
+- [ ] 调用 `config.get` 判断配置状态。
+- [ ] 调用 `session.restore` 恢复 UI。
+- [ ] 调用 `agent.sendMessage` 发送用户消息。
+- [ ] 监听 `agent.delta` / `agent.run` / `agent.tool_*` / `agent.ask_user` / `agent.guard_confirm`。
+- [ ] UI 关闭时 `stdin.end()`。
