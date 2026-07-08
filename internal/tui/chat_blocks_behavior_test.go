@@ -370,7 +370,7 @@ func TestThinkingBoxCompletedShowsAtMostThreeBodyRows(t *testing.T) {
 	}
 }
 
-func TestWaitingAfterToolWithCompletedToolShowsCompactSpinner(t *testing.T) {
+func TestWaitingAfterToolWithCompletedToolUsesBottomLoadingHint(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
 	tui.initChatComponents()
 	tui.chat.Loading = true
@@ -382,10 +382,11 @@ func TestWaitingAfterToolWithCompletedToolShowsCompactSpinner(t *testing.T) {
 	tui.syncContent()
 	view := stripANSIForTest(tui.replaceLiveTranscriptPlaceholders(tui.chat.Viewport.View()))
 	if strings.Contains(view, "工具已完成") || strings.Contains(view, "子任务已完成") {
-		t.Fatalf("view = %q, waiting after completed tool should use compact empty spinner", view)
+		t.Fatalf("view = %q, should not duplicate bottom loading status", view)
 	}
-	if !strings.Contains(view, "1.0s") {
-		t.Fatalf("view = %q, want compact spinner elapsed time", view)
+	input := stripANSIForTest(tui.renderInputArea())
+	if !strings.Contains(input, "工具已完成，正在请求模型继续") {
+		t.Fatalf("renderInputArea() = %q, want tool waiting hint", input)
 	}
 }
 

@@ -8,7 +8,11 @@ import (
 func (t *TUI) View() tea.View {
 	v := tea.NewView("")
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
+	if t.selectionMode {
+		v.MouseMode = tea.MouseModeNone
+	} else {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	if !t.ready {
 		v.SetContent(t.viewWelcome())
 		return v

@@ -144,42 +144,18 @@ func (t *TUI) renderSkillReviewMessage(p protocol.SkillReviewParams) string {
 	}
 	return textutil.IndentLines(boxStyle.BorderForeground(ColorBrand).Width(width).Padding(1, 2).Render(content), "  ")
 }
-func (t *TUI) hasVisibleActiveProgress() bool {
-	if t.chat.CurrentToolBlock != nil && len(t.chat.CurrentToolBlock.Order) > 0 {
-		return true
-	}
-	for i := len(t.chat.Messages) - 1; i >= 0; i-- {
-		msg := t.chat.Messages[i]
-		switch msg.Role {
-		case "reasoning":
-			return msg.Streaming
-		case "assistant", "user", "error", "system", "restore_summary", "panel":
-			return false
-		}
-	}
-	return false
-}
 func (t *TUI) compactRunningLabel() string {
 	if t.compactAuto {
 		return t.tr("compact.auto_running")
 	}
 	return t.tr("compact.running")
 }
-func (t *TUI) renderCurrentStatusLine() string {
-	label := t.currentStatusLabel()
-	if label == "" {
-		label = t.tr("status.responding")
-	}
-	// spinner 与耗时都延迟到 viewChat() 中替换，保持 transcript 签名稳定且耗时实时更新。
-	return fmt.Sprintf("    %s %s%s\n", spinnerPlaceholder, styleDim.Render(label), styleDim.Render(phaseElapsedPlaceholder))
-}
-func (t *TUI) renderCompactStatusLine() string {
-	// 同 renderCurrentStatusLine，spinner 与耗时都延迟到 viewChat() 中替换。
-	return fmt.Sprintf("    %s%s\n", spinnerPlaceholder, styleDim.Render(phaseElapsedPlaceholder))
-}
 func (t *TUI) currentInputStatusLabel() string {
-	if t.hasVisibleActiveProgress() && !t.chat.Compacting {
-		return t.tr("status.running")
+	if t.chat.Loading && !t.chat.Compacting {
+		if label := t.currentStatusLabel(); label != "" {
+			return label
+		}
+		return t.tr("status.responding")
 	}
 	return t.currentStatusLabel()
 }

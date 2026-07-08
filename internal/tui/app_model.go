@@ -70,6 +70,9 @@ type TUI struct {
 	// Help overlay 状态。
 	showHelp bool
 
+	// 选择模式会临时释放鼠标给终端原生选择，Esc 返回后恢复 TUI 滚动。
+	selectionMode bool
+
 	// Compact UI mode: auto compact should say model will continue; manual /compact should not.
 	compactAuto bool
 

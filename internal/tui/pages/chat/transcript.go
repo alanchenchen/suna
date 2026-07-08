@@ -28,25 +28,22 @@ type TranscriptDeps struct {
 	AskHelp       string
 	AskChoiceHelp string
 
-	RenderSunaHeader        func(string) string
-	RenderDisplayDiscard    func(DisplayDiscardSummary) string
-	RenderUserMessage       func(any, int) string
-	RenderAssistant         func(*Msg) string
-	RenderReasoning         func(*Msg) string
-	RenderToolBlock         func(*toolview.Block) string
-	RenderSubtaskBlock      func(*toolview.Block) string
-	RenderError             func(string) string
-	RenderRestoreSummary    func(string) string
-	RenderSkillLoad         func(protocol.SkillLoadParams) string
-	RenderSkillReview       func(protocol.SkillReviewParams) string
-	RenderSystem            func(string) string
-	RenderAskSelected       func(string) string
-	RenderAskOption         func(string) string
-	RenderAskHelp           func(string) string
-	RenderModelPicker       func() string
-	RenderStatusLine        func() string
-	RenderCompactStatusLine func() string
-	HasVisibleProgress      func() bool
+	RenderSunaHeader     func(string) string
+	RenderDisplayDiscard func(DisplayDiscardSummary) string
+	RenderUserMessage    func(any, int) string
+	RenderAssistant      func(*Msg) string
+	RenderReasoning      func(*Msg) string
+	RenderToolBlock      func(*toolview.Block) string
+	RenderSubtaskBlock   func(*toolview.Block) string
+	RenderError          func(string) string
+	RenderRestoreSummary func(string) string
+	RenderSkillLoad      func(protocol.SkillLoadParams) string
+	RenderSkillReview    func(protocol.SkillReviewParams) string
+	RenderSystem         func(string) string
+	RenderAskSelected    func(string) string
+	RenderAskOption      func(string) string
+	RenderAskHelp        func(string) string
+	RenderModelPicker    func() string
 }
 
 type transcriptBlock struct {
@@ -267,22 +264,6 @@ func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptB
 		addBlock(-1, false, deps.RenderModelPicker())
 	}
 
-	visibleProgress := false
-	if deps.HasVisibleProgress != nil {
-		visibleProgress = deps.HasVisibleProgress()
-	}
-	if m.Loading && !m.PhaseStart.IsZero() {
-		renderSunaHeader()
-		if m.Phase == PhaseWaitingAfterTool && visibleProgress && !m.Compacting {
-			if deps.RenderCompactStatusLine != nil {
-				addBlock(-1, false, deps.RenderCompactStatusLine())
-			}
-		} else if !visibleProgress || m.Compacting {
-			if deps.RenderStatusLine != nil {
-				addBlock(-1, false, deps.RenderStatusLine())
-			}
-		}
-	}
 	return blocks, nav
 }
 

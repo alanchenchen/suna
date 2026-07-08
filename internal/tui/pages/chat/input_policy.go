@@ -32,13 +32,13 @@ func CurrentInputPolicy(state InputPolicyState) InputPolicy {
 			if label == "" {
 				label = state.RespondingLabel
 			}
-			return InputPolicy{Locked: true, Placeholder: label}
+			return InputPolicy{Locked: true, Placeholder: joinNonEmpty(state.SpinnerView, label)}
 		}
 		label := state.StatusLabel
 		if label == "" {
 			label = state.RespondingLabel
 		}
-		return InputPolicy{Locked: true, Placeholder: label, AllowCancel: true}
+		return InputPolicy{Locked: true, Placeholder: joinNonEmpty(state.SpinnerView, label), AllowCancel: true}
 	}
 	if state.InteractionKind == InteractionAskUser && !state.AskAllowCustom {
 		return InputPolicy{Locked: true, Placeholder: state.RespondingLabel}

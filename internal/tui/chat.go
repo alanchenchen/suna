@@ -129,10 +129,7 @@ func (t *TUI) syncContent() {
 		RenderAskHelp: func(help string) string {
 			return styleDim.Render("  "+help) + "\n\n"
 		},
-		RenderModelPicker:       t.renderModelPicker,
-		RenderStatusLine:        t.renderCurrentStatusLine,
-		RenderCompactStatusLine: t.renderCompactStatusLine,
-		HasVisibleProgress:      t.hasVisibleActiveProgress,
+		RenderModelPicker: t.renderModelPicker,
 	})
 }
 

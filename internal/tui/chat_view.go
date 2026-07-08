@@ -425,7 +425,10 @@ func (t *TUI) renderInputArea() string {
 	}
 	width := max(40, t.width-4)
 	text := strings.TrimRight(t.chat.Textarea.View(), "\n")
-	emptyInput := !t.inputLocked() && !t.hasDraft()
+	// 输入区 placeholder 只按原始输入值判断，不能复用 HasDraft()。
+	// HasDraft() 会 trim 空白用于发送/退出判断；如果用户刚输入空格或换行，
+	// 这里仍应立刻隐藏 placeholder，避免 Bubble textarea 与外层占位文案不同步。
+	emptyInput := !t.inputLocked() && t.chat.Textarea.Value() == "" && len(t.chat.Attachments) == 0
 	if t.inputLocked() && !t.hasDraft() {
 		text = styleDim.Render(t.lockedInputPlaceholder())
 	}
@@ -482,6 +485,9 @@ func (t *TUI) lockedInputPlaceholder() string {
 }
 
 func (t *TUI) renderPreInputHint() string {
+	if t.selectionMode {
+		return styleBrand.Render("  "+t.tr("tui.selection_mode.title")) + styleDim.Render(" · ") + styleDim.Render(t.tr("tui.selection_mode.hint"))
+	}
 	if block := t.renderHandoffBlock(); block != "" {
 		return block
 	}

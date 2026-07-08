@@ -136,8 +136,12 @@ func TestAutoCompactNotificationShowsRunning(t *testing.T) {
 	}
 	tui.syncContent()
 	view := stripANSIForTest(tui.chat.Viewport.View())
-	if !strings.Contains(view, "正在自动压缩上下文") || !strings.Contains(view, "完成后模型会自动继续") {
-		t.Fatalf("compact status line = %q, want compact loading", view)
+	if strings.Contains(view, "正在自动压缩上下文") {
+		t.Fatalf("compact status line = %q, should not duplicate bottom loading status", view)
+	}
+	input := stripANSIForTest(tui.renderInputArea())
+	if !strings.Contains(input, "正在自动压缩上下文") || !strings.Contains(input, "完成后模型会自动继续") {
+		t.Fatalf("renderInputArea() = %q, want compact loading", input)
 	}
 }
 
@@ -204,8 +208,12 @@ func TestManualCompactCommandShowsLoadingBeforeDeferredRequest(t *testing.T) {
 	}
 	tui.syncContent()
 	view := stripANSIForTest(tui.chat.Viewport.View())
-	if !strings.Contains(view, "正在压缩上下文") {
-		t.Fatalf("viewport = %q, want manual compact loading before result", view)
+	if strings.Contains(view, "正在压缩上下文") {
+		t.Fatalf("viewport = %q, should not duplicate bottom loading status", view)
+	}
+	input := stripANSIForTest(tui.renderInputArea())
+	if !strings.Contains(input, "正在压缩上下文") {
+		t.Fatalf("renderInputArea() = %q, want manual compact loading before result", input)
 	}
 }
 
@@ -271,14 +279,14 @@ func TestWaitingWithoutVisibleProgressShowsStatusLine(t *testing.T) {
 
 	tui.syncContent()
 	view := stripANSIForTest(tui.chat.Viewport.View())
-	if !strings.Contains(view, "等待 LLM") {
-		t.Fatalf("view = %q, want wait status line", view)
+	if strings.Contains(view, "正在请求模型") {
+		t.Fatalf("view = %q, should not duplicate bottom loading status in transcript", view)
 	}
 	if strings.Contains(view, "Esc 取消") {
 		t.Fatalf("view = %q, should not contain duplicate cancel hint in status line", view)
 	}
 	input := stripANSIForTest(tui.renderInputArea())
-	if !strings.Contains(input, "等待 LLM") || !strings.Contains(input, "Esc 取消") {
+	if !strings.Contains(input, "正在请求模型") || !strings.Contains(input, "Esc 取消") {
 		t.Fatalf("renderInputArea() = %q, want cancellable locked input placeholder", input)
 	}
 }
@@ -293,8 +301,12 @@ func TestWaitingAfterSubtaskShowsSpecificStatusLine(t *testing.T) {
 
 	tui.syncContent()
 	view := stripANSIForTest(tui.replaceLiveTranscriptPlaceholders(tui.chat.Viewport.View()))
-	if !strings.Contains(view, "子任务已完成，等待主模型继续") {
-		t.Fatalf("view = %q, want subtask waiting status line", view)
+	if strings.Contains(view, "正在请求主模型继续") {
+		t.Fatalf("view = %q, should not duplicate bottom loading status in transcript", view)
+	}
+	input := stripANSIForTest(tui.renderInputArea())
+	if !strings.Contains(input, "子任务已完成，正在请求主模型继续") || !strings.Contains(input, "Esc 取消") {
+		t.Fatalf("renderInputArea() = %q, want subtask waiting placeholder", input)
 	}
 }
 
@@ -317,8 +329,8 @@ func TestRunningToolShowsCompactStatusLine(t *testing.T) {
 		t.Fatalf("view = %q, should not contain duplicate bottom status line", view)
 	}
 	input := stripANSIForTest(tui.renderInputArea())
-	if !strings.Contains(input, "运行中") || !strings.Contains(input, "Esc 取消") {
-		t.Fatalf("renderInputArea() = %q, want compact running placeholder", input)
+	if !strings.Contains(input, "执行工具中") || !strings.Contains(input, "Esc 取消") {
+		t.Fatalf("renderInputArea() = %q, want tool running placeholder", input)
 	}
 }
 
@@ -549,5 +561,16 @@ func TestUsageNotificationFallsBackToProviderContextTokens(t *testing.T) {
 
 	if got, want := tui.contextTokens, 42200; got != want {
 		t.Fatalf("contextTokens = %d, want fallback %d", got, want)
+	}
+}
+
+func TestInputPlaceholderHidesForWhitespaceDraft(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
+	tui.initChatComponents()
+	tui.chat.Textarea.SetValue(" ")
+
+	view := stripANSIForTest(tui.renderInputArea())
+	if strings.Contains(view, "Ask anything") || strings.Contains(view, "有什么可以帮你") {
+		t.Fatalf("renderInputArea() = %q, should hide placeholder for whitespace draft", view)
 	}
 }
