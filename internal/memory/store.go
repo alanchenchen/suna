@@ -2,10 +2,14 @@ package memory
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/google/uuid"
 
 	_ "modernc.org/sqlite"
 )
@@ -65,13 +69,25 @@ func (s *Store) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_user_profile_memory_kind ON user_profile_memory(user_id, kind)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_profile_memory_updated ON user_profile_memory(user_id, updated_at)`,
 
-		`CREATE TABLE IF NOT EXISTS conversation_state (
-			user_id TEXT PRIMARY KEY,
-			session_state TEXT NOT NULL DEFAULT '',
+		`CREATE TABLE IF NOT EXISTS sessions (
+			id TEXT PRIMARY KEY,
+			title TEXT NOT NULL DEFAULT '',
+			cwd TEXT NOT NULL DEFAULT '',
+			message_count INTEGER NOT NULL DEFAULT 0,
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			last_attached_at DATETIME
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_cwd ON sessions(cwd, updated_at)`,
+
+		`CREATE TABLE IF NOT EXISTS session_state (
+			session_id TEXT PRIMARY KEY,
+			compacted_state TEXT NOT NULL DEFAULT '',
 			last_messages TEXT NOT NULL DEFAULT '[]',
 			tool_summary TEXT NOT NULL DEFAULT '[]',
-			memory_processed_at DATETIME,
-			updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+			updated_at DATETIME NOT NULL,
+			FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
 		)`,
 
 		`CREATE TABLE IF NOT EXISTS memory_queue (
@@ -156,37 +172,120 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("exec migration: %w\nquery: %s", err, m)
 		}
 	}
-	if err := s.ensureConversationStateColumns(); err != nil {
+	if err := s.migrateLegacyConversationState(); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (s *Store) ensureConversationStateColumns() error {
-	rows, err := s.db.Query(`PRAGMA table_info(conversation_state)`)
+func (s *Store) migrateLegacyConversationState() error {
+	exists, err := s.tableExists("conversation_state")
+	if err != nil || !exists {
+		return err
+	}
+	selectState := "''"
+	if ok, err := s.columnExists("conversation_state", "session_state"); err != nil {
+		return err
+	} else if ok {
+		selectState = "session_state"
+	}
+	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("inspect conversation_state: %w", err)
+		return err
+	}
+	defer tx.Rollback()
+
+	// session_state 列只存在于较新的单会话库；更旧库迁移时把 compacted state 当空串处理。
+	rows, err := tx.Query(fmt.Sprintf(`SELECT %s, last_messages, tool_summary, updated_at FROM conversation_state`, selectState))
+	if err != nil {
+		return fmt.Errorf("read legacy conversation_state: %w", err)
 	}
 	defer rows.Close()
-	cols := map[string]bool{}
 	for rows.Next() {
-		var cid int
-		var name, typ string
-		var notNull int
-		var defaultValue any
-		var pk int
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &pk); err != nil {
+		var compacted, lastMessages, toolSummary string
+		var updated sql.NullString
+		if err := rows.Scan(&compacted, &lastMessages, &toolSummary, &updated); err != nil {
 			return err
 		}
-		cols[strings.ToLower(name)] = true
+		if strings.TrimSpace(compacted) == "" && emptyJSONMessages(lastMessages) {
+			continue
+		}
+		id := uuid.New().String()
+		when := parseDBTime(updated.String)
+		if when.IsZero() {
+			when = time.Now()
+		}
+		count := countLegacyMessages(lastMessages)
+		cwd := ""
+		if wd, err := os.Getwd(); err == nil {
+			cwd = wd
+		}
+		if _, err := tx.Exec(`INSERT INTO sessions (id, title, cwd, message_count, created_at, updated_at) VALUES (?, '', ?, ?, ?, ?)`, id, cwd, count, when, when); err != nil {
+			return fmt.Errorf("create migrated session: %w", err)
+		}
+		if _, err := tx.Exec(`INSERT INTO session_state (session_id, compacted_state, last_messages, tool_summary, updated_at) VALUES (?, ?, ?, ?, ?)`, id, strings.TrimSpace(compacted), normalizeLegacyJSON(lastMessages, "[]"), normalizeLegacyJSON(toolSummary, "[]"), when); err != nil {
+			return fmt.Errorf("create migrated session state: %w", err)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	if !cols["session_state"] {
-		if _, err := s.db.Exec(`ALTER TABLE conversation_state ADD COLUMN session_state TEXT NOT NULL DEFAULT ''`); err != nil {
-			return fmt.Errorf("add session_state column: %w", err)
+	if _, err := tx.Exec(`DROP TABLE conversation_state`); err != nil {
+		return fmt.Errorf("drop legacy conversation_state: %w", err)
+	}
+	return tx.Commit()
+}
+
+func (s *Store) tableExists(name string) (bool, error) {
+	row := s.db.QueryRow(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, name)
+	var got string
+	if err := row.Scan(&got); err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	return got == name, nil
+}
+
+func (s *Store) columnExists(table, column string) (bool, error) {
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
 		}
 	}
-	return nil
+	return false, rows.Err()
+}
+
+func emptyJSONMessages(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	return raw == "" || raw == "[]" || raw == "null"
+}
+
+func normalizeLegacyJSON(raw, fallback string) string {
+	if strings.TrimSpace(raw) == "" {
+		return fallback
+	}
+	return raw
+}
+
+func countLegacyMessages(raw string) int {
+	var arr []json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+		return 0
+	}
+	return len(arr)
 }

@@ -117,16 +117,37 @@ func (c *Client) GuardReply(guardID, decision string) error {
 	return c.Invoke(ctx, protocol.MethodGuardReply, protocol.GuardReplyParams{ID: guardID, Decision: decision}, nil)
 }
 
-func (c *Client) NewSession() error {
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout(protocol.MethodSessionNew))
+func (c *Client) ListSessions(params protocol.SessionListParams) (protocol.SessionListResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout(protocol.MethodSessionList))
 	defer cancel()
-	return c.Invoke(ctx, protocol.MethodSessionNew, nil, nil)
+	var result protocol.SessionListResult
+	return result, c.Invoke(ctx, protocol.MethodSessionList, params, &result)
 }
 
-func (c *Client) RestoreSession() error {
-	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout(protocol.MethodSessionRestore))
+func (c *Client) CreateSession(cwd, title string) (protocol.SessionSnapshot, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout(protocol.MethodSessionCreate))
 	defer cancel()
-	return c.Invoke(ctx, protocol.MethodSessionRestore, nil, nil)
+	var result protocol.SessionSnapshot
+	return result, c.Invoke(ctx, protocol.MethodSessionCreate, protocol.SessionCreateParams{CWD: cwd, Title: title}, &result)
+}
+
+func (c *Client) AttachSession(sessionID string, requireActive bool) (protocol.SessionSnapshot, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout(protocol.MethodSessionAttach))
+	defer cancel()
+	var result protocol.SessionSnapshot
+	return result, c.Invoke(ctx, protocol.MethodSessionAttach, protocol.SessionAttachParams{SessionID: sessionID, RequireActive: requireActive}, &result)
+}
+
+func (c *Client) DetachSession() error {
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout(protocol.MethodSessionDetach))
+	defer cancel()
+	return c.Invoke(ctx, protocol.MethodSessionDetach, nil, nil)
+}
+
+func (c *Client) DeleteSession(sessionID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout(protocol.MethodSessionDelete))
+	defer cancel()
+	return c.Invoke(ctx, protocol.MethodSessionDelete, protocol.SessionDeleteParams{SessionID: sessionID}, nil)
 }
 
 func (c *Client) ListMemory() (protocol.MemoryListResult, error) {

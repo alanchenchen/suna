@@ -15,16 +15,19 @@ import (
 )
 
 func (a *Agent) buildSystemPrompt(ctx context.Context) (string, error) {
-	env := getEnvInfo()
+	env := getEnvInfoForWorkDir(a.cwd)
 	projectConfig := projectInstructions{}
-	wd, _ := os.Getwd()
+	wd := a.cwd
+	if strings.TrimSpace(wd) == "" {
+		wd, _ = os.Getwd()
+	}
 	projectConfig = loadProjectInstructions(wd)
 	skills := ""
 	if a.skills != nil {
 		skills = a.skills.Summary()
 	}
 	return a.prompts.RenderSystem(prompt.SystemPromptData{
-		OS: env["OS"], Arch: env["Arch"], WorkDir: env["WorkDir"], ActiveModel: a.activeModelSummary(),
+		OS: env["OS"], Arch: env["Arch"], WorkDir: wd, ActiveModel: a.activeModelSummary(),
 		ModelRouting: a.modelRoutingSummary(), ProjectConfig: projectConfig.Content, ProjectConfigSource: projectConfig.Source, Skills: skills, SkillsDir: a.cfg.SkillsDir(),
 	})
 }
@@ -121,8 +124,10 @@ func withIntentParameter(params map[string]any) map[string]any {
 	return params
 }
 
-func getEnvInfo() map[string]string {
-	wd, _ := os.Getwd()
+func getEnvInfoForWorkDir(wd string) map[string]string {
+	if strings.TrimSpace(wd) == "" {
+		wd, _ = os.Getwd()
+	}
 	return map[string]string{"OS": runtime.GOOS, "Arch": runtime.GOARCH, "WorkDir": wd}
 }
 

@@ -28,15 +28,18 @@ import (
 )
 
 type Agent struct {
+	// runtime 指向共享全局运行时；nil 表示当前对象就是运行时根 Agent。
+	runtime      *Agent
 	cfg          *config.Config
 	router       *model.Router
 	tools        *tools.Manager
 	guard        *guard.Guard
 	working      *memory.WorkingMemory
-	sessions     *memory.SessionStore
+	usage        *memory.UsageStore
+	sessionStore *memory.SessionStore
+	stateStore   *memory.SessionStateStore
 	memories     *memory.MemoryStore
 	mediaStore   *media.Store
-	conversation *memory.ConversationStore
 	compressor   *memory.Compressor
 	calibrator   *model.TokenCalibrator
 	prompts      *prompt.Loader
@@ -44,6 +47,7 @@ type Agent struct {
 	skills       *skill.Runtime
 	mcp          *mcp.Runtime
 	sessionID    string
+	cwd          string
 	turnCount    int
 	sessionState string
 	toolSummary  memory.ToolSummary
@@ -65,10 +69,11 @@ type Agent struct {
 
 func NewAgent(cfg *config.Config) (*Agent, error) {
 	var router *model.Router
-	mediaStore := media.NewStore(media.DefaultRoot())
+	mediaStore := media.NewStore(cfg.AttachmentsDir())
+	resolver := media.NewContextResolver(cfg.AttachmentsDir())
 	if len(cfg.Models) > 0 && cfg.ActiveModel != "" {
 		var err error
-		router, err = model.NewRouter(cfg, mediaStore)
+		router, err = model.NewRouter(cfg, resolver)
 		if err != nil {
 			return nil, fmt.Errorf("init router: %w", err)
 		}
@@ -98,9 +103,10 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 		return nil, fmt.Errorf("init prompts: %w", err)
 	}
 
-	sessions := memory.NewSessionStore(store.DB())
+	usage := memory.NewUsageStore(store.DB())
+	sessionStore := memory.NewSessionStore(store.DB())
+	stateStore := memory.NewSessionStateStore(store.DB())
 	memories := memory.NewMemoryStore(store.DB())
-	conversation := memory.NewConversationStore(store.DB())
 
 	extractProvider := model.NewRoutedProvider(router)
 
@@ -112,10 +118,12 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 		router:        router,
 		tools:         toolManager,
 		working:       memory.NewWorkingMemory(),
-		sessions:      sessions,
+		usage:         usage,
+		sessionStore:  sessionStore,
+		stateStore:    stateStore,
 		memories:      memories,
 		mediaStore:    mediaStore,
-		conversation:  conversation,
+		guard:         guard.NewGuard(nil, sessionID),
 		compressor:    memory.NewCompressor(extractProvider),
 		calibrator:    model.NewTokenCalibrator(),
 		prompts:       prompts,
@@ -123,6 +131,7 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 		skills:        skillRuntime,
 		mcp:           mcpRuntime,
 		sessionID:     sessionID,
+		cwd:           mustGetwd(),
 		extractQueue:  extractQueue,
 		extractWorker: extractWorker,
 	}
@@ -146,6 +155,7 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 }
 
 func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
+	a.syncRuntime()
 	events := make(chan Event, eventBuffer)
 	if !a.runMu.TryLock() {
 		events <- Event{Type: EventStatus, Content: "agent is already running", Error: true}
@@ -191,6 +201,7 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 }
 
 func (a *Agent) ResumeRun(ctx context.Context) <-chan Event {
+	a.syncRuntime()
 	// resume 只恢复未完成的当前 turn，不新增 user message；用于模型/服务中断后的干净重试。
 	events := make(chan Event, eventBuffer)
 	if !a.runMu.TryLock() {
@@ -233,6 +244,7 @@ func (a *Agent) finishRun(events chan Event, cancel context.CancelFunc) {
 }
 
 func (a *Agent) runCurrentWorking(runCtx context.Context, inputText string, events chan<- Event) {
+	runCtx = tools.WithExecutionContext(runCtx, tools.ExecutionContext{SessionID: a.sessionID, CWD: a.cwd, AttachmentDir: a.attachmentRoot()})
 	_, modelRef, err := a.router.Route(runCtx, inputText)
 	if err != nil {
 		logging.Error("agent", "route_failed", err, logging.Event{"session_id": a.sessionID})
@@ -332,12 +344,12 @@ func (a *Agent) ReloadTools(ctx context.Context) error {
 }
 
 func (a *Agent) RecordUsage(ctx context.Context, modelID string, usage *model.Usage) {
-	if a.sessions == nil || usage == nil {
+	if a.usage == nil || usage == nil {
 		return
 	}
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	if err := a.sessions.SaveUsage(saveCtx, a.sessionID, modelID, usage.InputTokens, usage.OutputTokens); err != nil {
+	if err := a.usage.SaveUsage(saveCtx, a.sessionID, modelID, usage.InputTokens, usage.OutputTokens); err != nil {
 		logging.Error("agent", "save_usage_failed", err, logging.Event{"session_id": a.sessionID, "model": modelID})
 	}
 }

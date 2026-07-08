@@ -60,7 +60,7 @@ func RenderContent(commands []Command, deps RenderDeps) string {
 		helpLine("Enter", "tui.help.chat_send", deps),
 		helpLine("Shift+Enter/Ctrl+J", "tui.help.chat_newline", deps),
 		helpLine("Esc", "tui.help.chat_back", deps),
-		helpLine("?", "tui.key.help", deps),
+		helpLine("/help", "tui.key.help", deps),
 		helpLine("PgUp/PgDn", "tui.help.chat_scroll", deps),
 		helpLine("Ctrl+Y", "tui.help.copy_mode", deps),
 		helpLine("Esc", "tui.help.copy_exit", deps),

@@ -36,7 +36,7 @@ func (EditFile) Execute(ctx context.Context, params map[string]any) tools.Result
 	if path == "" {
 		return tools.ErrorResult("path is required")
 	}
-	path = expandPath(path)
+	path = expandPathWithContext(ctx, path)
 	if isSystemPath(path) {
 		return tools.ErrorResult(fmt.Sprintf("cannot edit system file: %s", path))
 	}

@@ -182,4 +182,11 @@ type Model struct {
 	MemoryError       string
 	MemoryConfirm     MemoryConfirmMode
 	MemoryConfirmText string
+
+	Sessions            []protocol.SessionInfo
+	SessionsOverlayOpen bool
+	SessionsLoading     bool
+	SessionCursor       int
+	SessionsError       string
+	SessionConfirm      SessionConfirmMode
 }

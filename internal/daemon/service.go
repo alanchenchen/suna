@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/alanchenchen/suna/internal/agent"
 	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/logging"
@@ -25,9 +27,17 @@ const maxToolResultBytes = 16 * 1024
 type service struct {
 	daemon *Daemon
 
-	// AskUser / GuardConfirm 会阻塞 agent loop，这里按事件 ID 保存 reply channel，等待客户端回传。
+	// AskUser / GuardConfirm 会阻塞 agent loop；pending 记录归属 session 和 owner，支持 owner 断开后的 Handoff 接力。
 	pendingAsks   sync.Map
 	pendingGuards sync.Map
+}
+
+type pendingInteraction struct {
+	sessionID string
+	ownerID   string
+	reply     chan string
+	ask       *protocol.AskUserParams
+	guard     *protocol.GuardConfirmParams
 }
 
 func newService(d *Daemon) *service { return &service{daemon: d} }
@@ -88,7 +98,11 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 	case protocol.MethodResumeRun:
 		return s.handleResumeRun(ctx, req, sink)
 	case protocol.MethodCancel:
-		s.daemon.agent.CancelCurrentRun()
+		rt, _, err := s.daemon.sessions.ensureRunOwner(req.ConnID)
+		if err != nil {
+			return nil, protocolError{code: -32602, message: err.Error(), data: protocol.ProtocolErrorData{Kind: err.Error()}}
+		}
+		rt.agent.CancelCurrentRun()
 		return map[string]string{"status": "cancelled"}, nil
 	case protocol.MethodAskReply:
 		return s.handleAskReply(req)
@@ -100,20 +114,26 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 		return s.handleMemoryDelete(ctx, req, sink)
 	case protocol.MethodMemoryClear:
 		return s.handleMemoryClear(ctx, sink)
-	case protocol.MethodSessionNew:
-		s.daemon.agent.NewSession()
-		_ = sink.Emit(ctx, protocol.Event{Method: protocol.NotifyDaemonFullStatus, Params: s.buildDaemonStatus(ctx)})
-		return map[string]string{"status": "ok"}, nil
-	case protocol.MethodSessionRestore:
-		return s.handleSessionRestore(ctx, sink)
+	case protocol.MethodSessionList:
+		return s.handleSessionList(ctx, req)
+	case protocol.MethodSessionCreate:
+		return s.handleSessionCreate(ctx, req)
+	case protocol.MethodSessionAttach:
+		return s.handleSessionAttach(ctx, req)
+	case protocol.MethodSessionDetach:
+		return s.handleSessionDetach(ctx, req)
+	case protocol.MethodSessionUpdate:
+		return s.handleSessionUpdate(ctx, req)
+	case protocol.MethodSessionDelete:
+		return s.handleSessionDelete(ctx, req)
 	case protocol.MethodCompact:
-		return s.handleCompact(ctx, sink)
+		return s.handleCompact(ctx, req, sink)
 	case protocol.MethodUsage:
 		return s.handleUsage(ctx), nil
 	case protocol.MethodAttachmentStatus:
-		return s.handleAttachmentStatus()
+		return s.handleAttachmentStatus(req)
 	case protocol.MethodAttachmentClear:
-		return s.handleAttachmentClear()
+		return s.handleAttachmentClear(req)
 	case protocol.MethodDaemonStatus:
 		// daemon.status 是 CLI 启动探测和 TUI 初始拉取的快路径：只返回 response，
 		// 不在这里同步 Emit full_status，避免慢 pipe/短连接阻塞响应。
@@ -140,7 +160,7 @@ func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHell
 		return protocol.RuntimeHelloResult{}, invalidParams(err.Error())
 	}
 	requestedVersion := strings.TrimSpace(params.ProtocolVersion)
-	if requestedVersion != "" && requestedVersion != "0.1" {
+	if requestedVersion != "" && requestedVersion != "0.2" {
 		return protocol.RuntimeHelloResult{}, protocolError{code: -32602, message: "unsupported protocol version", data: protocol.ProtocolErrorData{Kind: "unsupported_capability", Reason: "protocol_version"}}
 	}
 	transport := strings.TrimSpace(params.Transport)
@@ -148,12 +168,12 @@ func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHell
 		transport = "unknown"
 	}
 	return protocol.RuntimeHelloResult{
-		ProtocolVersion: "0.1",
+		ProtocolVersion: "0.2",
 		RuntimeVersion:  version.Current(),
 		Transport:       transport,
 		Capabilities: map[string]bool{
 			"agent": true, "streaming": true, "tools": true, "guard": true, "ask_user": true,
-			"session": true, "config": true, "memory": true, "skills": true, "mcp": true,
+			"session": true, "multi_session": true, "handoff": true, "config": true, "memory": true, "skills": true, "mcp": true,
 		},
 		ContentSources: map[string]bool{"text": true, "image_path": true, "image_url": true},
 		Limits:         map[string]int{"max_tool_result_bytes": maxToolResultBytes},
@@ -165,7 +185,10 @@ func (s *service) handleSendMessage(ctx context.Context, req protocol.Request, s
 	if err := decodeParams(req.Params, &params); err != nil {
 		return nil, invalidParams(err.Error())
 	}
-	input, err := s.agentInputFromParams(ctx, params)
+	if err := s.daemon.sessions.ensureAttached(req.ConnID); err != nil {
+		return nil, protocolError{code: -32602, message: err.Error(), data: protocol.ProtocolErrorData{Kind: err.Error()}}
+	}
+	input, err := s.agentInputFromParams(ctx, req.ConnID, params)
 	if err != nil {
 		return nil, invalidParams(err.Error())
 	}
@@ -173,27 +196,39 @@ func (s *service) handleSendMessage(ctx context.Context, req protocol.Request, s
 	if inputText == "" && len(input.Blocks) == 0 {
 		return nil, invalidParams("content is required")
 	}
-	go s.runAgent(ctx, req.ConnID, inputText, input, sink)
+	go s.runAgent(ctx, req.ConnID, inputText, input, params.Parts, sink)
 	return map[string]string{"status": "processing"}, nil
 }
 
 func (s *service) handleResumeRun(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
-	go s.runAgentEvents(ctx, req.ConnID, "resume", s.daemon.agent.ResumeRun(ctx), sink)
+	rt, sessionID, err := s.daemon.sessions.beginRun(req.ConnID)
+	if err != nil {
+		return nil, protocolError{code: -32602, message: err.Error(), data: protocol.ProtocolErrorData{Kind: err.Error()}}
+	}
+	go s.runAgentEvents(ctx, req.ConnID, sessionID, "resume", rt.agent.ResumeRun(ctx), sink)
+	s.emitAgentRun(ctx, sessionID, req.ConnID, protocol.AgentRunParams{State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
 	return map[string]string{"status": "processing"}, nil
 }
 
-func (s *service) runAgent(ctx context.Context, connID, inputText string, input agent.Input, sink protocol.EventSink) {
-	s.runAgentEvents(ctx, connID, inputText, s.daemon.agent.Run(ctx, input), sink)
+func (s *service) runAgent(ctx context.Context, connID, inputText string, input agent.Input, parts []protocol.MessagePart, sink protocol.EventSink) {
+	rt, sessionID, err := s.daemon.sessions.beginRun(connID)
+	if err != nil {
+		emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{State: protocol.AgentRunFailed, Message: err.Error()})
+		return
+	}
+	s.emitUserMessage(ctx, sessionID, connID, protocol.UserMessageParams{SessionID: sessionID, Parts: parts})
+	s.emitAgentRun(ctx, sessionID, connID, protocol.AgentRunParams{State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
+	s.runAgentEvents(ctx, connID, sessionID, inputText, rt.agent.Run(ctx, input), sink)
 }
 
-func (s *service) runAgentEvents(ctx context.Context, connID, inputLabel string, events <-chan agent.Event, sink protocol.EventSink) {
+func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, inputLabel string, events <-chan agent.Event, sink protocol.EventSink) {
 	started := time.Now()
 	logging.Info("agent", "run_start", logging.Event{"conn_id": connID, "input_chars": len(inputLabel)})
 	batcher := &streamBatcher{}
 	ticker := time.NewTicker(streamBatchInterval)
 	defer ticker.Stop()
 	flush := func() {
-		sink = s.daemon.sinkFor(connID, sink)
+		sink = multiSink(s.daemon.sessions.sinksForSession(s.daemon, sessionID))
 		batcher.flush(ctx, sink)
 	}
 	for {
@@ -203,13 +238,15 @@ func (s *service) runAgentEvents(ctx context.Context, connID, inputLabel string,
 				flush()
 				return
 			}
-			sink = s.daemon.sinkFor(connID, sink)
+			sink = multiSink(s.daemon.sessions.sinksForSession(s.daemon, sessionID))
 			switch evt.Type {
 			case agent.EventStream:
+				s.daemon.sessions.appendStream(sessionID, evt.Content)
 				if batcher.addStream(ctx, sink, evt.Content) {
 					flush()
 				}
 			case agent.EventReasoning:
+				s.daemon.sessions.appendReasoning(sessionID, evt.Content)
 				if batcher.addReasoning(ctx, sink, evt.Content) {
 					flush()
 				}
@@ -222,6 +259,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, inputLabel string,
 				emit(ctx, sink, protocol.NotifyUsage, protocol.UsageParams{InputTokens: evt.InputTokens, OutputTokens: evt.OutputTokens, CachedTokens: evt.CachedTokens, ContextTokens: evt.ContextTokens, EstimatedContextTokens: evt.EstimatedContextTokens, ContextWindow: evt.ContextWindow, DurationMs: evt.DurationMs, TokensPerSec: speed})
 			case agent.EventToolCall:
 				flush()
+				s.daemon.sessions.setPhase(sessionID, protocol.AgentRunPhaseTool)
 				logging.Info("agent", "tool_call", logging.Event{"conn_id": connID, "tool": evt.ToolName, "intent": evt.ToolIntent})
 				emit(ctx, sink, protocol.NotifyToolStart, protocol.ToolStartParams{ID: evt.ToolCallID, Tool: evt.ToolName, Params: evt.ToolParams, Intent: evt.ToolIntent})
 			case agent.EventToolGuard:
@@ -240,22 +278,32 @@ func (s *service) runAgentEvents(ctx context.Context, connID, inputLabel string,
 				emit(ctx, sink, protocol.NotifySkillReview, protocol.SkillReviewParams{Name: evt.SkillName, Status: evt.SkillReviewStatus, Review: evt.SkillReview, Error: evt.Content})
 			case agent.EventAskUser:
 				flush()
-				askID := connID + "_" + fmt.Sprintf("%d", time.Now().UnixNano())
+				s.daemon.sessions.setPhase(sessionID, protocol.AgentRunPhaseAsk)
+				s.daemon.sessions.setWaiting(sessionID, protocol.RunWaitingAsk)
+				// 交互 ID 是公开协议字段，必须保持 opaque，不能包含 daemon 内部连接标识。
+				askID := uuid.NewString()
+				params := protocol.AskUserParams{Question: evt.Question, Options: evt.Options, ID: askID, SessionID: sessionID, AllowCustom: evt.AllowCustom}
 				if evt.Reply != nil {
-					s.pendingAsks.Store(askID, evt.Reply)
+					s.pendingAsks.Store(askID, pendingInteraction{sessionID: sessionID, ownerID: connID, reply: evt.Reply, ask: &params})
 				}
-				emit(ctx, sink, protocol.NotifyAskUser, protocol.AskUserParams{Question: evt.Question, Options: evt.Options, ID: askID, AllowCustom: evt.AllowCustom})
+				s.emitAskUser(ctx, sessionID, connID, params)
 			case agent.EventGuardConfirm:
 				flush()
-				guardID := connID + "_guard_" + fmt.Sprintf("%d", time.Now().UnixNano())
+				s.daemon.sessions.setPhase(sessionID, protocol.AgentRunPhaseGuard)
+				s.daemon.sessions.setWaiting(sessionID, protocol.RunWaitingGuard)
+				// Guard 确认 ID 同样是公开协议字段，只能作为 opaque token 使用。
+				guardID := uuid.NewString()
+				params := protocol.GuardConfirmParams{ID: guardID, ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, Params: evt.GuardParams, Risk: evt.GuardRisk, Reason: evt.GuardReason, Suggestion: evt.GuardSuggestion, ReviewCode: evt.GuardReviewCode, ReviewMessage: evt.GuardReviewMsg, SessionID: sessionID}
 				if evt.Reply != nil {
-					s.pendingGuards.Store(guardID, evt.Reply)
+					s.pendingGuards.Store(guardID, pendingInteraction{sessionID: sessionID, ownerID: connID, reply: evt.Reply, guard: &params})
 				}
-				emit(ctx, sink, protocol.NotifyGuardConfirm, protocol.GuardConfirmParams{ID: guardID, ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, Params: evt.GuardParams, Risk: evt.GuardRisk, Reason: evt.GuardReason, Suggestion: evt.GuardSuggestion, ReviewCode: evt.GuardReviewCode, ReviewMessage: evt.GuardReviewMsg})
+				s.emitGuardConfirm(ctx, sessionID, connID, params)
 			case agent.EventStatus:
 				flush()
 				switch evt.Status {
 				case agent.StatusCompactRunning:
+					s.daemon.sessions.setPhase(sessionID, protocol.AgentRunPhaseCompact)
+					s.daemon.sessions.setStatus(sessionID, sessionCompacting)
 					running := true
 					emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running})
 				case agent.StatusCompactDone:
@@ -264,13 +312,21 @@ func (s *service) runAgentEvents(ctx context.Context, connID, inputLabel string,
 				case agent.StatusCompactError:
 					running := false
 					emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running, Error: evt.Content})
+					s.daemon.sessions.setStatus(sessionID, sessionIdle)
 					// compact 失败已经通过专用通知展示；不要再发送通用错误，避免 TUI 重复报错。
 					return
 				case agent.StatusWaitingLLM:
-					emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
+					s.daemon.sessions.setPhase(sessionID, protocol.AgentRunPhaseModel)
+					s.daemon.sessions.setStatus(sessionID, sessionRunning)
+					ownerID := s.daemon.sessions.runOwner(sessionID)
+					if ownerID == "" {
+						ownerID = connID
+					}
+					s.emitAgentRun(ctx, sessionID, ownerID, protocol.AgentRunParams{State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
 				case agent.StatusLLMRetrying:
 					emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{State: protocol.AgentRunRetrying, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Attempt: evt.Attempt, MaxAttempts: evt.MaxAttempts, DelayMs: evt.DelayMs, Error: protocolModelError(evt.ModelError)})
 				case agent.StatusDone:
+					s.daemon.sessions.setStatus(sessionID, sessionIdle)
 					logging.Info("agent", "run_done", logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()})
 					emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{State: protocol.AgentRunDone})
 					emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
@@ -282,6 +338,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, inputLabel string,
 						if evt.ModelError != nil && evt.ModelError.Kind == model.ModelErrorCancelled {
 							state = protocol.AgentRunCancelled
 						}
+						s.daemon.sessions.setStatus(sessionID, sessionIdle)
 						emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{State: state, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Error: protocolModelError(evt.ModelError), ResumeAvailable: resumeAvailable})
 						emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
 					}
@@ -293,18 +350,91 @@ func (s *service) runAgentEvents(ctx context.Context, connID, inputLabel string,
 	}
 }
 
+func (s *service) broadcastSessionState(ctx context.Context, sessionID string) {
+	s.daemon.broadcastSessionState(ctx, sessionID)
+}
+
+func (s *service) emitAgentRun(ctx context.Context, sessionID, ownerID string, params protocol.AgentRunParams) {
+	for _, targetConnID := range s.daemon.sessions.connIDsForSession(sessionID) {
+		p := params
+		p.CanControl = targetConnID == ownerID
+		emit(ctx, s.daemon.sinkFor(targetConnID, nil), protocol.NotifyAgentRun, p)
+	}
+}
+
+func (s *service) emitUserMessage(ctx context.Context, sessionID, ownerID string, params protocol.UserMessageParams) {
+	for _, targetConnID := range s.daemon.sessions.connIDsForSession(sessionID) {
+		if targetConnID == ownerID {
+			continue
+		}
+		emit(ctx, s.daemon.sinkFor(targetConnID, nil), protocol.NotifySessionUserMessage, params)
+	}
+}
+
+func (s *service) emitAskUser(ctx context.Context, sessionID, ownerID string, params protocol.AskUserParams) {
+	for _, targetConnID := range s.daemon.sessions.connIDsForSession(sessionID) {
+		p := params
+		p.CanReply = targetConnID == ownerID
+		emit(ctx, s.daemon.sinkFor(targetConnID, nil), protocol.NotifyAskUser, p)
+	}
+}
+
+func (s *service) emitGuardConfirm(ctx context.Context, sessionID, ownerID string, params protocol.GuardConfirmParams) {
+	for _, targetConnID := range s.daemon.sessions.connIDsForSession(sessionID) {
+		p := params
+		p.CanReply = targetConnID == ownerID
+		emit(ctx, s.daemon.sinkFor(targetConnID, nil), protocol.NotifyGuardConfirm, p)
+	}
+}
+
+func (s *service) emitInteractionResolved(ctx context.Context, sessionID, id string) {
+	sink := multiSink(s.daemon.sessions.sinksForSession(s.daemon, sessionID))
+	emit(ctx, sink, protocol.NotifyInteractionResolved, protocol.InteractionResolvedParams{ID: id, SessionID: sessionID})
+}
+
+func (s *service) onClientDetached(ctx context.Context, connID, sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	// owner 断开时，等待中的 ask/guard 会重新发给仍 attached 的客户端；daemon 只改变可回复权限，不引入 host/guest 概念。
+	s.pendingAsks.Range(func(key, value any) bool {
+		pending := value.(pendingInteraction)
+		if pending.sessionID != sessionID || pending.ownerID != connID || pending.ask == nil {
+			return true
+		}
+		for _, targetConnID := range s.daemon.sessions.connIDsForSession(sessionID) {
+			p := *pending.ask
+			p.CanReply = true
+			emit(ctx, s.daemon.sinkFor(targetConnID, nil), protocol.NotifyAskUser, p)
+		}
+		return true
+	})
+	s.pendingGuards.Range(func(key, value any) bool {
+		pending := value.(pendingInteraction)
+		if pending.sessionID != sessionID || pending.ownerID != connID || pending.guard == nil {
+			return true
+		}
+		for _, targetConnID := range s.daemon.sessions.connIDsForSession(sessionID) {
+			p := *pending.guard
+			p.CanReply = true
+			emit(ctx, s.daemon.sinkFor(targetConnID, nil), protocol.NotifyGuardConfirm, p)
+		}
+		return true
+	})
+}
+
 func (s *service) handleAskReply(req protocol.Request) (any, error) {
 	var params protocol.AskUserReply
 	if err := decodeParams(req.Params, &params); err != nil {
 		return nil, invalidParams(err.Error())
 	}
-	val, ok := s.pendingAsks.LoadAndDelete(params.ID)
-	if !ok {
-		return nil, protocolError{code: -32601, message: "ask session not found or expired"}
+	pending, err := s.claimInteractionReply(req.ConnID, params.ID, &s.pendingAsks, "ask session not found or expired")
+	if err != nil {
+		return nil, err
 	}
-	replyCh := val.(chan string)
-	replyCh <- params.Answer
-	close(replyCh)
+	pending.reply <- params.Answer
+	close(pending.reply)
+	s.emitInteractionResolved(context.Background(), pending.sessionID, params.ID)
 	return map[string]string{"status": "ok"}, nil
 }
 
@@ -313,14 +443,47 @@ func (s *service) handleGuardReply(req protocol.Request) (any, error) {
 	if err := decodeParams(req.Params, &params); err != nil {
 		return nil, invalidParams(err.Error())
 	}
-	val, ok := s.pendingGuards.LoadAndDelete(params.ID)
-	if !ok {
-		return nil, protocolError{code: -32601, message: "guard confirmation not found or expired"}
+	pending, err := s.claimInteractionReply(req.ConnID, params.ID, &s.pendingGuards, "guard confirmation not found or expired")
+	if err != nil {
+		return nil, err
 	}
-	replyCh := val.(chan string)
-	replyCh <- params.Decision
-	close(replyCh)
+	pending.reply <- params.Decision
+	close(pending.reply)
+	s.emitInteractionResolved(context.Background(), pending.sessionID, params.ID)
 	return map[string]string{"status": "ok"}, nil
+}
+
+func (s *service) claimInteractionReply(connID, id string, store *sync.Map, notFound string) (pendingInteraction, error) {
+	val, ok := store.Load(id)
+	if !ok {
+		return pendingInteraction{}, protocolError{code: -32601, message: notFound}
+	}
+	pending := val.(pendingInteraction)
+	if err := s.ensureInteractionReplyAllowed(connID, pending); err != nil {
+		return pendingInteraction{}, err
+	}
+	if connID != pending.ownerID {
+		// owner 已离线后的 Handoff 接手：回复者成为后续 run 控制者，Esc/后续通知才会落到正确窗口。
+		s.daemon.sessions.setRunOwner(pending.sessionID, connID)
+	}
+	val, ok = store.LoadAndDelete(id)
+	if !ok {
+		return pendingInteraction{}, protocolError{code: -32601, message: notFound}
+	}
+	return val.(pendingInteraction), nil
+}
+
+func (s *service) ensureInteractionReplyAllowed(connID string, pending pendingInteraction) error {
+	if connID == pending.ownerID {
+		return nil
+	}
+	if !s.daemon.sessions.isClientAttached(connID, pending.sessionID) {
+		return protocolError{code: -32602, message: "reply client is not attached to the waiting session", data: protocol.ProtocolErrorData{Kind: "session_required"}}
+	}
+	if s.daemon.sessions.isClientAttached(pending.ownerID, pending.sessionID) {
+		return protocolError{code: -32602, message: "interaction reply is owned by another client", data: protocol.ProtocolErrorData{Kind: "session_busy"}}
+	}
+	return nil
 }
 
 func (s *service) handleMemoryList(ctx context.Context, sink protocol.EventSink) (any, error) {
@@ -374,30 +537,6 @@ func (s *service) emitMemoryList(ctx context.Context, sink protocol.EventSink) e
 	return nil
 }
 
-func (s *service) handleSessionRestore(ctx context.Context, sink protocol.EventSink) (any, error) {
-	result := s.daemon.agent.RestoreSession(ctx)
-	if result.Messages > 0 {
-		for _, m := range s.daemon.agent.WorkingMessages() {
-			content := m.Text()
-			if content == "" {
-				continue
-			}
-			switch m.Role {
-			case "user":
-				emit(ctx, sink, protocol.NotifySessionRestoreMsg, map[string]string{"role": "user", "content": content})
-			case "assistant":
-				emit(ctx, sink, protocol.NotifySessionRestoreMsg, map[string]string{"role": "assistant", "content": content})
-			}
-		}
-	}
-	status := protocol.SessionRestoreStatus{Messages: result.Messages, Compacted: result.Compacted}
-	if summary := toolSummaryPayload(s.daemon.agent.RestoreToolSummary(ctx)); summary != nil {
-		status.ToolSummary = summary
-	}
-	emit(ctx, sink, protocol.NotifySessionRestoreStatus, status)
-	return map[string]int{"messages": result.Messages}, nil
-}
-
 func toolSummaryPayload(summary memory.ToolSummary) *protocol.ToolSummaryPayload {
 	summary = summary.Normalize()
 	if summary.Empty() {
@@ -416,8 +555,16 @@ func toolSummaryPayload(summary memory.ToolSummary) *protocol.ToolSummaryPayload
 	return out
 }
 
-func (s *service) handleCompact(ctx context.Context, sink protocol.EventSink) (any, error) {
-	before, after, contextWindow, turnsCompressed, truncated, err := s.daemon.agent.Compact(ctx)
+func (s *service) handleCompact(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
+	rt, sessionID, err := s.daemon.sessions.beginRun(req.ConnID)
+	if err != nil {
+		return nil, err
+	}
+	// compact 会重写当前 session 的 working state，必须像普通 run 一样独占 session，不能和 LLM/tool run 并发。
+	s.daemon.sessions.setPhase(sessionID, protocol.AgentRunPhaseCompact)
+	s.daemon.sessions.setStatus(sessionID, sessionCompacting)
+	defer s.daemon.sessions.setStatus(sessionID, sessionIdle)
+	before, after, contextWindow, turnsCompressed, truncated, err := rt.agent.Compact(ctx)
 	if err != nil {
 		return nil, protocolError{code: -32603, message: err.Error()}
 	}
@@ -444,20 +591,28 @@ func (s *service) handleUsage(ctx context.Context) protocol.UsageResult {
 	return result
 }
 
-func (s *service) handleAttachmentStatus() (protocol.AttachmentStatusResult, error) {
-	root, bytes, count, err := s.daemon.agent.AttachmentStatus()
+func (s *service) handleAttachmentStatus(req protocol.Request) (protocol.AttachmentStatusResult, error) {
+	rt, sessionID, err := s.requireSession(req.ConnID)
+	if err != nil {
+		return protocol.AttachmentStatusResult{}, err
+	}
+	root, bytes, count, err := rt.agent.AttachmentStatus()
 	if err != nil {
 		return protocol.AttachmentStatusResult{}, protocolError{code: -32603, message: err.Error()}
 	}
-	return protocol.AttachmentStatusResult{Root: root, Bytes: bytes, Count: count}, nil
+	return protocol.AttachmentStatusResult{SessionID: sessionID, Root: root, Bytes: bytes, Count: count}, nil
 }
 
-func (s *service) handleAttachmentClear() (protocol.AttachmentClearResult, error) {
-	root, removedBytes, removedCount, bytes, count, err := s.daemon.agent.ClearAttachments()
+func (s *service) handleAttachmentClear(req protocol.Request) (protocol.AttachmentClearResult, error) {
+	rt, sessionID, err := s.requireSession(req.ConnID)
+	if err != nil {
+		return protocol.AttachmentClearResult{}, err
+	}
+	root, removedBytes, removedCount, bytes, count, err := rt.agent.ClearAttachments()
 	if err != nil {
 		return protocol.AttachmentClearResult{}, protocolError{code: -32603, message: err.Error()}
 	}
-	return protocol.AttachmentClearResult{Root: root, BytesRemoved: removedBytes, CountRemoved: removedCount, Bytes: bytes, Count: count}, nil
+	return protocol.AttachmentClearResult{SessionID: sessionID, Root: root, BytesRemoved: removedBytes, CountRemoved: removedCount, Bytes: bytes, Count: count}, nil
 }
 
 func (s *service) handleConfigSet(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
@@ -472,8 +627,8 @@ func (s *service) handleConfigSet(ctx context.Context, req protocol.Request, sin
 	}
 	logging.Info("config", "update_success", logging.Event{"action": params.Action, "model_ref": params.ModelRef, "active_model": params.ActiveModel})
 	result := configToParams(updated)
-	emit(ctx, sink, protocol.NotifyConfigState, result)
-	emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
+	s.daemon.BroadcastToAll(ctx, protocol.NotifyConfigState, result)
+	s.daemon.BroadcastToAll(ctx, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
 	return result, nil
 }
 

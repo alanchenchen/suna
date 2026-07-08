@@ -8,7 +8,7 @@
 docs/runtime-stdio.md
 ```
 
-`runtime-stdio.md` 是 public runtime v0 的开发者接入手册，包含启动方式、JSON-RPC/NDJSON 细节、Node.js 最小客户端、method/notification 参数表和示例。本文不重复完整参数示例，只描述协议设计原则和实现约束。
+`runtime-stdio.md` 是 public runtime v0.2 的开发者接入手册，包含启动方式、JSON-RPC/NDJSON 细节、Node.js 最小客户端、method/notification 参数表和示例。本文不重复完整参数示例，只描述协议设计原则和实现约束。
 
 ---
 
@@ -49,7 +49,7 @@ transport 不可以决定：
 - params / result schema。
 - notification 名称和 schema。
 - agent、session、config、memory、skill、MCP 的业务语义。
-- 模型 retry、工具 Guard、askuser、session restore 等运行语义。
+- 模型 retry、工具 Guard、askuser、session attach/snapshot 等运行语义。
 
 ---
 
@@ -57,7 +57,7 @@ transport 不可以决定：
 
 local / stdio 当前都使用 JSON-RPC 风格消息，framing 是 NDJSON。JSON-RPC 是承载细节；业务语义以 `internal/protocol` 的 method、notification、params 和 result 为准。
 
-public stdio runtime v0 的限制：
+public stdio runtime v0.2 的限制：
 
 - 客户端 request 必须带整数 `id`。
 - 暂不支持 string id。
@@ -72,7 +72,7 @@ public stdio runtime v0 的限制：
 
 ## 4. Method 总览
 
-public runtime v0 主推的 method：
+public runtime v0.2 主推的 method：
 
 | Method | 语义 |
 |---|---|
@@ -82,8 +82,12 @@ public runtime v0 主推的 method：
 | `agent.cancel` | 取消当前 run。 |
 | `agent.askReply` | 回复 `agent.ask_user`。 |
 | `agent.guardReply` | 回复 `agent.guard_confirm`。 |
-| `session.new` | 新建会话。 |
-| `session.restore` | 恢复最近会话展示状态。 |
+| `session.list` | 列出 sessions。 |
+| `session.create` | 创建 session；客户端必须传 cwd，返回 snapshot。 |
+| `session.attach` | attach 到已有 session；Resume 和 Join 都使用该方法，返回 snapshot。 |
+| `session.detach` | 当前连接离开当前 session。 |
+| `session.update` | 更新当前 attached idle session 的 title。 |
+| `session.delete` | 删除非当前、非 active、无人 attached 的 idle session。 |
 | `session.compact` | 手动压缩当前会话上下文。 |
 | `session.usage` | 查询用量摘要。 |
 | `config.get` | 读取配置。 |
@@ -92,7 +96,7 @@ public runtime v0 主推的 method：
 | `skill.list` / `skill.set` | 查询、启用或禁用 Skill。 |
 | `mcp.list` / `mcp.toggle` / `mcp.reload` | 查询、启用/禁用或重载 MCP server。 |
 
-不主推给第三方 runtime v0 依赖的 method：
+不主推给第三方 runtime v0.2 依赖的 method：
 
 | Method | 说明 |
 |---|---|
@@ -106,7 +110,7 @@ public runtime v0 主推的 method：
 
 ## 5. Notification 总览
 
-public runtime v0 主推的 notification：
+public runtime v0.2 主推的 notification：
 
 | Notification | 语义 |
 |---|---|
@@ -116,10 +120,11 @@ public runtime v0 主推的 notification：
 | `agent.tool_start` | 工具开始执行。 |
 | `agent.tool_guard` | 工具执行前 Guard 决策状态。 |
 | `agent.tool_end` | 工具执行结束；`result` 是 UI 展示内容，可能被截断。 |
-| `agent.ask_user` | agent 请求用户输入。 |
-| `agent.guard_confirm` | 高风险工具操作请求用户确认。 |
-| `session.restore_message` | 恢复会话时下发可见 user/assistant 消息。 |
-| `session.restore_status` | 恢复结束状态、compact 标记和上一轮有界工具摘要。 |
+| `agent.ask_user` | agent 请求用户输入；带 `can_reply`。 |
+| `agent.guard_confirm` | 高风险工具操作请求用户确认；带 `can_reply`。 |
+| `agent.interaction_resolved` | ask/guard 已处理，其他 UI 应关闭残留交互。 |
+| `session.user_message` | 同 session 其他客户端新增 user turn。 |
+| `session.updated` | session metadata/status/client_count 更新。 |
 | `session.compact_result` | compact running / done / error / result 状态。 |
 | `config.state` | 配置变更后的主动状态通知。 |
 | `memory.state` | memory 变更后的主动状态通知。 |
@@ -263,17 +268,25 @@ agent.run state=failed
 
 ---
 
-## 9. Session restore 和 compact 语义
+## 9. Session attach 和 compact 语义
 
-### `session.restore`
+### `session.attach`
 
-`session.restore` 的职责拆成两部分：
+`session.attach` 是 Resume 和 Join Active 的共同原语，method response 直接返回 snapshot：
 
-- method response：返回恢复消息数量。
-- `session.restore_message`：逐条下发可见 user/assistant 消息。
-- `session.restore_status`：恢复结束状态、compact 标记和上一轮有界工具摘要。
+- `session`：session metadata，包括 cwd、status、client_count 和 message_count。
+- `messages`：最近可见 user/assistant 文本消息。
+- `compacted`：较早上下文是否已压缩为 Session State。
+- `tool_summary`：上一轮有界工具摘要，仅供 UI 展示。
+- `current_run`：Join running session 时的轻量当前 run 视图。
 
-工具摘要是 UI 展示状态，不作为原始工具历史重新注入模型。
+`session.attach.require_active=true` 只用于 Join Active 的陈旧 UI 防护；Resume 应传 false 或省略。
+
+snapshot 不保证完整 tool timeline / event replay。
+
+### `session.detach`
+
+`session.detach` 表示当前连接离开当前 session，但保持 transport 连接。官方 TUI 从 Chat 回 Welcome 时会调用它。
 
 ### `session.compact`
 
@@ -283,13 +296,27 @@ agent.run state=failed
 
 ---
 
-## 10. Public / internal 边界
+## 10. Handoff 语义
 
-public runtime v0 主推：
+Handoff 在 daemon 中只表现为 multi-attach、run owner 和权限字段，不引入 host/guest：
+
+- 同一 session 可被多个 client attach。
+- 同一 session 同一时间只能一个 active run。
+- 当前 run owner 收到 `can_control=true`。
+- ask/guard owner 在线时只有 owner `can_reply=true`。
+- owner 断开后，daemon 可把 pending ask/guard 重新发给仍 attached 的 client，并让实际回复者成为新的 run owner。
+
+TUI 的“本会话 / 已加入 / 观察中”是 UI 根据 attach 方式、client_count、status 和权限字段派生的产品表达。
+
+---
+
+## 11. Public / internal 边界
+
+public runtime v0.2 主推：
 
 - runtime handshake。
 - agent 消息和事件。
-- session restore/new/compact/usage。
+- session list/create/attach/detach/update/delete/compact/usage。
 - config get/set。
 - memory list/delete/clear。
 - skill list/set。
@@ -306,7 +333,7 @@ public runtime v0 主推：
 
 ---
 
-## 11. 兼容性规则
+## 12. 兼容性规则
 
 修改 protocol 时必须遵守：
 
@@ -317,11 +344,12 @@ public runtime v0 主推：
 - 不让 transport 改变业务语义。
 - 结构化错误新增 kind 时，应保持旧 kind 的含义稳定。
 - `agent.delta`、`agent.run`、`agent.usage` 的职责边界不能混淆。
-- public runtime v0 暂不承诺 string id 或客户端 notification；如果未来支持，应在 JSON-RPC 层保持 id 原样 round-trip，避免污染 daemon 业务层。
+- public runtime v0.2 暂不承诺 string id 或客户端 notification；如果未来支持，应在 JSON-RPC 层保持 id 原样 round-trip，避免污染 daemon 业务层。
+- protocol 0.2 不兼容旧 `session.new` / `session.restore` 主流程；旧客户端需要迁移到 `session.create` / `session.attach`。
 
 ---
 
-## 12. 文档分工
+## 13. 文档分工
 
 | 文档 | 面向对象 | 职责 |
 |---|---|---|

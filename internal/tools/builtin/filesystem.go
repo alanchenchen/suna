@@ -36,7 +36,7 @@ func (FileSystem) Execute(ctx context.Context, params map[string]any) tools.Resu
 	if path == "" {
 		return tools.ErrorResult("path is required")
 	}
-	path = expandPath(path)
+	path = expandPathWithContext(ctx, path)
 	if isSystemPath(path) && action != "stat" {
 		return tools.ErrorResult(fmt.Sprintf("cannot modify system path: %s", path))
 	}
@@ -58,7 +58,7 @@ func (FileSystem) Execute(ctx context.Context, params map[string]any) tools.Resu
 		if dst == "" {
 			return tools.ErrorResult("destination is required")
 		}
-		dst = expandPath(dst)
+		dst = expandPathWithContext(ctx, dst)
 		if isSystemPath(dst) {
 			return tools.ErrorResult(fmt.Sprintf("cannot write to system path: %s", dst))
 		}

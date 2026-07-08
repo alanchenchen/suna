@@ -47,6 +47,8 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 		return nil
 	case "/memory":
 		return t.handleMemory(parts)
+	case "/sessions":
+		return t.handleSessions(parts)
 	case "/compact":
 		t.compactAuto = false
 		t.chat.Compacting = true
@@ -55,7 +57,7 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 		t.chat.PhaseStart = time.Now()
 		t.chat.Textarea.Blur()
 		t.syncContent()
-		return tea.Batch(deferManualCompactRequestCmd(), t.chat.Spinner.Tick)
+		return tea.Batch(deferManualCompactRequestCmd(), t.startChatSpinner())
 	case "/config":
 		t.mode = uipage.Config
 		t.config.FromMode = uipage.Chat
@@ -126,6 +128,15 @@ func (t *TUI) handleMemory(parts []string) tea.Cmd {
 	}
 	t.chat.OpenMemoryOverlay()
 	return t.listMemoryCmd()
+}
+
+func (t *TUI) handleSessions(parts []string) tea.Cmd {
+	if len(parts) != 1 {
+		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.tr("tui.sessions.usage")})
+		return nil
+	}
+	t.chat.OpenSessionsOverlay()
+	return t.sessionListCmd()
 }
 
 func (t *TUI) handleSkills(parts []string) tea.Cmd {
@@ -241,6 +252,38 @@ func (t *TUI) clearMemoryOverlayCmd() tea.Cmd {
 		}
 		return nil
 	}
+}
+
+func (t *TUI) updateSessionsOverlay(ks string) (tea.Model, tea.Cmd) {
+	if t.chat.SessionConfirm != chatpage.SessionConfirmNone {
+		switch ks {
+		case "esc":
+			t.chat.CancelSessionConfirm()
+			return t, nil
+		case "enter":
+			if action, ok := t.chat.ConfirmSessionDelete(); ok {
+				return t, t.deleteSessionCmd(action.ID)
+			}
+			return t, nil
+		default:
+			return t, nil
+		}
+	}
+	switch ks {
+	case "esc":
+		t.chat.CloseSessionsOverlay()
+		return t, t.syncInputFocus()
+	case "up":
+		t.chat.MoveSessionCursor(-1)
+		return t, nil
+	case "down":
+		t.chat.MoveSessionCursor(1)
+		return t, nil
+	case "delete", "backspace", "ctrl+h":
+		t.chat.BeginSessionDelete(t.currentSession.ID, t.tr("tui.sessions.cannot_delete_current"), t.tr("tui.sessions.cannot_delete_active"))
+		return t, nil
+	}
+	return t, nil
 }
 
 func (t *TUI) handleMCP(parts []string) tea.Cmd {
@@ -622,4 +665,92 @@ func renderMemoryItem(m protocol.MemoryItem, width int) []string {
 
 func lipglossWidthPlain(s string) int {
 	return lipgloss.Width(s)
+}
+
+func (t *TUI) renderSessionsOverlay(width int) string {
+	w := max(56, min(96, width-4))
+	inner := max(36, w-8)
+	bodyHeight := max(5, min(16, t.height-12))
+	if t.chat.SessionConfirm == chatpage.SessionConfirmDelete {
+		return t.renderSessionDeleteConfirm(w)
+	}
+	var lines []string
+	lines = append(lines, styleHL.Render(t.tr("tui.sessions.title")))
+	if t.chat.SessionsLoading && len(t.chat.Sessions) == 0 {
+		lines = append(lines, "", styleDim.Render(t.tr("tui.loading")))
+	} else if t.chat.SessionsError != "" {
+		lines = append(lines, "", styleErrLine.Render(t.chat.SessionsError))
+	}
+	if len(t.chat.Sessions) == 0 && !t.chat.SessionsLoading {
+		lines = append(lines, "", styleDim.Render(t.tr("tui.sessions.empty")))
+	}
+	start := 0
+	if t.chat.SessionCursor >= bodyHeight {
+		start = t.chat.SessionCursor - bodyHeight + 1
+	}
+	end := min(len(t.chat.Sessions), start+bodyHeight)
+	for i := start; i < end; i++ {
+		lines = append(lines, t.renderSessionRow(i, t.chat.Sessions[i], inner)...)
+	}
+	lines = append(lines, "", styleDim.Render(t.sessionsHelpText(start, bodyHeight, len(t.chat.Sessions))))
+	return boxStyle.Width(w).Padding(1, 2).Render(strings.Join(lines, "\n"))
+}
+
+func (t *TUI) renderSessionDeleteConfirm(width int) string {
+	var lines []string
+	lines = append(lines, styleHL.Render(t.tr("tui.sessions.delete_confirm_title")), "")
+	if t.chat.SessionCursor >= 0 && t.chat.SessionCursor < len(t.chat.Sessions) {
+		s := t.chat.Sessions[t.chat.SessionCursor]
+		lines = append(lines, styleToolDim.Render(sessionTitle(s)))
+		lines = append(lines, styleDim.Render(s.CWD))
+	}
+	lines = append(lines, "", styleDim.Render(t.tr("tui.sessions.delete_confirm_help")))
+	return boxStyle.Width(width).Padding(1, 2).Render(strings.Join(lines, "\n"))
+}
+
+func (t *TUI) sessionStatusLabel(s protocol.SessionInfo) string {
+	if s.ID == t.currentSession.ID {
+		return t.tr("tui.sessions.current")
+	}
+	if sessionActive(s) {
+		return t.tr("tui.sessions.active")
+	}
+	switch s.Status {
+	case protocol.SessionStatusIdle:
+		return t.tr("tui.sessions.idle")
+	case protocol.SessionStatusRunning:
+		return t.tr("tui.sessions.running")
+	case protocol.SessionStatusWaiting:
+		return t.tr("tui.sessions.waiting")
+	case protocol.SessionStatusCompacting:
+		return t.tr("tui.sessions.compacting")
+	default:
+		return string(s.Status)
+	}
+}
+
+func (t *TUI) renderSessionRow(i int, s protocol.SessionInfo, width int) []string {
+	cursor := "  "
+	contentStyle := styleToolDim
+	if i == t.chat.SessionCursor {
+		cursor = styleCursor.Render("▶ ")
+		contentStyle = styleHL
+	}
+	status := t.sessionStatusLabel(s)
+	name := sessionTitle(s)
+	clients := ""
+	if s.ClientCount > 0 {
+		clients = " · " + t.i18n.Tf("tui.sessions.client_count", s.ClientCount)
+	}
+	head := fmt.Sprintf("%s%s %s%s", cursor, styleTool.Render("["+status+"]"), contentStyle.Render(name), styleDim.Render(clients))
+	cwd := textutil.TruncateRunes(s.CWD, max(10, width-4))
+	return []string{head, "    " + styleDim.Render(cwd)}
+}
+
+func (t *TUI) sessionsHelpText(start, height, total int) string {
+	text := t.tr("tui.sessions.help")
+	if total > height {
+		text += fmt.Sprintf(" · %d-%d/%d", start+1, min(total, start+height), total)
+	}
+	return text
 }

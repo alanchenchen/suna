@@ -52,7 +52,13 @@ type TUI struct {
 	help helppage.Model
 
 	// Welcome 页面状态。
-	welcomeCursor int
+	welcomeCursor        int
+	sessions             []protocol.SessionInfo
+	currentSession       protocol.SessionInfo
+	currentRunCanControl bool
+	handoffRole          string
+	resumeSessionID      string
+	welcomeActivePicker  bool
 
 	// Chat 页面状态。root 仅持有页面 model 与 transcript；运行态在 pages/chat.Model 内。
 	chat chatpage.Model
@@ -92,6 +98,9 @@ type TUI struct {
 	// transcript 同步由 daemon 通知触发时按帧合并，避免流式输出和工具事件风暴反复完整重渲染。
 	transcriptSyncDirty     bool
 	transcriptSyncScheduled bool
+
+	// chatSpinnerTicking 保证 loading/compacting 的 spinner 只有一条 tick 链；Join running session 时也会按需启动。
+	chatSpinnerTicking bool
 }
 
 type guardConfirmView = chatpage.GuardConfirmView

@@ -3,10 +3,8 @@ package agent
 import (
 	"context"
 	"fmt"
-	"strings"
+	"os"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/memory"
@@ -25,22 +23,26 @@ func (a *Agent) MemoryStats(ctx context.Context) (active, core, queued int) {
 }
 
 func (a *Agent) SessionStats(ctx context.Context) (active, completed int, lastID string) {
-	if a.conversation == nil {
+	if a.sessionStore == nil {
 		return
 	}
-	st, _ := a.conversation.Load(ctx, memory.DefaultUserID)
-	if st != nil && len(st.LastMessages) > 0 {
-		active = 1
-		lastID = "last"
+	items, _ := a.sessionStore.List(ctx)
+	for _, item := range items {
+		if item.MessageCount > 0 {
+			active++
+			if lastID == "" {
+				lastID = item.ID
+			}
+		}
 	}
 	return
 }
 
 func (a *Agent) UsageSummary(ctx context.Context, since time.Time) (*memory.UsageSummary, error) {
-	if a.sessions == nil {
+	if a.usage == nil {
 		return nil, fmt.Errorf("session store not initialized")
 	}
-	return a.sessions.UsageSummary(ctx, since)
+	return a.usage.UsageSummary(ctx, since)
 }
 
 func (a *Agent) ListModels() []string {
@@ -144,23 +146,6 @@ func (a *Agent) Compact(ctx context.Context) (int, int, int, int, int, error) {
 	return before, after, contextWindow, turnsCompressed, truncated, nil
 }
 
-func (a *Agent) NewSession() {
-	a.runMu.Lock()
-	defer a.runMu.Unlock()
-	if a.mediaStore != nil {
-		_, _, _ = a.mediaStore.Clear()
-	}
-	if a.conversation != nil {
-		a.conversation.ClearLastMessages(context.Background(), memory.DefaultUserID)
-	}
-	a.sessionID = uuid.New().String()
-	a.turnCount = 0
-	a.guard = a.newGuardForSession(a.sessionID)
-	a.working.Clear()
-	a.sessionState = ""
-	a.toolSummary = memory.ToolSummary{}
-}
-
 func (a *Agent) AttachmentStatus() (root string, bytes int64, count int, err error) {
 	if a.mediaStore == nil {
 		return "", 0, 0, nil
@@ -180,51 +165,13 @@ func (a *Agent) ClearAttachments() (root string, removedBytes int64, removedCoun
 	if err != nil {
 		return root, removedBytes, removedCount, 0, 0, err
 	}
+	if root != "" {
+		if err := os.RemoveAll(root); err != nil {
+			return root, removedBytes, removedCount, 0, 0, err
+		}
+	}
 	bytes, count, err = a.mediaStore.Usage()
 	return root, removedBytes, removedCount, bytes, count, err
-}
-
-type RestoreSessionResult struct {
-	Messages  int
-	Compacted bool
-}
-
-func (a *Agent) RestoreSession(ctx context.Context) RestoreSessionResult {
-	if a.conversation == nil {
-		return RestoreSessionResult{}
-	}
-	st, err := a.conversation.Load(ctx, memory.DefaultUserID)
-	if err != nil || st == nil || len(st.LastMessages) == 0 {
-		return RestoreSessionResult{}
-	}
-	a.sessionID = uuid.New().String()
-	a.turnCount = 0
-	a.guard = a.newGuardForSession(a.sessionID)
-	a.working.Clear()
-	a.sessionState = strings.TrimSpace(st.SessionState)
-	a.toolSummary = memory.ToolSummary{}
-	for _, m := range st.LastMessages {
-		a.working.AddMessage(m)
-	}
-	return RestoreSessionResult{Messages: len(st.LastMessages), Compacted: a.sessionState != ""}
-}
-
-func (a *Agent) RestoreToolSummary(ctx context.Context) memory.ToolSummary {
-	if a.conversation == nil {
-		return memory.ToolSummary{}
-	}
-	st, err := a.conversation.Load(ctx, memory.DefaultUserID)
-	if err != nil || st == nil {
-		return memory.ToolSummary{}
-	}
-	return st.ToolSummary.Normalize()
-}
-
-func (a *Agent) WorkingMessages() []model.Message {
-	if a.working == nil {
-		return nil
-	}
-	return a.working.Messages()
 }
 
 func (a *Agent) Close() {

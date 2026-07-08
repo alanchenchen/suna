@@ -97,7 +97,7 @@ func (Search) Execute(ctx context.Context, params map[string]any) tools.Result {
 	if root == "" {
 		return tools.ErrorResult("path is required")
 	}
-	root = expandPath(root)
+	root = expandPathWithContext(ctx, root)
 	info, err := os.Stat(root)
 	if err != nil {
 		return tools.ErrorResult(fmt.Sprintf("stat search path: %s", err))

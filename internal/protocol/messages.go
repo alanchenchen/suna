@@ -1,7 +1,7 @@
 package protocol
 
 type RuntimeHelloParams struct {
-	// ProtocolVersion 是客户端期望的协议版本；为空时按当前默认 0.1 处理。
+	// ProtocolVersion 是客户端期望的协议版本；为空时按当前默认 0.2 处理。
 	ProtocolVersion string `json:"protocol_version,omitempty"`
 	// Transport 由 JSON-RPC transport 层注入并覆盖客户端输入，用于 runtime.hello 返回真实承载方式。
 	Transport string `json:"transport,omitempty"`
@@ -104,6 +104,8 @@ type AgentRunParams struct {
 	RunID string        `json:"run_id,omitempty"`
 	State AgentRunState `json:"state"`
 	Phase AgentRunPhase `json:"phase,omitempty"`
+	// CanControl 表示接收该通知的 client 是否拥有当前 run 的控制权。
+	CanControl bool `json:"can_control"`
 
 	Message string `json:"message,omitempty"`
 
@@ -115,10 +117,96 @@ type AgentRunParams struct {
 	ResumeAvailable bool        `json:"resume_available,omitempty"`
 }
 
-type SessionRestoreStatus struct {
-	Messages    int                 `json:"messages"`
-	Compacted   bool                `json:"compacted"`
+type UserMessageParams struct {
+	SessionID string        `json:"session_id,omitempty"`
+	Parts     []MessagePart `json:"parts,omitempty"`
+}
+
+type SessionStateParams struct {
+	Session SessionInfo `json:"session"`
+}
+
+type SessionStatus string
+
+const (
+	SessionStatusIdle       SessionStatus = "idle"
+	SessionStatusRunning    SessionStatus = "running"
+	SessionStatusWaiting    SessionStatus = "waiting"
+	SessionStatusCompacting SessionStatus = "compacting"
+)
+
+type SessionInfo struct {
+	ID             string        `json:"id"`
+	Title          string        `json:"title,omitempty"`
+	CWD            string        `json:"cwd"`
+	MessageCount   int           `json:"message_count"`
+	CreatedAt      string        `json:"created_at"`
+	UpdatedAt      string        `json:"updated_at"`
+	LastAttachedAt string        `json:"last_attached_at,omitempty"`
+	Status         SessionStatus `json:"status"`
+	ClientCount    int           `json:"client_count"`
+}
+
+type SessionListParams struct {
+	CWD        string `json:"cwd,omitempty"`
+	ActiveOnly bool   `json:"active_only,omitempty"`
+}
+
+type SessionListResult struct {
+	Sessions []SessionInfo `json:"sessions"`
+}
+
+type SessionCreateParams struct {
+	CWD   string `json:"cwd"`
+	Title string `json:"title,omitempty"`
+}
+
+type SessionAttachParams struct {
+	SessionID string `json:"session_id"`
+	// RequireActive 只用于 Join Active 的陈旧 UI 防护；Resume/普通 attach 必须保持 false。
+	RequireActive bool `json:"require_active"`
+}
+
+type SessionUpdateParams struct {
+	SessionID string  `json:"session_id"`
+	Title     *string `json:"title,omitempty"`
+}
+
+type SessionDeleteParams struct {
+	SessionID string `json:"session_id"`
+}
+
+type SessionDeleteResult struct {
+	Deleted bool `json:"deleted"`
+}
+
+type SnapshotMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type RunWaitingType string
+
+const (
+	RunWaitingAsk   RunWaitingType = "ask"
+	RunWaitingGuard RunWaitingType = "guard"
+)
+
+type CurrentRunView struct {
+	Status          SessionStatus  `json:"status"`
+	Phase           AgentRunPhase  `json:"phase,omitempty"`
+	AssistantBuffer string         `json:"assistant_buffer,omitempty"`
+	ReasoningBuffer string         `json:"reasoning_buffer,omitempty"`
+	WaitingType     RunWaitingType `json:"waiting_type,omitempty"`
+	CanControl      bool           `json:"can_control"`
+}
+
+type SessionSnapshot struct {
+	Session     SessionInfo         `json:"session"`
+	Messages    []SnapshotMessage   `json:"messages,omitempty"`
+	Compacted   bool                `json:"compacted,omitempty"`
 	ToolSummary *ToolSummaryPayload `json:"tool_summary,omitempty"`
+	CurrentRun  *CurrentRunView     `json:"current_run,omitempty"`
 }
 
 type ToolSummaryPayload struct {
@@ -187,6 +275,8 @@ type AskUserParams struct {
 	Question    string   `json:"question"`
 	Options     []string `json:"options,omitempty"`
 	ID          string   `json:"id"`
+	SessionID   string   `json:"session_id,omitempty"`
+	CanReply    bool     `json:"can_reply"`
 	AllowCustom bool     `json:"allow_custom"`
 }
 
@@ -200,6 +290,13 @@ type GuardConfirmParams struct {
 	Suggestion    string         `json:"suggestion,omitempty"`
 	ReviewCode    string         `json:"review_code,omitempty"`
 	ReviewMessage string         `json:"review_message,omitempty"`
+	SessionID     string         `json:"session_id,omitempty"`
+	CanReply      bool           `json:"can_reply"`
+}
+
+type InteractionResolvedParams struct {
+	ID        string `json:"id"`
+	SessionID string `json:"session_id,omitempty"`
 }
 
 type GuardReplyParams struct {
@@ -330,12 +427,14 @@ type CompactResult struct {
 }
 
 type AttachmentStatusResult struct {
-	Root  string `json:"root"`
-	Bytes int64  `json:"bytes"`
-	Count int    `json:"count"`
+	SessionID string `json:"session_id,omitempty"`
+	Root      string `json:"root"`
+	Bytes     int64  `json:"bytes"`
+	Count     int    `json:"count"`
 }
 
 type AttachmentClearResult struct {
+	SessionID    string `json:"session_id,omitempty"`
 	Root         string `json:"root"`
 	BytesRemoved int64  `json:"bytes_removed"`
 	CountRemoved int    `json:"count_removed"`

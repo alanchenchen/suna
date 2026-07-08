@@ -46,9 +46,13 @@ func (Exec) Execute(ctx context.Context, params map[string]any) tools.Result {
 
 	cwd, _ := params["cwd"].(string)
 	if cwd == "" {
-		cwd, _ = os.Getwd()
+		if execCtx, ok := tools.ExecutionContextFrom(ctx); ok && execCtx.CWD != "" {
+			cwd = execCtx.CWD
+		} else {
+			cwd, _ = os.Getwd()
+		}
 	} else {
-		cwd = expandPath(cwd)
+		cwd = expandPathWithContext(ctx, cwd)
 	}
 
 	shell := "auto"

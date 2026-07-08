@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 )
@@ -15,7 +16,7 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t.initWelcomeList()
 		}
 		if t.mode == uipage.Chat {
-			return t, t.scheduleTranscriptSync()
+			return t, tea.Batch(t.scheduleTranscriptSync(), t.startChatSpinner())
 		}
 		return t, nil
 	}
@@ -27,6 +28,11 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if t.inputCursorBlinking {
 			return t, t.updateInputCursorBlink()
 		}
+		return t, nil
+	}
+	if _, ok := msg.(spinner.TickMsg); ok && t.mode != uipage.Chat {
+		// spinner tick 只属于 Chat；离开 Chat 时终止链，避免回到运行会话后误判已有 tick。
+		t.chatSpinnerTicking = false
 		return t, nil
 	}
 

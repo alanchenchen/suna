@@ -15,6 +15,18 @@ func (t *TUI) handleProtocolResultMsg(msg tea.Msg) tea.Cmd {
 		t.handleConfigStateNotification(m.Params)
 	case attachmentStatusResultMsg:
 		t.handleAttachmentStatusNotification(m.Params)
+	case sessionListResultMsg:
+		t.sessions = m.Params.Sessions
+		t.chat.SetSessions(m.Params.Sessions)
+		t.pickWelcomeSessions()
+	case sessionErrorMsg:
+		t.chat.SessionsLoading = false
+		t.chat.SessionsError = m.Message
+	case sessionSnapshotResultMsg:
+		t.applySessionSnapshot(m.Params)
+		t.mode = uipage.Chat
+		schedule = true
+		return tea.Batch(t.attachmentStatusCmd(), t.scheduleTranscriptSync(), t.startChatSpinner())
 	case memoryListResultMsg:
 		t.handleMemoryListNotification(m.Params)
 		schedule = true

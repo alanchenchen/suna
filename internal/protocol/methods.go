@@ -13,10 +13,14 @@ const (
 )
 
 const (
-	MethodSessionNew     = "session.new"
-	MethodSessionRestore = "session.restore"
-	MethodCompact        = "session.compact"
-	MethodUsage          = "session.usage"
+	MethodSessionList   = "session.list"
+	MethodSessionCreate = "session.create"
+	MethodSessionAttach = "session.attach"
+	MethodSessionDetach = "session.detach"
+	MethodSessionUpdate = "session.update"
+	MethodSessionDelete = "session.delete"
+	MethodCompact       = "session.compact"
+	MethodUsage         = "session.usage"
 )
 
 const (
@@ -60,14 +64,17 @@ const (
 )
 
 const (
-	NotifyAgentDelta   = "agent.delta"
-	NotifyAgentRun     = "agent.run"
-	NotifyUsage        = "agent.usage"
-	NotifyToolStart    = "agent.tool_start"
-	NotifyToolGuard    = "agent.tool_guard"
-	NotifyToolEnd      = "agent.tool_end"
-	NotifyAskUser      = "agent.ask_user"
-	NotifyGuardConfirm = "agent.guard_confirm"
+	NotifyAgentDelta          = "agent.delta"
+	NotifyAgentRun            = "agent.run"
+	NotifySessionUserMessage  = "session.user_message"
+	NotifySessionUpdated      = "session.updated"
+	NotifyUsage               = "agent.usage"
+	NotifyToolStart           = "agent.tool_start"
+	NotifyToolGuard           = "agent.tool_guard"
+	NotifyToolEnd             = "agent.tool_end"
+	NotifyAskUser             = "agent.ask_user"
+	NotifyGuardConfirm        = "agent.guard_confirm"
+	NotifyInteractionResolved = "agent.interaction_resolved"
 )
 
 const (
@@ -80,9 +87,7 @@ const (
 )
 
 const (
-	NotifyCompactResult        = "session.compact_result"
-	NotifySessionRestoreMsg    = "session.restore_message"
-	NotifySessionRestoreStatus = "session.restore_status"
+	NotifyCompactResult = "session.compact_result"
 )
 
 const (

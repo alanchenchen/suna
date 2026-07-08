@@ -45,7 +45,6 @@ func (a *Agent) executeTool(ctx context.Context, call runner.ToolExecution, even
 		}
 	}
 	if a.shouldGuardTool(name) {
-		a.prepareWorkspaceParams(name, params)
 		result := a.guard.Check(ctx, name, params, a.buildGuardReviewContext(call))
 		a.emitToolGuard(events, id, name, result)
 		if result.Decision == guard.Reject {
@@ -69,6 +68,7 @@ func (a *Agent) executeTool(ctx context.Context, call runner.ToolExecution, even
 	}
 	if name == agenttools.ToolAskUser || name == agenttools.ToolSpawn {
 		execCtx = agenttools.WithEvents(ctx, events)
+		execCtx = agenttools.WithRuntime(execCtx, a)
 	}
 	result := a.tools.Execute(execCtx, tools.Call{ID: id, Name: name, Params: params, Intent: call.Intent, AssistantContext: call.AssistantContext})
 	if events != nil {
@@ -194,7 +194,7 @@ func (a *Agent) ExecuteSpawnTool(ctx context.Context, id string, params map[stri
 	}
 
 	extraCtx, _ := params["context"].(string)
-	env := getEnvInfo()
+	env := getEnvInfoForWorkDir(a.cwd)
 	toolsSummary := strings.Join(toolNames, ", ")
 	if toolsSummary == "" {
 		toolsSummary = "none"
@@ -280,7 +280,6 @@ func (e subtaskExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecut
 		return tools.ErrorResult(fmt.Sprintf("tool %q not allowed for subtask", name))
 	}
 	if e.agent.shouldGuardTool(name) {
-		e.agent.prepareWorkspaceParams(name, params)
 		result := e.agent.guard.Check(ctx, name, params, e.agent.buildGuardReviewContext(call))
 		eventID := e.namespaced(call.ID)
 		e.agent.emitToolGuard(e.events, eventID, name, result)
@@ -384,16 +383,6 @@ func (a *Agent) shouldGuardTool(name string) bool {
 	return tools.ShouldGuard(spec)
 }
 
-func (a *Agent) prepareWorkspaceParams(name string, params map[string]any) {
-	if name != "exec" || params == nil || a.guard == nil || a.guard.Workspace() == "" {
-		return
-	}
-	if cwd, _ := params["cwd"].(string); strings.TrimSpace(cwd) == "" {
-		// workspace 启用后，未显式指定 cwd 的 exec 默认从 workspace 根目录执行。
-		params["cwd"] = a.guard.Workspace()
-	}
-}
-
 func sensitiveReadError(name string, params map[string]any) string {
 	if name != "readfile" || params == nil {
 		return ""
@@ -410,11 +399,12 @@ type subtaskSink struct {
 	spawnID string
 }
 
+// subtaskSink 只把子任务工具事件转发到主会话；状态、文本流和 reasoning 已由 spawn 结果摘要承载。
 func (s subtaskSink) Status(status runner.StatusEvent) {}
 func (s subtaskSink) Stream(content string)            {}
 func (s subtaskSink) Reasoning(content string)         {}
 
-// subtask 的 usage 只需要落库，不进入主 TUI token 展示。
+// 子任务 usage 只落库，不进入主 TUI token 展示。
 func (s subtaskSink) Usage(usage runner.UsageEvent) {}
 func (s subtaskSink) ToolCall(call runner.ToolCallEvent) {
 	s.events <- Event{Type: EventToolCall, ToolCallID: s.namespaced(call.ID), ToolName: call.Name, ToolParams: call.Params, ToolIntent: call.Intent}

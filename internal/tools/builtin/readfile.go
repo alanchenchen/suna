@@ -5,11 +5,12 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"github.com/alanchenchen/suna/internal/tools"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/alanchenchen/suna/internal/tools"
 )
 
 const (
@@ -41,7 +42,7 @@ func (ReadFile) Execute(ctx context.Context, params map[string]any) tools.Result
 	if path == "" {
 		return tools.ErrorResult("path is required")
 	}
-	path = expandPath(path)
+	path = expandPathWithContext(ctx, path)
 
 	encoding := "text"
 	if e, ok := params["encoding"].(string); ok {
@@ -182,10 +183,20 @@ func readLogicalLine(r *bufio.Reader) (string, error) {
 	}
 }
 
-func expandPath(path string) string {
+func expandPathWithContext(ctx context.Context, path string) string {
 	if strings.HasPrefix(path, "~/") {
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, path[2:])
+	}
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	base := ""
+	if execCtx, ok := tools.ExecutionContextFrom(ctx); ok {
+		base = execCtx.CWD
+	}
+	if base != "" {
+		return filepath.Clean(filepath.Join(base, path))
 	}
 	abs, err := filepath.Abs(path)
 	if err != nil {

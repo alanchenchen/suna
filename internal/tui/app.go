@@ -33,7 +33,7 @@ func (t *TUI) doQuit() {
 
 func (t *TUI) Init() tea.Cmd {
 	return func() tea.Msg {
-		return tea.Batch(t.daemonStatusCmd(), t.configGetCmd(), t.attachmentStatusCmd(), t.listMCPCmd())()
+		return tea.Batch(t.daemonStatusCmd(), t.configGetCmd(), t.sessionListCmd(), t.listMCPCmd())()
 	}
 }
 
@@ -42,17 +42,27 @@ func (t *TUI) refreshDaemonStatusCmd() tea.Cmd {
 }
 
 func (t *TUI) runAgent(input string, attachments []attachmentItem) tea.Cmd {
+	t.currentRunCanControl = true
 	t.startLLMWait()
 	t.chat.ResumeAvailable = false
 	t.chat.ResetToolState()
-	return tea.Batch(t.sendMessageCmd(input, attachments), t.chat.Spinner.Tick)
+	return tea.Batch(t.sendMessageCmd(input, attachments), t.startChatSpinner())
 }
 
 func (t *TUI) resumeAgent() tea.Cmd {
+	t.currentRunCanControl = true
 	t.startLLMWait()
 	t.chat.ResumeAvailable = false
 	t.chat.ResetToolState()
-	return tea.Batch(t.resumeRunCmd(), t.chat.Spinner.Tick)
+	return tea.Batch(t.resumeRunCmd(), t.startChatSpinner())
+}
+
+func (t *TUI) startChatSpinner() tea.Cmd {
+	if t.chatSpinnerTicking {
+		return nil
+	}
+	t.chatSpinnerTicking = true
+	return t.chat.Spinner.Tick
 }
 
 func (t *TUI) startLLMWait() {

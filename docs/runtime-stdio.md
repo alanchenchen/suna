@@ -20,14 +20,14 @@ Suna runtime 负责 Agent 能力；文件浏览、终端、HTTP/WebSocket 服务
 先确认 runtime 能握手：
 
 ```bash
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.1","client":{"name":"smoke","version":"0.1.0","type":"shell"}}}' \
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.2","client":{"name":"smoke","version":"0.1.0","type":"shell"}}}' \
   | suna runtime --transport stdio
 ```
 
 你应该在 stdout 看到一行 JSON-RPC response，形如：
 
 ```json
-{"jsonrpc":"2.0","id":1,"result":{"protocol_version":"0.1","runtime_version":"v0.8.0","transport":"stdio","capabilities":{"agent":true,"streaming":true,"tools":true,"guard":true,"ask_user":true,"session":true,"config":true,"memory":true,"skills":true,"mcp":true},"content_sources":{"text":true,"image_path":true,"image_url":true},"limits":{"max_tool_result_bytes":16384}}}
+{"jsonrpc":"2.0","id":1,"result":{"protocol_version":"0.2","runtime_version":"v0.8.0","transport":"stdio","capabilities":{"agent":true,"streaming":true,"tools":true,"guard":true,"ask_user":true,"session":true,"multi_session":true,"handoff":true,"config":true,"memory":true,"skills":true,"mcp":true},"content_sources":{"text":true,"image_path":true,"image_url":true},"limits":{"max_tool_result_bytes":16384}}}
 ```
 
 stderr 可能有：
@@ -74,7 +74,7 @@ stdio 约定：
 - stdio runtime 是前台单进程 headless runtime。
 - 父进程关闭 stdin 后，runtime 会退出。
 - stdio runtime 不写 `sunad.pid`；`sunad.pid` 只属于官方 TUI 使用的后台 local daemon。
-- v0 不支持多个 Suna 进程同时写入同一个数据目录。第三方 UI 应独占启动 runtime；不要同时打开官方 TUI 和第三方 runtime 操作同一套 `~/.suna` 数据。
+- v0.2 不支持多个 Suna 进程同时写入同一个数据目录。第三方 UI 应独占启动 runtime；不要同时打开官方 TUI 和第三方 runtime 操作同一套 `~/.suna` 数据。
 
 ---
 
@@ -93,11 +93,11 @@ Suna stdio runtime 使用 JSON-RPC 风格消息，外层 framing 是 NDJSON：**
 | 字段 | 说明 |
 |---|---|
 | `jsonrpc` | 固定为 `"2.0"`。 |
-| `id` | v0 只支持整数 id；response 会原样回传同一个整数。 |
+| `id` | v0.2 只支持整数 id；response 会原样回传同一个整数。 |
 | `method` | 方法名，例如 `agent.sendMessage`。 |
 | `params` | 方法参数。建议总是传对象；无参数时传 `{}`。 |
 
-v0 限制：
+v0.2 限制：
 
 - 客户端 request 必须带整数 `id`。
 - 暂不支持 string id。
@@ -144,7 +144,7 @@ Request params：
 
 | 字段 | 必填 | 说明 |
 |---|---:|---|
-| `protocol_version` | 否 | 当前公开版本是 `"0.1"`；为空时按当前默认版本处理。 |
+| `protocol_version` | 否 | 当前公开版本是 `"0.2"`；为空时按当前默认版本处理。 |
 | `client.name` | 否 | 客户端名称，用于诊断和未来能力协商。 |
 | `client.version` | 否 | 客户端版本。 |
 | `client.type` | 否 | 客户端类型，例如 `web`、`desktop`、`ide`、`node`。 |
@@ -152,7 +152,7 @@ Request params：
 Request 示例：
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.1","client":{"name":"my-web-ui","version":"0.1.0","type":"web"}}}
+{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.2","client":{"name":"my-web-ui","version":"0.1.0","type":"web"}}}
 ```
 
 Result 字段：
@@ -170,7 +170,7 @@ Result 示例：
 
 ```json
 {
-  "protocol_version":"0.1",
+  "protocol_version":"0.2",
   "runtime_version":"v0.8.0",
   "transport":"stdio",
   "capabilities":{
@@ -180,6 +180,8 @@ Result 示例：
     "guard":true,
     "ask_user":true,
     "session":true,
+    "multi_session":true,
+    "handoff":true,
     "config":true,
     "memory":true,
     "skills":true,
@@ -240,7 +242,7 @@ export class SunaRuntime {
 
   hello() {
     return this.request("runtime.hello", {
-      protocol_version: "0.1",
+      protocol_version: "0.2",
       client: { name: "example-ui", version: "0.1.0", type: "node" },
     });
   }
@@ -367,7 +369,7 @@ await suna.request("agent.sendMessage", {
 2. 建立 JSON-RPC pending map 和 notification dispatcher。
 3. 发送 `runtime.hello`。
 4. 调用 `config.get`，检查是否已有可用模型。
-5. 调用 `session.restore`，恢复最近会话展示状态。
+5. 调用 `session.list`，再按 UI 选择调用 `session.create` 或 `session.attach`。
 6. 用户发送消息时调用 `agent.sendMessage`。
 7. 持续监听：
    - `agent.delta`：流式文本。
@@ -376,7 +378,7 @@ await suna.request("agent.sendMessage", {
    - `agent.ask_user`：弹出用户输入。
    - `agent.guard_confirm`：弹出高风险操作确认。
    - `agent.usage`：用量统计。
-8. UI 关闭时 `stdin.end()`，让 runtime 退出。
+8. UI 离开当前 session 时调用 `session.detach`；进程退出时 `stdin.end()`。
 
 ---
 
@@ -414,8 +416,8 @@ Params：
 | 类型 | 示例 |
 |---|---|
 | 文本 | `{"type":"text","text":"hello"}` |
-| 图片路径 | `{"type":"image","source":{"kind":"path","path":"/absolute/path/a.png","mime_type":"image/png"}}` |
-| 图片 URL | `{"type":"image","source":{"kind":"url","url":"https://example.com/a.png","mime_type":"image/png"}}` |
+| 图片路径 | `{"type":"image","path":"/absolute/path/a.png","mime_type":"image/png"}` |
+| 图片 URL | `{"type":"image","url":"https://example.com/a.png","mime_type":"image/png"}` |
 
 Request 示例：
 
@@ -426,7 +428,7 @@ Request 示例：
 Result 示例：
 
 ```json
-{"status":"processing"}
+{"status":"accepted"}
 ```
 
 随后可能收到：
@@ -458,7 +460,7 @@ Params：`{}`
 Result：
 
 ```json
-{"status":"processing"}
+{"status":"accepted"}
 ```
 
 #### `agent.askReply`
@@ -475,7 +477,7 @@ Params：
 Request 示例：
 
 ```json
-{"jsonrpc":"2.0","id":11,"method":"agent.askReply","params":{"id":"conn_123_ask_1","answer":"A"}}
+{"jsonrpc":"2.0","id":11,"method":"agent.askReply","params":{"id":"opaque-ask-id","answer":"A"}}
 ```
 
 Result：
@@ -493,12 +495,12 @@ Params：
 | 字段 | 必填 | 说明 |
 |---|---:|---|
 | `id` | 是 | `agent.guard_confirm.params.id`。 |
-| `decision` | 是 | `"approve"` 或 `"deny"`。 |
+| `decision` | 是 | `"approve"` 或 `"reject"`。 |
 
 Request 示例：
 
 ```json
-{"jsonrpc":"2.0","id":12,"method":"agent.guardReply","params":{"id":"conn_123_guard_1","decision":"approve"}}
+{"jsonrpc":"2.0","id":12,"method":"agent.guardReply","params":{"id":"opaque-guard-id","decision":"approve"}}
 ```
 
 Result：
@@ -511,43 +513,93 @@ Result：
 
 ### 6.3 Session
 
-#### `session.new`
+#### `session.list`
 
-用途：新建会话。
+用途：列出 sessions。
+
+Params：
+
+```json
+{"active_only":false}
+```
+
+Result：
+
+```json
+{"sessions":[{"id":"session_id","title":"","cwd":"/repo","status":"idle","client_count":0,"message_count":3}]}
+```
+
+`active` 不作为字段返回，客户端按 `client_count > 0 || status != "idle"` 派生。
+
+#### `session.create`
+
+用途：创建新 session 并 attach 当前连接。`cwd` 必填，影响 prompt、exec 和文件类工具的默认相对路径。
+
+Params：
+
+```json
+{"cwd":"/absolute/project/path","title":""}
+```
+
+Result：`SessionSnapshot`，包含 `session`、最近可见 `messages`、`compacted`、`tool_summary` 和可选 `current_run`。
+
+#### `session.attach`
+
+用途：attach 到已有 session。Resume 和 Join Active 都使用该方法。
+
+Params：
+
+```json
+{"session_id":"session_id","require_active":false}
+```
+
+Join Active 时应传 `require_active:true`，用于防止陈旧 UI 把已经 idle 的 session 误当成 active join。
+
+Result：`SessionSnapshot`。
+
+#### `session.detach`
+
+用途：当前连接离开当前 session，但保持 stdio 连接。UI 回到 session 选择页时应调用。
 
 Params：`{}`
 
 Result：
 
 ```json
-{"status":"ok"}
+{"status":"detached"}
 ```
 
-可能额外收到 `daemon.full_status`，用于刷新状态面板。
+#### `session.update`
 
-#### `session.restore`
+用途：更新当前 attached idle session 的 title。
 
-用途：恢复最近会话的可见展示状态。
+Params：
 
-Params：`{}`
+```json
+{"session_id":"session_id","title":"new title"}
+```
+
+Result：`SessionSnapshot`。
+
+#### `session.delete`
+
+用途：删除非当前、非 active、无人 attached 的 idle session。
+
+Params：
+
+```json
+{"session_id":"session_id"}
+```
 
 Result：
 
 ```json
-{"messages":2}
-```
-
-同时通过 notification 下发内容：
-
-```json
-{"jsonrpc":"2.0","method":"session.restore_message","params":{"role":"user","content":"hello"}}
-{"jsonrpc":"2.0","method":"session.restore_message","params":{"role":"assistant","content":"Hi"}}
-{"jsonrpc":"2.0","method":"session.restore_status","params":{"messages":2,"compacted":false}}
+{"deleted":true}
 ```
 
 #### `session.compact`
 
-用途：手动压缩当前会话上下文。
+用途：手动压缩当前 session 上下文。compact 会独占 session；如果 session 正在 running/waiting/compacting，会返回 busy error。
 
 Params：`{}`
 
@@ -574,6 +626,20 @@ Result 示例：
   "month":{"input_tokens":12000,"output_tokens":3000,"requests":30}
 }
 ```
+
+#### `SessionSnapshot`
+
+```json
+{
+  "session":{"id":"session_id","title":"","cwd":"/repo","status":"running","client_count":2,"message_count":3},
+  "messages":[{"role":"user","content":"hello"}],
+  "compacted":false,
+  "tool_summary":null,
+  "current_run":{"status":"running","phase":"model","assistant_buffer":"partial","reasoning_buffer":"","waiting_type":"","can_control":false}
+}
+```
+
+snapshot 是轻量恢复视图，不保证完整 tool timeline / event replay。
 
 ---
 
@@ -807,7 +873,7 @@ Result：
 
 ### 6.8 诊断和 TUI 内部方法
 
-这些 method 当前可用，但第三方 UI v0 通常不需要依赖：
+这些 method 当前可用，但第三方 UI v0.2 通常不需要依赖：
 
 | Method | 说明 |
 |---|---|
@@ -982,25 +1048,25 @@ Params：
 拒绝：
 
 ```json
-{"jsonrpc":"2.0","id":22,"method":"agent.guardReply","params":{"id":"guard_1","decision":"deny"}}
+{"jsonrpc":"2.0","id":22,"method":"agent.guardReply","params":{"id":"guard_1","decision":"reject"}}
 ```
 
 ### 7.9 Session notifications
 
-#### `session.restore_message`
+#### `session.user_message`
 
-恢复可见 user/assistant 消息。
+同一 session 中其他 client 新增 user turn。发送者通常已经本地插入该 turn，因此 daemon 不回发给发送者。
 
 ```json
-{"role":"user","content":"hello"}
+{"session_id":"session_id","parts":[{"type":"text","text":"hello from another window"}]}
 ```
 
-#### `session.restore_status`
+#### `session.updated`
 
-恢复结束状态。
+session metadata/status/client_count 更新，用于刷新 session list、Welcome 和 Handoff 状态。
 
 ```json
-{"messages":2,"compacted":false,"tool_summary":{"total":3,"success":3,"failed":0}}
+{"session":{"id":"session_id","cwd":"/repo","status":"running","client_count":2,"message_count":3}}
 ```
 
 #### `session.compact_result`
@@ -1123,7 +1189,7 @@ JSON-RPC error 使用统一外层：
 | 终端 / PTY | UI 后端自己管理。 |
 | 上传缓存 | UI 自己管理文件，然后向 Suna 传 image path/url。 |
 | provider 模型列表拉取 | UI 自己请求 provider `/models` 或对应 API。Suna 只保存最终模型配置。 |
-| 多 UI 协作 / event replay | v0 不支持；未来单独设计。 |
+| 完整 event replay | v0.2 只提供轻量 current_run snapshot；完整历史事件回放未来单独设计。 |
 
 ---
 
@@ -1139,7 +1205,8 @@ JSON-RPC error 使用统一外层：
 - [ ] notification dispatcher：`method -> handlers`。
 - [ ] 第一条 request 发送 `runtime.hello`。
 - [ ] 调用 `config.get` 判断配置状态。
-- [ ] 调用 `session.restore` 恢复 UI。
+- [ ] 调用 `session.list`。
+- [ ] 调用 `session.create` 或 `session.attach`；Join Active 使用 `require_active=true`。
 - [ ] 调用 `agent.sendMessage` 发送用户消息。
 - [ ] 监听 `agent.delta` / `agent.run` / `agent.tool_*` / `agent.ask_user` / `agent.guard_confirm`。
-- [ ] UI 关闭时 `stdin.end()`。
+- [ ] UI 离开当前 session 时调用 `session.detach`；进程退出时 `stdin.end()`。

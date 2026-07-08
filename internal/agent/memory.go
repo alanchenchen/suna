@@ -34,14 +34,19 @@ func (a *Agent) replaceLastUserMessage(text string, replacement model.Message) {
 }
 
 func (a *Agent) saveConversationState(ctx context.Context) {
-	if a.conversation == nil || a.working == nil {
+	if a.stateStore == nil || a.working == nil || a.sessionID == "" {
 		return
 	}
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
 	msgs := a.working.Messages()
-	if err := a.conversation.Save(saveCtx, memory.DefaultUserID, strings.TrimSpace(a.sessionState), msgs, a.toolSummary); err != nil {
-		logging.Error("agent", "save_conversation_state_failed", err, nil)
+	if err := a.stateStore.Save(saveCtx, a.sessionID, strings.TrimSpace(a.sessionState), msgs, a.toolSummary); err != nil {
+		logging.Error("agent", "save_session_state_failed", err, nil)
+	}
+	if a.sessionStore != nil {
+		if err := a.sessionStore.SetMessageCount(saveCtx, a.sessionID, len(visibleMessagesForCount(msgs))); err != nil {
+			logging.Error("agent", "save_session_meta_failed", err, nil)
+		}
 	}
 }
 
@@ -51,16 +56,32 @@ func (a *Agent) commitCompactState(ctx context.Context, sessionState string) err
 		return nil
 	}
 	a.sessionState = sessionState
-	if a.conversation == nil || a.working == nil {
+	if a.stateStore == nil || a.working == nil || a.sessionID == "" {
 		return nil
 	}
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	if err := a.conversation.Save(saveCtx, memory.DefaultUserID, a.sessionState, a.working.Messages(), a.toolSummary); err != nil {
+	if err := a.stateStore.Save(saveCtx, a.sessionID, a.sessionState, a.working.Messages(), a.toolSummary); err != nil {
 		logging.Error("agent", "save_compact_state_failed", err, nil)
 		return err
 	}
+	if a.sessionStore != nil {
+		if err := a.sessionStore.SetMessageCount(saveCtx, a.sessionID, len(visibleMessagesForCount(a.working.Messages()))); err != nil {
+			logging.Error("agent", "save_session_meta_failed", err, nil)
+			return err
+		}
+	}
 	return nil
+}
+
+func visibleMessagesForCount(msgs []model.Message) []model.Message {
+	visible := make([]model.Message, 0, len(msgs))
+	for _, msg := range msgs {
+		if (msg.Role == model.RoleUser || msg.Role == model.RoleAssistant) && strings.TrimSpace(msg.Text()) != "" {
+			visible = append(visible, msg)
+		}
+	}
+	return visible
 }
 
 func (a *Agent) addToolSummary(name string, result tools.Result) {

@@ -80,10 +80,6 @@ func (t *TUI) updateAttachmentMode(key string) bool {
 	return t.chat.UpdateAttachmentMode(key)
 }
 
-func (t *TUI) deleteSelectedAttachment() {
-	t.chat.DeleteSelectedAttachment()
-}
-
 func (t *TUI) renderUserMessage(content any, width int) string {
 	switch v := content.(type) {
 	case userMessageContent:
@@ -215,6 +211,9 @@ func (t *TUI) attachmentHelp() string {
 }
 
 func (t *TUI) savePastedImage(p *pendingImagePaste) (string, string, int64, error) {
+	if t.currentSession.ID == "" || t.attachmentStatus.SessionID != t.currentSession.ID {
+		return "", "", 0, fmt.Errorf("attachments directory is not ready for this session")
+	}
 	root := strings.TrimSpace(t.attachmentStatus.Root)
 	if root == "" {
 		return "", "", 0, fmt.Errorf("attachments directory is unavailable")

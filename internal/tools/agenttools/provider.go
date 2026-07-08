@@ -12,6 +12,7 @@ const (
 )
 
 type eventContextKey struct{}
+type runtimeContextKey struct{}
 
 // WithEvents 把 Agent 当前事件流挂到 context，agenttools 不依赖 agent.Event 类型，避免包循环。
 func WithEvents(ctx context.Context, events any) context.Context {
@@ -20,6 +21,17 @@ func WithEvents(ctx context.Context, events any) context.Context {
 
 func Events(ctx context.Context) any {
 	return ctx.Value(eventContextKey{})
+}
+
+func WithRuntime(ctx context.Context, runtime Runtime) context.Context {
+	return context.WithValue(ctx, runtimeContextKey{}, runtime)
+}
+
+func RuntimeFrom(ctx context.Context) Runtime {
+	if rt, ok := ctx.Value(runtimeContextKey{}).(Runtime); ok {
+		return rt
+	}
+	return nil
 }
 
 // Runtime 由 Agent 实现。agenttools 只负责 schema/路由，不持有 Agent 具体类型。
@@ -48,14 +60,18 @@ func (p *Provider) SpecsWithCatalog(ctx context.Context, catalog []tools.Spec) (
 }
 
 func (p *Provider) Execute(ctx context.Context, call tools.Call) (tools.Result, bool) {
-	if p == nil || p.runtime == nil {
+	runtime := p.runtime
+	if rt := RuntimeFrom(ctx); rt != nil {
+		runtime = rt
+	}
+	if p == nil || runtime == nil {
 		return tools.ErrorResult("agent runtime tools are not initialized"), call.Name == ToolAskUser || call.Name == ToolSpawn
 	}
 	switch call.Name {
 	case ToolAskUser:
-		return p.runtime.ExecuteAskUserTool(ctx, call.Params), true
+		return runtime.ExecuteAskUserTool(ctx, call.Params), true
 	case ToolSpawn:
-		return p.runtime.ExecuteSpawnTool(ctx, call.ID, call.Params), true
+		return runtime.ExecuteSpawnTool(ctx, call.ID, call.Params), true
 	default:
 		return tools.Result{}, false
 	}

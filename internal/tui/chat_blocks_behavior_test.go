@@ -615,7 +615,8 @@ func leadingSpaces(s string) int {
 func TestConfirmClipboardImagePasteSavesAttachment(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
 	tui.initChatComponents()
-	tui.attachmentStatus.Root = t.TempDir()
+	tui.currentSession.ID = "session-1"
+	tui.attachmentStatus = protocol.AttachmentStatusResult{SessionID: "session-1", Root: t.TempDir()}
 	data := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0, 'I', 'H', 'D', 'R'}
 	tui.chat.EnqueueImagePaste(pendingImagePaste{SourceKind: "clipboard_image", Name: "clipboard-image.png", MimeType: "image/png", Size: int64(len(data)), Data: data})
 

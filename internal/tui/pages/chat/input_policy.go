@@ -12,12 +12,14 @@ type InputPolicy struct {
 type InputPolicyState struct {
 	Compacting      bool
 	Loading         bool
+	ObservingRun    bool
 	InteractionKind InteractionKind
 	AskAllowCustom  bool
 	StatusLabel     string
 	SpinnerView     string
 	CompactRunning  string
 	RespondingLabel string
+	ObservingLabel  string
 }
 
 func CurrentInputPolicy(state InputPolicyState) InputPolicy {
@@ -25,6 +27,13 @@ func CurrentInputPolicy(state InputPolicyState) InputPolicy {
 		return InputPolicy{Locked: true, Placeholder: joinNonEmpty(state.SpinnerView, state.CompactRunning)}
 	}
 	if state.Loading && state.InteractionKind == InteractionNone {
+		if state.ObservingRun {
+			label := state.ObservingLabel
+			if label == "" {
+				label = state.RespondingLabel
+			}
+			return InputPolicy{Locked: true, Placeholder: label}
+		}
 		label := state.StatusLabel
 		if label == "" {
 			label = state.RespondingLabel

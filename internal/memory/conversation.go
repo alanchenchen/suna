@@ -10,30 +10,26 @@ import (
 	"github.com/alanchenchen/suna/internal/model"
 )
 
-type ConversationState struct {
-	UserID            string
-	SessionState      string
-	LastMessages      []model.Message
-	ToolSummary       ToolSummary
-	MemoryProcessedAt time.Time
-	UpdatedAt         time.Time
+type SessionState struct {
+	SessionID    string
+	Compacted    string
+	LastMessages []model.Message
+	ToolSummary  ToolSummary
+	UpdatedAt    time.Time
 }
 
-type ConversationStore struct {
+type SessionStateStore struct {
 	db *sql.DB
 }
 
-func NewConversationStore(db *sql.DB) *ConversationStore { return &ConversationStore{db: db} }
+func NewSessionStateStore(db *sql.DB) *SessionStateStore { return &SessionStateStore{db: db} }
 
-func (s *ConversationStore) Load(ctx context.Context, userID string) (*ConversationState, error) {
-	if userID == "" {
-		userID = DefaultUserID
-	}
-	row := s.db.QueryRowContext(ctx, `SELECT user_id, session_state, last_messages, tool_summary, memory_processed_at, updated_at FROM conversation_state WHERE user_id = ?`, userID)
-	var st ConversationState
+func (s *SessionStateStore) Load(ctx context.Context, sessionID string) (*SessionState, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT session_id, compacted_state, last_messages, tool_summary, updated_at FROM session_state WHERE session_id = ?`, sessionID)
+	var st SessionState
 	var lastMessages, toolSummary string
-	var processed, updated sql.NullString
-	if err := row.Scan(&st.UserID, &st.SessionState, &lastMessages, &toolSummary, &processed, &updated); err != nil {
+	var updated sql.NullString
+	if err := row.Scan(&st.SessionID, &st.Compacted, &lastMessages, &toolSummary, &updated); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -41,47 +37,43 @@ func (s *ConversationStore) Load(ctx context.Context, userID string) (*Conversat
 	}
 	_ = json.Unmarshal([]byte(lastMessages), &st.LastMessages)
 	st.ToolSummary = decodeToolSummary(toolSummary)
-	st.MemoryProcessedAt = parseDBTime(processed.String)
 	st.UpdatedAt = parseDBTime(updated.String)
 	return &st, nil
 }
 
-func (s *ConversationStore) Save(ctx context.Context, userID, sessionState string, msgs []model.Message, tools ToolSummary) error {
-	if userID == "" {
-		userID = DefaultUserID
-	}
-	// last_messages 保存 TUI 恢复需要展示的真实可见对话；模型恢复时另行使用 session_state 控制 token。
+func (s *SessionStateStore) Save(ctx context.Context, sessionID, compacted string, msgs []model.Message, tools ToolSummary) error {
 	msgs = visibleMessages(msgs)
 	msgJSON, err := json.Marshal(msgs)
 	if err != nil {
 		return err
 	}
-	// tool_summary 只服务 TUI 恢复展示，不作为原始 tool 上下文恢复给模型。
 	toolJSON, err := json.Marshal(tools.Normalize())
 	if err != nil {
 		return err
 	}
 	now := time.Now()
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO conversation_state (user_id, session_state, last_messages, tool_summary, updated_at)
+		INSERT INTO session_state (session_id, compacted_state, last_messages, tool_summary, updated_at)
 		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(user_id) DO UPDATE SET
-			session_state = excluded.session_state,
+		ON CONFLICT(session_id) DO UPDATE SET
+			compacted_state = excluded.compacted_state,
 			last_messages = excluded.last_messages,
 			tool_summary = excluded.tool_summary,
-			updated_at = excluded.updated_at`, userID, strings.TrimSpace(sessionState), string(msgJSON), string(toolJSON), now)
+			updated_at = excluded.updated_at`, sessionID, strings.TrimSpace(compacted), string(msgJSON), string(toolJSON), now)
 	return err
 }
 
-func (s *ConversationStore) ClearLastMessages(ctx context.Context, userID string) error {
-	if userID == "" {
-		userID = DefaultUserID
-	}
+func (s *SessionStateStore) Clear(ctx context.Context, sessionID string) error {
 	now := time.Now()
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO conversation_state (user_id, session_state, last_messages, tool_summary, updated_at)
+		INSERT INTO session_state (session_id, compacted_state, last_messages, tool_summary, updated_at)
 		VALUES (?, '', '[]', '[]', ?)
-		ON CONFLICT(user_id) DO UPDATE SET session_state = '', last_messages = '[]', tool_summary = '[]', updated_at = excluded.updated_at`, userID, now)
+		ON CONFLICT(session_id) DO UPDATE SET compacted_state = '', last_messages = '[]', tool_summary = '[]', updated_at = excluded.updated_at`, sessionID, now)
+	return err
+}
+
+func (s *SessionStateStore) Delete(ctx context.Context, sessionID string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM session_state WHERE session_id = ?`, sessionID)
 	return err
 }
 

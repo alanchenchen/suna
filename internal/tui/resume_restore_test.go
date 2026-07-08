@@ -31,9 +31,7 @@ func TestStreamErrorUsesStructuredResumeFlag(t *testing.T) {
 func TestRestoreStatusShowsCompactedNoticeAtEnd(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 18}
 	tui.initChatComponents()
-	tui.handleSessionRestoreMessageNotification(sessionRestoreMessageMsg{Role: "user", Content: "之前的问题"})
-
-	tui.handleSessionRestoreStatusNotification(protocol.SessionRestoreStatus{Messages: 1, Compacted: true})
+	tui.applySessionSnapshot(protocol.SessionSnapshot{Messages: []protocol.SnapshotMessage{{Role: "user", Content: "之前的问题"}}, Compacted: true})
 
 	if got := len(tui.chat.Messages); got != 2 {
 		t.Fatalf("messages = %d, want 2", got)
@@ -52,7 +50,7 @@ func TestRestoreStatusShowsToolSummaryWithI18N(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleEN), width: 80, height: 18}
 	tui.initChatComponents()
 
-	tui.handleSessionRestoreStatusNotification(protocol.SessionRestoreStatus{ToolSummary: &protocol.ToolSummaryPayload{
+	tui.applySessionSnapshot(protocol.SessionSnapshot{ToolSummary: &protocol.ToolSummaryPayload{
 		Total:    3,
 		Success:  2,
 		Failed:   1,

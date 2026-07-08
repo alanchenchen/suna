@@ -40,7 +40,7 @@ func (ListDir) Execute(ctx context.Context, params map[string]any) tools.Result 
 	if path == "" {
 		return tools.ErrorResult("path is required")
 	}
-	path = expandPath(path)
+	path = expandPathWithContext(ctx, path)
 
 	recursive := false
 	if r, ok := params["recursive"].(bool); ok {

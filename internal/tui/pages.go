@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/alanchenchen/suna/internal/protocol"
 	chatpage "github.com/alanchenchen/suna/internal/tui/pages/chat"
 	tuiconfig "github.com/alanchenchen/suna/internal/tui/pages/config"
 	helppage "github.com/alanchenchen/suna/internal/tui/pages/help"
@@ -28,6 +29,10 @@ func (t *TUI) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t.doQuit()
 			return t, tea.Quit
 		case "esc":
+			if t.welcomeActivePicker {
+				t.welcomeActivePicker = false
+				t.initWelcomeList()
+			}
 			return t, nil
 		}
 		action, handled := t.menu.UpdateKey(m.String(), items)
@@ -59,21 +64,52 @@ func (t *TUI) handleWelcomeAction(action welcomepage.Action) tea.Cmd {
 		t.chat.Messages = []chatMsg{}
 		t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}
 		t.chat.Attachments = nil
+		t.currentRunCanControl = false
+		t.handoffRole = handoffRoleHost
+		t.attachmentStatus = protocol.AttachmentStatusResult{}
 		t.resetConversationStats()
 		cmd := t.initChatComponents()
 		t.resetPhase()
 		return tea.Batch(cmd, t.newSessionCmd())
 	case welcomepage.ActionResume:
-		if t.daemonStatus.Sessions == nil || t.daemonStatus.Sessions.LastID == "" {
+		if t.resumeSessionID == "" {
 			return nil
 		}
 		t.mode = uipage.Chat
 		t.chat.Messages = []chatMsg{}
 		t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}
+		t.chat.Attachments = nil
+		t.currentRunCanControl = false
+		t.handoffRole = handoffRoleHost
+		t.attachmentStatus = protocol.AttachmentStatusResult{}
 		t.resetConversationStats()
 		cmd := t.initChatComponents()
 		t.resetPhase()
-		return tea.Batch(cmd, t.restoreSessionCmd())
+		return tea.Batch(cmd, t.attachSessionCmd(t.resumeSessionID, false))
+	case welcomepage.ActionJoinPicker:
+		t.welcomeActivePicker = true
+		t.initWelcomeList()
+		return nil
+	case welcomepage.ActionJoin:
+		selected := t.menu.SelectedItem()
+		sessionID := selected.SessionID
+		if sessionID == "" {
+			return nil
+		}
+		t.chat.Messages = []chatMsg{}
+		t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}
+		t.chat.Attachments = nil
+		t.currentRunCanControl = false
+		t.handoffRole = handoffRoleGuest
+		t.attachmentStatus = protocol.AttachmentStatusResult{}
+		t.resetConversationStats()
+		cmd := t.initChatComponents()
+		t.resetPhase()
+		return tea.Batch(cmd, t.attachSessionCmd(sessionID, true))
+	case welcomepage.ActionBack:
+		t.welcomeActivePicker = false
+		t.initWelcomeList()
+		return nil
 	case welcomepage.ActionConfig:
 		t.mode = uipage.Config
 		t.config.FromMode = uipage.Welcome
@@ -113,18 +149,39 @@ func (t *TUI) welcomeMenuItems() []welcomepage.Item {
 	noModel := !t.hasConfiguredModel()
 	var items []welcomepage.Item
 	if noModel {
-		items = append(items, welcomepage.Item{"tui.welcome.new", "", welcomepage.ActionNew, false})
-		items = append(items, welcomepage.Item{"tui.welcome.config", "", welcomepage.ActionConfig, false})
-		items = append(items, welcomepage.Item{"tui.welcome.help_menu", "", welcomepage.ActionHelp, false})
+		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.new", Action: welcomepage.ActionNew})
+		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.config", Action: welcomepage.ActionConfig})
+		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.help_menu", Action: welcomepage.ActionHelp})
 		return items
 	}
-	if t.daemonStatus.Sessions != nil && t.daemonStatus.Sessions.LastID != "" {
-		items = append(items, welcomepage.Item{"tui.welcome.resume", "", welcomepage.ActionResume, false})
+	if t.welcomeActivePicker {
+		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.back", Action: welcomepage.ActionBack})
+		for _, session := range t.activeWelcomeSessions() {
+			items = append(items, welcomepage.Item{LabelKey: "tui.welcome.join_one", Key: sessionTitle(session), Action: welcomepage.ActionJoin, SessionID: session.ID})
+		}
+		return items
 	}
-	items = append(items, welcomepage.Item{"tui.welcome.new", "", welcomepage.ActionNew, false})
-	items = append(items, welcomepage.Item{"tui.welcome.config", "", welcomepage.ActionConfig, false})
-	items = append(items, welcomepage.Item{"tui.welcome.help_menu", "", welcomepage.ActionHelp, false})
+	if t.resumeSessionID != "" {
+		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.resume", Action: welcomepage.ActionResume, SessionID: t.resumeSessionID})
+	}
+	items = append(items, welcomepage.Item{LabelKey: "tui.welcome.new", Action: welcomepage.ActionNew})
+	activeSessions := t.activeWelcomeSessions()
+	if len(activeSessions) > 0 {
+		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.join", Key: fmt.Sprintf("%d", len(activeSessions)), Action: welcomepage.ActionJoinPicker})
+	}
+	items = append(items, welcomepage.Item{LabelKey: "tui.welcome.config", Action: welcomepage.ActionConfig})
+	items = append(items, welcomepage.Item{LabelKey: "tui.welcome.help_menu", Action: welcomepage.ActionHelp})
 	return items
+}
+
+func (t *TUI) activeWelcomeSessions() []protocol.SessionInfo {
+	out := make([]protocol.SessionInfo, 0)
+	for _, session := range t.sessions {
+		if sessionActive(session) && session.ID != t.currentSession.ID {
+			out = append(out, session)
+		}
+	}
+	return out
 }
 
 func (t *TUI) renderWelcomeInfo() string {

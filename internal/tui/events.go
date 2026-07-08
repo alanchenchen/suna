@@ -7,6 +7,7 @@ import (
 
 	"github.com/alanchenchen/suna/internal/protocol"
 	tuievents "github.com/alanchenchen/suna/internal/tui/events"
+	chatpage "github.com/alanchenchen/suna/internal/tui/pages/chat"
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 )
 
@@ -15,17 +16,18 @@ type notificationMsg = tuievents.NotificationMsg
 
 type agentDeltaMsg = tuievents.AgentDeltaMsg
 type agentRunMsg = tuievents.AgentRunMsg
+type userMessageMsg = tuievents.UserMessageMsg
+type sessionStateMsg = tuievents.SessionStateMsg
 type usageMsg = tuievents.UsageMsg
 type askUserMsg = tuievents.AskUserMsg
 type guardConfirmMsg = tuievents.GuardConfirmMsg
+type interactionResolvedMsg = tuievents.InteractionResolvedMsg
 type toolStartMsg = tuievents.ToolStartMsg
 type toolGuardMsg = tuievents.ToolGuardMsg
 type toolEndMsg = tuievents.ToolEndMsg
 type daemonStateMsg = tuievents.DaemonStateMsg
 type compactResultMsg = tuievents.CompactResultMsg
 type memoryListMsg = tuievents.MemoryListMsg
-type sessionRestoreStatusMsg = tuievents.SessionRestoreStatusMsg
-type sessionRestoreMessageMsg = tuievents.SessionRestoreMessageMsg
 type daemonFullStatusMsg = tuievents.DaemonFullStatusMsg
 type configStateMsg = tuievents.ConfigStateMsg
 type skillListMsg = tuievents.SkillListMsg
@@ -42,6 +44,9 @@ type configResultMsg struct{ Params protocol.ConfigParams }
 type attachmentStatusResultMsg struct {
 	Params protocol.AttachmentStatusResult
 }
+type sessionListResultMsg struct{ Params protocol.SessionListResult }
+type sessionErrorMsg struct{ Message string }
+type sessionSnapshotResultMsg struct{ Params protocol.SessionSnapshot }
 type memoryListResultMsg struct{ Params protocol.MemoryListResult }
 type skillListResultMsg struct{ Params protocol.SkillListResult }
 type mcpListResultMsg struct{ Params protocol.MCPListResult }
@@ -68,6 +73,10 @@ func (t *TUI) handleNotificationMsg(msg notificationMsg) {
 		t.handleAgentDeltaNotification(m.Params)
 	case agentRunMsg:
 		t.handleAgentRunNotification(m.Params)
+	case userMessageMsg:
+		t.handleUserMessageNotification(m.Params)
+	case sessionStateMsg:
+		t.handleSessionStateNotification(m.Params)
 	case usageMsg:
 		t.handleUsageNotification(m.Params)
 	case toolStartMsg:
@@ -80,16 +89,14 @@ func (t *TUI) handleNotificationMsg(msg notificationMsg) {
 		t.handleAskUserNotification(m.Params)
 	case guardConfirmMsg:
 		t.handleGuardConfirmNotification(m.Params)
+	case interactionResolvedMsg:
+		t.handleInteractionResolvedNotification(m.Params)
 	case daemonStateMsg:
 		t.handleDaemonStateNotification(m.Params)
 	case compactResultMsg:
 		t.handleCompactResultNotification(m.Params)
 	case memoryListMsg:
 		t.handleMemoryListNotification(m.Params)
-	case sessionRestoreMessageMsg:
-		t.handleSessionRestoreMessageNotification(m)
-	case sessionRestoreStatusMsg:
-		t.handleSessionRestoreStatusNotification(m.Params)
 	case daemonFullStatusMsg:
 		t.handleDaemonFullStatusNotification(m.Params)
 	case configStateMsg:
@@ -124,11 +131,44 @@ func (t *TUI) handleAgentDeltaNotification(p protocol.AgentDeltaParams) {
 	}
 }
 
+func (t *TUI) handleUserMessageNotification(p protocol.UserMessageParams) {
+	if p.SessionID != "" && t.currentSession.ID != "" && p.SessionID != t.currentSession.ID {
+		return
+	}
+	text, attachments := userMessageContentFromParts(p.Parts)
+	if strings.TrimSpace(text) == "" && len(attachments) == 0 {
+		return
+	}
+	t.finishStreamingMessages()
+	t.appendNonToolMessage(chatMsg{Role: "user", Content: userMessageContent{Text: text, Attachments: attachments}})
+	t.scrollToBottomOnNextSync()
+}
+
+func userMessageContentFromParts(parts []protocol.MessagePart) (string, []attachmentItem) {
+	var texts []string
+	var attachments []attachmentItem
+	for _, part := range parts {
+		switch part.Type {
+		case "text":
+			if strings.TrimSpace(part.Text) != "" {
+				texts = append(texts, part.Text)
+			}
+		case "image":
+			attachments = append(attachments, attachmentItem{Type: part.Type, SourceKind: part.Source.Kind, Path: part.Source.Path, URL: part.Source.URL, Name: part.Source.Name, MimeType: part.Source.MimeType, Size: part.Source.Size})
+		}
+	}
+	return strings.Join(texts, "\n"), attachments
+}
+
 func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
+	if p.State == protocol.AgentRunRunning {
+		t.currentRunCanControl = p.CanControl
+	}
 	switch p.State {
 	case protocol.AgentRunRetrying:
 		t.chat.SetStatusLabel(t.formatRunRetryStatus(p), time.Now())
 	case protocol.AgentRunFailed, protocol.AgentRunCancelled:
+		t.currentRunCanControl = false
 		t.finishStreamingMessages()
 		if p.State == protocol.AgentRunCancelled {
 			t.appendNonToolMessage(chatMsg{Role: "error", Content: t.tr("model_error.cancelled")})
@@ -138,11 +178,13 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 		t.chat.ResumeAvailable = p.ResumeAvailable
 		t.resetPhase()
 	case protocol.AgentRunDone:
+		t.currentRunCanControl = false
 		t.finishStreamingMessages()
 		t.chat.ResumeAvailable = false
 		t.resetPhase()
 	case protocol.AgentRunRunning:
 		if p.Phase == protocol.AgentRunPhaseModel {
+			t.startLLMWait()
 			t.chat.SetStatusLabel(t.tr("status.waiting_model"), time.Now())
 		}
 	}
@@ -232,13 +274,38 @@ func (t *TUI) handleUsageNotification(p protocol.UsageParams) {
 }
 
 func (t *TUI) handleAskUserNotification(p protocol.AskUserParams) {
+	if p.SessionID != "" && t.currentSession.ID != "" && p.SessionID != t.currentSession.ID {
+		return
+	}
+	if !p.CanReply {
+		t.appendNonToolMessage(chatMsg{Role: "system", Content: "❓ " + p.Question + "\n" + t.tr("handoff.waiting_owner")})
+		t.resetPhase()
+		return
+	}
 	t.chat.EnqueueAskUser(p)
 	t.appendNonToolMessage(chatMsg{Role: "system", Content: "❓ " + p.Question})
 	t.resetPhase()
 }
 
 func (t *TUI) handleGuardConfirmNotification(p protocol.GuardConfirmParams) {
+	if p.SessionID != "" && t.currentSession.ID != "" && p.SessionID != t.currentSession.ID {
+		return
+	}
+	if !p.CanReply {
+		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.tr("handoff.waiting_owner")})
+		t.resetPhase()
+		return
+	}
 	t.enqueueGuardConfirm(&guardConfirmView{ID: p.ID, ToolCallID: p.ToolCallID, Tool: p.Tool, Params: p.Params, Risk: p.Risk, Reason: p.Reason, Suggestion: p.Suggestion, ReviewCode: p.ReviewCode, ReviewMessage: p.ReviewMessage})
+}
+
+func (t *TUI) handleInteractionResolvedNotification(p protocol.InteractionResolvedParams) {
+	if p.SessionID != "" && t.currentSession.ID != "" && p.SessionID != t.currentSession.ID {
+		return
+	}
+	if t.chat.RemoveInteraction(p.ID) {
+		t.syncContent()
+	}
 }
 
 func (t *TUI) handleToolStartNotification(p protocol.ToolStartParams) {
@@ -324,13 +391,44 @@ func (t *TUI) handleMemoryListNotification(p protocol.MemoryListResult) {
 	}
 }
 
-func (t *TUI) handleSessionRestoreMessageNotification(p sessionRestoreMessageMsg) {
-	if p.Content != "" {
-		t.appendNonToolMessage(chatMsg{Role: p.Role, Content: p.Content})
+func (t *TUI) handleSessionStateNotification(p protocol.SessionStateParams) {
+	if p.Session.ID == "" {
+		return
+	}
+	updated := false
+	for i := range t.sessions {
+		if t.sessions[i].ID == p.Session.ID {
+			t.sessions[i] = p.Session
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		t.sessions = append(t.sessions, p.Session)
+	}
+	t.chat.SetSessions(t.sessions)
+	t.pickWelcomeSessions()
+	if t.currentSession.ID != "" && p.Session.ID == t.currentSession.ID {
+		t.currentSession = p.Session
+	}
+	if t.mode == uipage.Welcome {
+		t.menu.SetItems(t.welcomeMenuItems(), t.width)
 	}
 }
 
-func (t *TUI) handleSessionRestoreStatusNotification(p protocol.SessionRestoreStatus) {
+func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) {
+	if t.handoffRole == "" {
+		t.handoffRole = handoffRoleHost
+	}
+	t.currentSession = p.Session
+	t.currentRunCanControl = p.CurrentRun != nil && p.CurrentRun.CanControl
+	t.chat.Messages = nil
+	t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}
+	for _, m := range p.Messages {
+		if m.Content != "" {
+			t.appendNonToolMessage(chatMsg{Role: m.Role, Content: m.Content})
+		}
+	}
 	if p.ToolSummary != nil {
 		if content := t.renderSessionRestoreToolSummary(*p.ToolSummary); content != "" {
 			t.appendNonToolMessage(chatMsg{Role: "restore_summary", Content: content})
@@ -338,6 +436,15 @@ func (t *TUI) handleSessionRestoreStatusNotification(p protocol.SessionRestoreSt
 	}
 	if p.Compacted {
 		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.tr("session.restore_compacted")})
+	}
+	if p.CurrentRun != nil && p.CurrentRun.Status != protocol.SessionStatusIdle {
+		t.chat.StartLLMWait(time.Now())
+		if p.CurrentRun.ReasoningBuffer != "" {
+			t.appendStreamMessage("reasoning", p.CurrentRun.ReasoningBuffer)
+		}
+		if p.CurrentRun.AssistantBuffer != "" {
+			t.appendStreamMessage("assistant", p.CurrentRun.AssistantBuffer)
+		}
 	}
 	t.trimDisplayHistoryIfNeeded()
 	t.chat.ResumeAvailable = false
@@ -490,6 +597,9 @@ func (t *TUI) handleSkillReviewNotification(p protocol.SkillReviewParams) {
 }
 
 func (t *TUI) handleAttachmentStatusNotification(p protocol.AttachmentStatusResult) {
+	if p.SessionID != "" && t.currentSession.ID != "" && p.SessionID != t.currentSession.ID {
+		return
+	}
 	t.attachmentStatus = p
 	t.config.Error = ""
 }

@@ -15,15 +15,19 @@ const (
 	ActionNone Action = iota
 	ActionNew
 	ActionResume
+	ActionJoin
+	ActionJoinPicker
+	ActionBack
 	ActionConfig
 	ActionHelp
 )
 
 type Item struct {
-	LabelKey string
-	Key      string
-	Action   Action
-	Disabled bool
+	LabelKey  string
+	Key       string
+	Action    Action
+	Disabled  bool
+	SessionID string
 }
 
 func (i Item) FilterValue() string { return i.LabelKey }
@@ -45,6 +49,7 @@ type Model struct {
 	cursor      int
 	initialized bool
 	menu        list.Model
+	selected    Item
 }
 
 func New(deps Deps) Model {
@@ -95,6 +100,7 @@ func (m *Model) UpdateKey(key string, items []Item) (Action, bool) {
 		return ActionNone, true
 	case "enter":
 		if m.cursor >= 0 && m.cursor < len(items) && !items[m.cursor].Disabled {
+			m.selected = items[m.cursor]
 			return items[m.cursor].Action, true
 		}
 		return ActionNone, true
@@ -102,6 +108,8 @@ func (m *Model) UpdateKey(key string, items []Item) (Action, bool) {
 		return ActionNone, false
 	}
 }
+
+func (m *Model) SelectedItem() Item { return m.selected }
 
 type delegate struct{ m *Model }
 

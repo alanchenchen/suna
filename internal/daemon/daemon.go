@@ -36,10 +36,11 @@ type Options struct {
 }
 
 type Daemon struct {
-	cfg     *config.Config
-	opts    Options
-	agent   *agent.Agent
-	service *service
+	cfg      *config.Config
+	opts     Options
+	agent    *agent.Agent
+	sessions *sessionManager
+	service  *service
 	// transports 是 daemon 的全部通信入口；daemon 只认识 protocol.Transport，不关心具体是 socket、pipe 还是 Web。
 	transports []protocol.Transport
 
@@ -64,6 +65,7 @@ func New(cfg *config.Config, transports []protocol.Transport, opts ...Options) (
 		cfg:        cfg,
 		opts:       options,
 		agent:      agent,
+		sessions:   newSessionManager(agent, agent.SessionStore(), agent.SessionStateStore()),
 		transports: transports,
 		sinks:      make(map[string]protocol.EventSink),
 	}, nil
@@ -105,6 +107,8 @@ func (d *Daemon) run(label string) error {
 		defer tr.Close(ctx)
 	}
 
+	go d.sessions.pruneInactive(ctx, 30*24*time.Hour)
+
 	// 信号处理
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
@@ -124,6 +128,9 @@ func (d *Daemon) run(label string) error {
 	<-ctx.Done()
 
 	// 优雅关闭：无客户端或停止请求进入退出流程后，先取消当前 run，再释放资源。
+	if d.sessions != nil {
+		d.sessions.cancelAllRuns()
+	}
 	d.agent.CancelCurrentRun()
 	d.agent.Close()
 	return nil
@@ -144,9 +151,32 @@ func (d *Daemon) addConnection(connID string, sink protocol.EventSink) {
 }
 
 func (d *Daemon) removeConnection(connID string) {
+	var detachedSessionID string
+	if d.sessions != nil {
+		detachedSessionID = d.sessions.detach(connID)
+	}
+	if detachedSessionID != "" {
+		if d.service != nil {
+			d.service.onClientDetached(context.Background(), connID, detachedSessionID)
+		}
+		d.broadcastSessionState(context.Background(), detachedSessionID)
+	}
 	d.mu.Lock()
 	delete(d.sinks, connID)
 	d.mu.Unlock()
+}
+
+func (d *Daemon) broadcastSessionState(ctx context.Context, sessionID string) {
+	if d.sessions == nil || sessionID == "" {
+		return
+	}
+	info, ok := d.sessions.sessionInfo(ctx, sessionID)
+	if !ok {
+		return
+	}
+	for _, sink := range d.sessions.sinksForSession(d, sessionID) {
+		_ = sink.Emit(ctx, protocol.Event{Method: protocol.NotifySessionUpdated, Params: protocol.SessionStateParams{Session: info}})
+	}
 }
 
 func (d *Daemon) sinkFor(connID string, fallback protocol.EventSink) protocol.EventSink {

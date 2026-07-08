@@ -27,9 +27,14 @@ type NotificationMsg interface{ isNotificationMsg() }
 
 type AgentDeltaMsg struct{ Params protocol.AgentDeltaParams }
 type AgentRunMsg struct{ Params protocol.AgentRunParams }
+type UserMessageMsg struct{ Params protocol.UserMessageParams }
+type SessionStateMsg struct{ Params protocol.SessionStateParams }
 type UsageMsg struct{ Params protocol.UsageParams }
 type AskUserMsg struct{ Params protocol.AskUserParams }
 type GuardConfirmMsg struct{ Params protocol.GuardConfirmParams }
+type InteractionResolvedMsg struct {
+	Params protocol.InteractionResolvedParams
+}
 
 type ToolStartMsg struct{ Params protocol.ToolStartParams }
 type ToolGuardMsg struct{ Params protocol.ToolGuardParams }
@@ -38,11 +43,6 @@ type ToolEndMsg struct{ Params protocol.ToolEndParams }
 type DaemonStateMsg struct{ Params protocol.DaemonStateParams }
 type CompactResultMsg struct{ Params protocol.CompactResult }
 type MemoryListMsg struct{ Params protocol.MemoryListResult }
-type SessionRestoreStatusMsg struct{ Params protocol.SessionRestoreStatus }
-type SessionRestoreMessageMsg struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
 type DaemonFullStatusMsg struct{ Params protocol.DaemonStatusParams }
 type ConfigStateMsg struct{ Params protocol.ConfigParams }
 type SkillListMsg struct{ Params protocol.SkillListResult }
@@ -58,28 +58,29 @@ type RequestErrorMsg struct {
 }
 type UnknownNotificationMsg struct{ Raw Notification }
 
-func (AgentDeltaMsg) isNotificationMsg()            {}
-func (AgentRunMsg) isNotificationMsg()              {}
-func (UsageMsg) isNotificationMsg()                 {}
-func (AskUserMsg) isNotificationMsg()               {}
-func (GuardConfirmMsg) isNotificationMsg()          {}
-func (ToolStartMsg) isNotificationMsg()             {}
-func (ToolGuardMsg) isNotificationMsg()             {}
-func (ToolEndMsg) isNotificationMsg()               {}
-func (DaemonStateMsg) isNotificationMsg()           {}
-func (CompactResultMsg) isNotificationMsg()         {}
-func (MemoryListMsg) isNotificationMsg()            {}
-func (SessionRestoreStatusMsg) isNotificationMsg()  {}
-func (SessionRestoreMessageMsg) isNotificationMsg() {}
-func (DaemonFullStatusMsg) isNotificationMsg()      {}
-func (ConfigStateMsg) isNotificationMsg()           {}
-func (SkillListMsg) isNotificationMsg()             {}
-func (MCPListMsg) isNotificationMsg()               {}
-func (SkillLoadMsg) isNotificationMsg()             {}
-func (SkillReviewMsg) isNotificationMsg()           {}
-func (AttachmentStatusMsg) isNotificationMsg()      {}
-func (RequestErrorMsg) isNotificationMsg()          {}
-func (UnknownNotificationMsg) isNotificationMsg()   {}
+func (AgentDeltaMsg) isNotificationMsg()          {}
+func (AgentRunMsg) isNotificationMsg()            {}
+func (UserMessageMsg) isNotificationMsg()         {}
+func (SessionStateMsg) isNotificationMsg()        {}
+func (UsageMsg) isNotificationMsg()               {}
+func (AskUserMsg) isNotificationMsg()             {}
+func (GuardConfirmMsg) isNotificationMsg()        {}
+func (InteractionResolvedMsg) isNotificationMsg() {}
+func (ToolStartMsg) isNotificationMsg()           {}
+func (ToolGuardMsg) isNotificationMsg()           {}
+func (ToolEndMsg) isNotificationMsg()             {}
+func (DaemonStateMsg) isNotificationMsg()         {}
+func (CompactResultMsg) isNotificationMsg()       {}
+func (MemoryListMsg) isNotificationMsg()          {}
+func (DaemonFullStatusMsg) isNotificationMsg()    {}
+func (ConfigStateMsg) isNotificationMsg()         {}
+func (SkillListMsg) isNotificationMsg()           {}
+func (MCPListMsg) isNotificationMsg()             {}
+func (SkillLoadMsg) isNotificationMsg()           {}
+func (SkillReviewMsg) isNotificationMsg()         {}
+func (AttachmentStatusMsg) isNotificationMsg()    {}
+func (RequestErrorMsg) isNotificationMsg()        {}
+func (UnknownNotificationMsg) isNotificationMsg() {}
 
 func Decode(notif Notification) tea.Msg {
 	switch notif.Method {
@@ -87,6 +88,10 @@ func Decode(notif Notification) tea.Msg {
 		return decodeParams[protocol.AgentDeltaParams](notif, func(p protocol.AgentDeltaParams) tea.Msg { return AgentDeltaMsg{Params: p} })
 	case protocol.NotifyAgentRun:
 		return decodeParams[protocol.AgentRunParams](notif, func(p protocol.AgentRunParams) tea.Msg { return AgentRunMsg{Params: p} })
+	case protocol.NotifySessionUserMessage:
+		return decodeParams[protocol.UserMessageParams](notif, func(p protocol.UserMessageParams) tea.Msg { return UserMessageMsg{Params: p} })
+	case protocol.NotifySessionUpdated:
+		return decodeParams[protocol.SessionStateParams](notif, func(p protocol.SessionStateParams) tea.Msg { return SessionStateMsg{Params: p} })
 	case protocol.NotifyUsage:
 		return decodeParams[protocol.UsageParams](notif, func(p protocol.UsageParams) tea.Msg { return UsageMsg{Params: p} })
 	case protocol.NotifyToolStart:
@@ -99,6 +104,8 @@ func Decode(notif Notification) tea.Msg {
 		return decodeParams[protocol.AskUserParams](notif, func(p protocol.AskUserParams) tea.Msg { return AskUserMsg{Params: p} })
 	case protocol.NotifyGuardConfirm:
 		return decodeParams[protocol.GuardConfirmParams](notif, func(p protocol.GuardConfirmParams) tea.Msg { return GuardConfirmMsg{Params: p} })
+	case protocol.NotifyInteractionResolved:
+		return decodeParams[protocol.InteractionResolvedParams](notif, func(p protocol.InteractionResolvedParams) tea.Msg { return InteractionResolvedMsg{Params: p} })
 	case protocol.NotifyDaemonState:
 		return decodeParams[protocol.DaemonStateParams](notif, func(p protocol.DaemonStateParams) tea.Msg { return DaemonStateMsg{Params: p} })
 	case protocol.NotifyCompactResult:
@@ -111,10 +118,6 @@ func Decode(notif Notification) tea.Msg {
 		return RequestErrorMsg{Scope: notif.Method, Message: p.Message}
 	case protocol.NotifyMemoryState:
 		return decodeParams[protocol.MemoryListResult](notif, func(p protocol.MemoryListResult) tea.Msg { return MemoryListMsg{Params: p} })
-	case protocol.NotifySessionRestoreMsg:
-		return decodeParams[SessionRestoreMessageMsg](notif, func(p SessionRestoreMessageMsg) tea.Msg { return p })
-	case protocol.NotifySessionRestoreStatus:
-		return decodeParams[protocol.SessionRestoreStatus](notif, func(p protocol.SessionRestoreStatus) tea.Msg { return SessionRestoreStatusMsg{Params: p} })
 	case protocol.NotifyDaemonFullStatus:
 		return decodeParams[protocol.DaemonStatusParams](notif, func(p protocol.DaemonStatusParams) tea.Msg { return DaemonFullStatusMsg{Params: p} })
 	case protocol.NotifyConfigState:

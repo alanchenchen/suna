@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -109,7 +110,7 @@ func (t *TUI) attachmentClearCmd() tea.Cmd {
 		if err != nil {
 			return ipcErrorNotification(notifyConfigError, err)
 		}
-		return attachmentStatusResultMsg{Params: protocol.AttachmentStatusResult{Root: result.Root, Bytes: result.Bytes, Count: result.Count}}
+		return attachmentStatusResultMsg{Params: protocol.AttachmentStatusResult{SessionID: result.SessionID, Root: result.Root, Bytes: result.Bytes, Count: result.Count}}
 	}
 }
 
@@ -150,27 +151,75 @@ func (t *TUI) cancelCmd() tea.Cmd {
 	}
 }
 
+func (t *TUI) sessionListCmd() tea.Cmd {
+	return func() tea.Msg {
+		if t.localCli == nil {
+			return sessionErrorMsg{Message: t.tr("error.not_connected")}
+		}
+		result, err := t.localCli.ListSessions(protocol.SessionListParams{})
+		if err != nil {
+			return sessionErrorMsg{Message: err.Error()}
+		}
+		return sessionListResultMsg{Params: result}
+	}
+}
+
 func (t *TUI) newSessionCmd() tea.Cmd {
 	return func() tea.Msg {
 		if t.localCli == nil {
 			return ipcErrorNotification(notifyConfigError, fmt.Errorf("%s", t.tr("error.not_connected")))
 		}
-		if err := t.localCli.NewSession(); err != nil {
+		cwd, _ := os.Getwd()
+		result, err := t.localCli.CreateSession(cwd, "")
+		if err != nil {
 			return ipcErrorNotification(notifyConfigError, err)
 		}
-		return nil
+		return sessionSnapshotResultMsg{Params: result}
 	}
 }
 
-func (t *TUI) restoreSessionCmd() tea.Cmd {
+func (t *TUI) attachSessionCmd(sessionID string, requireActive bool) tea.Cmd {
 	return func() tea.Msg {
 		if t.localCli == nil {
 			return ipcErrorNotification(notifyConfigError, fmt.Errorf("%s", t.tr("error.not_connected")))
 		}
-		if err := t.localCli.RestoreSession(); err != nil {
+		result, err := t.localCli.AttachSession(sessionID, requireActive)
+		if err != nil {
 			return ipcErrorNotification(notifyConfigError, err)
 		}
-		return nil
+		return sessionSnapshotResultMsg{Params: result}
+	}
+}
+
+func (t *TUI) detachSessionCmd() tea.Cmd {
+	return func() tea.Msg {
+		if t.localCli == nil {
+			return ipcErrorNotification(notifyConfigError, fmt.Errorf("%s", t.tr("error.not_connected")))
+		}
+		if err := t.localCli.DetachSession(); err != nil {
+			return ipcErrorNotification(notifyConfigError, err)
+		}
+		result, err := t.localCli.ListSessions(protocol.SessionListParams{})
+		if err != nil {
+			return sessionErrorMsg{Message: err.Error()}
+		}
+		return sessionListResultMsg{Params: result}
+	}
+}
+
+func (t *TUI) deleteSessionCmd(sessionID string) tea.Cmd {
+	return func() tea.Msg {
+		if t.localCli == nil {
+			return ipcErrorNotification(notifyConfigError, fmt.Errorf("%s", t.tr("error.not_connected")))
+		}
+		if err := t.localCli.DeleteSession(sessionID); err != nil {
+			return sessionErrorMsg{Message: t.i18n.Tf("tui.sessions.delete_failed", err.Error())}
+		}
+		result, err := t.localCli.ListSessions(protocol.SessionListParams{})
+		if err != nil {
+			return sessionErrorMsg{Message: err.Error()}
+		}
+		return sessionListResultMsg{Params: result}
 	}
 }
 

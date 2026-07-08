@@ -116,6 +116,30 @@ func (m *Model) RemoveQueuedInteractions(kind InteractionKind) {
 
 func (m *Model) CancelActiveInteraction() { m.CompleteInteraction() }
 
+func (m *Model) RemoveInteraction(id string) bool {
+	if id == "" {
+		return false
+	}
+	removed := false
+	if m.ActiveInteraction != nil && m.ActiveInteraction.ID == id {
+		m.CompleteInteraction()
+		removed = true
+	}
+	kept := m.InteractionQueue[:0]
+	for _, i := range m.InteractionQueue {
+		if i.ID == id {
+			removed = true
+			continue
+		}
+		kept = append(kept, i)
+	}
+	for i := len(kept); i < len(m.InteractionQueue); i++ {
+		m.InteractionQueue[i] = Interaction{}
+	}
+	m.InteractionQueue = kept
+	return removed
+}
+
 func (m *Model) RequestDiscardDraft() {
 	m.EnqueueInteraction(Interaction{Kind: InteractionDiscardDraft, ID: "discard_draft"})
 }

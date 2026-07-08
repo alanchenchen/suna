@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/alanchenchen/suna/internal/config"
+	"github.com/alanchenchen/suna/internal/media"
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/protocol"
@@ -66,7 +67,7 @@ func (a *Agent) ReloadConfigFromDiskIfNeeded() (*config.Config, error) {
 	if err := a.reloadRouterLocked(loaded); err != nil {
 		return nil, err
 	}
-	a.guard = a.newGuardForSession(a.sessionID)
+	// Guard 是 per-session 状态；config 更新后下一轮 session run 会重新同步 runtime 并刷新 Guard。
 	a.reloadSkillsLocked()
 	if a.mcp != nil {
 		a.mcp.SetConfig(loaded.MCP)
@@ -172,7 +173,7 @@ func (a *Agent) UpdateConfig(params ConfigSetParams) (*config.Config, error) {
 	if err := a.reloadRouterLocked(cfg); err != nil {
 		return nil, err
 	}
-	a.guard = a.newGuardForSession(a.sessionID)
+	// Guard 是 per-session 状态；config 更新后下一轮 session run 会重新同步 runtime 并刷新 Guard。
 	a.reloadSkillsLocked()
 	if a.tools != nil {
 		if err := a.tools.Reload(context.Background()); err != nil {
@@ -228,7 +229,7 @@ func (a *Agent) reloadRouterLocked(cfg *config.Config) error {
 		}
 		return nil
 	}
-	router, err := model.NewRouter(cfg, a.mediaStore)
+	router, err := model.NewRouter(cfg, media.NewContextResolver(cfg.AttachmentsDir()))
 	if err != nil {
 		return err
 	}

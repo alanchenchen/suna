@@ -137,7 +137,6 @@ func (w *Worker) processPending() {
 		logging.Error("memory", "delete_queue_failed", err, logging.Event{"queue_events": len(items)})
 		return
 	}
-	_, _ = w.db.ExecContext(ctx, `UPDATE conversation_state SET memory_processed_at = ?, updated_at = ? WHERE user_id = ?`, time.Now(), time.Now(), DefaultUserID)
 	logging.Info("memory", "compaction_success", logging.Event{"request_id": requestID, "queue_events": len(items), "active_memories_before": len(current), "active_memories_after": len(newList)})
 }
 

@@ -31,7 +31,7 @@ func (WriteFile) Execute(ctx context.Context, params map[string]any) tools.Resul
 	if path == "" {
 		return tools.ErrorResult("path is required")
 	}
-	path = expandPath(path)
+	path = expandPathWithContext(ctx, path)
 
 	createDirs := false
 	if c, ok := params["create_dirs"].(bool); ok {

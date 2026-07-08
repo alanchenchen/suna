@@ -13,6 +13,7 @@ const (
 	KeyTargetSkills
 	KeyTargetMCP
 	KeyTargetMemory
+	KeyTargetSessions
 	KeyTargetAttachment
 	KeyTargetBlocked
 )
@@ -41,6 +42,9 @@ func (m Model) RouteKey(key string, inputLocked bool, compacting bool) KeyTarget
 	if m.MemoryOverlayOpen {
 		return KeyTargetMemory
 	}
+	if m.SessionsOverlayOpen {
+		return KeyTargetSessions
+	}
 	if m.AttachmentMode || m.AttachmentDelete {
 		return KeyTargetAttachment
 	}
@@ -53,14 +57,14 @@ func (m Model) RouteKey(key string, inputLocked bool, compacting bool) KeyTarget
 func AllowLockedInputKey(key string, compacting bool) bool {
 	if compacting {
 		switch key {
-		case "ctrl+c", "?", "ctrl+t", "ctrl+r", "pgup", "pgdown", "up", "down", "tab":
+		case "ctrl+c", "ctrl+t", "ctrl+r", "pgup", "pgdown", "up", "down", "tab":
 			return true
 		default:
 			return false
 		}
 	}
 	switch key {
-	case "ctrl+c", "?", "esc", "enter", "ctrl+j", "ctrl+t", "ctrl+r", "pgup", "pgdown", "up", "down", "tab":
+	case "ctrl+c", "esc", "enter", "ctrl+j", "ctrl+t", "ctrl+r", "pgup", "pgdown", "up", "down", "tab":
 		return true
 	default:
 		return false

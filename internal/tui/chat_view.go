@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -43,6 +44,10 @@ func (t *TUI) viewChat() string {
 	if t.chat.MemoryOverlayOpen {
 		memoryOverlay = t.renderMemoryOverlay(t.width)
 	}
+	sessionsOverlay := ""
+	if t.chat.SessionsOverlayOpen {
+		sessionsOverlay = t.renderSessionsOverlay(t.width)
+	}
 	guardOverlay := ""
 	if t.chat.ActiveInteractionKind() == chatpage.InteractionGuardConfirm {
 		guardOverlay = t.renderGuardOverlay(t.width)
@@ -73,6 +78,7 @@ func (t *TUI) viewChat() string {
 		SkillsOverlay:      skillsOverlay,
 		MCPOverlay:         mcpOverlay,
 		MemoryOverlay:      memoryOverlay,
+		SessionsOverlay:    sessionsOverlay,
 		GuardOverlay:       guardOverlay,
 		Overlay:            overlay.OverlayBlock,
 	}))
@@ -172,7 +178,70 @@ func (t *TUI) chatTopMeta() string {
 	if reasoning != "" {
 		modelRef += "·" + strings.ReplaceAll(reasoning, " / ", "/")
 	}
-	return styleHL.Render(textutil.TruncateRunes(modelRef, max(10, t.width/3)))
+	available := max(10, t.width/2)
+	return styleHL.Render(textutil.TruncateRunes(modelRef, available))
+}
+
+func (t *TUI) observingRun() bool {
+	return t.currentSession.ID != "" && t.chat.Loading && !t.currentRunCanControl
+}
+
+func (t *TUI) renderHandoffBlock() string {
+	if t.currentSession.ID == "" {
+		return ""
+	}
+	guest := t.handoffRole == handoffRoleGuest
+	otherClients := max(0, t.currentSession.ClientCount-1)
+	// 单窗口本会话不显示 Handoff 块；只有有其他窗口接入，或当前窗口是接入会话时才持续提示。
+	if !guest && otherClients == 0 {
+		return ""
+	}
+	name := strings.TrimSpace(t.currentSession.Title)
+	if name == "" {
+		name = filepath.Base(t.currentSession.CWD)
+	}
+	if name == "." || name == string(filepath.Separator) || name == "" {
+		name = "session"
+	}
+	cwd := strings.TrimSpace(t.currentSession.CWD)
+	if cwd == "" {
+		cwd = "-"
+	}
+	width := max(30, t.width-6)
+	contentWidth := max(24, width-4)
+
+	primary := t.tr("handoff.shared")
+	if guest {
+		primary = t.tr("handoff.joined")
+	}
+	name = textutil.TruncateRunes(name, max(8, contentWidth/3))
+	cwd = textutil.TruncateRunes(cwd, max(10, contentWidth-lipgloss.Width(primary)-lipgloss.Width(name)-6))
+	line1 := styleBrand.Render(primary) + styleDim.Render(" · ") + styleHL.Render(name) + styleDim.Render(" · ") + styleDim.Render(cwd)
+	if !guest && otherClients > 0 {
+		line1 += styleDim.Render(" · ") + styleDim.Render(t.i18n.Tf("handoff.window_count", otherClients))
+	}
+
+	state := t.tr("handoff.idle_continue")
+	if t.chat.Loading && t.currentRunCanControl {
+		state = t.tr("handoff.your_run")
+	} else if t.observingRun() {
+		state = t.tr("handoff.observing_run")
+	}
+	var line2 string
+	if guest && otherClients > 0 {
+		otherText := t.i18n.Tf("handoff.other_window_count", otherClients)
+		stateWidth := max(10, contentWidth-lipgloss.Width(otherText)-3)
+		line2 = styleHL.Render(textutil.TruncateRunes(state, stateWidth)) + styleDim.Render(" · ") + styleDim.Render(otherText)
+	} else {
+		line2 = styleHL.Render(textutil.TruncateRunes(state, contentWidth))
+	}
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ColorBrand).
+		Padding(0, 1).
+		Width(width).
+		Render(line1 + "\n" + line2)
+	return textutil.IndentLines(box, "  ")
 }
 
 func (t *TUI) mouseInComposer(msg tea.MouseMsg) bool {
@@ -417,6 +486,9 @@ func (t *TUI) lockedInputPlaceholder() string {
 }
 
 func (t *TUI) renderPreInputHint() string {
+	if block := t.renderHandoffBlock(); block != "" {
+		return block
+	}
 	hint := t.inputHint()
 	if hint == "" {
 		return ""
@@ -438,6 +510,9 @@ func (t *TUI) inputHelp() string {
 	if t.inputLocked() {
 		if t.chat.Compacting {
 			return ""
+		}
+		if t.observingRun() {
+			return t.tr("tui.chat.input_help_observing")
 		}
 		return t.tr("tui.chat.input_help_running")
 	}
@@ -517,13 +592,14 @@ func (t *TUI) submitGuardDecision(decision string) tea.Cmd {
 	t.advanceGuardQueue()
 	restartSpinner := false
 	if t.chat.ActiveGuard() == nil {
+		t.currentRunCanControl = true
 		t.chat.Textarea.Blur()
 		t.chat.ResumeToolPhase(time.Now())
 		restartSpinner = true
 	}
 	cmd := t.guardReplyCmd(id, decision)
 	if restartSpinner && !t.chat.HasBlockingInteraction() {
-		return tea.Batch(cmd, t.chat.Spinner.Tick)
+		return tea.Batch(cmd, t.startChatSpinner())
 	}
 	return cmd
 }

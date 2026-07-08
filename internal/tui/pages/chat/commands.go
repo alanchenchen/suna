@@ -12,6 +12,7 @@ func AllCommands() []CommandSpec {
 		{"/new", "tui.command.new.desc"},
 		{"/model", "tui.command.model.desc"},
 		{"/memory", "tui.command.memory.desc"},
+		{"/sessions", "tui.command.sessions.desc"},
 		{"/mcp", "tui.command.mcp.desc"},
 		{"/skills", "tui.command.skills.desc"},
 		{"/compact", "tui.command.compact.desc"},

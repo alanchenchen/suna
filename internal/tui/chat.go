@@ -187,6 +187,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// 此处只需推进 spinner 帧状态，不触发 transcript 全量重建。
 			return t, cmd
 		}
+		t.chatSpinnerTicking = false
 		return t, nil
 
 	case manualCompactRequestMsg:

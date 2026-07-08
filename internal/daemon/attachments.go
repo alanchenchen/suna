@@ -11,8 +11,12 @@ import (
 	"github.com/alanchenchen/suna/internal/protocol"
 )
 
-func (s *service) agentInputFromParams(ctx context.Context, params protocol.SendMessageParams) (agent.Input, error) {
-	store := media.NewStore(media.DefaultRoot())
+func (s *service) agentInputFromParams(ctx context.Context, connID string, params protocol.SendMessageParams) (agent.Input, error) {
+	rt, _, err := s.requireSession(connID)
+	if err != nil {
+		return agent.Input{}, err
+	}
+	store := rt.agent.MediaStore()
 	blocks := make([]model.ContentBlock, 0, len(params.Parts))
 	stored := make([]model.ContentBlock, 0, len(params.Parts))
 	for _, part := range params.Parts {

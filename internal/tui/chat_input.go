@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/alanchenchen/suna/internal/protocol"
 	"github.com/alanchenchen/suna/internal/tui/clipboard"
 	attachmentmodel "github.com/alanchenchen/suna/internal/tui/components/attachment"
 	chatpage "github.com/alanchenchen/suna/internal/tui/pages/chat"
@@ -44,12 +45,14 @@ func (t *TUI) currentInputPolicy() chatpage.InputPolicy {
 	return chatpage.CurrentInputPolicy(chatpage.InputPolicyState{
 		Compacting:      t.chat.Compacting,
 		Loading:         t.chat.Loading,
+		ObservingRun:    t.observingRun(),
 		InteractionKind: t.chat.ActiveInteractionKind(),
 		AskAllowCustom:  activeAskAllowCustom(t.chat.ActiveAsk()),
 		StatusLabel:     t.currentInputStatusLabel(),
 		SpinnerView:     t.chat.Spinner.View(),
 		CompactRunning:  t.compactRunningLabel(),
 		RespondingLabel: t.tr("status.responding"),
+		ObservingLabel:  t.tr("tui.chat.observe_input"),
 	})
 }
 
@@ -123,8 +126,9 @@ func (t *TUI) handleSend() tea.Cmd {
 			}
 		}
 		t.chat.CompleteInteraction()
+		t.currentRunCanControl = true
 		t.startLLMWait()
-		return tea.Batch(t.askReplyCmd(askID, answer), t.chat.Spinner.Tick)
+		return tea.Batch(t.askReplyCmd(askID, answer), t.startChatSpinner())
 	}
 
 	if strings.HasPrefix(input, "/") && chatpage.IsRegisteredSlashCommand(input) {
@@ -201,6 +205,10 @@ func (t *TUI) acceptCommandSuggestion() tea.Cmd {
 }
 
 func (t *TUI) updateChatKey(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
+	if ks == "ctrl+c" {
+		t.doQuit()
+		return t, tea.Quit
+	}
 	switch t.chat.RouteKey(ks, t.inputLocked(), t.chat.Compacting) {
 	case chatpage.KeyTargetDiscardDraft:
 		return t.updateDiscardDraftConfirm(ks, msg)
@@ -216,6 +224,8 @@ func (t *TUI) updateChatKey(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t.updateMCPOverlay(ks)
 	case chatpage.KeyTargetMemory:
 		return t.updateMemoryOverlay(ks)
+	case chatpage.KeyTargetSessions:
+		return t.updateSessionsOverlay(ks)
 	case chatpage.KeyTargetImagePasteConfirm:
 		cmd := t.updatePendingImagePaste(ks)
 		t.syncContent()
@@ -249,12 +259,6 @@ func (t *TUI) readClipboardImagePasteCmd(startedAt time.Time) tea.Cmd {
 
 func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch {
-	case ks == "ctrl+c":
-		t.doQuit()
-		return t, tea.Quit
-	case ks == "?":
-		t.showHelp = !t.showHelp
-		return t, nil
 	case ks == "enter":
 		if t.hasActiveSubtaskPanel() {
 			t.chat.SubtaskToolDetailExpanded = !t.chat.SubtaskToolDetailExpanded
@@ -349,15 +353,29 @@ func (t *TUI) updateChatEnter() (tea.Model, tea.Cmd) {
 			t.chat.CompleteInteraction()
 			t.appendNonToolMessage(chatMsg{Role: "user", Content: answer})
 			t.scrollToBottomOnNextSync()
+			t.currentRunCanControl = true
 			t.startLLMWait()
 			t.syncContent()
-			return t, tea.Batch(t.askReplyCmd(askID, answer), t.chat.Spinner.Tick)
+			return t, tea.Batch(t.askReplyCmd(askID, answer), t.startChatSpinner())
 		}
 	}
 	if !t.chat.Loading {
 		return t, t.handleSend()
 	}
 	return t, nil
+}
+
+func (t *TUI) leaveCurrentSessionForWelcome() tea.Cmd {
+	// Welcome 表示当前窗口未进入任何 session；离开 Chat 必须 detach，避免继续占用 guest/client_count。
+	t.mode = uipage.Welcome
+	t.currentSession = protocol.SessionInfo{}
+	t.currentRunCanControl = false
+	t.handoffRole = handoffRoleHost
+	t.welcomeActivePicker = false
+	t.attachmentStatus = protocol.AttachmentStatusResult{}
+	t.chat.Attachments = nil
+	t.updateSessionShortcuts()
+	return tea.Batch(t.detachSessionCmd(), t.refreshDaemonStatusCmd())
 }
 
 func (t *TUI) updateChatEsc() (tea.Model, tea.Cmd) {
@@ -376,14 +394,17 @@ func (t *TUI) updateChatEsc() (tea.Model, tea.Cmd) {
 		return t, nil
 	}
 	if t.chat.Loading {
+		if !t.currentRunCanControl {
+			return t, t.leaveCurrentSessionForWelcome()
+		}
+		t.currentRunCanControl = false
 		t.resetPhase()
 		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.i18n.T("status.cancelled")})
 		t.syncContent()
 		return t, tea.Batch(t.cancelCmd(), t.syncInputFocus())
 	}
 	if !t.hasDraft() {
-		t.mode = uipage.Welcome
-		return t, t.refreshDaemonStatusCmd()
+		return t, t.leaveCurrentSessionForWelcome()
 	}
 	// Esc 的帮助文案是“清空”，因此这里直接清空草稿；不再弹确认，避免输入区确认态闪烁。
 	t.discardDraft()
