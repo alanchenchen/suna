@@ -3,6 +3,7 @@ package chat
 import "time"
 
 func (m *Model) ResetDraft() {
+	m.ExitInputHistory()
 	m.Attachments = nil
 	m.AttachmentMode = false
 	m.AttachmentDelete = false

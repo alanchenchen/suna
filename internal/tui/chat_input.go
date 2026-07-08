@@ -92,6 +92,7 @@ func (t *TUI) updateDiscardDraftConfirm(ks string, msg tea.Msg) (tea.Model, tea.
 	t.chat.CancelDiscardDraft()
 	var cmd tea.Cmd
 	t.chat.Textarea, cmd = t.chat.Textarea.Update(msg)
+	t.chat.ExitInputHistory()
 	t.updateCmdSuggestionState()
 	t.layoutChat()
 	return t, cmd
@@ -105,6 +106,7 @@ func (t *TUI) handleSend() tea.Cmd {
 		return t.resumeAgent()
 	}
 	t.chat.Textarea.Reset()
+	t.chat.ExitInputHistory()
 	if input == "" && len(attachments) == 0 {
 		return t.syncInputFocus()
 	}
@@ -317,12 +319,20 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 			t.syncContent()
 			return t, nil
 		}
+		if t.canBrowseInputHistory() && t.chat.BrowseInputHistory(-1) {
+			t.layoutChat()
+			return t, nil
+		}
 		t.moveChatCursor(-1)
 		return t, nil
 	case ks == "down":
 		if t.hasActiveSubtaskPanel() {
 			t.moveSubtaskToolCursor(1)
 			t.syncContent()
+			return t, nil
+		}
+		if t.canBrowseInputHistory() && t.chat.BrowseInputHistory(1) {
+			t.layoutChat()
 			return t, nil
 		}
 		t.moveChatCursor(1)
@@ -444,6 +454,10 @@ func (t *TUI) scrollChatPage(direction int) {
 		t.syncContent()
 	}
 	t.chat.FollowBottom = t.chat.TranscriptAtBottom()
+}
+
+func (t *TUI) canBrowseInputHistory() bool {
+	return !t.chat.ShowToolDetail && len(t.chat.CmdSuggestions) == 0 && t.chat.ActiveAsk() == nil && !t.chat.AttachmentMode && !t.chat.AttachmentDelete
 }
 
 func (t *TUI) moveChatCursor(delta int) {

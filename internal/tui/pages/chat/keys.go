@@ -72,6 +72,7 @@ func AllowLockedInputKey(key string, compacting bool) bool {
 }
 
 func (m *Model) InsertNewline() {
+	m.ExitInputHistory()
 	m.Textarea.InsertString("\n")
 }
 

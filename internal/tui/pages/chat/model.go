@@ -106,19 +106,22 @@ type Model struct {
 	TranscriptWindowEnd       int
 	TranscriptWindowSignature transcriptWindowSignature
 
-	Messages          []Msg
-	DisplayDiscard    DisplayDiscardSummary
-	PendingInput      string
-	LastAssistantText string
-	Loading           bool
-	Compacting        bool
-	ResumeAvailable   bool
-	Phase             Phase
-	PhaseStart        time.Time
-	StatusLabel       string
-	StreamStart       time.Time
-	FollowBottom      bool
-	ForceBottom       bool
+	Messages           []Msg
+	DisplayDiscard     DisplayDiscardSummary
+	PendingInput       string
+	InputHistoryIndex  int
+	InputHistoryDraft  string
+	InputHistoryActive bool
+	LastAssistantText  string
+	Loading            bool
+	Compacting         bool
+	ResumeAvailable    bool
+	Phase              Phase
+	PhaseStart         time.Time
+	StatusLabel        string
+	StreamStart        time.Time
+	FollowBottom       bool
+	ForceBottom        bool
 
 	LastAssistantStartLine int
 	LastAssistantLineCount int

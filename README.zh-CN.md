@@ -227,7 +227,8 @@ Enter              发送 / 确认
 Shift+Enter        输入换行
 Ctrl+J             输入换行
 Esc                取消运行、返回或关闭浮层
-Ctrl+Y             进入 / 退出复制模式
+Shift+拖拽        复制终端文本
+↑ / ↓             输入框为空时召回上一条 / 下一条历史输入
 Ctrl+T             打开 / 关闭工具详情
 Ctrl+R             展开 / 折叠 reasoning 详情
 ?                  打开或关闭帮助

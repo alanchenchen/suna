@@ -48,19 +48,6 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return t, nil
 	}
-	if key, ok := msg.(tea.KeyPressMsg); ok {
-		switch key.String() {
-		case "ctrl+y":
-			t.copyMode = !t.copyMode
-			return t, nil
-		case "esc":
-			if t.copyMode {
-				t.copyMode = false
-				return t, nil
-			}
-		}
-	}
-
 	switch t.mode {
 	case uipage.Welcome:
 		return t.updateWelcome(msg)

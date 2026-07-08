@@ -38,6 +38,7 @@ func (m *Model) InitComponents(deps ComponentDeps) {
 	m.Spinner.Style = deps.SpinnerStyle
 
 	m.Phase = PhaseIdle
+	m.InputHistoryIndex = -1
 	m.ActiveTools = make(map[string]*toolview.Entry)
 	m.ToolStartTimes = make(map[string]time.Time)
 	m.CurrentToolBlock = nil

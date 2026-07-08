@@ -311,10 +311,6 @@ func leftAlignInputOverlayLine(line string, width int) string {
 }
 
 func (t *TUI) renderChatStatusBar() string {
-	copyHint := ""
-	if t.copyMode {
-		copyHint = styleDim.Render(" · ") + styleHL.Render(t.tr("tui.key.copy_mode")) + styleDim.Render(" [Ctrl+Y/Esc]")
-	}
 	ctx := "?"
 	if t.contextTokens > 0 {
 		ctx = fmtTok(t.contextTokens)
@@ -334,7 +330,7 @@ func (t *TUI) renderChatStatusBar() string {
 	}
 	ctxPart := styleDim.Render(fmt.Sprintf("ctx %s/%s ", ctx, window)) + ctxPct
 	if !t.hasUsage {
-		return "  " + ctxPart + styleDim.Render(" · ") + styleDim.Render("↑? ↓? ↻? · ?t/s") + copyHint
+		return "  " + ctxPart + styleDim.Render(" · ") + styleDim.Render("↑? ↓? ↻? · ?t/s")
 	}
 	tokParts := []string{
 		styleUser.Render("↑" + fmtTok(t.lastInputTok)),
@@ -349,7 +345,7 @@ func (t *TUI) renderChatStatusBar() string {
 	} else {
 		parts = append(parts, "0t/s")
 	}
-	return "  " + joinNonEmpty(parts, styleDim.Render(" · ")) + copyHint
+	return "  " + joinNonEmpty(parts, styleDim.Render(" · "))
 }
 
 func (t *TUI) contextPercentStyle(pct int) lipgloss.Style {

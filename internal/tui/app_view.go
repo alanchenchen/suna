@@ -9,10 +9,6 @@ func (t *TUI) View() tea.View {
 	v := tea.NewView("")
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
-	if t.copyMode {
-		// 复制模式临时关闭鼠标捕获，把拖拽选择权还给终端；退出后恢复滚轮事件。
-		v.MouseMode = tea.MouseModeNone
-	}
 	if !t.ready {
 		v.SetContent(t.viewWelcome())
 		return v

@@ -31,13 +31,12 @@ type TUI struct {
 	program     *tea.Program
 	notifyQueue *notificationQueue
 
-	// 根应用状态：只负责页面路由和全局尺寸/复制模式。
+	// 根应用状态：只负责页面路由和全局尺寸。
 	mode     uipage.Page
 	prevMode uipage.Page
 	width    int
 	height   int
 	ready    bool
-	copyMode bool
 
 	// 全局配置与 daemon 快照。真实持久化状态由 daemon 持有，TUI 只缓存用于显示。
 	theme            string
