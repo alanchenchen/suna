@@ -138,6 +138,13 @@ func (c *Client) AttachSession(sessionID string, requireActive bool) (protocol.S
 	return result, c.Invoke(ctx, protocol.MethodSessionAttach, protocol.SessionAttachParams{SessionID: sessionID, RequireActive: requireActive}, &result)
 }
 
+func (c *Client) UpdateSession(params protocol.SessionUpdateParams) (protocol.SessionInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout(protocol.MethodSessionUpdate))
+	defer cancel()
+	var result protocol.SessionInfo
+	return result, c.Invoke(ctx, protocol.MethodSessionUpdate, params, &result)
+}
+
 func (c *Client) DetachSession() error {
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout(protocol.MethodSessionDetach))
 	defer cancel()

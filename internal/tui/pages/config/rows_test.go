@@ -21,11 +21,18 @@ func TestModelRowsActiveModelUsesMarkerWithoutRepeatedActiveText(t *testing.T) {
 		},
 	})
 
-	if len(rows) == 0 {
-		t.Fatalf("ModelRows returned no rows")
+	var modelRow Row
+	for _, row := range rows {
+		if row.Kind == "model" {
+			modelRow = row
+			break
+		}
 	}
-	label := rows[0].Label
-	value := rows[0].Value
+	if modelRow.Kind == "" {
+		t.Fatalf("ModelRows returned no model row: %#v", rows)
+	}
+	label := modelRow.Label
+	value := modelRow.Value
 	if !strings.HasPrefix(label, "◉ ") {
 		t.Fatalf("active model label = %q, want active marker prefix", label)
 	}
@@ -102,4 +109,32 @@ func TestDetailRowsShowsSubtaskFor(t *testing.T) {
 		}
 	}
 	t.Fatalf("Subtask for row not found in %#v", rows)
+}
+
+func TestModelRowsGroupsModelsByProvider(t *testing.T) {
+	m := &Model{Page: "models"}
+	rows := m.ModelRows(RowsDeps{
+		Tr: func(key string) string { return key },
+		Models: []ModelConfig{
+			{Provider: "Oio", Model: "claude", BaseURL: "https://oio.example", ContextWindow: 1000, MaxOutputTokens: 100, HasAPIKey: true},
+			{Provider: "DF", Model: "glm", BaseURL: "https://df.example", ContextWindow: 1000, MaxOutputTokens: 100, HasAPIKey: true},
+		},
+		IsActive:     func(string) bool { return false },
+		ModelSummary: func(ModelConfig) string { return "summary" },
+	})
+
+	var headers, providerAdds, finalAdds int
+	for _, row := range rows {
+		switch row.Kind {
+		case "provider_header":
+			headers++
+		case "provider_add_model":
+			providerAdds++
+		case "add_provider_model":
+			finalAdds++
+		}
+	}
+	if headers != 2 || providerAdds != 2 || finalAdds != 1 {
+		t.Fatalf("group rows headers=%d providerAdds=%d finalAdds=%d rows=%#v", headers, providerAdds, finalAdds, rows)
+	}
 }

@@ -26,6 +26,7 @@ type Model struct {
 	DeleteConfirm   string
 	DetailRef       string
 	FormTitle       string
+	FormProvider    string
 	Inputs          []textinput.Model
 	InputFocus      int
 	Error           string
@@ -50,7 +51,7 @@ type Row struct {
 
 func (r Row) Selectable() bool {
 	switch r.Kind {
-	case "section", "general_language", "general_theme", "general_guard", "general_workspace", "clear_attachments", "open_config_dir", "add_model", "edit_model", "edit_reasoning", "activate_model", "delete_model", "model", "empty":
+	case "section", "general_language", "general_theme", "general_guard", "general_workspace", "clear_attachments", "open_config_dir", "add_model", "provider_add_model", "add_provider_model", "edit_model", "edit_reasoning", "activate_model", "delete_model", "model", "empty":
 		return true
 	default:
 		return false

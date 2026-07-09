@@ -48,12 +48,12 @@ func (t *TUI) updateProviderForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, nil
 		case "shift+tab", "up":
 			if idx, ok := t.config.PrevInput(len(t.config.Inputs)); ok {
-				return t, t.focusConfigInput(idx)
+				return t, t.focusConfigInputWithDelta(idx, -1)
 			}
 			return t, nil
 		case "tab", "down":
 			if idx, ok := t.config.NextInput(len(t.config.Inputs)); ok {
-				return t, t.focusConfigInput(idx)
+				return t, t.focusConfigInputWithDelta(idx, 1)
 			}
 			return t, nil
 		}
@@ -69,6 +69,25 @@ func (t *TUI) openProviderForm(ref string, mc *tuiconfig.ModelConfig) {
 	t.config.OpenProviderForm(ref, mc)
 	t.config.Notice = ""
 	t.initProviderForm(mc)
+}
+
+func (t *TUI) openProviderModelForm(provider string) {
+	t.config.OpenProviderModelForm(provider)
+	t.config.Notice = ""
+	var template *tuiconfig.ModelConfig
+	for _, mc := range t.configModelsSnapshot() {
+		if mc.Provider == provider {
+			copy := mc
+			copy.Model = ""
+			template = &copy
+			break
+		}
+	}
+	t.initProviderForm(template)
+	if len(t.config.Inputs) > 3 {
+		t.config.Inputs[3].SetValue("")
+	}
+	t.focusConfigInput(t.nextEditableConfigInput(0, 1))
 }
 func (t *TUI) initProviderForm(mc *tuiconfig.ModelConfig) {
 	spec := t.config.ProviderFormSpec(t.providerFormLabels(), mc)
@@ -110,6 +129,11 @@ func (t *TUI) providerFormLabels() tuiconfig.ProviderFormLabels {
 }
 
 func (t *TUI) focusConfigInput(idx int) tea.Cmd {
+	return t.focusConfigInputWithDelta(idx, 1)
+}
+
+func (t *TUI) focusConfigInputWithDelta(idx, delta int) tea.Cmd {
+	idx = t.nextEditableConfigInput(idx, delta)
 	if !t.config.FocusInput(idx, len(t.config.Inputs)) {
 		return nil
 	}
@@ -124,6 +148,46 @@ func (t *TUI) focusConfigInput(idx int) tea.Cmd {
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+func (t *TUI) configInputEditable(idx int) bool {
+	if idx < 0 || idx >= len(t.config.Inputs) {
+		return false
+	}
+	if t.config.FormProvider != "" && (idx == 0 || idx == 3) {
+		return false
+	}
+	return true
+}
+
+func (t *TUI) nextEditableConfigInput(idx, delta int) int {
+	if len(t.config.Inputs) == 0 {
+		return idx
+	}
+	if delta == 0 {
+		delta = 1
+	}
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(t.config.Inputs) {
+		idx = len(t.config.Inputs) - 1
+	}
+	for idx >= 0 && idx < len(t.config.Inputs) {
+		if t.configInputEditable(idx) {
+			return idx
+		}
+		idx += delta
+	}
+	if t.configInputEditable(t.config.InputFocus) {
+		return t.config.InputFocus
+	}
+	for i := range t.config.Inputs {
+		if t.configInputEditable(i) {
+			return i
+		}
+	}
+	return t.config.InputFocus
 }
 func (t *TUI) saveProviderForm() tea.Cmd {
 	v := t.providerFormValues()

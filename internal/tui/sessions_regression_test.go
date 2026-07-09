@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -72,5 +73,30 @@ func TestSessionsOverlayRejectsActiveDeletion(t *testing.T) {
 	}
 	if m.SessionsError != "active" {
 		t.Fatalf("SessionsError = %q, want active", m.SessionsError)
+	}
+}
+
+func TestDeriveSessionTitleCleansCommonPrefix(t *testing.T) {
+	got := deriveSessionTitle("请帮我修复 TUI 复制模式的问题\n第二行")
+	want := "修复 TUI 复制模式的问题"
+	if got != want {
+		t.Fatalf("deriveSessionTitle = %q, want %q", got, want)
+	}
+}
+
+func TestWelcomeNewRequiresConfirmWhenIdleCWDSessionsExist(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24, ready: true, providerName: "test", modelName: "model"}
+	tui.sessions = []protocol.SessionInfo{{ID: "old", CWD: cwd, Status: protocol.SessionStatusIdle, MessageCount: 1}}
+	tui.pickWelcomeSessions()
+	cmd := tui.handleWelcomeAction(welcomepage.ActionNew)
+	if cmd != nil {
+		t.Fatal("ActionNew returned cmd, want confirmation")
+	}
+	if !tui.welcomeNewConfirm {
+		t.Fatal("welcomeNewConfirm = false, want true")
 	}
 }

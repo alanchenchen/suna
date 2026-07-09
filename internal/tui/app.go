@@ -46,7 +46,25 @@ func (t *TUI) runAgent(input string, attachments []attachmentItem) tea.Cmd {
 	t.startLLMWait()
 	t.chat.ResumeAvailable = false
 	t.chat.ResetToolState()
-	return tea.Batch(t.sendMessageCmd(input, attachments), t.startChatSpinner())
+	return tea.Batch(t.maybeAutoTitleSessionCmd(input), t.sendMessageCmd(input, attachments), t.startChatSpinner())
+}
+
+func (t *TUI) maybeAutoTitleSessionCmd(input string) tea.Cmd {
+	if !shouldAutoTitleSession(t.currentSession) {
+		return nil
+	}
+	title := deriveSessionTitle(input)
+	if title == "" {
+		return nil
+	}
+	t.currentSession.Title = title
+	for i := range t.sessions {
+		if t.sessions[i].ID == t.currentSession.ID {
+			t.sessions[i].Title = title
+			break
+		}
+	}
+	return t.updateSessionTitleCmd(t.currentSession.ID, title)
 }
 
 func (t *TUI) resumeAgent() tea.Cmd {

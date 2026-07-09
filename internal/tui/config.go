@@ -219,6 +219,12 @@ func (t *TUI) workspaceDisplay() string {
 }
 
 func (t *TUI) attachmentUsageDisplay() string {
+	if t.currentSession.ID == "" {
+		return t.tr("tui.config.attachments_no_session")
+	}
+	if t.attachmentStatus.SessionID != "" && t.attachmentStatus.SessionID != t.currentSession.ID {
+		return t.tr("tui.config.attachments_loading")
+	}
 	return fmt.Sprintf("%s / %d files", formatAttachmentSize(t.attachmentStatus.Bytes), t.attachmentStatus.Count)
 }
 
@@ -277,25 +283,27 @@ func (t *TUI) configRows() []tuiconfig.Row {
 
 func (t *TUI) configRowsDeps() tuiconfig.RowsDeps {
 	return tuiconfig.RowsDeps{
-		Tr:               func(key string) string { return t.tr(key) },
-		ProvidersSummary: func(total, needs int) string { return t.i18n.Tf("tui.config.providers_summary", total, needs) },
-		Models:           t.configModelsSnapshot(),
-		ActiveModel:      t.configState.ActiveModel,
-		IsActive:         t.isActiveModelRef,
-		NeedsAttention:   t.modelNeedsAttention,
-		ModelSummary:     t.modelSummary,
-		CurrentLanguage:  t.currentLangDisplay(),
-		Theme:            t.themeDisplay(),
-		GuardMode:        t.guardModeDisplay(),
-		Workspace:        t.workspaceDisplay(),
-		ConfigPath:       configFilePath(),
-		CredentialsPath:  credentialsFilePath(),
-		AttachmentUsage:  t.attachmentUsageDisplay(),
-		ConfigDir:        configDataDir(),
-		DisplayEndpoint:  t.displayEndpoint,
-		ContextDisplay:   contextDisplay,
-		MaxOutputDisplay: maxOutputDisplay,
-		ReasoningDisplay: t.reasoningDisplay,
+		Tr:                  func(key string) string { return t.tr(key) },
+		ProvidersSummary:    func(total, needs int) string { return t.i18n.Tf("tui.config.providers_summary", total, needs) },
+		Models:              t.configModelsSnapshot(),
+		ActiveModel:         t.configState.ActiveModel,
+		IsActive:            t.isActiveModelRef,
+		NeedsAttention:      t.modelNeedsAttention,
+		ModelSummary:        t.modelSummary,
+		CurrentLanguage:     t.currentLangDisplay(),
+		Theme:               t.themeDisplay(),
+		GuardMode:           t.guardModeDisplay(),
+		Workspace:           t.workspaceDisplay(),
+		ConfigPath:          configFilePath(),
+		CredentialsPath:     credentialsFilePath(),
+		AttachmentUsage:     t.attachmentUsageDisplay(),
+		AttachmentAvailable: t.currentSession.ID != "",
+		AttachmentDisabled:  t.tr("tui.config.attachments_open_session"),
+		ConfigDir:           configDataDir(),
+		DisplayEndpoint:     t.displayEndpoint,
+		ContextDisplay:      contextDisplay,
+		MaxOutputDisplay:    maxOutputDisplay,
+		ReasoningDisplay:    t.reasoningDisplay,
 	}
 }
 
@@ -336,12 +344,18 @@ func (t *TUI) handleConfigAction(rows []tuiconfig.Row) tea.Cmd {
 	case "general_workspace":
 		return t.openWorkspaceForm()
 	case "clear_attachments":
+		if t.currentSession.ID == "" {
+			return nil
+		}
 		t.chat.Attachments = nil
 		return t.attachmentClearCmd()
 	case "open_config_dir":
 		return t.openConfigDirCmd()
-	case "add_model":
+	case "add_model", "add_provider_model":
 		t.openProviderKind()
+	case "provider_add_model":
+		t.openProviderModelForm(row.Name)
+		return t.config.Inputs[t.config.InputFocus].Focus()
 	case "edit_model":
 		if mc, ok := t.modelByRef(t.config.DetailRef); ok {
 			t.openProviderForm(t.config.DetailRef, &mc)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -170,7 +171,27 @@ func (t *TUI) newSessionCmd() tea.Cmd {
 			return ipcErrorNotification(notifyConfigError, fmt.Errorf("%s", t.tr("error.not_connected")))
 		}
 		cwd, _ := os.Getwd()
-		result, err := t.localCli.CreateSession(cwd, "")
+		result, err := t.localCli.CreateSession(cwd, defaultSessionTitle(cwd))
+		if err != nil {
+			return ipcErrorNotification(notifyConfigError, err)
+		}
+		return sessionSnapshotResultMsg{Params: result}
+	}
+}
+
+func (t *TUI) newReplacingCWDSessionsCmd() tea.Cmd {
+	targets := t.replaceableCWDSessions()
+	return func() tea.Msg {
+		if t.localCli == nil {
+			return ipcErrorNotification(notifyConfigError, fmt.Errorf("%s", t.tr("error.not_connected")))
+		}
+		for _, item := range targets {
+			if err := t.localCli.DeleteSession(item.ID); err != nil {
+				return sessionErrorMsg{Message: t.i18n.Tf("tui.sessions.delete_failed", err.Error())}
+			}
+		}
+		cwd, _ := os.Getwd()
+		result, err := t.localCli.CreateSession(cwd, defaultSessionTitle(cwd))
 		if err != nil {
 			return ipcErrorNotification(notifyConfigError, err)
 		}
@@ -310,4 +331,17 @@ func errNotConnected(t *TUI) error {
 
 func ipcErrorNotification(method string, err error) tea.Msg {
 	return localNotification{method: method, params: []byte(fmt.Sprintf(`{"message":%q}`, err.Error()))}
+}
+
+func (t *TUI) updateSessionTitleCmd(sessionID, title string) tea.Cmd {
+	return func() tea.Msg {
+		if t.localCli == nil || sessionID == "" || strings.TrimSpace(title) == "" {
+			return nil
+		}
+		updated, err := t.localCli.UpdateSession(protocol.SessionUpdateParams{SessionID: sessionID, Title: &title})
+		if err != nil {
+			return nil
+		}
+		return tuievents.SessionStateMsg{Params: protocol.SessionStateParams{Session: updated}}
+	}
 }

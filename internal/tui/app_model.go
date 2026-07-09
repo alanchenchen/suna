@@ -58,6 +58,8 @@ type TUI struct {
 	handoffRole          string
 	resumeSessionID      string
 	welcomeActivePicker  bool
+	welcomeNewConfirm    bool
+	welcomeNotice        string
 
 	// Chat 页面状态。root 仅持有页面 model 与 transcript；运行态在 pages/chat.Model 内。
 	chat chatpage.Model

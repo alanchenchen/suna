@@ -39,9 +39,18 @@ func (m *Model) OpenProviderForm(ref string, mc *ModelConfig) {
 	m.FormOpen = true
 	m.FormTitle = "tui.config.provider.edit"
 	m.EditingName = ref
+	m.FormProvider = ""
 	if ref == "" {
 		m.FormTitle = "tui.config.provider.add"
 	}
+}
+
+func (m *Model) OpenProviderModelForm(provider string) {
+	m.WorkspaceOpen = false
+	m.FormOpen = true
+	m.FormTitle = "tui.config.provider.add_model_to_provider"
+	m.EditingName = ""
+	m.FormProvider = strings.TrimSpace(provider)
 }
 
 func (m *Model) ProviderFormSpec(labels ProviderFormLabels, mc *ModelConfig) ProviderFormSpec {
@@ -76,6 +85,9 @@ func (m *Model) ProviderFormSpec(labels ProviderFormLabels, mc *ModelConfig) Pro
 			placeholders[5] = "200000"
 			placeholders[6] = "8192"
 		}
+	}
+	if m.FormProvider != "" {
+		values[0] = m.FormProvider
 	}
 	return ProviderFormSpec{Labels: fieldLabels, Placeholders: placeholders, Values: values, PasswordAt: 3}
 }
@@ -129,6 +141,7 @@ func ValidateProviderForm(v ProviderFormValues, setupMode bool, labels ProviderV
 }
 
 func (m *Model) CloseProviderForm() bool {
+	m.FormProvider = ""
 	if m.SetupMode {
 		m.FormOpen = false
 		return true
@@ -181,6 +194,7 @@ func (m *Model) CloseFormToWelcome() {
 func (m *Model) CloseForm() {
 	m.FormOpen = false
 	m.WorkspaceOpen = false
+	m.FormProvider = ""
 }
 
 func ProviderProtocolOptions() []coreconfig.ModelProtocol {

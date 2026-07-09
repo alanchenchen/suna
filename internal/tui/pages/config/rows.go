@@ -6,25 +6,27 @@ import (
 )
 
 type RowsDeps struct {
-	Tr               func(string) string
-	ProvidersSummary func(total, needs int) string
-	Models           []ModelConfig
-	ActiveModel      string
-	IsActive         func(string) bool
-	NeedsAttention   func(ModelConfig) bool
-	ModelSummary     func(ModelConfig) string
-	CurrentLanguage  string
-	Theme            string
-	GuardMode        string
-	Workspace        string
-	ConfigPath       string
-	CredentialsPath  string
-	AttachmentUsage  string
-	ConfigDir        string
-	DisplayEndpoint  func(string) string
-	ContextDisplay   func(ModelConfig) string
-	MaxOutputDisplay func(ModelConfig) string
-	ReasoningDisplay func(ModelConfig) string
+	Tr                  func(string) string
+	ProvidersSummary    func(total, needs int) string
+	Models              []ModelConfig
+	ActiveModel         string
+	IsActive            func(string) bool
+	NeedsAttention      func(ModelConfig) bool
+	ModelSummary        func(ModelConfig) string
+	CurrentLanguage     string
+	Theme               string
+	GuardMode           string
+	Workspace           string
+	ConfigPath          string
+	CredentialsPath     string
+	AttachmentUsage     string
+	AttachmentAvailable bool
+	AttachmentDisabled  string
+	ConfigDir           string
+	DisplayEndpoint     func(string) string
+	ContextDisplay      func(ModelConfig) string
+	MaxOutputDisplay    func(ModelConfig) string
+	ReasoningDisplay    func(ModelConfig) string
 }
 
 func (m *Model) Rows(deps RowsDeps) []Row {
@@ -50,6 +52,12 @@ func (m *Model) HomeRows(deps RowsDeps) []Row {
 			needs++
 		}
 	}
+	attachmentKind := "clear_attachments"
+	attachmentUsage := deps.AttachmentUsage
+	if !deps.AttachmentAvailable {
+		attachmentKind = "attachments_disabled"
+		attachmentUsage = deps.AttachmentDisabled
+	}
 	rows := []Row{
 		{"section", "models", "▸ " + deps.Tr("tui.config.model_connections"), ""},
 		{"info", "", "  " + deps.Tr("tui.config.active"), active},
@@ -64,7 +72,7 @@ func (m *Model) HomeRows(deps RowsDeps) []Row {
 		{"label", "", deps.Tr("tui.config.local_files"), ""},
 		{"info", "", "  " + deps.Tr("tui.config.config_path"), deps.ConfigPath},
 		{"info", "", "  " + deps.Tr("tui.config.credentials_path"), deps.CredentialsPath},
-		{"clear_attachments", "", "  " + deps.Tr("tui.config.attachments"), deps.AttachmentUsage},
+		{attachmentKind, "", "  " + deps.Tr("tui.config.attachments"), attachmentUsage},
 		{"open_config_dir", "", "  " + deps.Tr("tui.config.open_config_folder"), deps.ConfigDir},
 	}
 	m.EnsureCursor(rows)
@@ -73,22 +81,40 @@ func (m *Model) HomeRows(deps RowsDeps) []Row {
 
 func (m *Model) ModelRows(deps RowsDeps) []Row {
 	models := append([]ModelConfig(nil), deps.Models...)
-	sort.Slice(models, func(i, j int) bool { return models[i].Ref() < models[j].Ref() })
+	sort.SliceStable(models, func(i, j int) bool {
+		if models[i].Provider != models[j].Provider {
+			return strings.ToLower(models[i].Provider) < strings.ToLower(models[j].Provider)
+		}
+		return strings.ToLower(models[i].Model) < strings.ToLower(models[j].Model)
+	})
 	m.Models = nil
 	var rows []Row
 	if len(models) == 0 {
-		rows = append(rows, Row{"add_model", "", deps.Tr("tui.config.add_first_model"), ""})
+		rows = append(rows, Row{"add_provider_model", "", deps.Tr("tui.config.add_first_model"), ""})
+		m.EnsureCursor(rows)
+		return rows
 	}
+	currentProvider := ""
 	for _, mc := range models {
+		if mc.Provider != currentProvider {
+			if currentProvider != "" {
+				rows = append(rows, Row{"provider_add_model", currentProvider, deps.Tr("tui.config.add_model_short"), ""})
+				rows = append(rows, Row{"provider_end", currentProvider, "", ""})
+			}
+			currentProvider = mc.Provider
+			rows = append(rows, Row{"provider_header", currentProvider, currentProvider, ""})
+		}
 		ref := mc.Ref()
 		m.Models = append(m.Models, ref)
 		active := deps.IsActive != nil && deps.IsActive(ref)
-		label := ModelStatusMark(mc, active) + " " + ref
+		label := ModelStatusMark(mc, active) + " " + mc.Model
 		rows = append(rows, Row{"model", ref, label, deps.ModelSummary(mc)})
 	}
-	if len(models) > 0 {
-		rows = append(rows, Row{"add_model", "", "+ " + deps.Tr("tui.config.add_model"), ""})
+	if currentProvider != "" {
+		rows = append(rows, Row{"provider_add_model", currentProvider, deps.Tr("tui.config.add_model_short"), ""})
+		rows = append(rows, Row{"provider_end", currentProvider, "", ""})
 	}
+	rows = append(rows, Row{"add_provider_model", "", "+ " + deps.Tr("tui.config.add_provider_model"), ""})
 	m.EnsureCursor(rows)
 	return rows
 }

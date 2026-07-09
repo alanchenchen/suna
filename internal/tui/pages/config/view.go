@@ -53,7 +53,7 @@ func (m Model) Help(rows []Row, labels HelpLabels) string {
 			return labels.Attachments
 		case "open_config_dir":
 			return labels.OpenConfigDir
-		case "add_model":
+		case "add_model", "provider_add_model", "add_provider_model":
 			return labels.AddModel
 		case "model":
 			return labels.ModelRow

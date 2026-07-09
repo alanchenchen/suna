@@ -72,7 +72,7 @@ func (t *TUI) viewConfigPage() string {
 			continue
 		}
 		t.renderConfigRow(&sb, i, row)
-		if row.Kind == "model" {
+		if row.Kind == "model" || row.Kind == "provider_end" || row.Kind == "add_provider_model" {
 			sb.WriteString("\n")
 		}
 	}
@@ -120,6 +120,14 @@ func (t *TUI) viewProviderForm() string {
 	view := t.config.ProviderFormView(t.tr(t.config.FormTitle), t.tr("tui.config.setup_title"), t.tr("tui.config.form_help"), min(max(48, t.width-8), 72))
 	var lines []string
 	for i, in := range t.config.Inputs {
+		if t.config.FormProvider != "" && i == 0 {
+			lines = append(lines, styleDim.Render(t.tr("tui.config.provider.type")+": ")+styleHL.Render(t.config.FormProvider)+styleDim.Render("  "+t.tr("tui.config.locked")))
+			continue
+		}
+		if t.config.FormProvider != "" && i == 3 {
+			lines = append(lines, styleDim.Render(t.tr("tui.config.provider.api_key")+": ")+styleDim.Render(t.i18n.Tf("tui.config.api_key_reused", t.config.FormProvider)))
+			continue
+		}
 		if i == tuiconfig.ProviderFormProtocolIndex {
 			lines = append(lines, t.providerProtocolInputView(in))
 			continue
@@ -156,28 +164,168 @@ func (t *TUI) viewWorkspaceForm() string {
 }
 
 func (t *TUI) renderConfigRow(sb *strings.Builder, idx int, row tuiconfig.Row) {
+	if row.Kind == "provider_header" {
+		sb.WriteString(t.renderConfigProviderHeader(row.Label) + "\n")
+		return
+	}
+	if row.Kind == "provider_end" {
+		sb.WriteString(t.renderConfigProviderEnd() + "\n")
+		return
+	}
+	if row.Kind == "model" {
+		t.renderConfigModelRow(sb, idx, row)
+		return
+	}
+	if row.Kind == "provider_add_model" {
+		t.renderConfigProviderAddRow(sb, idx, row)
+		return
+	}
 	label, value := row.Label, row.Value
+	if row.Kind == "attachments_disabled" {
+		sb.WriteString("    " + styleDim.Render(label))
+		if value != "" {
+			sb.WriteString(styleDim.Render("  ") + styleDim.Render(value))
+		}
+		sb.WriteString("\n")
+		return
+	}
 	cursor := "    "
 	st := lipgloss.NewStyle()
-	if row.Kind == "model" && t.isActiveModelRef(row.Name) {
-		st = styleBrand
-	}
 	if t.config.Cursor == idx {
 		cursor = styleCursor.Render("  ▶ ")
 		st = styleHL
-		if row.Kind == "model" && t.isActiveModelRef(row.Name) {
-			st = styleBrand
-		}
+	}
+	if row.Kind == "add_provider_model" && t.config.Cursor != idx {
+		st = styleBrand
 	}
 	sb.WriteString(cursor + t.configRowLabelStyle(label, st))
 	if value != "" {
 		valueStyle := styleDim
-		if row.Kind == "model" && t.isActiveModelRef(row.Name) {
-			valueStyle = styleBrand
-		}
 		sb.WriteString(styleDim.Render("  ") + valueStyle.Render(value))
 	}
 	sb.WriteString("\n")
+}
+
+func (t *TUI) renderConfigProviderHeader(provider string) string {
+	name := strings.TrimSpace(provider)
+	if name == "" {
+		name = t.tr("tui.config.provider.unnamed")
+	}
+	label := lipgloss.NewStyle().Foreground(currentTheme.MutedText).Bold(true).Render(name)
+	lineWidth := max(8, min(28, t.width-lipgloss.Width(name)-14))
+	return "  " + styleDim.Render("╭─ ") + label + styleDim.Render(" "+strings.Repeat("─", lineWidth))
+}
+
+func (t *TUI) renderConfigProviderEnd() string {
+	return ""
+}
+
+func (t *TUI) configModelLine(indent, content string) string {
+	width := max(20, t.width-8-lipgloss.Width(indent))
+	return indent + truncateDisplay(content, width)
+}
+
+func (t *TUI) renderConfigProviderAddRow(sb *strings.Builder, idx int, row tuiconfig.Row) {
+	selected := t.config.Cursor == idx
+	prefix := "    "
+	label := t.tr("tui.config.add_model_short")
+	if selected {
+		prefix = "  " + styleCursor.Render("▶ ")
+		label = styleHL.Render("+ " + label)
+	} else {
+		label = styleDim.Render("+ ") + styleBrand.Render(label)
+	}
+	sb.WriteString(t.configModelLine(prefix, label) + "\n")
+}
+
+func (t *TUI) configBadge(text string, active bool) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	st := lipgloss.NewStyle().Padding(0, 1).Bold(true)
+	if active {
+		return st.Foreground(currentTheme.ToolText).Background(ColorBrand).Render(text)
+	}
+	return st.Foreground(currentTheme.MutedText).Background(currentTheme.CodeBg).Render(text)
+}
+
+func (t *TUI) configSoftBadge(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	return lipgloss.NewStyle().Foreground(currentTheme.MutedText).Background(currentTheme.CodeBg).Padding(0, 1).Render(text)
+}
+
+func (t *TUI) renderConfigModelRow(sb *strings.Builder, idx int, row tuiconfig.Row) {
+	mc, ok := t.modelByRef(row.Name)
+	if !ok {
+		return
+	}
+	selected := t.config.Cursor == idx
+	active := t.isActiveModelRef(mc.Ref())
+	prefix := "    "
+	bodyIndent := "      "
+	if selected {
+		prefix = "  " + styleCursor.Render("▶ ")
+		bodyIndent = "      "
+	} else if active {
+		prefix = "  " + styleBrand.Render("▌ ")
+		bodyIndent = "      "
+	}
+
+	nameStyle := lipgloss.NewStyle().Foreground(currentTheme.Text).Bold(true)
+	if active {
+		nameStyle = styleBrand
+	}
+	if selected {
+		nameStyle = styleHL
+	}
+
+	badges := []string{}
+	if active {
+		badges = append(badges, t.configBadge(t.tr("tui.config.active_badge"), true))
+	}
+	badges = append(badges, t.configSoftBadge(string(mc.Protocol)))
+	if tuiconfig.ModelNeedsAttention(mc) {
+		badges = append([]string{styleError.Render(t.tr("tui.config.needs_attention_badge"))}, badges...)
+	}
+	line := nameStyle.Render(mc.Model)
+	for _, badge := range badges {
+		if badge != "" {
+			line += " " + badge
+		}
+	}
+	sb.WriteString(t.configModelLine(prefix, line) + "\n")
+
+	meta := []string{}
+	if mc.ContextWindow > 0 {
+		meta = append(meta, fmtTok(mc.ContextWindow)+" ctx")
+	}
+	if mc.MaxOutputTokens > 0 {
+		meta = append(meta, fmtTok(mc.MaxOutputTokens)+" out")
+	}
+	if reasoning := t.reasoningDisplay(mc); reasoning != "" && reasoning != t.tr("tui.config.reasoning.none") {
+		meta = append(meta, reasoning)
+	}
+	if len(meta) > 0 {
+		sb.WriteString(t.configModelLine(bodyIndent, styleDim.Render(strings.Join(meta, "  ·  "))) + "\n")
+	}
+
+	tail := []string{}
+	if strings.TrimSpace(mc.BaseURL) != "" {
+		tail = append(tail, t.displayEndpoint(mc.BaseURL))
+	}
+	if len(mc.Strengths) > 0 {
+		tail = append(tail, strings.Join(mc.Strengths, " · "))
+	}
+	if len(tail) > 0 {
+		sb.WriteString(t.configModelLine(bodyIndent, lipgloss.NewStyle().Foreground(currentTheme.SubtleText).Render(strings.Join(tail, "  ·  "))) + "\n")
+	}
+	if tuiconfig.ModelNeedsAttention(mc) {
+		sb.WriteString(t.configModelLine(bodyIndent, styleError.Render(t.modelSummary(mc))) + "\n")
+	}
 }
 
 func (t *TUI) configRowLabelStyle(label string, st lipgloss.Style) string {
@@ -231,6 +379,10 @@ func (t *TUI) configConfirmButton(idx int, label string) string {
 func (t *TUI) renderConfigInfoRow(sb *strings.Builder, label, value string) {
 	if label == "" && value == "" {
 		sb.WriteString("\n")
+		return
+	}
+	if strings.TrimSpace(label) == t.tr("tui.config.active_model") {
+		sb.WriteString("  " + styleDim.Render(label) + styleDim.Render("  ") + styleHL.Render(value) + "\n")
 		return
 	}
 	sb.WriteString("    " + styleDim.Render(fmt.Sprintf("%-12s", label)) + " " + value + "\n")

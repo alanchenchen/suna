@@ -29,6 +29,12 @@ func (t *TUI) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t.doQuit()
 			return t, tea.Quit
 		case "esc":
+			if t.welcomeNewConfirm {
+				t.welcomeNewConfirm = false
+				t.welcomeNotice = ""
+				t.initWelcomeList()
+				return t, nil
+			}
 			if t.welcomeActivePicker {
 				t.welcomeActivePicker = false
 				t.initWelcomeList()
@@ -60,17 +66,26 @@ func (t *TUI) handleWelcomeAction(action welcomepage.Action) tea.Cmd {
 			t.openProviderForm("", nil)
 			return t.config.Inputs[t.config.InputFocus].Focus()
 		}
-		t.mode = uipage.Chat
-		t.chat.Messages = []chatMsg{}
-		t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}
-		t.chat.Attachments = nil
-		t.currentRunCanControl = false
-		t.handoffRole = handoffRoleHost
-		t.attachmentStatus = protocol.AttachmentStatusResult{}
-		t.resetConversationStats()
-		cmd := t.initChatComponents()
-		t.resetPhase()
-		return tea.Batch(cmd, t.newSessionCmd())
+		if t.cwdHasActiveSession() {
+			t.welcomeNotice = t.tr("tui.welcome.new_active_blocked")
+			return nil
+		}
+		if count := len(t.replaceableCWDSessions()); count > 0 {
+			t.welcomeNewConfirm = true
+			t.welcomeNotice = t.i18n.Tf("tui.welcome.new_confirm_notice", count)
+			t.initWelcomeList()
+			return nil
+		}
+		return t.startNewSession(t.newSessionCmd())
+	case welcomepage.ActionConfirmNew:
+		t.welcomeNewConfirm = false
+		t.welcomeNotice = ""
+		return t.startNewSession(t.newReplacingCWDSessionsCmd())
+	case welcomepage.ActionCancelNew:
+		t.welcomeNewConfirm = false
+		t.welcomeNotice = ""
+		t.initWelcomeList()
+		return nil
 	case welcomepage.ActionResume:
 		if t.resumeSessionID == "" {
 			return nil
@@ -125,6 +140,20 @@ func (t *TUI) handleWelcomeAction(action welcomepage.Action) tea.Cmd {
 	return nil
 }
 
+func (t *TUI) startNewSession(sessionCmd tea.Cmd) tea.Cmd {
+	t.mode = uipage.Chat
+	t.chat.Messages = []chatMsg{}
+	t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}
+	t.chat.Attachments = nil
+	t.currentRunCanControl = false
+	t.handoffRole = handoffRoleHost
+	t.attachmentStatus = protocol.AttachmentStatusResult{}
+	t.resetConversationStats()
+	cmd := t.initChatComponents()
+	t.resetPhase()
+	return tea.Batch(cmd, sessionCmd)
+}
+
 func (t *TUI) viewWelcome() string {
 	if !t.menu.HasItems() {
 		t.initWelcomeList()
@@ -152,6 +181,11 @@ func (t *TUI) welcomeMenuItems() []welcomepage.Item {
 		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.new", Action: welcomepage.ActionNew})
 		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.config", Action: welcomepage.ActionConfig})
 		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.help_menu", Action: welcomepage.ActionHelp})
+		return items
+	}
+	if t.welcomeNewConfirm {
+		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.new_confirm", Action: welcomepage.ActionConfirmNew})
+		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.new_cancel", Action: welcomepage.ActionCancelNew})
 		return items
 	}
 	if t.welcomeActivePicker {
@@ -214,6 +248,9 @@ func (t *TUI) renderWelcomeInfo() string {
 	}
 	rows = append(rows, fmt.Sprintf("%-8s %s", t.tr("tui.status.guard"), styleHL.Render(t.welcomeGuardStatus())))
 	rows = append(rows, fmt.Sprintf("%-8s %s", t.tr("tui.status.workspace"), styleHL.Render(t.welcomeWorkspaceStatus())))
+	if t.welcomeNotice != "" {
+		rows = append(rows, fmt.Sprintf("%-8s %s", t.tr("tui.status.notice"), styleError.Render(t.welcomeNotice)))
+	}
 	return strings.Join(rows, "\n")
 }
 

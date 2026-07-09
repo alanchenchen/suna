@@ -14,6 +14,8 @@ type Action int
 const (
 	ActionNone Action = iota
 	ActionNew
+	ActionConfirmNew
+	ActionCancelNew
 	ActionResume
 	ActionJoin
 	ActionJoinPicker

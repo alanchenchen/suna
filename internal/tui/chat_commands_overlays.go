@@ -743,8 +743,14 @@ func (t *TUI) renderSessionRow(i int, s protocol.SessionInfo, width int) []strin
 		clients = " · " + t.i18n.Tf("tui.sessions.client_count", s.ClientCount)
 	}
 	head := fmt.Sprintf("%s%s %s%s", cursor, styleTool.Render("["+status+"]"), contentStyle.Render(name), styleDim.Render(clients))
-	cwd := textutil.TruncateRunes(s.CWD, max(10, width-4))
-	return []string{head, "    " + styleDim.Render(cwd)}
+	meta := []string{textutil.TruncateRunes(s.CWD, max(10, width-4))}
+	if s.MessageCount > 0 {
+		meta = append(meta, t.i18n.Tf("tui.sessions.message_count", s.MessageCount))
+	}
+	if updated := relativeSessionTime(s.UpdatedAt); updated != "" {
+		meta = append(meta, t.i18n.Tf("tui.sessions.updated", updated))
+	}
+	return []string{head, "    " + styleDim.Render(strings.Join(meta, " · "))}
 }
 
 func (t *TUI) sessionsHelpText(start, height, total int) string {
@@ -753,4 +759,34 @@ func (t *TUI) sessionsHelpText(start, height, total int) string {
 		text += fmt.Sprintf(" · %d-%d/%d", start+1, min(total, start+height), total)
 	}
 	return text
+}
+
+func relativeSessionTime(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		parsed, err = time.Parse(time.RFC3339, value)
+	}
+	if err != nil {
+		return value
+	}
+	d := time.Since(parsed)
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case d < 48*time.Hour:
+		return "yesterday"
+	default:
+		return parsed.Format("Jan 2 15:04")
+	}
 }
