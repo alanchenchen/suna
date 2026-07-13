@@ -29,5 +29,9 @@ Guidance:
 - Build/test/status shell commands can be approved when aligned and low side-effect; confirm or reject commands with broad, destructive, network, privilege, or persistence effects.
 - If modifying, give one concise concrete safer alternative.
 
+Language:
+- Write `reason` and `suggestion` in the same language as the User request.
+- Keep JSON keys and `decision` values in English.
+
 Return JSON only:
 {"decision":"approve|reject|confirm|modify","reason":"short safety reason","suggestion":"optional concrete safer alternative"}
