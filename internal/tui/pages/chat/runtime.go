@@ -10,6 +10,7 @@ func (m *Model) ResetToolState() {
 	m.ActiveTools = make(map[string]*toolview.Entry)
 	m.ToolStartTimes = make(map[string]time.Time)
 	m.CurrentToolBlock = nil
+	m.CloseToolBlockWhenIdle = false
 	m.SelectedToolID = ""
 	m.SubtaskCursor = 0
 	m.SubtaskCursorUserSet = false

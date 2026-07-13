@@ -103,6 +103,10 @@ func (m *Model) EndTool(p protocol.ToolEndParams, id string, now time.Time) {
 	}
 	delete(m.ActiveTools, id)
 	delete(m.ToolStartTimes, id)
+	if te != nil && toolview.IsSubtask(te) {
+		// 子任务根调用结束后，等待仍在收束的子任务事件结束，再封闭该工具块。
+		m.CloseToolBlockWhenIdle = true
+	}
 	if !m.HasRunningTools() {
 		m.Phase = PhaseWaitingAfterTool
 		m.PhaseStart = now
@@ -110,6 +114,18 @@ func (m *Model) EndTool(p protocol.ToolEndParams, id string, now time.Time) {
 		m.LastWaitingTool = ""
 		if te != nil && toolview.IsSubtask(te) {
 			m.LastWaitingTool = "spawn"
+		}
+		if m.CloseToolBlockWhenIdle {
+			// 子任务根调用结束后，后续主 Agent 工具属于新的执行批次，不能继续追加到该子任务块。
+			m.CurrentToolBlock = nil
+			m.CloseToolBlockWhenIdle = false
+			m.SelectedToolID = ""
+			m.SubtaskCursor = 0
+			m.SubtaskCursorUserSet = false
+			m.SubtaskToolCursor = 0
+			m.SubtaskToolCursorUserSet = false
+			m.SubtaskToolDetailExpanded = false
+			m.SubtaskToolDetailScroll = 0
 		}
 	}
 }

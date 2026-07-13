@@ -153,9 +153,10 @@ type Model struct {
 	SubtaskToolDetailExpanded bool
 	SubtaskToolDetailScroll   int
 
-	ActiveTools      map[string]*toolview.Entry
-	ToolStartTimes   map[string]time.Time
-	CurrentToolBlock *toolview.Block
+	ActiveTools            map[string]*toolview.Entry
+	ToolStartTimes         map[string]time.Time
+	CurrentToolBlock       *toolview.Block
+	CloseToolBlockWhenIdle bool
 
 	Attachments      []attachment.Item
 	AttachmentMode   bool

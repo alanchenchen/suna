@@ -70,6 +70,73 @@ func TestConsecutiveToolsReuseSameBlock(t *testing.T) {
 	}
 }
 
+func TestToolAfterCompletedSubtaskStartsNewBlock(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleEN)}
+
+	start := func(id, tool string) {
+		tui.handleLocalNotification(localNotification{
+			method: protocol.NotifyToolStart,
+			params: mustJSON(t, protocol.ToolStartParams{ID: id, Tool: tool}),
+		})
+	}
+	end := func(id, tool string) {
+		tui.handleLocalNotification(localNotification{
+			method: protocol.NotifyToolEnd,
+			params: mustJSON(t, protocol.ToolEndParams{ID: id, Tool: tool}),
+		})
+	}
+
+	start("spawn-1", "spawn")
+	start("spawn:spawn-1:child-1", "readfile")
+	end("spawn:spawn-1:child-1", "readfile")
+	end("spawn-1", "spawn")
+	start("tool-2", "listdir")
+
+	blocks := collectToolBlocks(tui.chat.Messages)
+	if len(blocks) != 2 {
+		t.Fatalf("len(tool blocks) = %d, want 2", len(blocks))
+	}
+	if got := blocks[0].Order; len(got) != 2 || got[0] != "spawn-1" || got[1] != "spawn:spawn-1:child-1" {
+		t.Fatalf("first block order = %#v, want [spawn-1 spawn:spawn-1:child-1]", got)
+	}
+	if got := blocks[1].Order; len(got) != 1 || got[0] != "tool-2" {
+		t.Fatalf("second block order = %#v, want [tool-2]", got)
+	}
+	if entry := blocks[1].Entries["tool-2"]; entry == nil || entry.ParentID != "" {
+		t.Fatalf("tool-2 entry = %#v, want top-level tool", entry)
+	}
+	if tui.chat.CurrentToolBlock != blocks[1] {
+		t.Fatalf("currentToolBlock = %p, want second block %p", tui.chat.CurrentToolBlock, blocks[1])
+	}
+}
+
+func TestToolBlockClosesAfterSubtaskParentEndsBeforeChild(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleEN)}
+	start := func(id, tool string) {
+		tui.handleLocalNotification(localNotification{
+			method: protocol.NotifyToolStart,
+			params: mustJSON(t, protocol.ToolStartParams{ID: id, Tool: tool}),
+		})
+	}
+	end := func(id, tool string) {
+		tui.handleLocalNotification(localNotification{
+			method: protocol.NotifyToolEnd,
+			params: mustJSON(t, protocol.ToolEndParams{ID: id, Tool: tool}),
+		})
+	}
+
+	start("spawn-1", "spawn")
+	start("spawn:spawn-1:child-1", "readfile")
+	end("spawn-1", "spawn")
+	if tui.chat.CurrentToolBlock == nil || !tui.chat.CloseToolBlockWhenIdle {
+		t.Fatal("subtask block was closed before child completed")
+	}
+	end("spawn:spawn-1:child-1", "readfile")
+	if tui.chat.CurrentToolBlock != nil || tui.chat.CloseToolBlockWhenIdle {
+		t.Fatalf("subtask block = %p, pending = %v, want closed/false", tui.chat.CurrentToolBlock, tui.chat.CloseToolBlockWhenIdle)
+	}
+}
+
 func TestSystemMessageClosesCurrentToolBlock(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleEN)}
 
