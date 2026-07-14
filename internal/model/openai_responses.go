@@ -42,8 +42,10 @@ func (p *OpenAIResponsesProvider) Complete(ctx context.Context, req *CompletionR
 		Model:             responses.ResponsesModel(p.resolveModel(req.Model)),
 		Input:             responses.ResponseNewParamsInputUnion{OfInputItemList: input},
 		MaxOutputTokens:   openai.Int(int64(maxTokens)),
-		Temperature:       openai.Float(p.resolveTemperature(req.Temperature)),
 		ParallelToolCalls: openai.Bool(true),
+	}
+	if req.Temperature != nil {
+		params.Temperature = openai.Float(*req.Temperature)
 	}
 	if req.System != "" {
 		params.Instructions = openai.String(req.System)
@@ -158,13 +160,6 @@ func (p *OpenAIResponsesProvider) resolveMaxTokens(m int) int {
 	return p.maxOutputTokens
 }
 
-func (p *OpenAIResponsesProvider) resolveTemperature(t float64) float64 {
-	if t > 0 {
-		return t
-	}
-	return 0.7
-}
-
 func (p *OpenAIResponsesProvider) buildInput(ctx context.Context, req *CompletionRequest) (responses.ResponseInputParam, error) {
 	input := make(responses.ResponseInputParam, 0, len(req.Messages)*2+1)
 	if state := FormatSessionStateForModel(req.SessionState); state != "" {
@@ -258,74 +253,91 @@ type responseToolCall struct {
 	Arguments strings.Builder
 }
 
+// Responses 的 arguments 事件只携带 item_id；因此调用状态始终以原生 output item 为键。
 func mergeResponseToolCall(event responses.ResponseStreamEventUnion, calls map[string]*responseToolCall, order *[]string) {
-	if event.Type == "response.output_item.added" || event.Type == "response.output_item.done" {
+	switch event.Type {
+	case "response.output_item.added":
+		if event.Item.Type == "function_call" {
+			supplementResponseToolCall(calls, order, event.Item.ID, event.Item.CallID, event.Item.Name, event.Item.Arguments.OfString)
+		}
+	case "response.output_item.done":
 		if event.Item.Type == "function_call" {
 			upsertResponseToolCall(calls, order, event.Item.ID, event.Item.CallID, event.Item.Name, event.Item.Arguments.OfString, false)
 		}
-	}
-	if event.Type == "response.function_call_arguments.delta" && event.Delta != "" {
-		upsertResponseToolCall(calls, order, event.ItemID, "", "", event.Delta, true)
-	}
-	if event.Type == "response.function_call_arguments.done" {
+	case "response.function_call_arguments.delta":
+		if event.Delta != "" {
+			upsertResponseToolCall(calls, order, event.ItemID, "", "", event.Delta, true)
+		}
+	case "response.function_call_arguments.done":
 		upsertResponseToolCall(calls, order, event.ItemID, "", event.Name, event.Arguments, false)
 	}
 }
 
+// completed 中的 output 是流事件的最终快照，只补全缺失字段，不能重新聚合为新的调用。
 func collectResponseOutputToolCalls(items []responses.ResponseOutputItemUnion, calls map[string]*responseToolCall, order *[]string) {
 	for _, item := range items {
 		if item.Type == "function_call" {
-			upsertResponseToolCall(calls, order, item.ID, item.CallID, item.Name, item.Arguments.OfString, false)
+			supplementResponseToolCall(calls, order, item.ID, item.CallID, item.Name, item.Arguments.OfString)
 		}
 	}
 }
 
 func orderedResponseToolCalls(calls map[string]*responseToolCall, order []string) []ToolCall {
 	toolCalls := make([]ToolCall, 0, len(order))
-	for _, id := range order {
-		if tc := calls[id]; tc != nil && tc.Name != "" {
-			toolCalls = append(toolCalls, ToolCall{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments.String()})
+	seenCallIDs := make(map[string]bool, len(order))
+	for _, itemID := range order {
+		tc := calls[itemID]
+		if tc == nil || tc.ID == "" || tc.Name == "" || seenCallIDs[tc.ID] {
+			continue
 		}
+		seenCallIDs[tc.ID] = true
+		toolCalls = append(toolCalls, ToolCall{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments.String()})
 	}
 	return toolCalls
 }
 
+// upsertResponseToolCall 仅以 itemID 定位状态；callID 是最终发送给工具执行器的 ID，不参与流式聚合。
 func upsertResponseToolCall(calls map[string]*responseToolCall, order *[]string, itemID, callID, name, args string, appendArgs bool) {
-	key := callID
-	if key == "" {
-		key = itemID
+	if itemID == "" {
+		return
 	}
-	if key == "" {
-		key = fmt.Sprintf("call_%d", len(*order))
-	}
-	if callID != "" && itemID != "" && callID != itemID {
-		if existing := calls[itemID]; existing != nil {
-			delete(calls, itemID)
-			calls[callID] = existing
-			for i, id := range *order {
-				if id == itemID {
-					(*order)[i] = callID
-					break
-				}
-			}
-		}
-	}
-	tc, ok := calls[key]
-	if !ok {
-		calls[key] = &responseToolCall{ID: key}
-		*order = append(*order, key)
-		tc = calls[key]
-	}
-	if name != "" {
-		tc.Name = name
+	tc := calls[itemID]
+	if tc == nil {
+		tc = &responseToolCall{}
+		calls[itemID] = tc
+		*order = append(*order, itemID)
 	}
 	if callID != "" {
 		tc.ID = callID
 	}
+	if name != "" {
+		tc.Name = name
+	}
 	if appendArgs {
 		tc.Arguments.WriteString(args)
-	} else if args != "" {
-		tc.Arguments.Reset()
+		return
+	}
+	tc.Arguments.Reset()
+	tc.Arguments.WriteString(args)
+}
+
+func supplementResponseToolCall(calls map[string]*responseToolCall, order *[]string, itemID, callID, name, args string) {
+	if itemID == "" {
+		return
+	}
+	tc := calls[itemID]
+	if tc == nil {
+		tc = &responseToolCall{}
+		calls[itemID] = tc
+		*order = append(*order, itemID)
+	}
+	if tc.ID == "" {
+		tc.ID = callID
+	}
+	if tc.Name == "" {
+		tc.Name = name
+	}
+	if tc.Arguments.Len() == 0 && args != "" {
 		tc.Arguments.WriteString(args)
 	}
 }

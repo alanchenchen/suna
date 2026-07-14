@@ -67,10 +67,11 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req *CompletionRequest
 		params.Tools = tools
 	}
 	hasThinking := anthropicReasoningHasThinking(req.Reasoning)
-	if !hasThinking {
-		params.Temperature = anthropic.Float(resolveAnthropicTemperature(req.Temperature))
+	sendTemperature := !hasThinking && req.Temperature != nil
+	if sendTemperature {
+		params.Temperature = anthropic.Float(*req.Temperature)
 	}
-	opts, err := anthropicReasoningFieldOptions(req.Reasoning, anthropicGeneratedKeys(!hasThinking))
+	opts, err := anthropicReasoningFieldOptions(req.Reasoning, anthropicGeneratedKeys(sendTemperature))
 	if err != nil {
 		return nil, err
 	}
@@ -173,13 +174,6 @@ func anthropicReasoningHasThinking(reasoning map[string]any) bool {
 	}
 	_, ok := reasoning["thinking"]
 	return ok
-}
-
-func resolveAnthropicTemperature(t float64) float64 {
-	if t > 0 {
-		return t
-	}
-	return 0.7
 }
 
 type anthropicToolCallAccum struct {

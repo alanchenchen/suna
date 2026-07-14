@@ -43,13 +43,15 @@ func (p *OpenAIChatProvider) Complete(ctx context.Context, req *CompletionReques
 		return nil, err
 	}
 	params := openai.ChatCompletionNewParams{
-		Model:       openai.ChatModel(p.resolveModel(req.Model)),
-		Messages:    messages,
-		MaxTokens:   openai.Int(int64(maxTokens)),
-		Temperature: openai.Float(p.resolveTemperature(req.Temperature)),
+		Model:     openai.ChatModel(p.resolveModel(req.Model)),
+		Messages:  messages,
+		MaxTokens: openai.Int(int64(maxTokens)),
 		StreamOptions: openai.ChatCompletionStreamOptionsParam{
 			IncludeUsage: openai.Bool(true),
 		},
+	}
+	if req.Temperature != nil {
+		params.Temperature = openai.Float(*req.Temperature)
 	}
 	if tools := p.buildTools(req.Tools); len(tools) > 0 {
 		params.Tools = tools
@@ -173,13 +175,6 @@ func (p *OpenAIChatProvider) resolveMaxTokens(m int) int {
 		return m
 	}
 	return p.maxOutputTokens
-}
-
-func (p *OpenAIChatProvider) resolveTemperature(t float64) float64 {
-	if t > 0 {
-		return t
-	}
-	return 0.7
 }
 
 func (p *OpenAIChatProvider) buildMessages(ctx context.Context, req *CompletionRequest) ([]openai.ChatCompletionMessageParamUnion, error) {

@@ -121,12 +121,18 @@ type CompletionRequest struct {
 	RequestID string `json:"request_id,omitempty"`
 	System    string `json:"system,omitempty"`
 	// SessionState 是会话压缩后的连续性上下文，由 provider 序列化为内部上下文块。
-	SessionState string         `json:"session_state,omitempty"`
-	Messages     []Message      `json:"messages"`
-	Tools        []ToolDef      `json:"tools,omitempty"`
-	MaxTokens    int            `json:"max_tokens,omitempty"`
-	Temperature  float64        `json:"temperature,omitempty"`
-	Reasoning    map[string]any `json:"reasoning,omitempty"`
+	SessionState string    `json:"session_state,omitempty"`
+	Messages     []Message `json:"messages"`
+	Tools        []ToolDef `json:"tools,omitempty"`
+	MaxTokens    int       `json:"max_tokens,omitempty"`
+	// Temperature 为 nil 时由调用方不发送该参数；非 nil 时（包括 0）必须原样传给 provider。
+	Temperature *float64       `json:"temperature,omitempty"`
+	Reasoning   map[string]any `json:"reasoning,omitempty"`
+}
+
+// Float64Ptr 用于构造需要区分未设置和显式零值的请求数值。
+func Float64Ptr(value float64) *float64 {
+	return &value
 }
 
 // FinishInfo 是 provider 从协议原生响应中透传的结束信息。

@@ -154,15 +154,6 @@ func TestMergeAnthropicUsagePreservesStartInputForOutputOnlyDelta(t *testing.T) 
 	}
 }
 
-func TestResolveAnthropicTemperatureDefaultsLikeOpenAIProviders(t *testing.T) {
-	if got, want := resolveAnthropicTemperature(0), 0.7; got != want {
-		t.Fatalf("resolveAnthropicTemperature(0) = %v, want %v", got, want)
-	}
-	if got, want := resolveAnthropicTemperature(0.2), 0.2; got != want {
-		t.Fatalf("resolveAnthropicTemperature(0.2) = %v, want %v", got, want)
-	}
-}
-
 func TestAnthropicToolInputSchemaPreservesRequiredAndProperties(t *testing.T) {
 	p := NewAnthropicProvider("test-key", "", "claude-test", 128000, 8192, nil)
 	tools := p.buildTools([]ToolDef{{

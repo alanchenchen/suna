@@ -130,7 +130,7 @@ func ReasoningOptions(family, protocol string) []ReasoningOption {
 
 func GPTReasoning(protocol, effort string) map[string]any {
 	if protocol == "openai_responses" {
-		return map[string]any{"reasoning": map[string]any{"effort": effort}}
+		return map[string]any{"reasoning": map[string]any{"effort": effort, "summary": "auto"}}
 	}
 	return map[string]any{"reasoning_effort": effort}
 }

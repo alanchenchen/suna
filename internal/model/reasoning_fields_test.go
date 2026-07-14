@@ -62,6 +62,25 @@ func TestChatReasoningContentReadsMiniMaxReasoningDetails(t *testing.T) {
 	}
 }
 
+func TestFloat64PtrPreservesZero(t *testing.T) {
+	value := Float64Ptr(0)
+	if value == nil {
+		t.Fatal("Float64Ptr(0) = nil, want non-nil")
+	}
+	if got, want := *value, 0.0; got != want {
+		t.Fatalf("*Float64Ptr(0) = %v, want %v", got, want)
+	}
+}
+
+func TestFloat64PtrPreservesNonZero(t *testing.T) {
+	value := Float64Ptr(0.7)
+	if value == nil {
+		t.Fatal("Float64Ptr(0.7) = nil, want non-nil")
+	}
+	if got, want := *value, 0.7; got != want {
+		t.Fatalf("*Float64Ptr(0.7) = %v, want %v", got, want)
+	}
+}
 func TestResponseReasoningContentReadsDeltas(t *testing.T) {
 	tests := []struct {
 		name string

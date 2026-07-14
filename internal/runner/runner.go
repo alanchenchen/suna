@@ -71,6 +71,8 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			Messages:     messages,
 			Tools:        tools,
 			MaxTokens:    req.MaxTokens,
+			// 主 Agent 保持既有的 0.7 默认采样；内部确定性请求可显式传入 0。
+			Temperature: model.Float64Ptr(0.7),
 		}
 		if req.AutoCompress {
 			completionReq.Messages = trimToolResultsForContext(completionReq.Messages)

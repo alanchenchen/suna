@@ -222,7 +222,9 @@ func logLLMRequest(level string, req *CompletionRequest, route llmRoute, status 
 		fields["request_messages"] = len(req.Messages)
 		fields["tool_defs"] = len(req.Tools)
 		fields["max_tokens"] = req.MaxTokens
-		fields["temperature"] = req.Temperature
+		if req.Temperature != nil {
+			fields["temperature"] = *req.Temperature
+		}
 	}
 	if level == "ERROR" {
 		logging.Error("llm", "request", err, fields)

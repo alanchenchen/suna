@@ -622,7 +622,7 @@ func (a *Agent) guardLLMReview(ctx context.Context, req guard.ReviewRequest) (st
 	}
 	modelRef := a.router.ActiveRef()
 	modelID := resolveModelID(a.cfg, modelRef)
-	request := &model.CompletionRequest{Model: modelID, Purpose: "guard_review", RequestID: uuid.New().String(), System: "Reply with JSON only.", Messages: []model.Message{model.NewTextMessage(model.RoleUser, reviewPrompt)}, Temperature: 0}
+	request := &model.CompletionRequest{Model: modelID, Purpose: "guard_review", RequestID: uuid.New().String(), System: "Reply with JSON only.", Messages: []model.Message{model.NewTextMessage(model.RoleUser, reviewPrompt)}, Temperature: model.Float64Ptr(0)}
 	ch, err := a.router.Complete(ctx, modelRef, request)
 	if err != nil {
 		return "", err

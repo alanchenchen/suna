@@ -153,6 +153,9 @@ func TestGPTReasoningUsesResponsesForOpenAI(t *testing.T) {
 	if got := reasoning["effort"]; got != "high" {
 		t.Fatalf("gptReasoning(high)[reasoning][effort] = %#v, want %q", got, "high")
 	}
+	if got := reasoning["summary"]; got != "auto" {
+		t.Fatalf("gptReasoning(high)[reasoning][summary] = %#v, want %q", got, "auto")
+	}
 }
 
 func TestGPTReasoningUsesChatForCompatible(t *testing.T) {
