@@ -20,8 +20,8 @@ func logRequestPrepare(req Request, completionReq *model.CompletionRequest, cont
 	inputLimit := usableInputBudget(contextWindow, completionReq.MaxTokens)
 	logging.Info("llm", "request_prepare", logging.Event{
 		"purpose":                  req.Purpose,
-		"model":                    req.ModelID,
-		"model_ref":                req.ModelRef,
+		"model":                    completionReq.Model,
+		"model_ref":                bindingRef(req),
 		"request_id":               completionReq.RequestID,
 		"turn":                     turn,
 		"request_messages":         len(completionReq.Messages),
@@ -38,4 +38,11 @@ func logRequestPrepare(req Request, completionReq *model.CompletionRequest, cont
 		"auto_compress":            req.AutoCompress,
 	})
 	return raw, calibrated
+}
+
+func bindingRef(req Request) string {
+	if req.Binding == nil {
+		return ""
+	}
+	return req.Binding.Ref()
 }

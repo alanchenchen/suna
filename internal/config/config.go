@@ -207,8 +207,12 @@ type credentialsFile map[string]struct {
 // Load 从 TOML 加载配置并校验模型引用；缺失或非法字段直接返回错误。
 // 旧配置兼容只允许模型 protocol 缺省，并在 NormalizeModels 中显式归一为 openai_chat。
 func Load(path string) (*Config, error) {
-	cfg := &Config{UI: UIConfig{Theme: "auto", Locale: "en"}}
-	cfg.DataDir = DefaultDataDir()
+	return LoadFromDataDir(path, DefaultDataDir())
+}
+
+// LoadFromDataDir 从指定数据目录加载配置与凭证，避免调用方的作用域被默认目录覆盖。
+func LoadFromDataDir(path, dataDir string) (*Config, error) {
+	cfg := &Config{UI: UIConfig{Theme: "auto", Locale: "en"}, DataDir: dataDir}
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil, fmt.Errorf("config file not found: %s\nPlease create ~/.suna/config.toml with active_model and [[models]] entries", path)

@@ -172,7 +172,7 @@ func (t *TUI) chatTopMeta() string {
 	}
 	modelRef := provider + "/" + model
 	reasoning := ""
-	if mc, ok := t.activeConfigModel(); ok {
+	if mc, ok := t.modelByRef(t.currentSession.ModelRef); ok {
 		reasoning = t.reasoningDisplay(mc)
 	}
 	if reasoning != "" {
@@ -383,7 +383,8 @@ func (t *TUI) renderModelPicker() string {
 	models := t.configModelsSnapshot()
 	rows := make([]chatpage.ModelPickerRow, 0, len(models))
 	for _, mc := range models {
-		rows = append(rows, chatpage.ModelPickerRow{Ref: mc.Ref(), Summary: t.modelSummary(mc), Mark: tuiconfig.ModelStatusMark(mc, t.isActiveModelRef(mc.Ref()))})
+		isCurrent := t.isCurrentSessionModelRef(mc.Ref())
+		rows = append(rows, chatpage.ModelPickerRow{Ref: mc.Ref(), Summary: t.modelSummary(mc), Mark: tuiconfig.ModelStatusMark(mc, isCurrent)})
 	}
 	view := t.chat.ModelPickerView(rows, chatpage.ModelPickerLabels{
 		Empty: t.tr("cmd.model_none"),

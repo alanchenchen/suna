@@ -28,6 +28,36 @@ func TestStreamErrorUsesStructuredResumeFlag(t *testing.T) {
 	}
 }
 
+func TestSessionModelUnavailableErrorUsesLocalizedRecoveryGuidance(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		locale LocaleID
+		wants  []string
+	}{
+		{name: "Chinese", locale: LocaleZH, wants: []string{"当前会话使用的模型「openai/gpt-5.6」已不存在", "请使用 /model"}},
+		{name: "English", locale: LocaleEN, wants: []string{"openai/gpt-5.6", "Use /model"}},
+	} {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			tui := &TUI{i18n: newTranslator(tt.locale), width: 80, height: 18}
+			tui.initChatComponents()
+			tui.handleAgentRunNotification(protocol.AgentRunParams{
+				State:    protocol.AgentRunFailed,
+				RunError: &protocol.RunError{Kind: protocol.RunErrorSessionModelUnavailable, ModelRef: "openai/gpt-5.6"},
+			})
+			if got := len(tui.chat.Messages); got != 1 {
+				t.Fatalf("messages = %d, want 1", got)
+			}
+			content, _ := tui.chat.Messages[0].Content.(string)
+			for _, want := range tt.wants {
+				if !strings.Contains(content, want) {
+					t.Fatalf("message content = %q, want %q", content, want)
+				}
+			}
+		})
+	}
+}
+
 func TestRestoreStatusShowsCompactedNoticeAtEnd(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 18}
 	tui.initChatComponents()

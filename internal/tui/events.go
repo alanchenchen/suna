@@ -47,6 +47,14 @@ type attachmentStatusResultMsg struct {
 type sessionListResultMsg struct{ Params protocol.SessionListResult }
 type sessionErrorMsg struct{ Message string }
 type sessionSnapshotResultMsg struct{ Params protocol.SessionSnapshot }
+type sessionMetadataResultMsg struct{ Session protocol.SessionInfo }
+type sessionTitleUpdateResultMsg struct {
+	SessionID       string
+	OldTitle        string
+	OptimisticTitle string
+	Session         protocol.SessionInfo
+	Err             error
+}
 type memoryListResultMsg struct{ Params protocol.MemoryListResult }
 type skillListResultMsg struct{ Params protocol.SkillListResult }
 type mcpListResultMsg struct{ Params protocol.MCPListResult }
@@ -199,6 +207,9 @@ func (t *TUI) formatRunRetryStatus(p protocol.AgentRunParams) string {
 }
 
 func (t *TUI) formatModelError(p protocol.AgentRunParams) string {
+	if p.RunError != nil {
+		return t.formatRunError(*p.RunError)
+	}
 	summary := t.tr("model_error.unknown")
 	detail := strings.TrimSpace(p.Message)
 	if p.Error != nil {
@@ -215,6 +226,17 @@ func (t *TUI) formatModelError(p protocol.AgentRunParams) string {
 		lines = append(lines, t.tr("model_error.action_check"))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (t *TUI) formatRunError(err protocol.RunError) string {
+	switch err.Kind {
+	case protocol.RunErrorNoModelConfigured:
+		return t.tr("model_error.no_model_configured")
+	case protocol.RunErrorSessionModelUnavailable:
+		return t.i18n.Tf("model_error.session_model_unavailable", err.ModelRef)
+	default:
+		return t.tr("model_error.unknown")
+	}
 }
 
 func (t *TUI) modelErrorSummary(err protocol.ModelError) string {
@@ -408,9 +430,30 @@ func (t *TUI) handleSessionStateNotification(p protocol.SessionStateParams) {
 	}
 	t.chat.SetSessions(t.sessions)
 	t.pickWelcomeSessions()
-	if t.currentSession.ID != "" && p.Session.ID == t.currentSession.ID {
+	if p.Session.ID == t.currentSession.ID {
 		t.currentSession = p.Session
+		t.applyCurrentSessionModelConfig()
 	}
+	if t.mode == uipage.Welcome {
+		t.menu.SetItems(t.welcomeMenuItems(), t.width)
+	}
+}
+
+func (t *TUI) restoreOptimisticSessionTitle(sessionID, optimisticTitle, oldTitle string) {
+	if sessionID == "" {
+		return
+	}
+	for i := range t.sessions {
+		if t.sessions[i].ID == sessionID && t.sessions[i].Title == optimisticTitle {
+			t.sessions[i].Title = oldTitle
+			break
+		}
+	}
+	if t.currentSession.ID == sessionID && t.currentSession.Title == optimisticTitle {
+		t.currentSession.Title = oldTitle
+	}
+	t.chat.SetSessions(t.sessions)
+	t.pickWelcomeSessions()
 	if t.mode == uipage.Welcome {
 		t.menu.SetItems(t.welcomeMenuItems(), t.width)
 	}
@@ -421,6 +464,7 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) {
 		t.handoffRole = handoffRoleHost
 	}
 	t.currentSession = p.Session
+	t.applyCurrentSessionModelConfig()
 	t.currentRunCanControl = p.CurrentRun != nil && p.CurrentRun.CanControl
 	t.chat.Messages = nil
 	t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}
@@ -453,16 +497,14 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) {
 
 func (t *TUI) handleDaemonFullStatusNotification(p protocol.DaemonStatusParams) {
 	t.daemonStatus = p
-	if t.daemonStatus.Provider != "" {
-		t.providerName = t.daemonStatus.Provider
+	// Daemon status describes the default model for new sessions. An attached
+	// session keeps its own context window even if its model was removed from
+	// the latest configuration snapshot.
+	if t.currentSession.ModelRef != "" {
+		t.applyCurrentSessionModelConfig()
+		return
 	}
-	if t.daemonStatus.Model != "" {
-		t.modelName = t.daemonStatus.Model
-	}
-	if t.providerName != "" && t.modelName != "" {
-		t.configState.ActiveModel = t.providerName + "/" + t.modelName
-	}
-	t.applyContextStats(t.daemonStatus.ContextTokens, t.daemonStatus.ContextWindow)
+	t.applyContextStats(p.ContextTokens, p.ContextWindow)
 }
 
 func (t *TUI) handleConfigStateNotification(p protocol.ConfigParams) {
@@ -484,13 +526,7 @@ func (t *TUI) handleConfigStateNotification(p protocol.ConfigParams) {
 	if t.config.DeleteConfirm != "" {
 		t.config.DeleteConfirm = ""
 	}
-	if t.configState.ActiveModel != "" {
-		if mc, ok := t.activeConfigModel(); ok {
-			t.providerName = mc.Provider
-			t.modelName = mc.Model
-			t.contextWindow = mc.ContextWindow
-		}
-	}
+	t.applyCurrentSessionModelConfig()
 	if t.config.SetupMode && len(t.configState.Models) > 0 {
 		t.config.SetupMode = false
 		t.config.FormOpen = false

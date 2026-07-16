@@ -96,11 +96,12 @@ func (s *service) handleSessionUpdate(ctx context.Context, req protocol.Request)
 	if strings.TrimSpace(params.SessionID) == "" {
 		return nil, invalidParams("session_id is required")
 	}
-	snapshot, err := s.daemon.sessions.update(ctx, req.ConnID, params)
+	updated, err := s.daemon.sessions.update(ctx, req.ConnID, params)
 	if err != nil {
 		return nil, protocolError{code: -32603, message: err.Error()}
 	}
-	return snapshot, nil
+	s.daemon.broadcastSessionState(ctx, updated.Session.ID)
+	return updated, nil
 }
 
 func (s *service) handleSessionDelete(ctx context.Context, req protocol.Request) (any, error) {

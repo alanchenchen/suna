@@ -45,7 +45,7 @@ api_key = "sk-..."
 ## 完整示例
 
 ```toml
-# 主 Agent 使用的模型。格式为 "provider/model"，必须匹配某个 [[models]]。
+# 新建会话默认模型。格式为 "provider/model"，必须匹配某个 [[models]]；已有会话会保存自己的模型选择，不受此值之后变化影响。
 active_model = "openai/gpt-4o-mini"
 
 # 每个模型 ref 的请求限速。省略或 <=0 时使用默认值 10。
@@ -90,7 +90,7 @@ base_url = "https://api.minimax.io/v1"
 context_window = 1000000
 max_output_tokens = 8192
 reasoning = { reasoning_split = true }
-# 可选：仅当主模型 ref 匹配这些 glob 时，MiniMax-M3 才作为 subtask 候选展示。
+# 可选：仅当当前 session 模型 ref 匹配这些 glob 时，MiniMax-M3 才作为 subtask 候选展示。
 subtask_for = ["openai/*", "anthropic/claude-*"]
 
 [[models]]
@@ -206,7 +206,7 @@ api_key = "..."
 
 | 字段 | 类型 | 必填 | 默认值 | 当前用途 |
 |---|---|---:|---|---|
-| `active_model` | string | 否 | 第一个 `[[models]]` | 主 Agent 默认模型，格式为 `provider/model`，必须匹配某个模型配置。 |
+| `active_model` | string | 否 | 第一个 `[[models]]` | 新建 session 的默认模型，格式为 `provider/model`，必须匹配某个模型配置；不会改变已有 session 的模型。 |
 | `max_model_rps` | int | 否 | `10` | 每个模型 ref 的请求限速，避免 subtask 并发打爆供应商。保存时值为 0 会被省略。 |
 | `[[models]]` | array | 是 | 无 | 至少一个模型，否则配置不可用。 |
 | `models.provider` | string | 是 | 无 | 厂商/凭证命名空间，也是模型 ref 前缀；必须和 `credentials.toml` 分组名一致。 |
@@ -216,7 +216,7 @@ api_key = "..."
 | `models.context_window` | int | 是 | 无 | 模型服务声明的总上下文窗口，按 `input + output` 理解；用于 status、usage 展示和 compact 预算。 |
 | `models.max_output_tokens` | int | 是 | 无 | 模型服务允许的最大单次输出；所有 LLM 请求默认使用该值作为输出预算，且必须小于 `context_window`。 |
 | `models.strengths` | string[] | 否 | 空 | 模型能力描述，会给主 Agent 参考，用于选择 subtask 模型。 |
-| `models.subtask_for` | string[] | 否 | 空 | 子任务候选可见性过滤器；留空表示所有主模型可用，非空时 active model ref 匹配任一 glob 才展示，模型始终可作为自己的子任务模型。`*` 不跨 `/`，`**` 可跨 `/`。 |
+| `models.subtask_for` | string[] | 否 | 空 | 子任务候选可见性过滤器；留空表示所有主 session 模型可用，非空时当前 session model ref 匹配任一 glob 才展示，模型始终可作为自己的子任务模型。`*` 不跨 `/`，`**` 可跨 `/`。 |
 | `models.reasoning` | object | 否 | 空 | 透传到 provider 请求体的额外 reasoning/thinking 字段；Suna 不理解 preset，是否有效取决于上游。 |
 | `[guard].mode` | string | 否 | `ask` | `readonly` / `ask` / `auto` / `smart`。空或非法值按 `ask` 使用；`smart` 会对中高风险调用进行安全审查，而不是做普通 tool-call 优化。 |
 | `[guard].workspace` | string | 否 | 空 | 本地文件和 exec 的目录硬边界；非空时必须是存在目录，会展开 `~/` 并规范化为绝对路径。 |
@@ -274,7 +274,7 @@ max_output_tokens = 8192
 
 1. `base_url` 指向兼容服务；
 2. `credentials.toml` 中存在同名 table；
-3. `active_model` 使用同样的 `provider/model` ref。
+3. 新建 session 使用相同的 `provider/model` ref 作为其初始模型；之后可通过 `/model` 单独切换。
 
 ### context_window 与 max_output_tokens
 

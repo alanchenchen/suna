@@ -41,28 +41,47 @@ func canonicalCWD(cwd string) string {
 	return cwd
 }
 
-func (a *Agent) NewSessionAgent(sessionID, cwd string) *Agent {
+func (a *Agent) NewSessionAgent(sessionID, cwd, modelRef string) *Agent {
 	cwd = canonicalCWD(cwd)
+	root := a.root()
+	root.configMu.RLock()
+	cfg := root.cfg
+	router := root.router
+	tools := root.tools
+	usage := root.usage
+	sessionStore := root.sessionStore
+	stateStore := root.stateStore
+	memories := root.memories
+	compressor := root.compressor
+	calibrator := root.calibrator
+	prompts := root.prompts
+	store := root.store
+	skills := root.skills
+	mcp := root.mcp
+	extractQueue := root.extractQueue
+	extractWorker := root.extractWorker
+	root.configMu.RUnlock()
 	s := &Agent{
-		runtime:       a.root(),
-		cfg:           a.cfg,
-		router:        a.router,
-		tools:         a.tools,
-		usage:         a.usage,
-		sessionStore:  a.sessionStore,
-		stateStore:    a.stateStore,
-		memories:      a.memories,
-		mediaStore:    media.NewStore(filepath.Join(a.cfg.AttachmentsDir(), sessionID)),
-		compressor:    a.compressor,
-		calibrator:    a.calibrator,
-		prompts:       a.prompts,
-		store:         a.store,
-		skills:        a.skills,
-		mcp:           a.mcp,
-		extractQueue:  a.extractQueue,
-		extractWorker: a.extractWorker,
+		runtime:       root,
+		cfg:           cfg,
+		router:        router,
+		tools:         tools,
+		usage:         usage,
+		sessionStore:  sessionStore,
+		stateStore:    stateStore,
+		memories:      memories,
+		mediaStore:    media.NewStore(filepath.Join(cfg.AttachmentsDir(), sessionID)),
+		compressor:    compressor,
+		calibrator:    calibrator,
+		prompts:       prompts,
+		store:         store,
+		skills:        skills,
+		mcp:           mcp,
+		extractQueue:  extractQueue,
+		extractWorker: extractWorker,
 		sessionID:     sessionID,
 		cwd:           cwd,
+		modelRef:      strings.TrimSpace(modelRef),
 		working:       memory.NewWorkingMemory(),
 	}
 	s.guard = s.newGuardForSession(sessionID)
@@ -99,6 +118,11 @@ func (a *Agent) SnapshotState(ctx context.Context) (SessionSnapshot, error) {
 
 func (a *Agent) SessionID() string { return a.sessionID }
 func (a *Agent) CWD() string       { return a.cwd }
+func (a *Agent) ModelRef() string  { return a.modelRef }
+
+func (a *Agent) SetModelRef(modelRef string) {
+	a.modelRef = strings.TrimSpace(modelRef)
+}
 
 func (a *Agent) root() *Agent {
 	if a == nil {
@@ -131,6 +155,8 @@ func (a *Agent) syncRuntime() {
 	a.store = root.store
 	a.skills = root.skills
 	a.mcp = root.mcp
+	a.extractQueue = root.extractQueue
+	a.extractWorker = root.extractWorker
 	a.guard = a.newGuardForSession(a.sessionID)
 }
 

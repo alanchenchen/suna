@@ -189,9 +189,15 @@ func (t *TUI) welcomeMenuItems() []welcomepage.Item {
 		return items
 	}
 	if t.welcomeActivePicker {
-		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.back", Action: welcomepage.ActionBack})
+		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.back", DetailKey: "tui.welcome.help", Action: welcomepage.ActionBack})
 		for _, session := range t.activeWelcomeSessions() {
-			items = append(items, welcomepage.Item{LabelKey: "tui.welcome.join_one", Key: sessionTitle(session), Action: welcomepage.ActionJoin, SessionID: session.ID})
+			items = append(items, welcomepage.Item{
+				LabelKey:  "tui.welcome.join_one",
+				Key:       sessionTitle(session),
+				CWD:       session.CWD,
+				Action:    welcomepage.ActionJoin,
+				SessionID: session.ID,
+			})
 		}
 		return items
 	}
@@ -220,12 +226,11 @@ func (t *TUI) activeWelcomeSessions() []protocol.SessionInfo {
 
 func (t *TUI) renderWelcomeInfo() string {
 	s := t.daemonStatus
-	provider, model := t.activeProviderModel()
-	if provider == "" {
-		provider = "-"
-	}
-	if model == "" {
-		model = "-"
+	provider, model := "-", "-"
+	// Welcome advertises the configured default for new sessions. It must not
+	// borrow the current session's model, which can legitimately differ.
+	if mc, ok := t.activeConfigModel(); ok {
+		provider, model = mc.Provider, mc.Model
 	}
 	rows := []string{
 		fmt.Sprintf("%-8s %s", t.tr("tui.status.version"), styleHL.Render(appVersion())),

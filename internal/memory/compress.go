@@ -24,12 +24,11 @@ const (
 )
 
 type Compressor struct {
-	fastProvider model.Provider
-	prompts      *prompt.Loader
+	prompts *prompt.Loader
 }
 
-func NewCompressor(fastProvider model.Provider) *Compressor {
-	return &Compressor{fastProvider: fastProvider}
+func NewCompressor() *Compressor {
+	return &Compressor{}
 }
 
 func (c *Compressor) SetPrompts(p *prompt.Loader) {
@@ -135,15 +134,15 @@ func isUTF8Boundary(b byte) bool {
 	return b&0xC0 != 0x80
 }
 
-func (c *Compressor) CompressHistoryWithState(ctx context.Context, messages []model.Message, previousState string, contextWindow int) ([]model.Message, string, int, error) {
-	return c.CompressHistoryWithStateBudget(ctx, messages, previousState, contextWindow, c.recentWindowTokenBudget(contextWindow))
+func (c *Compressor) CompressHistoryWithState(ctx context.Context, binding *model.ModelBinding, messages []model.Message, previousState string, contextWindow, outputBudget int) ([]model.Message, string, int, error) {
+	return c.CompressHistoryWithStateBudget(ctx, binding, messages, previousState, contextWindow, outputBudget, recentWindowTokenBudget(contextWindow, outputBudget))
 }
 
-func (c *Compressor) CompressHistoryWithStateBudget(ctx context.Context, messages []model.Message, previousState string, contextWindow, recentTokenBudget int) ([]model.Message, string, int, error) {
-	return c.compressHistoryKeepingState(ctx, messages, previousState, chooseRecentKeepWithBudget(messages, contextWindow, recentTokenBudget), contextWindow)
+func (c *Compressor) CompressHistoryWithStateBudget(ctx context.Context, binding *model.ModelBinding, messages []model.Message, previousState string, contextWindow, outputBudget, recentTokenBudget int) ([]model.Message, string, int, error) {
+	return c.compressHistoryKeepingState(ctx, binding, messages, previousState, chooseRecentKeepWithBudget(messages, contextWindow, recentTokenBudget), contextWindow, outputBudget)
 }
 
-func (c *Compressor) compressHistoryKeepingState(ctx context.Context, messages []model.Message, previousState string, keepRecent int, contextWindow int) ([]model.Message, string, int, error) {
+func (c *Compressor) compressHistoryKeepingState(ctx context.Context, binding *model.ModelBinding, messages []model.Message, previousState string, keepRecent int, contextWindow, outputBudget int) ([]model.Message, string, int, error) {
 	if len(messages) == 0 {
 		return messages, "", 0, nil
 	}
@@ -182,8 +181,8 @@ func (c *Compressor) compressHistoryKeepingState(ctx context.Context, messages [
 	if strings.TrimSpace(compressInput) == "" && strings.TrimSpace(previousState) == "" {
 		return messages, "", 0, nil
 	}
-	if c.fastProvider == nil {
-		return nil, "", 0, fmt.Errorf("compressor model provider is not configured")
+	if binding == nil {
+		return nil, "", 0, fmt.Errorf("compressor model binding is not configured")
 	}
 
 	if c.prompts == nil {
@@ -202,8 +201,9 @@ func (c *Compressor) compressHistoryKeepingState(ctx context.Context, messages [
 		Messages: []model.Message{
 			model.NewTextMessage(model.RoleUser, promptText),
 		},
+		MaxTokens: outputBudget,
 	}
-	ch, err := c.fastProvider.Complete(ctx, req)
+	ch, err := binding.Complete(ctx, req)
 	if err != nil {
 		return nil, "", 0, err
 	}
@@ -330,14 +330,6 @@ func chooseRecentKeepWithBudget(messages []model.Message, contextWindow, budget 
 		keep = 1
 	}
 	return keep
-}
-
-func (c *Compressor) recentWindowTokenBudget(contextWindow int) int {
-	outputBudget := 0
-	if c != nil && c.fastProvider != nil {
-		outputBudget = c.fastProvider.MaxOutputTokens()
-	}
-	return recentWindowTokenBudget(contextWindow, outputBudget)
 }
 
 func recentWindowTokenBudget(contextWindow, outputBudget int) int {

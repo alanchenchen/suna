@@ -65,11 +65,12 @@ func TestConfigDeleteOptionsHideAPIKeyWhenMissing(t *testing.T) {
 	}
 }
 
-func TestSwitchModelRefUpdatesActiveProviderModel(t *testing.T) {
+func TestSwitchModelRefUpdatesCurrentSessionModel(t *testing.T) {
 	tui := &TUI{
-		i18n:         newTranslator(LocaleEN),
-		providerName: "openai",
-		modelName:    "gpt-4o-mini",
+		i18n:           newTranslator(LocaleEN),
+		providerName:   "openai",
+		modelName:      "gpt-4o-mini",
+		currentSession: protocol.SessionInfo{ID: "session-1", ModelRef: "openai/gpt-4o-mini"},
 		configState: protocol.ConfigParams{ActiveModel: "openai/gpt-4o-mini", Models: []protocol.ConfigModel{
 			{Provider: "openai", Model: "gpt-4o-mini", ContextWindow: 128000},
 			{Provider: "anthropic", Model: "claude-sonnet", ContextWindow: 200000},
@@ -80,14 +81,8 @@ func TestSwitchModelRefUpdatesActiveProviderModel(t *testing.T) {
 	if cmd == nil {
 		t.Fatalf("switchModelRef returned nil cmd")
 	}
-	if tui.configState.ActiveModel != "anthropic/claude-sonnet" {
-		t.Fatalf("ActiveModel = %q", tui.configState.ActiveModel)
-	}
-	if tui.providerName != "anthropic" || tui.modelName != "claude-sonnet" {
-		t.Fatalf("provider/model = %q/%q", tui.providerName, tui.modelName)
-	}
-	if tui.contextWindow != 200000 {
-		t.Fatalf("contextWindow = %d", tui.contextWindow)
+	if tui.configState.ActiveModel != "openai/gpt-4o-mini" {
+		t.Fatalf("default active model changed to %q", tui.configState.ActiveModel)
 	}
 }
 

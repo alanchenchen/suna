@@ -16,8 +16,7 @@ type Request struct {
 	ID       string
 	Task     string
 	Input    []model.ContentBlock
-	ModelRef string
-	ModelID  string
+	Binding  *model.ModelBinding
 	System   string
 	ToolDefs []model.ToolDef
 
@@ -75,6 +74,14 @@ func (s *Subtask) toolDefs() []model.ToolDef {
 }
 
 func (s *Subtask) Run(ctx context.Context, r *runner.Runner) (Result, error) {
+	if s.req.Binding == nil {
+		err := fmt.Errorf("subtask model binding is required")
+		return failedResult(err.Error(), false), err
+	}
+	// 子任务是独立执行单元，不能依赖调用方预先注入 binding；Guard、Skill 等辅助调用
+	// 必须复用本次请求的同一不可变模型快照。
+	ctx = model.WithBinding(ctx, s.req.Binding)
+
 	working := memory.NewWorkingMemory()
 	blocks := s.req.Input
 	if len(blocks) == 0 {
@@ -82,9 +89,8 @@ func (s *Subtask) Run(ctx context.Context, r *runner.Runner) (Result, error) {
 	}
 	working.AddMessage(model.Message{Role: model.RoleUser, TextContent: s.req.Task, Content: blocks})
 	res, err := r.Run(ctx, runner.Request{
+		Binding:       s.req.Binding,
 		System:        s.req.System,
-		ModelRef:      s.req.ModelRef,
-		ModelID:       s.req.ModelID,
 		Working:       working,
 		ToolDefs:      s.toolDefs,
 		EmitStream:    false,

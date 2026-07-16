@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -48,6 +49,7 @@ type Agent struct {
 	mcp          *mcp.Runtime
 	sessionID    string
 	cwd          string
+	modelRef     string
 	turnCount    int
 	sessionState string
 	toolSummary  memory.ToolSummary
@@ -71,7 +73,7 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 	var router *model.Router
 	mediaStore := media.NewStore(cfg.AttachmentsDir())
 	resolver := media.NewContextResolver(cfg.AttachmentsDir())
-	if len(cfg.Models) > 0 && cfg.ActiveModel != "" {
+	if len(cfg.Models) > 0 {
 		var err error
 		router, err = model.NewRouter(cfg, resolver)
 		if err != nil {
@@ -108,10 +110,13 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 	stateStore := memory.NewSessionStateStore(store.DB())
 	memories := memory.NewMemoryStore(store.DB())
 
-	extractProvider := model.NewRoutedProvider(router)
-
 	extractQueue := memory.NewExtractQueue(store.DB())
-	extractWorker := memory.NewWorker(extractQueue, memories, store.DB(), extractProvider)
+	extractWorker := memory.NewWorker(extractQueue, memories, store.DB(), func(ref string) (*model.ModelBinding, error) {
+		if router == nil {
+			return nil, fmt.Errorf("model router is not configured")
+		}
+		return router.Bind(ref)
+	})
 
 	agent := &Agent{
 		cfg:           cfg,
@@ -124,7 +129,7 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 		memories:      memories,
 		mediaStore:    mediaStore,
 		guard:         guard.NewGuard(nil, sessionID),
-		compressor:    memory.NewCompressor(extractProvider),
+		compressor:    memory.NewCompressor(),
 		calibrator:    model.NewTokenCalibrator(),
 		prompts:       prompts,
 		store:         store,
@@ -143,15 +148,27 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 	if info, err := os.Stat(cfg.ConfigPath()); err == nil {
 		agent.configModTime = info.ModTime()
 	}
-	if router != nil {
-		router.SetPrompts(prompts)
-	}
 	agent.compressor.SetPrompts(prompts)
 	agent.extractWorker.SetPrompts(prompts)
+	agent.materializeLegacyPendingMemoryQueueModelRef(cfg, router)
 
 	go extractWorker.Run()
 	extractQueue.RecoverUnextracted(context.Background())
 	return agent, nil
+}
+
+func (a *Agent) BindModel(ref string) (*model.ModelBinding, error) {
+	if a == nil {
+		return nil, fmt.Errorf("model router is not configured")
+	}
+	root := a.root()
+	root.configMu.RLock()
+	router := root.router
+	root.configMu.RUnlock()
+	if router == nil {
+		return nil, fmt.Errorf("model router is not configured")
+	}
+	return router.Bind(ref)
 }
 
 func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
@@ -172,7 +189,7 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 		defer a.finishRun(events, cancel)
 
 		if a.router == nil {
-			events <- Event{Type: EventStatus, Content: "no model configured, please add a model in config", Error: true}
+			events <- Event{Type: EventStatus, Error: true, RunError: a.modelUnavailableRunError()}
 			return
 		}
 
@@ -220,7 +237,7 @@ func (a *Agent) ResumeRun(ctx context.Context) <-chan Event {
 		defer a.saveConversationState(runCtx)
 
 		if a.router == nil {
-			events <- Event{Type: EventStatus, Content: "no model configured, please add a model in config", Error: true}
+			events <- Event{Type: EventStatus, Error: true, RunError: a.modelUnavailableRunError()}
 			return
 		}
 		if !a.canResumeRunLocked() {
@@ -243,22 +260,47 @@ func (a *Agent) finishRun(events chan Event, cancel context.CancelFunc) {
 	a.runMu.Unlock()
 }
 
+func (a *Agent) modelUnavailableRunError() *RunError {
+	if modelRef := a.modelRef; modelRef != "" {
+		return &RunError{Kind: RunErrorSessionModelUnavailable, ModelRef: modelRef}
+	}
+	return &RunError{Kind: RunErrorNoModelConfigured}
+}
+
 func (a *Agent) runCurrentWorking(runCtx context.Context, inputText string, events chan<- Event) {
 	runCtx = tools.WithExecutionContext(runCtx, tools.ExecutionContext{SessionID: a.sessionID, CWD: a.cwd, AttachmentDir: a.attachmentRoot()})
-	_, modelRef, err := a.router.Route(runCtx, inputText)
+	modelRef := a.modelRef
+	if a.router == nil {
+		events <- Event{Type: EventStatus, Error: true, RunError: a.modelUnavailableRunError()}
+		return
+	}
+	if modelRef == "" {
+		// 正常 session 在 create 或 legacy attach 时已固化 model_ref；此处仅处理损坏持久化数据。
+		events <- Event{Type: EventStatus, Error: true, RunError: &RunError{Kind: RunErrorNoModelConfigured}}
+		return
+	}
+	binding, err := a.router.Bind(modelRef)
 	if err != nil {
-		logging.Error("agent", "route_failed", err, logging.Event{"session_id": a.sessionID})
+		logging.Error("agent", "bind_model_failed", err, logging.Event{"session_id": a.sessionID, "model_ref": modelRef})
+		var bindingErr *model.BindingError
+		if errors.As(err, &bindingErr) {
+			runErr := &RunError{Kind: RunErrorNoModelConfigured}
+			if bindingErr.Kind == model.BindingErrorModelNotFound {
+				runErr = &RunError{Kind: RunErrorSessionModelUnavailable, ModelRef: modelRef}
+			}
+			events <- Event{Type: EventStatus, Error: true, RunError: runErr}
+			return
+		}
 		events <- Event{Type: EventStatus, Content: err.Error(), Error: true}
 		return
 	}
+	runCtx = model.WithBinding(runCtx, binding)
 	systemPrompt, _ := a.buildSystemPrompt(runCtx)
-	modelID := resolveModelID(a.cfg, modelRef)
 
 	r := a.newRunner(events)
 	res, err := r.Run(runCtx, runner.Request{
+		Binding:       binding,
 		System:        systemPrompt,
-		ModelRef:      modelRef,
-		ModelID:       modelID,
 		Working:       a.working,
 		Messages:      a.buildRequestMessages,
 		ToolDefs:      a.buildToolDefs,
@@ -317,7 +359,6 @@ func (a *Agent) lastUserTextLocked() string {
 
 func (a *Agent) newRunner(events chan<- Event) *runner.Runner {
 	return &runner.Runner{
-		Router:     a.router,
 		Compressor: a.compressor,
 		Calibrator: a.calibrator,
 		Executor:   mainExecutor{agent: a, events: events},

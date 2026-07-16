@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -23,7 +24,7 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
+	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
@@ -38,6 +39,31 @@ func NewStore(dbPath string) (*Store, error) {
 
 func (s *Store) DB() *sql.DB {
 	return s.db
+}
+
+// MaterializePendingMemoryQueueModelRef 为早于 model_ref 持久化的遗留 pending 队列项写入已校验的默认模型。
+// Store 不依赖配置或路由；调用方必须先校验 modelRef。
+func (s *Store) MaterializePendingMemoryQueueModelRef(ctx context.Context, modelRef string) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("materialize pending memory queue model_ref: nil store")
+	}
+	modelRef = strings.TrimSpace(modelRef)
+	if modelRef == "" {
+		return 0, fmt.Errorf("materialize pending memory queue model_ref: model_ref is required")
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE memory_queue
+		SET model_ref = ?
+		WHERE processed_at IS NULL
+		  AND (model_ref IS NULL OR TRIM(model_ref, CHAR(9) || CHAR(10) || CHAR(13) || ' ') = '')`, modelRef)
+	if err != nil {
+		return 0, fmt.Errorf("materialize pending memory queue model_ref: %w", err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("materialize pending memory queue model_ref rows affected: %w", err)
+	}
+	return int(updated), nil
 }
 
 func (s *Store) Close() error {
@@ -73,6 +99,7 @@ func (s *Store) migrate() error {
 			id TEXT PRIMARY KEY,
 			title TEXT NOT NULL DEFAULT '',
 			cwd TEXT NOT NULL DEFAULT '',
+			model_ref TEXT,
 			message_count INTEGER NOT NULL DEFAULT 0,
 			created_at DATETIME NOT NULL,
 			updated_at DATETIME NOT NULL,
@@ -93,6 +120,7 @@ func (s *Store) migrate() error {
 		`CREATE TABLE IF NOT EXISTS memory_queue (
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL,
+			model_ref TEXT NOT NULL DEFAULT '',
 			kind TEXT NOT NULL,
 			content TEXT NOT NULL,
 			tags TEXT NOT NULL DEFAULT '[]',
@@ -172,8 +200,43 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("exec migration: %w\nquery: %s", err, m)
 		}
 	}
+	if err := s.migrateSessionModelRef(); err != nil {
+		return err
+	}
+	if err := s.migrateMemoryQueueModelRef(); err != nil {
+		return err
+	}
 	if err := s.migrateLegacyConversationState(); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (s *Store) migrateSessionModelRef() error {
+	exists, err := s.columnExists("sessions", "model_ref")
+	if err != nil {
+		return fmt.Errorf("check sessions.model_ref: %w", err)
+	}
+	if exists {
+		return nil
+	}
+	if _, err := s.db.Exec(`ALTER TABLE sessions ADD COLUMN model_ref TEXT`); err != nil {
+		return fmt.Errorf("add sessions.model_ref: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) migrateMemoryQueueModelRef() error {
+	const column = "model_ref"
+	exists, err := s.columnExists("memory_queue", column)
+	if err != nil {
+		return fmt.Errorf("check memory_queue.%s: %w", column, err)
+	}
+	if exists {
+		return nil
+	}
+	if _, err := s.db.Exec(`ALTER TABLE memory_queue ADD COLUMN model_ref TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("add memory_queue.%s: %w", column, err)
 	}
 	return nil
 }

@@ -3,6 +3,9 @@ package welcome
 import (
 	"fmt"
 	"io"
+	"strings"
+
+	textutil "github.com/alanchenchen/suna/internal/tui/components/text"
 
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
@@ -30,6 +33,10 @@ type Item struct {
 	Action    Action
 	Disabled  bool
 	SessionID string
+	// CWD 显示在活跃会话选择器的标题下方。
+	CWD string
+	// DetailKey 是双行菜单使用的可选本地化次行。
+	DetailKey string
 }
 
 func (i Item) FilterValue() string { return i.LabelKey }
@@ -60,12 +67,22 @@ func New(deps Deps) Model {
 
 func (m *Model) SetItems(items []Item, width int) {
 	listItems := make([]list.Item, 0, len(items))
+	joinPicker := false
 	for _, item := range items {
 		listItems = append(listItems, item)
+		joinPicker = joinPicker || item.Action == ActionJoin
 	}
-	w := max(20, min(max(54, width-14), 84)-6)
-	h := max(3, len(items))
-	m.menu = list.New(listItems, delegate{m: m}, w, h)
+	w := max(1, welcomeContentWidth(width)-6)
+	if joinPicker {
+		// Welcome 外框在窄终端会与视口一起收缩，菜单必须使用同一套宽度计算。
+		w = max(1, w)
+	}
+	itemHeight := 1
+	if joinPicker {
+		itemHeight = 2
+	}
+	h := max(3, len(items)*itemHeight)
+	m.menu = list.New(listItems, delegate{m: m, twoLine: joinPicker}, w, h)
 	m.initialized = true
 	m.menu.SetShowTitle(false)
 	m.menu.SetShowStatusBar(false)
@@ -113,9 +130,17 @@ func (m *Model) UpdateKey(key string, items []Item) (Action, bool) {
 
 func (m *Model) SelectedItem() Item { return m.selected }
 
-type delegate struct{ m *Model }
+type delegate struct {
+	m       *Model
+	twoLine bool
+}
 
-func (d delegate) Height() int                         { return 1 }
+func (d delegate) Height() int {
+	if d.twoLine {
+		return 2
+	}
+	return 1
+}
 func (d delegate) Spacing() int                        { return 0 }
 func (d delegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
 func (d delegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
@@ -134,13 +159,33 @@ func (d delegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 			st = d.m.deps.Styles.Brand
 		}
 	}
+
+	if wi.Action == ActionJoin {
+		contentWidth := max(1, m.Width()-lipgloss.Width(cursor))
+		title := textutil.TruncateRunes(wi.Key, contentWidth)
+		cwd := textutil.TruncateRunes(wi.CWD, contentWidth)
+		indent := strings.Repeat(" ", lipgloss.Width(cursor))
+		fmt.Fprint(w, cursor+st.Render(title)+"\n"+indent+d.m.deps.Styles.Dim.Render(cwd))
+		return
+	}
+
 	line := cursor + st.Render(d.m.deps.Tr(wi.LabelKey))
 	if wi.Key != "" {
 		line += d.m.deps.Styles.Dim.Render("  [" + wi.Key + "]")
 	}
+	if d.twoLine {
+		indent := strings.Repeat(" ", lipgloss.Width(cursor))
+		fmt.Fprint(w, line+"\n"+indent+d.m.deps.Styles.Dim.Render(d.m.deps.Tr(wi.DetailKey)))
+		return
+	}
 	fmt.Fprint(w, line)
 }
 
+func welcomeContentWidth(viewportWidth int) int {
+	preferred := min(max(54, viewportWidth-14), 84)
+	// Border and horizontal padding consume six cells outside Style.Width.
+	return min(preferred, max(1, viewportWidth-6))
+}
 func max(a, b int) int {
 	if a > b {
 		return a

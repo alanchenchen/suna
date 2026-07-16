@@ -5,6 +5,26 @@ import (
 	"testing"
 )
 
+func TestQueuePushPersistsModelRef(t *testing.T) {
+	store, err := NewStore(t.TempDir() + "/memory.db")
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer store.Close()
+
+	queue := NewExtractQueue(store.DB())
+	if !queue.Push(context.Background(), DefaultUserID, "openai/gpt-test", Candidate{Kind: MemoryKindPreference, Content: "prefer tests", Confidence: 0.9, Significance: SignificanceHigh}) {
+		t.Fatal("Push() = false, want true")
+	}
+	items, err := LoadDueQueue(context.Background(), store.DB(), DefaultUserID, 1)
+	if err != nil {
+		t.Fatalf("LoadDueQueue() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ModelRef != "openai/gpt-test" {
+		t.Fatalf("queue model_ref = %#v, want openai/gpt-test", items)
+	}
+}
+
 func TestMemoryStoreDeleteRemovesActiveMemory(t *testing.T) {
 	store, err := NewStore(t.TempDir() + "/memory.db")
 	if err != nil {
@@ -57,7 +77,7 @@ func TestMemoryStoreClearDoesNotDeleteQueue(t *testing.T) {
 		t.Fatalf("ReplaceAll() error = %v", err)
 	}
 	queue := NewExtractQueue(store.DB())
-	if !queue.Push(ctx, DefaultUserID, Candidate{Kind: MemoryKindPreference, Content: "prefer tests", Confidence: 0.9, Significance: SignificanceHigh}) {
+	if !queue.Push(ctx, DefaultUserID, "openai/test", Candidate{Kind: MemoryKindPreference, Content: "prefer tests", Confidence: 0.9, Significance: SignificanceHigh}) {
 		t.Fatal("Push() = false, want true")
 	}
 

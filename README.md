@@ -30,23 +30,23 @@ Suna's Guard is not just an approve/deny popup. In `smart` mode, hard safety rul
 
 ### Runtime-first architecture
 
-Suna separates UI from agent runtime:
+Suna separates UI from a shared local runtime. The daemon owns the model catalog, providers, tools, Guard, memory, attachments, and persistent session state; each session owns its selected model and working conversation state:
 
 ```text
 Built-in TUI / third-party UI / script
         ↓ JSON-RPC over local or stdio transport
-Daemon / runtime
-        ↓
-Main Agent / Runner
-   ├─ model providers
-   ├─ tools / Guard / memory / Skills / MCP
-   └─ isolated subtasks
-        ├─ explicit model
-        ├─ explicit context
-        └─ explicit tool permissions
+Daemon / shared runtime
+    ├─ model catalog, providers, tools, Guard, memory, Skills, MCP
+    └─ sessions
+        ├─ selected model + conversation / working state
+        ├─ attachments, usage, and run lifecycle
+        └─ isolated subtasks
+             ├─ explicit model
+             ├─ explicit context
+             └─ explicit tool permissions
 ```
 
-The TUI is only one client. The daemon/runtime owns model calls, tools, Guard, memory, Skills, MCP, attachments, usage, and session state.
+The built-in TUI is only one client. A default model is used when creating a new conversation; each existing session keeps its own selected model, including after restart or when another session changes model.
 
 ## Who is Suna for?
 
@@ -77,7 +77,7 @@ Use Suna to:
 
 | Capability | Typical terminal agent | Suna |
 |---|---|---|
-| Model choice | One active model per run | Main agent can spawn subtasks on different models |
+| Model choice | One active model per run | Each session keeps its selected model; subtasks can explicitly use another configured model |
 | Subagent context | Shared or implicit | Explicit, isolated context only |
 | Tool permissions | Usually global | Per-subtask tool whitelist |
 | User memory | Often mixed into the whole context | Lightweight profile memory near the latest user input |
@@ -143,9 +143,11 @@ suna stop
    - **Anthropic**: Anthropic Messages API.
    - **OpenAI Compatible**: OpenAI Chat Completions compatible providers or gateways.
 5. Fill in model name, endpoint, API key, `context_window`, `max_output_tokens`, and optional capability labels.
-6. Activate the model and start a new conversation.
+6. Set it as the default model for new conversations, then start a new conversation.
 
-You can change most settings from the TUI with `/config`. `context_window` and `max_output_tokens` must match the real limits of your model provider. `strengths` tell the main agent what a model is good at. `subtask_for` optionally controls which main models may see a model as a subtask candidate.
+You can change most settings from the TUI with `/config`. `context_window` and `max_output_tokens` must match the real limits of your model provider. `strengths` tell the main agent what a model is good at. `subtask_for` optionally controls which session models may see a model as a subtask candidate.
+
+`/model` changes only the current conversation. The default model in Config is used only for conversations created afterwards.
 
 ## Try these prompts
 
@@ -234,7 +236,7 @@ Common slash commands:
 ```text
 /new              New conversation
 /model            Open model picker
-/model <ref>      Switch model, e.g. /model openai/gpt-4o-mini
+/model <ref>      Switch the current conversation model, e.g. /model openai/gpt-4o-mini
 /memory           View user profile memory
 /mcp              Open MCP panel
 /skills           Open Skill panel

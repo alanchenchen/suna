@@ -240,7 +240,7 @@ func TestExecuteSpawnToolRejectsModelHiddenBySubtaskFor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
 	}
-	a := &Agent{cfg: cfg, router: router}
+	a := &Agent{cfg: cfg, router: router, modelRef: "openai/gpt-4.1"}
 	events := make(chan Event, 1)
 	var sink chan<- Event = events
 	ctx := agenttools.WithEvents(context.Background(), sink)
@@ -253,7 +253,7 @@ func TestExecuteSpawnToolRejectsModelHiddenBySubtaskFor(t *testing.T) {
 	if !result.IsError {
 		t.Fatalf("ExecuteSpawnTool() IsError = false, want true")
 	}
-	if !strings.Contains(result.Error, "not available for active model") {
+	if !strings.Contains(result.Error, "not available for session model") {
 		t.Fatalf("ExecuteSpawnTool() error = %q, want availability message", result.Error)
 	}
 	if strings.Contains(result.Error, "DF/MiniMax-M3") && strings.Contains(result.Error, "Choose one of: DF/MiniMax-M3") {

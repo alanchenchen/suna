@@ -17,7 +17,7 @@ func TestLogRequestPrepareReturnsEstimatedInputContext(t *testing.T) {
 		MaxTokens: 128000,
 	}
 
-	raw, calibrated := logRequestPrepare(Request{Purpose: "chat", ModelRef: "P/model", ModelID: "model", AutoCompress: true}, completionReq, 400000, 1, 1.0, false)
+	raw, calibrated := logRequestPrepare(Request{Purpose: "chat", AutoCompress: true}, completionReq, 400000, 1, 1.0, false)
 	want := estimateInputTokens(completionReq, 1.0)
 	if raw != want {
 		t.Fatalf("raw got %d, want %d", raw, want)

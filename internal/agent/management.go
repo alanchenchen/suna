@@ -58,22 +58,19 @@ type ModelRuntime struct {
 	ContextWindow int
 }
 
-func (a *Agent) ActiveModelRuntime() ModelRuntime {
+func (a *Agent) DefaultModelRuntime() ModelRuntime {
 	a.configMu.RLock()
 	cfg := a.cfg
-	router := a.router
 	a.configMu.RUnlock()
 
 	rt := ModelRuntime{}
-	if cfg != nil {
-		if mc, ok := cfg.ActiveModelConfig(); ok {
-			rt.Provider = mc.Provider
-			rt.Model = mc.Model
-		}
+	if cfg == nil {
+		return rt
 	}
-	if router != nil {
-		// context window 以 runtime provider 为准；provider 内部统一处理配置值和默认值。
-		rt.ContextWindow = router.ActiveContextWindow()
+	if mc, ok := cfg.ActiveModelConfig(); ok {
+		rt.Provider = mc.Provider
+		rt.Model = mc.Model
+		rt.ContextWindow = mc.ContextWindow
 	}
 	return rt
 }
@@ -115,13 +112,21 @@ func (a *Agent) ClearMemory(ctx context.Context) (int, error) {
 }
 
 func (a *Agent) Compact(ctx context.Context) (int, int, int, int, int, error) {
-	r := &runner.Runner{Router: a.router, Compressor: a.compressor}
-	contextWindow := 0
-	outputBudget := 0
-	if a.router != nil {
-		contextWindow = a.router.ActiveContextWindow()
-		outputBudget = a.router.ActiveMaxOutputTokens()
+	// 手动 compact 不经过 Run；先同步 session 的共享运行时，避免配置重载后仍从旧 router 建立 binding。
+	a.syncRuntime()
+	// 本次 compact 从同一个局部快照读取并使用 modelRef，不能在校验后再次读取可变的 session 字段。
+	modelRef := a.modelRef
+	router := a.router
+	if router == nil || modelRef == "" {
+		return 0, 0, 0, 0, 0, fmt.Errorf("session model is not configured")
 	}
+	binding, err := router.Bind(modelRef)
+	if err != nil {
+		return 0, 0, 0, 0, 0, err
+	}
+	r := &runner.Runner{Compressor: a.compressor}
+	contextWindow := binding.ContextWindow()
+	outputBudget := binding.MaxOutputTokens()
 	started := time.Now()
 	beforeEstimate := 0
 	messageCount := 0
@@ -130,7 +135,7 @@ func (a *Agent) Compact(ctx context.Context) (int, int, int, int, int, error) {
 		messageCount = a.working.Len()
 	}
 	logging.Info("memory", "session_compact_start", logging.Event{"mode": "manual", "context_window": contextWindow, "output_budget": outputBudget, "before_tokens": beforeEstimate, "messages": messageCount})
-	before, after, turnsCompressed, truncated, state, err := r.Compact(ctx, a.working, a.sessionState, contextWindow, outputBudget)
+	before, after, turnsCompressed, truncated, state, err := r.Compact(ctx, binding, a.working, a.sessionState)
 	if err != nil {
 		logging.Error("memory", "session_compact_failed", err, logging.Event{"mode": "manual", "context_window": contextWindow, "output_budget": outputBudget, "before_tokens": beforeEstimate, "messages": messageCount, "duration_ms": time.Since(started).Milliseconds()})
 		return 0, 0, 0, 0, 0, err

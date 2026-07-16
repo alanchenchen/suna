@@ -46,13 +46,19 @@ func NewMemoryStore(db *sql.DB) *MemoryStore {
 }
 
 func (s *MemoryStore) List(ctx context.Context, userID string, limit int) ([]UserMemory, error) {
+	return s.list(ctx, s.db, userID, limit)
+}
+
+func (s *MemoryStore) list(ctx context.Context, db interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, userID string, limit int) ([]UserMemory, error) {
 	if userID == "" {
 		userID = DefaultUserID
 	}
 	if limit <= 0 {
 		limit = MaxActiveMemories
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := db.QueryContext(ctx, `
 		SELECT id, user_id, kind, content, tags, source, confidence, priority, is_core, use_count,
 		       last_used_at, evidence, expires_at, created_at, updated_at
 		FROM user_profile_memory
@@ -63,13 +69,13 @@ func (s *MemoryStore) List(ctx context.Context, userID string, limit int) ([]Use
 		return nil, err
 	}
 	defer rows.Close()
-
 	var out []UserMemory
 	for rows.Next() {
 		m, err := scanUserMemory(rows)
-		if err == nil {
-			out = append(out, m)
+		if err != nil {
+			return nil, err
 		}
+		out = append(out, m)
 	}
 	return out, rows.Err()
 }
@@ -96,7 +102,10 @@ func (s *MemoryStore) Delete(ctx context.Context, userID, id string) (bool, erro
 	if err != nil {
 		return false, err
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
 	return n > 0, nil
 }
 
@@ -108,7 +117,10 @@ func (s *MemoryStore) Clear(ctx context.Context, userID string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
 	return int(n), nil
 }
 
@@ -157,6 +169,50 @@ func (s *MemoryStore) ReplaceAll(ctx context.Context, userID string, newList []U
 	}
 	defer tx.Rollback()
 
+	if err := replaceAllTx(ctx, tx, userID, newList); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// CommitQueueCompaction 在单个 SQLite transaction 中替换用户画像并删除本批队列项。
+// 当前队列只由一个 worker 串行消费；任一队列项缺失时整笔事务回滚。
+func (s *MemoryStore) CommitQueueCompaction(ctx context.Context, userID string, ids []string, newList []UserMemory) error {
+	if userID == "" {
+		userID = DefaultUserID
+	}
+	if len(ids) == 0 {
+		return fmt.Errorf("commit queue compaction: missing queue items")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := replaceAllTx(ctx, tx, userID, newList); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		res, err := tx.ExecContext(ctx, `DELETE FROM memory_queue WHERE id = ? AND user_id = ? AND processed_at IS NULL`, id, userID)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n != 1 {
+			return fmt.Errorf("commit queue compaction: queue item %q is missing", id)
+		}
+	}
+	return tx.Commit()
+}
+
+func replaceAllTx(ctx context.Context, tx *sql.Tx, userID string, newList []UserMemory) error {
+	if len(newList) > MaxActiveMemories {
+		newList = newList[:MaxActiveMemories]
+	}
+
 	existingRows, err := tx.QueryContext(ctx, `SELECT id, content, kind FROM user_profile_memory WHERE user_id = ?`, userID)
 	if err != nil {
 		return err
@@ -164,11 +220,19 @@ func (s *MemoryStore) ReplaceAll(ctx context.Context, userID string, newList []U
 	existing := map[string]UserMemory{}
 	for existingRows.Next() {
 		var m UserMemory
-		if err := existingRows.Scan(&m.ID, &m.Content, &m.Kind); err == nil {
-			existing[m.ID] = m
+		if err := existingRows.Scan(&m.ID, &m.Content, &m.Kind); err != nil {
+			existingRows.Close()
+			return err
 		}
+		existing[m.ID] = m
 	}
-	existingRows.Close()
+	if err := existingRows.Err(); err != nil {
+		existingRows.Close()
+		return err
+	}
+	if err := existingRows.Close(); err != nil {
+		return err
+	}
 
 	keep := map[string]bool{}
 	now := time.Now()
@@ -213,7 +277,7 @@ func (s *MemoryStore) ReplaceAll(ctx context.Context, userID string, newList []U
 			}
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func selectMemories(mems []UserMemory, query string) []UserMemory {

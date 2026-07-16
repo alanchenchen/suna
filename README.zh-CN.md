@@ -34,23 +34,23 @@ Suna 的 Guard 不只是简单的确认弹窗。`smart` 模式下，硬性安全
 
 ### Runtime-first 架构
 
-Suna 把 UI 和 Agent Runtime 分开：
+Suna 把 UI 与共享的本地 Runtime 分开。daemon 持有模型目录、Provider、工具、Guard、记忆、附件和持久化会话状态；每个 session 则持有自己选择的模型和工作对话状态：
 
 ```text
 内置 TUI / 第三方 UI / 脚本
         ↓ local 或 stdio transport 上的 JSON-RPC
-Daemon / Runtime
-        ↓
-Main Agent / Runner
-   ├─ model providers
-   ├─ tools / Guard / memory / Skills / MCP
-   └─ isolated subtasks
-        ├─ explicit model
-        ├─ explicit context
-        └─ explicit tool permissions
+Daemon / 共享 Runtime
+    ├─ 模型目录、Provider、工具、Guard、记忆、Skill、MCP
+    └─ sessions
+        ├─ 已选模型 + 对话 / working state
+        ├─ 附件、用量和运行生命周期
+        └─ 隔离 Subtask
+             ├─ explicit model
+             ├─ explicit context
+             └─ explicit tool permissions
 ```
 
-TUI 只是一个客户端。daemon/runtime 持有模型调用、工具执行、Guard、记忆、Skill、MCP、附件、用量和会话状态。
+内置 TUI 只是一个客户端。默认模型只在新建会话时使用；已有 session 会保持自己选择的模型，即使重启或其他 session 切换模型也不会改变。
 
 ## Suna 适合谁？
 
@@ -81,7 +81,7 @@ Suna 适合希望在本地使用 AI 处理文件、文档、代码、命令、AP
 
 | 能力 | 常见终端 Agent | Suna |
 |---|---|---|
-| 模型选择 | 一次运行一个活跃模型 | 主 Agent 可在运行中为 Subtask 选择不同模型 |
+| 模型选择 | 一次运行一个活跃模型 | 每个 session 保持自己选择的模型；Subtask 可显式选择另一已配置模型 |
 | 子任务上下文 | 常常共享或隐式继承 | 只接收主 Agent 显式传入的上下文 |
 | 工具权限 | 通常是全局工具集 | 每个 Subtask 单独设置工具白名单 |
 | 用户记忆 | 容易混进整段上下文 | 轻量用户画像，靠近最新输入注入 |
@@ -151,9 +151,11 @@ suna stop
    - **Anthropic**：Anthropic Messages 协议。
    - **OpenAI Compatible**：兼容 OpenAI Chat Completions 的第三方服务或网关。
 5. 填写模型名、Endpoint、API Key、`context_window`、`max_output_tokens` 和可选能力标签。
-6. 激活模型后回到 Welcome / New Conversation 开始对话。
+6. 将它设为新会话默认模型，再回到 Welcome / New Conversation 开始对话。
 
-常用设置都可以在 TUI 中通过 `/config` 修改。`context_window` 和 `max_output_tokens` 必须按当前模型服务的真实限制填写。`strengths` 用于告诉主 Agent 模型擅长什么；`subtask_for` 可选地控制哪些主模型能看到该模型作为 Subtask 候选。
+常用设置都可以在 TUI 中通过 `/config` 修改。`context_window` 和 `max_output_tokens` 必须按当前模型服务的真实限制填写。`strengths` 用于告诉主 Agent 模型擅长什么；`subtask_for` 可选地控制哪些 session 模型能看到该模型作为 Subtask 候选。
+
+`/model` 只切换当前会话的模型；Config 中的默认模型只影响之后新建的会话。
 
 ## 试试这些 Prompt
 
@@ -242,7 +244,7 @@ Ctrl+C             退出
 ```text
 /new              新建会话
 /model            打开模型选择器
-/model <ref>      切换模型，例如 /model openai/gpt-4o-mini
+/model <ref>      切换当前会话模型，例如 /model openai/gpt-4o-mini
 /memory           查看 user profile memory
 /mcp              打开 MCP 面板
 /skills           打开 Skill 面板

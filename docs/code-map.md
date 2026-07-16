@@ -22,7 +22,7 @@
 | Help 页面 | `internal/tui/pages/help` | 快捷键和 slash commands。 |
 | 附件识别 | `internal/tui/components/attachment`, `internal/tui/clipboard` | 识别本地图片路径、图片 URL、data URI，并在收到 `ctrl+v` fallback 时读取系统剪贴板图片。 | |
 | 附件存储 | `internal/media`, `internal/daemon/attachments.go` | 本地附件缓存和消息附件提交。 |
-| 模型路由 | `internal/model/router.go` | 根据 `models.protocol` 选择请求适配器，`provider` 只作为厂商/凭证命名空间。 |
+| 模型路由与绑定 | `internal/model/router.go`, `internal/model/binding.go` | Router 是 global runtime 的模型 provider/config registry，按显式 ref 创建不可变 `ModelBinding`；binding 承载一次调用的模型配置、限流、reasoning、日志和校验，不存在隐式 active model。 |
 | OpenAI Responses | `internal/model/openai_responses.go` | `protocol = "openai_responses"` 的请求和流式响应适配。 |
 | Anthropic Messages | `internal/model/anthropic.go` | `protocol = "anthropic"` 的 Messages 流式请求和响应适配，会把 thinking/text/tool use 归一为 Suna `Chunk`。 |
 | OpenAI-compatible | `internal/model/openai_chat.go` | `protocol = "openai_chat"` 的 Chat Completions 兼容协议。 |
@@ -35,7 +35,7 @@
 | MCP 工具适配 | `internal/tools/mcptools` | 将 MCP tools 注册为 `mcp__<server>__<tool>`。 |
 | Guard | `internal/guard` | 工具风险识别、敏感路径、Workspace、Smart Review 审查输入。 |
 | 配置 | `internal/config` | 数据目录、默认配置、TOML 读写、凭据文件。 |
-| 记忆和会话 | `internal/memory` | user profile memory、memory queue、conversation state、compact 支撑。 |
+| 记忆和会话 | `internal/memory` | user profile memory、memory queue、conversation state、compact 支撑；session 运行按 `sessions.model_ref` 绑定模型，队列只保存 `model_ref`，不保存 `session_id`。 |
 | Skill runtime | `internal/skill` | Skill 扫描、导入、检查、review、启用状态和运行时索引。 |
 | MCP runtime | `internal/mcp` | stdio server 生命周期、JSON-RPC、tools/list、tools/call。 |
 | Subtask | `internal/subtask`, `internal/agent/tools.go`, `internal/tools/agenttools` | 主 Agent 通过 `spawn` 动态选择经过 `subtask_for` 过滤的模型、上下文、图片和工具白名单，创建独立上下文子任务并接收结构化结果。 | |
@@ -58,6 +58,8 @@ TUI 不应直接调用 `agent`、`runner`、`tools`、`guard`、`memory`、`skil
 - `internal/transport/jsonrpc`：local / stdio 共用的 JSON-RPC 编解码、结构化错误和 hello gate。
 - `internal/transport/local`：Unix socket / Named Pipe 本地 transport。
 - `internal/transport/stdio`：第三方 runtime stdio transport。
+- global runtime：`internal/daemon` 协调全局 config、Model Router、工具目录、Guard、Skill/MCP runtime 和 memory worker；它不持有某个 session 的当前模型。
+- session runtime：按 session 建立隔离的 cwd、状态和 run 上下文，从 `sessions.model_ref` 创建显式 `ModelBinding`；主 run、Guard、Skill、compact 和 memory candidate extraction 都复用该 binding。
 - `internal/daemon`：长期运行服务，协调配置、会话、Agent、附件和状态通知。
 
 ### Agent 核心
@@ -71,7 +73,9 @@ TUI 不应直接调用 `agent`、`runner`、`tools`、`guard`、`memory`、`skil
 `internal/model` 只保留两类核心职责：协议 provider 和服务 provider/router 的公共支撑。新增模型协议时应优先遵守以下分层，避免把某个 SDK 或某个厂商的特殊字段泄漏到公共逻辑里：
 
 - `provider.go`：定义 Suna 统一模型请求、消息、工具调用、流式 `Chunk` 和 `Provider` 接口；这里不能依赖任何具体 SDK。
-- `router.go`：根据 `models.protocol` 选择具体 provider，应用模型默认配置、记录统一 LLM 日志；router 不理解 provider 私有请求字段。
+- `router.go`：维护全局 provider/config registry，按显式 model ref 创建 binding；不拥有“当前模型”。
+- `binding.go`：`ModelBinding` 是一次显式模型选择的不可变快照，统一承载 provider、配置、限流、reasoning 注入、LLM 日志和工具调用配对校验；Guard、Skill、compact 等辅助请求必须复用它。
+
 - `openai_chat.go`、`openai_responses.go`、`anthropic.go`：具体协议实现，只负责把 `CompletionRequest` 转成对应协议请求，并把流式响应归一为 `Chunk`。
 - `reasoning_fields.go`：公共 reasoning 字段校验/合并逻辑，不依赖 OpenAI、Anthropic 或其他 SDK。`models.reasoning` 是 Suna 对各协议“思考/推理强度相关参数”的统一抽象入口，Suna 只防止它覆盖 core 已生成字段。
 - `reasoning_fields_openai.go`、`reasoning_fields_anthropic.go`：SDK adapter，只负责把公共 reasoning fields 转成对应 SDK 的 request option；后续新增协议应新增自己的 adapter，而不是在公共文件里 import 该 SDK。
@@ -122,11 +126,11 @@ TUI 主动拉取 daemon.status / config.get 等初始状态
   ↓
 TUI 发送 protocol request
   ↓
-daemon 接收并准备当前会话、附件和配置
+daemon 为当前 session 从 `sessions.model_ref` 解析显式 ModelBinding
   ↓
 Agent 组装上下文、工具目录、记忆、Skill index、Session State
   ↓
-Runner 调用 active model 并流式接收事件
+Runner 使用该 binding 调用模型并流式接收事件
   ↓
 模型输出文本 / reasoning / tool call
   ↓

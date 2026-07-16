@@ -333,15 +333,27 @@ func ipcErrorNotification(method string, err error) tea.Msg {
 	return localNotification{method: method, params: []byte(fmt.Sprintf(`{"message":%q}`, err.Error()))}
 }
 
-func (t *TUI) updateSessionTitleCmd(sessionID, title string) tea.Cmd {
+func (t *TUI) updateSessionTitleCmd(sessionID, title, oldTitle string) tea.Cmd {
 	return func() tea.Msg {
-		if t.localCli == nil || sessionID == "" || strings.TrimSpace(title) == "" {
-			return nil
+		result := sessionTitleUpdateResultMsg{
+			SessionID:       sessionID,
+			OldTitle:        oldTitle,
+			OptimisticTitle: title,
+		}
+		if t.localCli == nil {
+			result.Err = errNotConnected(t)
+			return result
+		}
+		if sessionID == "" || strings.TrimSpace(title) == "" {
+			result.Err = fmt.Errorf("invalid session title update")
+			return result
 		}
 		updated, err := t.localCli.UpdateSession(protocol.SessionUpdateParams{SessionID: sessionID, Title: &title})
 		if err != nil {
-			return nil
+			result.Err = err
+			return result
 		}
-		return tuievents.SessionStateMsg{Params: protocol.SessionStateParams{Session: updated}}
+		result.Session = updated.Session
+		return result
 	}
 }

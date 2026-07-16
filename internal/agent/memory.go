@@ -19,7 +19,7 @@ func (a *Agent) enqueueMemoryEvent(ctx context.Context, role model.Role, content
 	if !ok {
 		return
 	}
-	a.extractQueue.Push(ctx, memory.DefaultUserID, candidate)
+	a.extractQueue.Push(ctx, memory.DefaultUserID, a.modelRef, candidate)
 }
 
 func (a *Agent) replaceLastUserMessage(text string, replacement model.Message) {

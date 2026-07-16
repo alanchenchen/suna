@@ -12,6 +12,7 @@ type SessionMeta struct {
 	ID             string
 	Title          string
 	CWD            string
+	ModelRef       string
 	MessageCount   int
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -33,13 +34,13 @@ func (s *SessionStore) Create(ctx context.Context, meta SessionMeta) error {
 		meta.UpdatedAt = meta.CreatedAt
 	}
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO sessions (id, title, cwd, message_count, created_at, updated_at, last_attached_at)
-		VALUES (?, ?, ?, ?, ?, ?, NULL)`, meta.ID, strings.TrimSpace(meta.Title), strings.TrimSpace(meta.CWD), meta.MessageCount, meta.CreatedAt, meta.UpdatedAt)
+		INSERT INTO sessions (id, title, cwd, model_ref, message_count, created_at, updated_at, last_attached_at)
+		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, NULL)`, meta.ID, strings.TrimSpace(meta.Title), strings.TrimSpace(meta.CWD), strings.TrimSpace(meta.ModelRef), meta.MessageCount, meta.CreatedAt, meta.UpdatedAt)
 	return err
 }
 
 func (s *SessionStore) Get(ctx context.Context, id string) (*SessionMeta, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT id, title, cwd, message_count, created_at, updated_at, last_attached_at FROM sessions WHERE id = ?`, id)
+	row := s.db.QueryRowContext(ctx, `SELECT id, title, cwd, model_ref, message_count, created_at, updated_at, last_attached_at FROM sessions WHERE id = ?`, id)
 	meta, err := scanSessionMeta(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -51,7 +52,7 @@ func (s *SessionStore) Get(ctx context.Context, id string) (*SessionMeta, error)
 }
 
 func (s *SessionStore) List(ctx context.Context) ([]SessionMeta, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, title, cwd, message_count, created_at, updated_at, last_attached_at FROM sessions ORDER BY updated_at DESC`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, title, cwd, model_ref, message_count, created_at, updated_at, last_attached_at FROM sessions ORDER BY updated_at DESC`)
 	if err != nil {
 		return nil, err
 	}
@@ -67,9 +68,61 @@ func (s *SessionStore) List(ctx context.Context) ([]SessionMeta, error) {
 	return out, rows.Err()
 }
 
-func (s *SessionStore) UpdateTitle(ctx context.Context, id, title string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?`, strings.TrimSpace(title), time.Now(), id)
-	return err
+// UpdateMetadata 在同一 SQLite 事务中更新请求指定的会话元数据字段。
+// 调用者应先完成模型引用校验，确保持久化元数据与运行态切换可按顺序发布。
+func (s *SessionStore) UpdateMetadata(ctx context.Context, id, title string, titleSet bool, modelRef string, modelRefSet bool) error {
+	if !titleSet && !modelRefSet {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	now := time.Now()
+	var result sql.Result
+	switch {
+	case titleSet && modelRefSet:
+		result, err = tx.ExecContext(ctx, `
+			UPDATE sessions
+			SET title = ?, model_ref = NULLIF(?, ''), updated_at = ?
+			WHERE id = ?`, strings.TrimSpace(title), strings.TrimSpace(modelRef), now, id)
+	case titleSet:
+		result, err = tx.ExecContext(ctx, `
+			UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?`, strings.TrimSpace(title), now, id)
+	case modelRefSet:
+		result, err = tx.ExecContext(ctx, `
+			UPDATE sessions SET model_ref = NULLIF(?, ''), updated_at = ? WHERE id = ?`, strings.TrimSpace(modelRef), now, id)
+	}
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated == 0 {
+		return sql.ErrNoRows
+	}
+	return tx.Commit()
+}
+
+// MaterializeModelRefIfEmpty 只为尚未选择模型的旧会话固化一次模型引用。
+// 返回值表示本次调用是否取得了固化权；并发调用者必须重新读取最终值。
+func (s *SessionStore) MaterializeModelRefIfEmpty(ctx context.Context, id, modelRef string) (bool, error) {
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE sessions
+		SET model_ref = ?, updated_at = ?
+		WHERE id = ? AND (model_ref IS NULL OR TRIM(model_ref) = '')`, strings.TrimSpace(modelRef), time.Now(), id)
+	if err != nil {
+		return false, err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return updated == 1, nil
 }
 
 func (s *SessionStore) TouchAttached(ctx context.Context, id string) error {
@@ -82,42 +135,30 @@ func (s *SessionStore) SetMessageCount(ctx context.Context, id string, count int
 	return err
 }
 
-func (s *SessionStore) Delete(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, id)
-	return err
-}
-
-func (s *SessionStore) PruneInactive(ctx context.Context, olderThan time.Time) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id FROM sessions WHERE message_count > 0 AND updated_at < ?`, olderThan)
+// DeleteWithState 在同一事务中删除会话元信息与工作状态。附件属于文件系统资源，
+// 由 daemon 在事务成功后清理，避免持久化删除失败时错误删除用户附件。
+func (s *SessionStore) DeleteWithState(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM session_state WHERE session_id = ?`, id); err != nil {
+		return err
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+	if _, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE id = ?`, id); err != nil {
+		return err
 	}
-	for _, id := range ids {
-		if err := s.Delete(ctx, id); err != nil {
-			return ids, err
-		}
-	}
-	return ids, nil
+	return tx.Commit()
 }
 
 func scanSessionMeta(scanner interface{ Scan(dest ...any) error }) (*SessionMeta, error) {
 	var meta SessionMeta
-	var created, updated, attached sql.NullString
-	if err := scanner.Scan(&meta.ID, &meta.Title, &meta.CWD, &meta.MessageCount, &created, &updated, &attached); err != nil {
+	var created, updated, attached, modelRef sql.NullString
+	if err := scanner.Scan(&meta.ID, &meta.Title, &meta.CWD, &modelRef, &meta.MessageCount, &created, &updated, &attached); err != nil {
 		return nil, err
 	}
+	meta.ModelRef = modelRef.String
 	meta.CreatedAt = parseDBTime(created.String)
 	meta.UpdatedAt = parseDBTime(updated.String)
 	meta.LastAttachedAt = parseDBTime(attached.String)

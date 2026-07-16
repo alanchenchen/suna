@@ -15,14 +15,17 @@ import (
 	"github.com/google/uuid"
 )
 
+// BindingResolver 按队列事件持久化的 model_ref 解析不可变模型绑定，不能回退到当前默认模型。
+type BindingResolver func(modelRef string) (*model.ModelBinding, error)
+
 type Worker struct {
-	queue    *ExtractQueue
-	memories *MemoryStore
-	db       *sql.DB
-	provider model.Provider
-	mu       sync.RWMutex
-	prompts  *prompt.Loader
-	closed   chan struct{}
+	queue      *ExtractQueue
+	memories   *MemoryStore
+	db         *sql.DB
+	resolver   BindingResolver
+	resolverMu sync.RWMutex
+	prompts    *prompt.Loader
+	closed     chan struct{}
 }
 
 const (
@@ -30,24 +33,26 @@ const (
 	batchTimeout = 60 * time.Second
 )
 
-func NewWorker(queue *ExtractQueue, memories *MemoryStore, db *sql.DB, provider model.Provider) *Worker {
-	return &Worker{queue: queue, memories: memories, db: db, provider: provider, closed: make(chan struct{})}
+func NewWorker(queue *ExtractQueue, memories *MemoryStore, db *sql.DB, resolver BindingResolver) *Worker {
+	return &Worker{queue: queue, memories: memories, db: db, resolver: resolver, closed: make(chan struct{})}
 }
 
 func (w *Worker) SetPrompts(p *prompt.Loader) { w.prompts = p }
 
-func (w *Worker) SetProvider(provider model.Provider) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	w.provider = provider
+func (w *Worker) SetResolver(resolver BindingResolver) {
+	w.resolverMu.Lock()
+	defer w.resolverMu.Unlock()
+	w.resolver = resolver
 }
 
-func (w *Worker) Provider() model.Provider { return w.currentProvider() }
-
-func (w *Worker) currentProvider() model.Provider {
-	w.mu.RLock()
-	defer w.mu.RUnlock()
-	return w.provider
+func (w *Worker) resolve(modelRef string) (*model.ModelBinding, error) {
+	w.resolverMu.RLock()
+	resolver := w.resolver
+	w.resolverMu.RUnlock()
+	if resolver == nil {
+		return nil, fmt.Errorf("memory extraction model resolver is not configured")
+	}
+	return resolver(modelRef)
 }
 
 func (w *Worker) Run() {
@@ -98,46 +103,93 @@ func (w *Worker) processPending() {
 	if w == nil || w.db == nil || w.memories == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), model.LLMMemoryCompactTimeout)
-	defer cancel()
-	items, err := LoadPendingQueue(ctx, w.db, DefaultUserID, 50)
-	if err != nil || len(items) == 0 {
+	loadCtx, loadCancel := context.WithTimeout(context.Background(), model.LLMMemoryCompactTimeout)
+	items, err := LoadDueQueue(loadCtx, w.db, DefaultUserID, 50)
+	loadCancel()
+	if err != nil {
+		logging.Error("memory", "load_queue_failed", err, nil)
+		return
+	}
+	if len(items) == 0 {
+		return
+	}
+
+	// 每个 model_ref 独立整理，避免一批候选意外使用其他会话切换后的活动模型。
+	groups := make(map[string][]QueueItem)
+	refs := make([]string, 0)
+	for _, item := range items {
+		ref := strings.TrimSpace(item.ModelRef)
+		if _, exists := groups[ref]; !exists {
+			refs = append(refs, ref)
+		}
+		groups[ref] = append(groups[ref], item)
+	}
+	w.processModelGroups(refs, groups, newMemoryCompactContext)
+}
+
+func newMemoryCompactContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), model.LLMMemoryCompactTimeout)
+}
+
+func (w *Worker) processModelGroups(refs []string, groups map[string][]QueueItem, newContext func() (context.Context, context.CancelFunc)) {
+	for _, ref := range refs {
+		group := groups[ref]
+		if ref == "" {
+			// 空 model_ref 同样按失败退避并最终丢弃，避免每分钟热循环；绝不回退到 active model。
+			err := fmt.Errorf("memory extraction model_ref is empty")
+			logging.Info("memory", "compaction_missing_model_ref", logging.Event{"queue_events": len(group), "queue_ids": compactQueueIDs(group)})
+			if retryErr := RetryQueueItems(context.Background(), w.db, queueIDs(group), err); retryErr != nil {
+				logging.Error("memory", "retry_queue_failed", retryErr, nil)
+			}
+			continue
+		}
+		ctx, cancel := newContext()
+		w.processModelGroup(ctx, ref, group)
+		cancel()
+	}
+}
+
+func (w *Worker) processModelGroup(ctx context.Context, modelRef string, items []QueueItem) {
+	if len(items) == 0 {
 		return
 	}
 	ids := make([]string, 0, len(items))
-	for _, it := range items {
-		ids = append(ids, it.ID)
+	for _, item := range items {
+		ids = append(ids, item.ID)
 	}
-	provider := w.currentProvider()
-	if provider == nil {
-		// 没有可用模型时保留队列，等待后续 provider 配置好再处理，避免静默丢记忆。
-		logging.Info("memory", "compaction_no_provider", logging.Event{"queue_events": len(items)})
+	binding, err := w.resolve(modelRef)
+	if err != nil || binding == nil {
+		if err == nil {
+			err = fmt.Errorf("memory extraction model %q is unavailable", modelRef)
+		}
+		logging.Info("memory", "compaction_model_unresolved", logging.Event{"model_ref": modelRef, "queue_events": len(items), "queue_ids": compactQueueIDs(items)})
+		if retryErr := RetryQueueItems(context.Background(), w.db, ids, err); retryErr != nil {
+			logging.Error("memory", "retry_queue_failed", retryErr, nil)
+		}
 		return
 	}
 	current, err := w.memories.List(ctx, DefaultUserID, MaxActiveMemories)
 	if err != nil {
-		logging.Error("memory", "load_active_memory_failed", err, logging.Event{"queue_events": len(items)})
-		_ = RetryQueueItems(context.Background(), w.db, ids, err)
+		logging.Error("memory", "load_active_memory_failed", err, logging.Event{"model_ref": modelRef, "queue_events": len(items)})
+		w.retry(ids, err)
 		return
 	}
 	requestID := uuid.New().String()
-	logging.Info("memory", "compaction_start", logging.Event{"request_id": requestID, "queue_events": len(items), "queue_ids": compactQueueIDs(items), "attempts": compactAttempts(items), "significance": compactSignificance(items), "active_memories_before": len(current)})
-	newList, err := w.compact(ctx, provider, current, items, requestID)
+	metadata := logging.Event{"request_id": requestID, "model_ref": modelRef, "queue_events": len(items), "queue_ids": compactQueueIDs(items), "attempts": compactAttempts(items), "significance": compactSignificance(items), "active_memories_before": len(current)}
+	logging.Info("memory", "compaction_start", metadata)
+	newList, err := w.compact(ctx, binding, current, items, requestID)
 	if err != nil {
-		logging.Error("memory", "compaction_failed", err, logging.Event{"request_id": requestID, "queue_events": len(items), "queue_ids": compactQueueIDs(items), "attempts": compactAttempts(items), "significance": compactSignificance(items), "active_memories_before": len(current), "will_retry": true})
-		_ = RetryQueueItems(context.Background(), w.db, ids, err)
+		metadata["will_retry"] = true
+		logging.Error("memory", "compaction_failed", err, metadata)
+		w.retry(ids, err)
 		return
 	}
-	if err := w.memories.ReplaceAll(ctx, DefaultUserID, newList); err != nil {
-		logging.Error("memory", "replace_active_memory_failed", err, logging.Event{"queue_events": len(items), "active_memories_after": len(newList)})
-		_ = RetryQueueItems(context.Background(), w.db, ids, err)
+	if err := w.memories.CommitQueueCompaction(ctx, DefaultUserID, ids, newList); err != nil {
+		logging.Error("memory", "commit_compaction_failed", err, logging.Event{"model_ref": modelRef, "queue_events": len(items), "active_memories_after": len(newList)})
+		w.retry(ids, err)
 		return
 	}
-	if err := DeleteQueueItems(ctx, w.db, ids); err != nil {
-		logging.Error("memory", "delete_queue_failed", err, logging.Event{"queue_events": len(items)})
-		return
-	}
-	logging.Info("memory", "compaction_success", logging.Event{"request_id": requestID, "queue_events": len(items), "active_memories_before": len(current), "active_memories_after": len(newList)})
+	logging.Info("memory", "compaction_success", logging.Event{"request_id": requestID, "model_ref": modelRef, "queue_events": len(items), "active_memories_before": len(current), "active_memories_after": len(newList)})
 }
 
 type compactionMemory struct {
@@ -156,11 +208,18 @@ type compactionResult struct {
 	Memories []compactionMemory `json:"memories"`
 }
 
-func (w *Worker) compact(ctx context.Context, provider model.Provider, current []UserMemory, items []QueueItem, requestID string) ([]UserMemory, error) {
+func (w *Worker) retry(ids []string, cause error) {
+	if err := RetryQueueItems(context.Background(), w.db, ids, cause); err != nil {
+		// retry 的读取/更新错误必须可观察，避免数据层故障被后续处理掩盖。
+		logging.Error("memory", "retry_queue_failed", err, logging.Event{"queue_ids": strings.Join(ids, ",")})
+	}
+}
+
+func (w *Worker) compact(ctx context.Context, binding *model.ModelBinding, current []UserMemory, items []QueueItem, requestID string) ([]UserMemory, error) {
 	systemPrompt := w.renderCompactionPrompt(current, items)
 	// 记忆整理是异步 LLM 调用，一次处理多条 queue event，并要求模型返回完整的新列表。
 	// 主请求链路不会等待这个调用，因此不会影响用户看到回复的延迟。
-	ch, err := provider.Complete(ctx, &model.CompletionRequest{Purpose: "memory_compact", RequestID: requestID, System: systemPrompt, Messages: []model.Message{model.NewTextMessage(model.RoleUser, "Return the new user profile memory JSON now.")}})
+	ch, err := binding.Complete(ctx, &model.CompletionRequest{Purpose: "memory_compact", RequestID: requestID, System: systemPrompt, Messages: []model.Message{model.NewTextMessage(model.RoleUser, "Return the new user profile memory JSON now.")}})
 	if err != nil {
 		return nil, err
 	}
@@ -236,6 +295,14 @@ func parseCompactionResult(raw string) *compactionResult {
 		return nil
 	}
 	return &result
+}
+
+func queueIDs(items []QueueItem) []string {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	return ids
 }
 
 func compactQueueIDs(items []QueueItem) string {

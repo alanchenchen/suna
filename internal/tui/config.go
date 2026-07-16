@@ -104,31 +104,14 @@ func (t *TUI) hasConfiguredModel() bool {
 }
 
 func (t *TUI) activeProviderModel() (string, string) {
-	if mc, ok := t.activeConfigModel(); ok {
+	if mc, ok := t.modelByRef(t.currentSession.ModelRef); ok {
 		return mc.Provider, mc.Model
 	}
-	provider, model := t.providerName, t.modelName
-	if t.daemonStatus.Provider != "" {
-		provider = t.daemonStatus.Provider
-	}
-	if t.daemonStatus.Model != "" {
-		model = t.daemonStatus.Model
-	}
-	if provider == "" && model == "" && len(t.configState.Models) > 0 {
-		cm := t.configState.Models[0]
-		return cm.Provider, cm.Model
-	}
-	return provider, model
+	return "", ""
 }
 
 func (t *TUI) activeConfigModel() (tuiconfig.ModelConfig, bool) {
-	return tuiconfig.ActiveModel(t.configModelsSnapshot(), tuiconfig.ActiveModelRef(
-		t.configState,
-		t.providerName,
-		t.modelName,
-		t.daemonStatus.Provider,
-		t.daemonStatus.Model,
-	))
+	return t.modelByRef(t.configState.ActiveModel)
 }
 
 func (t *TUI) configModelsSnapshot() []tuiconfig.ModelConfig {
@@ -144,6 +127,22 @@ func (t *TUI) modelByRef(ref string) (tuiconfig.ModelConfig, bool) {
 	return tuiconfig.ModelConfig{}, false
 }
 
+// applyCurrentSessionModelConfig keeps an attached session's display model
+// independent from the daemon's default model for new sessions.
+func (t *TUI) applyCurrentSessionModelConfig() bool {
+	if t.currentSession.ModelRef == "" {
+		return false
+	}
+	mc, ok := t.modelByRef(t.currentSession.ModelRef)
+	if !ok {
+		return false
+	}
+	t.providerName = mc.Provider
+	t.modelName = mc.Model
+	t.contextWindow = mc.ContextWindow
+	return true
+}
+
 func (t *TUI) updateConfigModelReasoning(ref string, reasoning map[string]any) bool {
 	for i, mc := range t.configState.Models {
 		if mc.Provider+"/"+mc.Model == ref {
@@ -154,15 +153,12 @@ func (t *TUI) updateConfigModelReasoning(ref string, reasoning map[string]any) b
 	return false
 }
 
-func (t *TUI) isActiveModelRef(ref string) bool {
-	if ref == "" {
-		return false
-	}
-	if t.configState.ActiveModel != "" {
-		return ref == t.configState.ActiveModel
-	}
-	provider, model := t.activeProviderModel()
-	return ref == provider+"/"+model
+func (t *TUI) isDefaultModelRef(ref string) bool {
+	return ref != "" && ref == t.configState.ActiveModel
+}
+
+func (t *TUI) isCurrentSessionModelRef(ref string) bool {
+	return ref != "" && ref == t.currentSession.ModelRef
 }
 
 func (t *TUI) shouldOfferDeleteAPIKey(ref string) bool {
@@ -260,7 +256,7 @@ func credentialsFilePath() string {
 }
 
 func (t *TUI) modelSummary(mc tuiconfig.ModelConfig) string {
-	raw := tuiconfig.ModelSummary(mc, t.isActiveModelRef(mc.Ref()), fmtTok)
+	raw := tuiconfig.ModelSummary(mc, t.isDefaultModelRef(mc.Ref()), fmtTok)
 	parts := strings.Split(raw, " · ")
 	for i, part := range parts {
 		switch part {
@@ -287,7 +283,7 @@ func (t *TUI) configRowsDeps() tuiconfig.RowsDeps {
 		ProvidersSummary:    func(total, needs int) string { return t.i18n.Tf("tui.config.providers_summary", total, needs) },
 		Models:              t.configModelsSnapshot(),
 		ActiveModel:         t.configState.ActiveModel,
-		IsActive:            t.isActiveModelRef,
+		IsActive:            t.isDefaultModelRef,
 		NeedsAttention:      t.modelNeedsAttention,
 		ModelSummary:        t.modelSummary,
 		CurrentLanguage:     t.currentLangDisplay(),
@@ -405,6 +401,10 @@ func (t *TUI) activateModelRef(ref string) tea.Cmd {
 }
 func (t *TUI) setActiveModelRef(ref string) {
 	t.configState.ActiveModel = ref
+	if t.currentSession.ModelRef != "" {
+		t.applyCurrentSessionModelConfig()
+		return
+	}
 	if mc, ok := t.modelByRef(ref); ok {
 		t.providerName = mc.Provider
 		t.modelName = mc.Model
@@ -484,7 +484,7 @@ func (t *TUI) configModelCursorForActive() int {
 }
 func (t *TUI) configDetailDefaultCursor(ref string) int {
 	preferred := "edit_model"
-	if mc, ok := t.modelByRef(ref); ok && !t.modelNeedsAttention(mc) && !t.isActiveModelRef(mc.Ref()) {
+	if mc, ok := t.modelByRef(ref); ok && !t.modelNeedsAttention(mc) && !t.isDefaultModelRef(mc.Ref()) {
 		preferred = "activate_model"
 	}
 	return tuiconfig.DetailDefaultCursor(t.configDetailRowsForRef(ref), preferred)

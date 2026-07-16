@@ -24,29 +24,3 @@ func SnapshotFromProtocol(p protocol.ConfigParams) []ModelConfig {
 	}
 	return models
 }
-
-func ActiveModelRef(p protocol.ConfigParams, providerName, modelName, daemonProvider, daemonModel string) string {
-	if p.ActiveModel != "" {
-		return p.ActiveModel
-	}
-	provider, model := providerName, modelName
-	if daemonProvider != "" {
-		provider = daemonProvider
-	}
-	if daemonModel != "" {
-		model = daemonModel
-	}
-	if provider != "" && model != "" {
-		return provider + "/" + model
-	}
-	return ""
-}
-
-func ActiveModel(models []ModelConfig, ref string) (ModelConfig, bool) {
-	for _, mc := range models {
-		if mc.Ref() == ref {
-			return mc, true
-		}
-	}
-	return ModelConfig{}, false
-}

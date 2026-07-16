@@ -81,4 +81,5 @@ type Event struct {
 	MaxAttempts     int
 	DelayMs         int64
 	ModelError      *model.ModelError
+	RunError        *RunError
 }

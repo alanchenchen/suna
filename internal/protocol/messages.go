@@ -100,6 +100,20 @@ type ModelError struct {
 	Model      string         `json:"model,omitempty"`
 }
 
+type RunErrorKind string
+
+const (
+	RunErrorNoModelConfigured       RunErrorKind = "no_model_configured"
+	RunErrorSessionModelUnavailable RunErrorKind = "session_model_unavailable"
+)
+
+// RunError 表示模型请求开始前无法满足的运行前置条件。
+// UI/SDK 应只根据 Kind 分支，并使用 ModelRef 作为展示或恢复上下文。
+type RunError struct {
+	Kind     RunErrorKind `json:"kind"`
+	ModelRef string       `json:"model_ref,omitempty"`
+}
+
 type AgentRunParams struct {
 	RunID string        `json:"run_id,omitempty"`
 	State AgentRunState `json:"state"`
@@ -114,6 +128,7 @@ type AgentRunParams struct {
 	DelayMs     int64 `json:"delay_ms,omitempty"`
 
 	Error           *ModelError `json:"error,omitempty"`
+	RunError        *RunError   `json:"run_error,omitempty"`
 	ResumeAvailable bool        `json:"resume_available,omitempty"`
 }
 
@@ -139,6 +154,7 @@ type SessionInfo struct {
 	ID             string        `json:"id"`
 	Title          string        `json:"title,omitempty"`
 	CWD            string        `json:"cwd"`
+	ModelRef       string        `json:"model_ref,omitempty"`
 	MessageCount   int           `json:"message_count"`
 	CreatedAt      string        `json:"created_at"`
 	UpdatedAt      string        `json:"updated_at"`
@@ -170,6 +186,7 @@ type SessionAttachParams struct {
 type SessionUpdateParams struct {
 	SessionID string  `json:"session_id"`
 	Title     *string `json:"title,omitempty"`
+	ModelRef  *string `json:"model_ref,omitempty"`
 }
 
 type SessionDeleteParams struct {

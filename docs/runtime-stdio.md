@@ -571,13 +571,15 @@ Result：
 
 #### `session.update`
 
-用途：更新当前 attached idle session 的 title。
+用途：更新当前 attached session 的 title 或模型选择。只更新 title 时可在运行中执行；更新 `model_ref` 时必须处于 idle。
 
 Params：
 
 ```json
-{"session_id":"session_id","title":"new title"}
+{"session_id":"session_id","title":"new title","model_ref":"openai/gpt-4o-mini"}
 ```
+
+`title` 与 `model_ref` 均为可选，但请求至少应包含其一。更新 `model_ref` 成功后，该 session 后续主对话、Guard、Skill review 和 compact 都使用新模型；不会修改 `config.active_model`。
 
 Result：`SessionSnapshot`。
 
@@ -631,7 +633,7 @@ Result 示例：
 
 ```json
 {
-  "session":{"id":"session_id","title":"","cwd":"/repo","status":"running","client_count":2,"message_count":3},
+  "session":{"id":"session_id","title":"","cwd":"/repo","model_ref":"openai/gpt-4o-mini","status":"running","client_count":2,"message_count":3},
   "messages":[{"role":"user","content":"hello"}],
   "compacted":false,
   "tool_summary":null,
@@ -687,7 +689,7 @@ Result 示例：
 | `action` | 必填。取值：`upsert_model`、`delete_model`、`activate_model`、`update_general`。 |
 | `model` | `upsert_model` 使用。 |
 | `model_ref` | 更新/删除已有模型时使用，例如 `openai/gpt-4o-mini`。 |
-| `active_model` | 激活模型或 upsert 后指定 active。 |
+| `active_model` | 新建 session 的默认模型。修改它不会改变已有 session；删除当前默认模型时，daemon 会选择一个剩余模型作为新默认值，或在没有模型时清空。 |
 | `api_key` | 新增/更新 provider API key。Suna 会自动 trim 首尾空白。 |
 | `delete_api_key` | 删除模型时，如果该 provider 不再被其它模型使用，可同时删除 key。 |
 | `locale` / `theme` / `guard_mode` / `workspace` | `update_general` 使用。 |
@@ -932,6 +934,7 @@ Params：
 | `message` | 可选人类可读说明。 |
 | `attempt` / `max_attempts` / `delay_ms` | `retrying` 使用。 |
 | `error` | 失败时的结构化 `ModelError`。 |
+| `run_error` | 失败前置条件的结构化错误。`no_model_configured` 表示尚未配置模型；`session_model_unavailable` 表示当前 session 的 `model_ref` 已不可用，UI 应引导用户通过 `session.update` 选择模型。 |
 | `resume_available` | 失败后是否可调用 `agent.resumeRun`。 |
 
 示例：
@@ -948,8 +951,7 @@ Params：
 {
   "state":"failed",
   "phase":"model",
-  "resume_available":true,
-  "error":{"kind":"http","message":"rate limit exceeded","status_code":429,"type":"rate_limit_error"}
+  "run_error":{"kind":"session_model_unavailable","model_ref":"openai/gpt-4o-mini"}
 }
 ```
 
@@ -1066,7 +1068,7 @@ Params：
 session metadata/status/client_count 更新，用于刷新 session list、Welcome 和 Handoff 状态。
 
 ```json
-{"session":{"id":"session_id","cwd":"/repo","status":"running","client_count":2,"message_count":3}}
+{"session":{"id":"session_id","cwd":"/repo","model_ref":"openai/gpt-4o-mini","status":"running","client_count":2,"message_count":3}}
 ```
 
 #### `session.compact_result`
@@ -1157,7 +1159,7 @@ JSON-RPC error 使用统一外层：
 | `handshake_required` | 未先调用 `runtime.hello`。 |
 | `internal_error` | daemon 内部错误。 |
 
-模型请求失败不会作为 `agent.sendMessage` response error 返回，因为 `agent.sendMessage` 只表示“已接收”。模型失败通过 `agent.run state=failed` 的 `error` 字段通知：
+模型请求失败不会作为 `agent.sendMessage` response error 返回，因为 `agent.sendMessage` 只表示“已接收”。已经发起的模型请求失败通过 `agent.run state=failed` 的 `error`（`ModelError`）字段通知；请求前无法满足模型条件时通过 `run_error` 字段通知。客户端必须按这些结构化 kind 分支，不能解析自由文本。
 
 ```json
 {

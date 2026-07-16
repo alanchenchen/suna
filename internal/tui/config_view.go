@@ -264,7 +264,7 @@ func (t *TUI) renderConfigModelRow(sb *strings.Builder, idx int, row tuiconfig.R
 		return
 	}
 	selected := t.config.Cursor == idx
-	active := t.isActiveModelRef(mc.Ref())
+	active := t.isDefaultModelRef(mc.Ref())
 	prefix := "    "
 	bodyIndent := "      "
 	if selected {

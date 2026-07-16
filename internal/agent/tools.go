@@ -177,11 +177,11 @@ func (a *Agent) ExecuteSpawnTool(ctx context.Context, id string, params map[stri
 	if a.router == nil {
 		return tools.ErrorResult("spawn requires configured models, but no model router is available")
 	}
-	if _, err := a.router.Provider(modelRef); err != nil {
+	if _, err := a.router.Bind(modelRef); err != nil {
 		return tools.ErrorResult(fmt.Sprintf("invalid spawn model %q. Choose one of: %s", modelRef, strings.Join(a.availableModelRefs(), ", ")))
 	}
-	if !a.router.IsSpawnableModel(modelRef) {
-		return tools.ErrorResult(fmt.Sprintf("spawn model %q is not available for active model %q. Choose one of: %s", modelRef, a.router.ActiveRef(), strings.Join(a.availableModelRefs(), ", ")))
+	if !a.router.IsSpawnableModel(a.modelRef, modelRef) {
+		return tools.ErrorResult(fmt.Sprintf("spawn model %q is not available for session model %q. Choose one of: %s", modelRef, a.modelRef, strings.Join(a.availableModelRefs(), ", ")))
 	}
 	allowedTools, toolNames, errResult := a.buildSubtaskAllowedTools(params["tools"])
 	if errResult.IsError {
@@ -213,8 +213,13 @@ func (a *Agent) ExecuteSpawnTool(ctx context.Context, id string, params map[stri
 	if spawnID == "" {
 		spawnID = uuid.New().String()
 	}
+	binding, err := a.router.Bind(modelRef)
+	if err != nil {
+		return tools.ErrorResult(fmt.Sprintf("invalid spawn model %q: %v", modelRef, err))
+	}
+	ctx = model.WithBinding(ctx, binding)
 	r := a.newSubtaskRunner(events, spawnID, allowedTools)
-	st := subtask.New(subtask.Request{ID: spawnID, Task: task, Input: inputBlocks, ModelRef: modelRef, ModelID: resolveModelID(a.cfg, modelRef), System: subtaskPrompt, ToolDefs: toolDefs})
+	st := subtask.New(subtask.Request{ID: spawnID, Task: task, Input: inputBlocks, Binding: binding, System: subtaskPrompt, ToolDefs: toolDefs})
 	res, err := st.Run(ctx, r)
 	if err != nil && res.Status == "" {
 		res = subtask.Result{
@@ -257,7 +262,7 @@ func spawnToolResult(content string, res subtask.Result) tools.Result {
 }
 
 func (a *Agent) newSubtaskRunner(events chan<- Event, spawnID string, allowedTools map[string]bool) *runner.Runner {
-	return &runner.Runner{Router: a.router, Compressor: a.compressor, Calibrator: a.calibrator, Executor: subtaskExecutor{agent: a, events: events, allowedTools: allowedTools, spawnID: spawnID}, Sink: subtaskSink{events: events, spawnID: spawnID}, UsageSink: a, Hooks: runner.Hooks{CleanToolParams: a.cleanToolParams}}
+	return &runner.Runner{Compressor: a.compressor, Calibrator: a.calibrator, Executor: subtaskExecutor{agent: a, events: events, allowedTools: allowedTools, spawnID: spawnID}, Sink: subtaskSink{events: events, spawnID: spawnID}, UsageSink: a, Hooks: runner.Hooks{CleanToolParams: a.cleanToolParams}}
 }
 
 type subtaskExecutor struct {
@@ -586,7 +591,7 @@ func (a *Agent) availableModelRefs() []string {
 	if a.router == nil {
 		return nil
 	}
-	refs := a.router.ListSpawnableModels()
+	refs := a.router.ListSpawnableModels(a.modelRef)
 	sort.Strings(refs)
 	return refs
 }
@@ -620,10 +625,12 @@ func (a *Agent) guardLLMReview(ctx context.Context, req guard.ReviewRequest) (st
 	if err != nil {
 		return "", err
 	}
-	modelRef := a.router.ActiveRef()
-	modelID := resolveModelID(a.cfg, modelRef)
-	request := &model.CompletionRequest{Model: modelID, Purpose: "guard_review", RequestID: uuid.New().String(), System: "Reply with JSON only.", Messages: []model.Message{model.NewTextMessage(model.RoleUser, reviewPrompt)}, Temperature: model.Float64Ptr(0)}
-	ch, err := a.router.Complete(ctx, modelRef, request)
+	binding := model.BindingFromContext(ctx)
+	if binding == nil {
+		return "", fmt.Errorf("guard review requires model binding")
+	}
+	request := &model.CompletionRequest{Model: binding.ModelID(), Purpose: "guard_review", RequestID: uuid.New().String(), System: "Reply with JSON only.", Messages: []model.Message{model.NewTextMessage(model.RoleUser, reviewPrompt)}, Temperature: model.Float64Ptr(0)}
+	ch, err := binding.Complete(ctx, request)
 	if err != nil {
 		return "", err
 	}

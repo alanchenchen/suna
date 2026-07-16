@@ -185,18 +185,24 @@ func (s *service) handleSendMessage(ctx context.Context, req protocol.Request, s
 	if err := decodeParams(req.Params, &params); err != nil {
 		return nil, invalidParams(err.Error())
 	}
-	if err := s.daemon.sessions.ensureAttached(req.ConnID); err != nil {
+	// 在 RPC 内预留 run，绑定本次请求的 session runtime 与附件根目录；连接随后切换 session 不得改变消息归属。
+	rt, sessionID, err := s.daemon.sessions.beginRun(req.ConnID)
+	if err != nil {
 		return nil, protocolError{code: -32602, message: err.Error(), data: protocol.ProtocolErrorData{Kind: err.Error()}}
 	}
-	input, err := s.agentInputFromParams(ctx, req.ConnID, params)
+	input, err := s.agentInputFromParams(ctx, rt.agent, params)
 	if err != nil {
+		s.daemon.sessions.setStatus(sessionID, sessionIdle)
 		return nil, invalidParams(err.Error())
 	}
 	inputText := input.Text()
 	if inputText == "" && len(input.Blocks) == 0 {
+		s.daemon.sessions.setStatus(sessionID, sessionIdle)
 		return nil, invalidParams("content is required")
 	}
-	go s.runAgent(ctx, req.ConnID, inputText, input, params.Parts, sink)
+	go s.runAgentEvents(ctx, req.ConnID, sessionID, inputText, rt.agent.Run(ctx, input), sink)
+	s.emitUserMessage(ctx, sessionID, req.ConnID, protocol.UserMessageParams{SessionID: sessionID, Parts: params.Parts})
+	s.emitAgentRun(ctx, sessionID, req.ConnID, protocol.AgentRunParams{State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
 	return map[string]string{"status": "processing"}, nil
 }
 
@@ -210,19 +216,15 @@ func (s *service) handleResumeRun(ctx context.Context, req protocol.Request, sin
 	return map[string]string{"status": "processing"}, nil
 }
 
-func (s *service) runAgent(ctx context.Context, connID, inputText string, input agent.Input, parts []protocol.MessagePart, sink protocol.EventSink) {
-	rt, sessionID, err := s.daemon.sessions.beginRun(connID)
-	if err != nil {
-		emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{State: protocol.AgentRunFailed, Message: err.Error()})
-		return
-	}
-	s.emitUserMessage(ctx, sessionID, connID, protocol.UserMessageParams{SessionID: sessionID, Parts: parts})
-	s.emitAgentRun(ctx, sessionID, connID, protocol.AgentRunParams{State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
-	s.runAgentEvents(ctx, connID, sessionID, inputText, rt.agent.Run(ctx, input), sink)
-}
-
 func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, inputLabel string, events <-chan agent.Event, sink protocol.EventSink) {
+	// Agent 只会在状态保存 defer 完成后关闭 events；因此只能在这里把会话转为 idle，
+	// 避免首轮 run 的 done 通知先到、客户端断开后被空会话清理。
+	defer func() {
+		s.daemon.sessions.setStatus(sessionID, sessionIdle)
+		emit(ctx, multiSink(s.daemon.sessions.sinksForSession(s.daemon, sessionID)), protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
+	}()
 	started := time.Now()
+	compactFailed := false
 	logging.Info("agent", "run_start", logging.Event{"conn_id": connID, "input_chars": len(inputLabel)})
 	batcher := &streamBatcher{}
 	ticker := time.NewTicker(streamBatchInterval)
@@ -312,9 +314,9 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, inputLa
 				case agent.StatusCompactError:
 					running := false
 					emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running, Error: evt.Content})
-					s.daemon.sessions.setStatus(sessionID, sessionIdle)
-					// compact 失败已经通过专用通知展示；不要再发送通用错误，避免 TUI 重复报错。
-					return
+					// 压缩错误已有专用通知；仍需继续消费 events，等状态保存完成后再转 idle。
+					compactFailed = true
+					continue
 				case agent.StatusWaitingLLM:
 					s.daemon.sessions.setPhase(sessionID, protocol.AgentRunPhaseModel)
 					s.daemon.sessions.setStatus(sessionID, sessionRunning)
@@ -326,20 +328,31 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, inputLa
 				case agent.StatusLLMRetrying:
 					emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{State: protocol.AgentRunRetrying, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Attempt: evt.Attempt, MaxAttempts: evt.MaxAttempts, DelayMs: evt.DelayMs, Error: protocolModelError(evt.ModelError)})
 				case agent.StatusDone:
-					s.daemon.sessions.setStatus(sessionID, sessionIdle)
 					logging.Info("agent", "run_done", logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()})
 					emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{State: protocol.AgentRunDone})
 					emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
 				default:
 					if evt.Error {
+						if compactFailed {
+							// 压缩失败已由 CompactResult 展示，避免重复的通用模型错误。
+							continue
+						}
 						resumeAvailable := evt.ResumeAvailable
-						logging.Error("agent", "run_failed", fmt.Errorf("%s", evt.Content), logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()})
+						failure := fmt.Errorf("agent run failed")
+						fields := logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()}
+						if evt.RunError != nil {
+							failure = fmt.Errorf("agent run precondition failed: %s", evt.RunError.Kind)
+							fields["run_error_kind"] = evt.RunError.Kind
+							if evt.RunError.ModelRef != "" {
+								fields["model_ref"] = evt.RunError.ModelRef
+							}
+						}
+						logging.Error("agent", "run_failed", failure, fields)
 						state := protocol.AgentRunFailed
 						if evt.ModelError != nil && evt.ModelError.Kind == model.ModelErrorCancelled {
 							state = protocol.AgentRunCancelled
 						}
-						s.daemon.sessions.setStatus(sessionID, sessionIdle)
-						emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{State: state, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Error: protocolModelError(evt.ModelError), ResumeAvailable: resumeAvailable})
+						emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{State: state, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Error: protocolModelError(evt.ModelError), RunError: protocolRunError(evt.RunError), ResumeAvailable: resumeAvailable})
 						emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
 					}
 				}
@@ -646,7 +659,7 @@ func (s *service) buildDaemonStatus(ctx context.Context) protocol.DaemonStatusPa
 		}
 	}
 	if s.daemon.agent != nil {
-		rt := s.daemon.agent.ActiveModelRuntime()
+		rt := s.daemon.agent.DefaultModelRuntime()
 		if params.Provider == "" {
 			params.Provider = rt.Provider
 		}
@@ -753,6 +766,16 @@ func (e protocolError) Data() any {
 
 func invalidParams(message string) protocolError {
 	return protocolError{code: -32602, message: message, data: protocol.ProtocolErrorData{Kind: "invalid_request"}}
+}
+
+func protocolRunError(err *agent.RunError) *protocol.RunError {
+	if err == nil {
+		return nil
+	}
+	return &protocol.RunError{
+		Kind:     protocol.RunErrorKind(err.Kind),
+		ModelRef: err.ModelRef,
+	}
 }
 
 func protocolModelError(err *model.ModelError) *protocol.ModelError {

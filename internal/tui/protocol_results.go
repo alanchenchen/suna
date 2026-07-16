@@ -2,6 +2,7 @@ package tui
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"github.com/alanchenchen/suna/internal/protocol"
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 )
 
@@ -27,6 +28,14 @@ func (t *TUI) handleProtocolResultMsg(msg tea.Msg) tea.Cmd {
 		t.mode = uipage.Chat
 		schedule = true
 		return tea.Batch(t.attachmentStatusCmd(), t.scheduleTranscriptSync(), t.startChatSpinner())
+	case sessionMetadataResultMsg:
+		t.handleSessionStateNotification(protocol.SessionStateParams{Session: m.Session})
+	case sessionTitleUpdateResultMsg:
+		if m.Err != nil {
+			t.restoreOptimisticSessionTitle(m.SessionID, m.OptimisticTitle, m.OldTitle)
+			break
+		}
+		t.handleSessionStateNotification(protocol.SessionStateParams{Session: m.Session})
 	case memoryListResultMsg:
 		t.handleMemoryListNotification(m.Params)
 		schedule = true

@@ -57,6 +57,7 @@ func (t *TUI) maybeAutoTitleSessionCmd(input string) tea.Cmd {
 	if title == "" {
 		return nil
 	}
+	oldTitle := t.currentSession.Title
 	t.currentSession.Title = title
 	for i := range t.sessions {
 		if t.sessions[i].ID == t.currentSession.ID {
@@ -64,7 +65,7 @@ func (t *TUI) maybeAutoTitleSessionCmd(input string) tea.Cmd {
 			break
 		}
 	}
-	return t.updateSessionTitleCmd(t.currentSession.ID, title)
+	return t.updateSessionTitleCmd(t.currentSession.ID, title, oldTitle)
 }
 
 func (t *TUI) resumeAgent() tea.Cmd {

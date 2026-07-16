@@ -10,9 +10,8 @@ import (
 )
 
 type Request struct {
+	Binding       *model.ModelBinding
 	System        string
-	ModelRef      string
-	ModelID       string
 	Purpose       string
 	Working       *memory.WorkingMemory
 	Messages      func(context.Context) []model.Message
@@ -121,7 +120,6 @@ type Hooks struct {
 }
 
 type Runner struct {
-	Router     *model.Router
 	Compressor *memory.Compressor
 	Executor   ToolExecutor
 	Sink       EventSink

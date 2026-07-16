@@ -9,25 +9,11 @@ import (
 	"github.com/alanchenchen/suna/internal/prompt"
 )
 
-type captureCompressProvider struct {
-	request *model.CompletionRequest
-	text    string
-}
-
-func (p *captureCompressProvider) Complete(ctx context.Context, req *model.CompletionRequest) (<-chan model.Chunk, error) {
-	p.request = req
-	ch := make(chan model.Chunk, 1)
-	ch <- model.Chunk{Content: p.text, Done: true}
-	close(ch)
-	return ch, nil
-}
-func (p *captureCompressProvider) EstimateTokens(text string) int { return len(text) / 4 }
-func (p *captureCompressProvider) ContextWindow() int             { return 100000 }
-func (p *captureCompressProvider) MaxOutputTokens() int           { return 8192 }
-
 func TestCompressHistoryBuildsSessionState(t *testing.T) {
-	provider := &captureCompressProvider{text: "# Session State\n\n## Active context\n- continue task"}
-	compressor := NewCompressor(provider)
+	summaryText := "# Session State\n\n## Active context\n- continue task"
+	var requestBody []byte
+	binding := newTestModelBinding(t, summaryText, func(body []byte) { requestBody = body })
+	compressor := NewCompressor()
 	loader, err := prompt.New()
 	if err != nil {
 		t.Fatal(err)
@@ -40,12 +26,12 @@ func TestCompressHistoryBuildsSessionState(t *testing.T) {
 		model.NewTextMessage(model.RoleUser, "不要新增复杂语义，复用现有 compact。"),
 		model.NewTextMessage(model.RoleAssistant, "好的，改为 continuation state。"),
 	}
-	compressed, summary, folded, err := compressor.compressHistoryKeepingState(context.Background(), messages, "", 1, 0)
+	compressed, summary, folded, err := compressor.compressHistoryKeepingState(context.Background(), binding, messages, "", 1, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if summary != provider.text {
-		t.Fatalf("summary = %q, want provider text", summary)
+	if summary != summaryText {
+		t.Fatalf("summary = %q, want %q", summary, summaryText)
 	}
 	if folded != 3 {
 		t.Fatalf("folded = %d, want 3", folded)
@@ -56,7 +42,7 @@ func TestCompressHistoryBuildsSessionState(t *testing.T) {
 	if compressed[0].Text() != "好的，改为 continuation state。" {
 		t.Fatalf("recent message = %q, want latest assistant message", compressed[0].Text())
 	}
-	input := provider.request.Messages[0].Text()
+	input := string(requestBody)
 	for _, want := range []string{"# Session State", "## Completed work / topic ledger", "## User requirements and decisions", "<user_message", "不要新增复杂语义"} {
 		if !strings.Contains(input, want) {
 			t.Fatalf("compress input missing %q:\n%s", want, input)
@@ -65,8 +51,8 @@ func TestCompressHistoryBuildsSessionState(t *testing.T) {
 }
 
 func TestCompressHistoryPreservesToolCallParentForRecentToolResult(t *testing.T) {
-	provider := &captureCompressProvider{text: "# Session State\n\n## Active context\n- compacted"}
-	compressor := NewCompressor(provider)
+	binding := newTestModelBinding(t, "# Session State\n\n## Active context\n- compacted", nil)
+	compressor := NewCompressor()
 	loader, err := prompt.New()
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +64,7 @@ func TestCompressHistoryPreservesToolCallParentForRecentToolResult(t *testing.T)
 		{Role: model.RoleAssistant, ToolCalls: []model.ToolCall{{ID: "call-1", Name: "readfile", Arguments: `{"path":"a"}`}}},
 		{Role: model.RoleTool, ToolCallID: "call-1", TextContent: "result"},
 	}
-	compressed, _, _, err := compressor.compressHistoryKeepingState(context.Background(), messages, "", 1, 400000)
+	compressed, _, _, err := compressor.compressHistoryKeepingState(context.Background(), binding, messages, "", 1, 400000, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,8 +80,8 @@ func TestCompressHistoryPreservesToolCallParentForRecentToolResult(t *testing.T)
 }
 
 func TestCompressHistoryPreservesParallelToolCallParentForRecentToolResult(t *testing.T) {
-	provider := &captureCompressProvider{text: "# Session State\n\n## Active context\n- compacted"}
-	compressor := NewCompressor(provider)
+	binding := newTestModelBinding(t, "# Session State\n\n## Active context\n- compacted", nil)
+	compressor := NewCompressor()
 	loader, err := prompt.New()
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +97,7 @@ func TestCompressHistoryPreservesParallelToolCallParentForRecentToolResult(t *te
 		{Role: model.RoleTool, ToolCallID: "call-a", TextContent: "result a"},
 		{Role: model.RoleTool, ToolCallID: "call-b", TextContent: "result b"},
 	}
-	compressed, _, _, err := compressor.compressHistoryKeepingState(context.Background(), messages, "", 1, 400000)
+	compressed, _, _, err := compressor.compressHistoryKeepingState(context.Background(), binding, messages, "", 1, 400000, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

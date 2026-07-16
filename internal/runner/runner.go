@@ -24,22 +24,24 @@ const (
 
 func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 	var result Result
-	if r.Router == nil {
-		return result, fmt.Errorf("no model configured, please add a model in config")
+	if req.Binding == nil {
+		return result, fmt.Errorf("model binding is required")
+	}
+	modelRef := req.Binding.Ref()
+	if modelRef == "" {
+		return result, fmt.Errorf("model binding ref is required")
+	}
+	modelID := req.Binding.ModelID()
+	if modelID == "" {
+		modelID = modelRef
 	}
 	if req.Working == nil {
 		return result, fmt.Errorf("working memory is required")
 	}
-	if req.ModelRef == "" {
-		return result, fmt.Errorf("model ref is required")
-	}
-	if req.ModelID == "" {
-		req.ModelID = req.ModelRef
-	}
 	if req.Purpose == "" {
 		req.Purpose = "chat"
 	}
-	req.MaxTokens = r.resolveMaxTokens(req.ModelRef, req.MaxTokens)
+	req.MaxTokens = r.resolveMaxTokens(req.Binding, req.MaxTokens)
 	turns := 0
 	toolCallsExecuted := 0
 
@@ -57,13 +59,13 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			messages = req.Messages(ctx)
 		}
 		tools := buildToolDefs(req)
-		contextWindow := r.contextWindow(req.ModelRef)
+		contextWindow := req.Binding.ContextWindow()
 		// 校准系数与校准状态在每轮开始时读取：Observe 会随真实 usage 演进，后续轮次自然用上更准的系数；
 		// calibrated 决定安全垫大小——已校准时收小、未校准或回退时维持厚垫兜底。
-		coef := r.calibrationCoefficient(req.ModelRef)
-		calibrated := r.calibrationReady(req.ModelRef)
+		coef := r.calibrationCoefficient(modelRef)
+		calibrated := r.calibrationReady(modelRef)
 		completionReq := &model.CompletionRequest{
-			Model:        req.ModelID,
+			Model:        modelID,
 			Purpose:      req.Purpose,
 			RequestID:    uuid.New().String(),
 			System:       req.System,
@@ -82,7 +84,7 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			}
 			var compactErr error
 			if needCompact {
-				req.SessionState, compactErr = r.compactForRequest(ctx, req.Working, completionReq, contextWindow, req.SessionState, coef, calibrated)
+				req.SessionState, compactErr = r.compactForRequest(ctx, req.Binding, req.Working, completionReq, contextWindow, req.SessionState, coef, calibrated)
 				completionReq.SessionState = req.SessionState
 				if compactErr == nil && r.Hooks.OnCompactCommit != nil {
 					compactErr = r.Hooks.OnCompactCommit(ctx, req.SessionState)
@@ -105,7 +107,7 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			if shouldCompactRequest(completionReq, contextWindow, coef, calibrated) {
 				estimated := estimateRequestTokens(completionReq, coef)
 				inputLimit := usableInputBudget(contextWindow, completionReq.MaxTokens)
-				logging.Error("memory", "session_compact_still_oversized", nil, logging.Event{"mode": "auto", "purpose": req.Purpose, "model": req.ModelID, "context_window": contextWindow, "request_tokens": estimated, "input_limit": inputLimit, "compacted": needCompact})
+				logging.Error("memory", "session_compact_still_oversized", nil, logging.Event{"mode": "auto", "purpose": req.Purpose, "model": modelID, "context_window": contextWindow, "request_tokens": estimated, "input_limit": inputLimit, "compacted": needCompact})
 				if needCompact && r.Sink != nil {
 					r.Sink.Status(StatusEvent{Kind: StatusCompactError, Message: "automatic context compression could not reduce the request enough; try /compact manually, reduce the current input, or start a new session"})
 				}
@@ -122,7 +124,7 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 		}
 		requestStarted := time.Now()
 		rawEstimatedTokens, estimatedContextTokens := logRequestPrepare(req, completionReq, contextWindow, turns, coef, calibrated)
-		fullContent, toolCalls, usage, err := r.completeWithRecovery(ctx, req.ModelRef, completionReq, req)
+		fullContent, toolCalls, usage, err := r.completeWithRecovery(ctx, req.Binding, completionReq, req)
 		if err != nil {
 			return result, err
 		}
@@ -130,7 +132,7 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			result.Usage = usage
 			// 用真实 input token 回喂校准器；Observe 内部做异常过滤与 EMA 平滑，中转站偏差不会带偏系数。
 			if r.Calibrator != nil && usage.InputTokens > 0 {
-				r.Calibrator.Observe(req.ModelRef, rawEstimatedTokens, usage.InputTokens)
+				r.Calibrator.Observe(modelRef, rawEstimatedTokens, usage.InputTokens)
 			}
 			if r.Sink != nil {
 				contextTokens := usage.TotalTokens
@@ -148,7 +150,7 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 				})
 			}
 			if r.UsageSink != nil {
-				r.UsageSink.RecordUsage(ctx, req.ModelID, usage)
+				r.UsageSink.RecordUsage(ctx, modelID, usage)
 			}
 		}
 
@@ -163,7 +165,7 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 
 		if len(toolCalls) == 0 {
 			result.FinalText = fullContent
-			result.ContextWindow = r.contextWindow(req.ModelRef)
+			result.ContextWindow = req.Binding.ContextWindow()
 			return result, nil
 		}
 
@@ -214,7 +216,8 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 	}
 }
 
-func (r *Runner) completeWithRecovery(ctx context.Context, modelRef string, completionReq *model.CompletionRequest, req Request) (string, []model.ToolCall, *model.Usage, error) {
+func (r *Runner) completeWithRecovery(ctx context.Context, binding *model.ModelBinding, completionReq *model.CompletionRequest, req Request) (string, []model.ToolCall, *model.Usage, error) {
+	modelRef := binding.Ref()
 	streamTimeout := req.StreamTimeout
 	dynamicReasoningTimeout := false
 	if streamTimeout <= 0 {
@@ -223,7 +226,7 @@ func (r *Runner) completeWithRecovery(ctx context.Context, modelRef string, comp
 	}
 	var lastErr error
 	for attempt := 1; attempt <= modelRequestMaxAttempts; attempt++ {
-		ch, err := r.Router.Complete(ctx, modelRef, completionReq)
+		ch, err := binding.Complete(ctx, completionReq)
 		if err != nil {
 			lastErr = err
 		} else {
@@ -460,26 +463,15 @@ func (r *Runner) calibrationReady(modelRef string) bool {
 	return r.Calibrator.Calibrated(modelRef)
 }
 
-func (r *Runner) resolveMaxTokens(modelRef string, requested int) int {
-	if r.Router == nil {
+func (r *Runner) resolveMaxTokens(binding *model.ModelBinding, requested int) int {
+	if binding == nil {
 		return requested
 	}
-	maxOutput := r.Router.MaxOutputTokens(modelRef)
+	maxOutput := binding.MaxOutputTokens()
 	if requested > 0 && requested < maxOutput {
 		return requested
 	}
 	return maxOutput
-}
-
-func (r *Runner) contextWindow(modelRef string) int {
-	if r.Router == nil {
-		return 0
-	}
-	p, err := r.Router.Provider(modelRef)
-	if err != nil || p == nil {
-		return 0
-	}
-	return p.ContextWindow()
 }
 
 func buildToolDefs(req Request) []model.ToolDef {

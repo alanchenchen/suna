@@ -81,21 +81,42 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 }
 
 func (t *TUI) switchModelRef(ref string) tea.Cmd {
-	if !strings.Contains(ref, "/") && t.providerName != "" {
-		ref = t.providerName + "/" + ref
+	if !strings.Contains(ref, "/") {
+		provider := t.providerName
+		if sessionProvider, _, ok := strings.Cut(t.currentSession.ModelRef, "/"); ok && sessionProvider != "" {
+			provider = sessionProvider
+		}
+		if provider != "" {
+			ref = provider + "/" + ref
+		}
 	}
 	if _, ok := t.modelByRef(ref); !ok {
 		t.appendNonToolMessage(chatMsg{Role: "error", Content: t.i18n.Tf("cmd.model_not_found", ref)})
 		return nil
 	}
-	t.setActiveModelRef(ref)
+	if t.currentSession.ID == "" {
+		t.appendNonToolMessage(chatMsg{Role: "error", Content: t.i18n.T("error.not_connected")})
+		return nil
+	}
 	t.chat.ModelPickerOpen = false
-	t.appendNonToolMessage(chatMsg{Role: "system", Content: t.i18n.Tf("cmd.model_switched", ref)})
-	return t.sendConfigSet(protocol.ConfigSetParams{Action: protocol.ConfigActionActivateModel, ActiveModel: ref})
+	return t.updateSessionModelCmd(t.currentSession.ID, ref)
+}
+
+func (t *TUI) updateSessionModelCmd(sessionID, modelRef string) tea.Cmd {
+	return func() tea.Msg {
+		if t.localCli == nil {
+			return ipcErrorNotification(notifyConfigError, errNotConnected(t))
+		}
+		updated, err := t.localCli.UpdateSession(protocol.SessionUpdateParams{SessionID: sessionID, ModelRef: &modelRef})
+		if err != nil {
+			return ipcErrorNotification(notifyConfigError, err)
+		}
+		return sessionSnapshotResultMsg{Params: updated}
+	}
 }
 
 func (t *TUI) openModelPicker() {
-	t.chat.OpenModelPicker(chatpage.ModelRefs(t.configModelsSnapshot()), t.configState.ActiveModel)
+	t.chat.OpenModelPicker(chatpage.ModelRefs(t.configModelsSnapshot()), t.currentSession.ModelRef)
 }
 
 func (t *TUI) updateModelPicker(key string) (tea.Model, tea.Cmd) {

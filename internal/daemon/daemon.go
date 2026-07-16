@@ -65,7 +65,7 @@ func New(cfg *config.Config, transports []protocol.Transport, opts ...Options) (
 		cfg:        cfg,
 		opts:       options,
 		agent:      agent,
-		sessions:   newSessionManager(agent, agent.SessionStore(), agent.SessionStateStore()),
+		sessions:   newSessionManager(agent, agent.SessionStore()),
 		transports: transports,
 		sinks:      make(map[string]protocol.EventSink),
 	}, nil
@@ -107,7 +107,9 @@ func (d *Daemon) run(label string) error {
 		defer tr.Close(ctx)
 	}
 
-	go d.sessions.pruneInactive(ctx, 30*24*time.Hour)
+	if d.sessions != nil {
+		go d.sessions.pruneInactive(ctx, 30*24*time.Hour)
+	}
 
 	// 信号处理
 	sigCh := make(chan os.Signal, 1)
@@ -237,18 +239,4 @@ func (d *Daemon) Agent() *agent.Agent {
 // Uptime 返回运行时长
 func (d *Daemon) Uptime() time.Duration {
 	return time.Since(d.startTime)
-}
-
-func (d *Daemon) ProviderName() string {
-	if mc, ok := d.agent.Config().ActiveModelConfig(); ok {
-		return mc.Provider
-	}
-	return ""
-}
-
-func (d *Daemon) ModelName() string {
-	if mc, ok := d.agent.Config().ActiveModelConfig(); ok {
-		return mc.Model
-	}
-	return ""
 }

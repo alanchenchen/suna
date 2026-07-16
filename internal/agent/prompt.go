@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/prompt"
@@ -72,14 +71,14 @@ func (a *Agent) activeModelSummary() string {
 	if a.router == nil {
 		return "none configured"
 	}
-	return a.router.ActiveRef()
+	return a.modelRef
 }
 
 func (a *Agent) modelRoutingSummary() string {
 	if a.router == nil {
 		return "- No models configured. Configure a model before using spawn."
 	}
-	refs := a.router.ListSpawnableModels()
+	refs := a.router.ListSpawnableModels(a.modelRef)
 	sort.Strings(refs)
 	if len(refs) == 0 {
 		return "- No models configured. Configure a model before using spawn."
@@ -129,16 +128,6 @@ func getEnvInfoForWorkDir(wd string) map[string]string {
 		wd, _ = os.Getwd()
 	}
 	return map[string]string{"OS": runtime.GOOS, "Arch": runtime.GOARCH, "WorkDir": wd}
-}
-
-func resolveModelID(cfg *config.Config, modelName string) string {
-	if mc, ok := cfg.ModelByRef(modelName); ok {
-		return mc.Model
-	}
-	if mc, ok := cfg.ActiveModelConfig(); ok {
-		return mc.Model
-	}
-	return modelName
 }
 
 func formatContextWindow(n int) string {

@@ -3,8 +3,6 @@ package daemon
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -12,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/alanchenchen/suna/internal/agent"
+	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/protocol"
 )
@@ -41,17 +40,20 @@ type sessionRuntime struct {
 }
 
 type sessionManager struct {
-	root     *agent.Agent
-	store    *memory.SessionStore
-	states   *memory.SessionStateStore
-	mu       sync.RWMutex
-	runtime  map[string]*sessionRuntime
-	attached map[string]string
-	deleting map[string]bool
+	root                  *agent.Agent
+	store                 *memory.SessionStore
+	mu                    sync.RWMutex
+	legacyModelMu         sync.Mutex
+	runtime               map[string]*sessionRuntime
+	attached              map[string]string
+	creating              map[string]string
+	deleting              map[string]bool
+	deleteVersion         map[string]uint64
+	beforeAttachStateLoad func()
 }
 
-func newSessionManager(root *agent.Agent, store *memory.SessionStore, states *memory.SessionStateStore) *sessionManager {
-	return &sessionManager{root: root, store: store, states: states, runtime: map[string]*sessionRuntime{}, attached: map[string]string{}, deleting: map[string]bool{}}
+func newSessionManager(root *agent.Agent, store *memory.SessionStore) *sessionManager {
+	return &sessionManager{root: root, store: store, runtime: map[string]*sessionRuntime{}, attached: map[string]string{}, creating: map[string]string{}, deleting: map[string]bool{}, deleteVersion: map[string]uint64{}}
 }
 
 func (m *sessionManager) list(ctx context.Context, activeOnly bool) ([]protocol.SessionInfo, error) {
@@ -80,16 +82,62 @@ func (m *sessionManager) sessionInfo(ctx context.Context, sessionID string) (pro
 }
 
 func (m *sessionManager) create(ctx context.Context, connID, cwd, title string) (protocol.SessionSnapshot, error) {
-	id := uuid.New().String()
-	cwd = canonicalCWD(cwd)
-	meta := memory.SessionMeta{ID: id, Title: title, CWD: cwd, CreatedAt: time.Now(), UpdatedAt: time.Now()}
-	if err := m.store.Create(ctx, meta); err != nil {
+	// 新会话必须先绑定当前默认模型，再写入 sessions；否则失败时不能留下无法运行的孤立记录。
+	cfg := m.root.Config()
+	if cfg == nil {
+		return protocol.SessionSnapshot{}, fmt.Errorf("no default model configured")
+	}
+	modelRef := strings.TrimSpace(cfg.ActiveModel)
+	if modelRef == "" {
+		return protocol.SessionSnapshot{}, fmt.Errorf("no default model configured")
+	}
+	if _, err := m.root.BindModel(modelRef); err != nil {
 		return protocol.SessionSnapshot{}, err
 	}
-	return m.attach(ctx, connID, id, false)
+
+	id := uuid.New().String()
+	cwd = canonicalCWD(cwd)
+	meta := memory.SessionMeta{ID: id, Title: title, CWD: cwd, ModelRef: modelRef, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	// 创建门闩必须先于持久化记录建立，避免其他客户端在记录刚落库时 attach 半成品会话。
+	m.mu.Lock()
+	m.creating[id] = connID
+	m.mu.Unlock()
+	if err := m.store.Create(ctx, meta); err != nil {
+		m.mu.Lock()
+		delete(m.creating, id)
+		m.mu.Unlock()
+		return protocol.SessionSnapshot{}, err
+	}
+	snapshot, err := m.attach(ctx, connID, id, false)
+	if err == nil {
+		return snapshot, nil
+	}
+	// create 对调用方是原子语义：首次 attach 或状态加载失败时，不能留下无法使用的新会话。
+	m.mu.Lock()
+	delete(m.creating, id)
+	m.deleting[id] = true
+	m.mu.Unlock()
+	if cleanupErr := m.deletePersistedSession(context.Background(), id); cleanupErr != nil {
+		logging.Error("session", "cleanup_failed_create", cleanupErr, logging.Event{"session_id": id})
+	} else {
+		m.mu.Lock()
+		m.deleteVersion[id]++
+		delete(m.runtime, id)
+		m.mu.Unlock()
+		m.removeSessionAttachments(id)
+	}
+	m.mu.Lock()
+	delete(m.deleting, id)
+	m.mu.Unlock()
+	return protocol.SessionSnapshot{}, err
 }
 
 func (m *sessionManager) attach(ctx context.Context, connID, sessionID string, requireActive bool) (protocol.SessionSnapshot, error) {
+	// 在读取持久化元数据前捕获删除代际；后续锁内校验确保读取期间完成的删除
+	// 不会让陈旧 meta 重建 runtime。
+	m.mu.RLock()
+	deleteVersion := m.deleteVersion[sessionID]
+	m.mu.RUnlock()
 	meta, err := m.store.Get(ctx, sessionID)
 	if err != nil {
 		return protocol.SessionSnapshot{}, err
@@ -97,22 +145,76 @@ func (m *sessionManager) attach(ctx context.Context, connID, sessionID string, r
 	if meta == nil {
 		return protocol.SessionSnapshot{}, fmt.Errorf("session not found")
 	}
-	m.mu.RLock()
-	deleting := m.deleting[sessionID]
-	m.mu.RUnlock()
-	if deleting {
-		return protocol.SessionSnapshot{}, fmt.Errorf("session is being deleted")
+	if strings.TrimSpace(meta.ModelRef) == "" {
+		meta, err = m.materializeLegacyModelRef(ctx, sessionID)
+		if err != nil {
+			return protocol.SessionSnapshot{}, err
+		}
 	}
-	rt := m.ensureRuntimeLocked(meta)
-	loadState := false
+
+	// 附着关系只在状态读取成功后提交。这样 create 的内部读取失败时，原有附着不被替换，
+	// 新会话随后删除也不会让连接指向已经移除的 runtime。
 	m.mu.Lock()
-	if m.deleting[sessionID] {
+	creatingOwner := m.creating[sessionID]
+	if creatingOwner != "" && creatingOwner != connID {
 		m.mu.Unlock()
-		return protocol.SessionSnapshot{}, fmt.Errorf("session is being deleted")
+		return protocol.SessionSnapshot{}, fmt.Errorf("session is being created")
+	}
+	if m.deleting[sessionID] || m.deleteVersion[sessionID] != deleteVersion {
+		m.mu.Unlock()
+		return protocol.SessionSnapshot{}, fmt.Errorf("session not found")
+	}
+	rt := m.ensureRuntimeNoLock(meta)
+	if rt == nil {
+		m.mu.Unlock()
+		return protocol.SessionSnapshot{}, fmt.Errorf("session model is not configured")
 	}
 	if requireActive && len(rt.clients) == 0 && rt.status == sessionIdle {
 		m.mu.Unlock()
 		return protocol.SessionSnapshot{}, fmt.Errorf("session is no longer active")
+	}
+	// 即使只读取 active 会话快照，也保留 runtime，避免读取和提交附着之间被删除。
+	rt.stateOps++
+	loadState := rt.status == sessionIdle
+	m.mu.Unlock()
+
+	if m.beforeAttachStateLoad != nil {
+		m.beforeAttachStateLoad()
+	}
+	var snap agent.SessionSnapshot
+	if loadState {
+		rt.stateMu.Lock()
+		snap, err = rt.agent.LoadSessionState(ctx)
+		rt.stateMu.Unlock()
+	} else {
+		snap, err = rt.agent.SnapshotState(ctx)
+	}
+	if err != nil {
+		m.finishStateOp(sessionID)
+		return protocol.SessionSnapshot{}, err
+	}
+
+	m.mu.Lock()
+	if m.deleting[sessionID] || m.deleteVersion[sessionID] != deleteVersion || m.runtime[sessionID] != rt {
+		if rt.stateOps > 0 {
+			rt.stateOps--
+		}
+		m.mu.Unlock()
+		return protocol.SessionSnapshot{}, fmt.Errorf("session not found")
+	}
+	if requireActive && len(rt.clients) == 0 && rt.status == sessionIdle {
+		if rt.stateOps > 0 {
+			rt.stateOps--
+		}
+		m.mu.Unlock()
+		return protocol.SessionSnapshot{}, fmt.Errorf("session is no longer active")
+	}
+	if creatingOwner := m.creating[sessionID]; creatingOwner != "" && creatingOwner != connID {
+		if rt.stateOps > 0 {
+			rt.stateOps--
+		}
+		m.mu.Unlock()
+		return protocol.SessionSnapshot{}, fmt.Errorf("session is being created")
 	}
 	var oldID string
 	var oldMaybeDelete bool
@@ -122,33 +224,61 @@ func (m *sessionManager) attach(ctx context.Context, connID, sessionID string, r
 	}
 	rt.clients[connID] = true
 	m.attached[connID] = sessionID
-	active := rt.status != sessionIdle
-	if !active {
-		// idle attach 会重载会话快照；必须阻塞 beginRun，避免刚开始 run 就被清空 working memory。
-		rt.stateOps++
-		loadState = true
+	delete(m.creating, sessionID)
+	if rt.stateOps > 0 {
+		rt.stateOps--
 	}
 	m.mu.Unlock()
+
 	if oldID != "" && oldMaybeDelete {
 		if oldMeta, err := m.store.Get(context.Background(), oldID); err == nil && oldMeta != nil && oldMeta.MessageCount == 0 {
 			m.deleteInactive(context.Background(), oldID)
 		}
 	}
 	_ = m.store.TouchAttached(ctx, sessionID)
-	var snap agent.SessionSnapshot
-	if loadState {
-		rt.stateMu.Lock()
-		snap, err = rt.agent.LoadSessionState(ctx)
-		rt.stateMu.Unlock()
-		m.finishStateOp(sessionID)
-	} else {
-		snap, err = rt.agent.SnapshotState(ctx)
-	}
-	if err != nil {
-		m.detach(connID)
-		return protocol.SessionSnapshot{}, err
-	}
 	return m.snapshotForConn(connID, *meta, rt, snap), nil
+}
+
+// materializeLegacyModelRef 将升级前没有模型选择的 session 迁移为显式选择。
+// 该路径只会在每个旧会话的首次 attach 命中，独立互斥避免阻塞正常 session 生命周期。
+func (m *sessionManager) materializeLegacyModelRef(ctx context.Context, sessionID string) (*memory.SessionMeta, error) {
+	m.legacyModelMu.Lock()
+	defer m.legacyModelMu.Unlock()
+
+	meta, err := m.store.Get(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if meta == nil {
+		return nil, fmt.Errorf("session not found")
+	}
+	if strings.TrimSpace(meta.ModelRef) != "" {
+		return meta, nil
+	}
+	cfg := m.root.Config()
+	if cfg == nil || strings.TrimSpace(cfg.ActiveModel) == "" {
+		return nil, fmt.Errorf("no default model configured")
+	}
+	modelRef := strings.TrimSpace(cfg.ActiveModel)
+	if _, err := m.root.BindModel(modelRef); err != nil {
+		return nil, err
+	}
+	materialized, err := m.store.MaterializeModelRefIfEmpty(ctx, meta.ID, modelRef)
+	if err != nil {
+		return nil, err
+	}
+	if materialized {
+		meta.ModelRef = modelRef
+		return meta, nil
+	}
+	meta, err = m.store.Get(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if meta == nil || strings.TrimSpace(meta.ModelRef) == "" {
+		return nil, fmt.Errorf("session model is not configured")
+	}
+	return meta, nil
 }
 
 func (m *sessionManager) detach(connID string) string {
@@ -244,135 +374,90 @@ func (m *sessionManager) setRunOwner(sessionID, connID string) bool {
 
 func (m *sessionManager) update(ctx context.Context, connID string, params protocol.SessionUpdateParams) (protocol.SessionSnapshot, error) {
 	updateTitle := params.Title != nil
+	updateModelRef := params.ModelRef != nil
 	title := ""
-	if params.Title != nil {
+	modelRef := ""
+	if updateTitle {
 		title = *params.Title
 	}
-	m.mu.Lock()
+	if updateModelRef {
+		modelRef = strings.TrimSpace(*params.ModelRef)
+	}
+
+	m.mu.RLock()
 	rt := m.runtime[params.SessionID]
 	attached := m.attached[connID] == params.SessionID
 	busy := rt != nil && (rt.status != sessionIdle || rt.stateOps > 0)
-	if attached && !busy && rt != nil {
-		rt.stateOps++
-	}
-	m.mu.Unlock()
+	m.mu.RUnlock()
 	if !attached {
 		return protocol.SessionSnapshot{}, fmt.Errorf("session_required")
+	}
+	if rt == nil {
+		return protocol.SessionSnapshot{}, fmt.Errorf("session not loaded")
+	}
+
+	// 纯标题更新不读取或重载 working state，运行期间也可安全执行，避免自动命名与首条消息争抢状态操作。
+	// 请求在上方确认连接已附着目标会话后即被受理；其后的 detach 不撤销已受理的元数据写入。
+	if updateTitle && !updateModelRef {
+		if err := m.store.UpdateMetadata(ctx, params.SessionID, title, true, "", false); err != nil {
+			return protocol.SessionSnapshot{}, err
+		}
+		meta, err := m.store.Get(ctx, params.SessionID)
+		if err != nil {
+			return protocol.SessionSnapshot{}, err
+		}
+		if meta == nil {
+			return protocol.SessionSnapshot{}, fmt.Errorf("session not found")
+		}
+		return protocol.SessionSnapshot{Session: m.infoFor(*meta)}, nil
 	}
 	if busy {
 		return protocol.SessionSnapshot{}, fmt.Errorf("session_busy")
 	}
-	if updateTitle {
-		if err := m.store.UpdateTitle(ctx, params.SessionID, title); err != nil {
-			if rt != nil {
-				m.finishStateOp(params.SessionID)
-			}
+	m.mu.Lock()
+	if current := m.runtime[params.SessionID]; current != rt || m.attached[connID] != params.SessionID || rt.status != sessionIdle || rt.stateOps > 0 {
+		m.mu.Unlock()
+		return protocol.SessionSnapshot{}, fmt.Errorf("session_busy")
+	}
+	rt.stateOps++
+	m.mu.Unlock()
+	defer m.finishStateOp(params.SessionID)
+
+	// 同时修改标题和模型时，先完成模型绑定校验，避免标题先落库而模型被拒绝。
+	if updateModelRef {
+		if modelRef == "" {
+			return protocol.SessionSnapshot{}, fmt.Errorf("model_ref is required")
+		}
+		if _, err := m.root.BindModel(modelRef); err != nil {
 			return protocol.SessionSnapshot{}, err
 		}
 	}
+	// 所有可失败读取都在提交前完成，避免更新已生效却因返回快照读取失败而向调用方报告错误。
 	meta, err := m.store.Get(ctx, params.SessionID)
 	if err != nil {
-		if rt != nil {
-			m.finishStateOp(params.SessionID)
-		}
 		return protocol.SessionSnapshot{}, err
 	}
 	if meta == nil {
-		if rt != nil {
-			m.finishStateOp(params.SessionID)
-		}
 		return protocol.SessionSnapshot{}, fmt.Errorf("session not found")
 	}
-	if rt == nil {
-		m.mu.Lock()
-		rt = m.ensureRuntimeNoLock(meta)
-		rt.stateOps++
-		m.mu.Unlock()
-	}
 	rt.stateMu.Lock()
-	snap, err := rt.agent.LoadSessionState(ctx)
+	snap, err := rt.agent.SnapshotState(ctx)
 	rt.stateMu.Unlock()
-	m.finishStateOp(params.SessionID)
 	if err != nil {
 		return protocol.SessionSnapshot{}, err
 	}
+	// 单一事务提交所有元数据；成功后才切换运行时 Agent 的模型引用。
+	if err := m.store.UpdateMetadata(ctx, params.SessionID, title, updateTitle, modelRef, updateModelRef); err != nil {
+		return protocol.SessionSnapshot{}, err
+	}
+	if updateTitle {
+		meta.Title = strings.TrimSpace(title)
+	}
+	if updateModelRef {
+		meta.ModelRef = modelRef
+		rt.agent.SetModelRef(modelRef)
+	}
 	return m.snapshotForConn(connID, *meta, rt, snap), nil
-}
-
-func (m *sessionManager) delete(ctx context.Context, connID, sessionID string) error {
-	if strings.TrimSpace(sessionID) == "" {
-		return fmt.Errorf("session_required")
-	}
-	m.mu.Lock()
-	currentID := m.attached[connID]
-	if currentID == sessionID {
-		m.mu.Unlock()
-		return fmt.Errorf("cannot delete current session")
-	}
-	rt := m.runtime[sessionID]
-	clientCount := 0
-	status := sessionIdle
-	stateOps := 0
-	if rt != nil {
-		clientCount = len(rt.clients)
-		status = rt.status
-		stateOps = rt.stateOps
-	}
-	deleteInProgress := m.deleting[sessionID]
-	canDelete := status == sessionIdle && stateOps == 0 && clientCount == 0 && !deleteInProgress
-	if canDelete {
-		m.deleting[sessionID] = true
-	}
-	if canDelete && rt != nil {
-		rt.stateOps++
-	}
-	m.mu.Unlock()
-	if canDelete {
-		defer func() {
-			m.mu.Lock()
-			delete(m.deleting, sessionID)
-			m.mu.Unlock()
-		}()
-	}
-	if deleteInProgress {
-		return fmt.Errorf("session is busy")
-	}
-	if status != sessionIdle || stateOps > 0 {
-		return fmt.Errorf("session is busy")
-	}
-	if clientCount > 0 {
-		return fmt.Errorf("session has attached clients")
-	}
-	meta, err := m.store.Get(ctx, sessionID)
-	if err != nil {
-		if rt != nil {
-			m.finishStateOp(sessionID)
-		}
-		return err
-	}
-	if meta == nil {
-		if rt != nil {
-			m.finishStateOp(sessionID)
-		}
-		return fmt.Errorf("session not found")
-	}
-	if err := m.states.Delete(ctx, sessionID); err != nil {
-		if rt != nil {
-			m.finishStateOp(sessionID)
-		}
-		return err
-	}
-	if err := m.store.Delete(ctx, sessionID); err != nil {
-		if rt != nil {
-			m.finishStateOp(sessionID)
-		}
-		return err
-	}
-	_ = os.RemoveAll(filepath.Join(m.root.Config().AttachmentsDir(), sessionID))
-	m.mu.Lock()
-	delete(m.runtime, sessionID)
-	m.mu.Unlock()
-	return nil
 }
 
 func (m *sessionManager) ensureAttached(connID string) error {
@@ -486,17 +571,13 @@ func (m *sessionManager) appendReasoning(sessionID, content string) {
 	}
 }
 
-func (m *sessionManager) ensureRuntimeLocked(meta *memory.SessionMeta) *sessionRuntime {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.ensureRuntimeNoLock(meta)
-}
-
 func (m *sessionManager) ensureRuntimeNoLock(meta *memory.SessionMeta) *sessionRuntime {
 	if rt := m.runtime[meta.ID]; rt != nil {
 		return rt
 	}
-	rt := &sessionRuntime{stateMu: &sync.Mutex{}, agent: m.root.NewSessionAgent(meta.ID, meta.CWD), status: sessionIdle, clients: map[string]bool{}}
+	// 旧会话可能因 schema 升级保留空 model_ref；不得在 attach 时回退到全局默认模型，
+	// 否则修改新会话默认值会静默改变历史会话。用户需显式选择模型后再运行。
+	rt := &sessionRuntime{stateMu: &sync.Mutex{}, agent: m.root.NewSessionAgent(meta.ID, meta.CWD, meta.ModelRef), status: sessionIdle, clients: map[string]bool{}}
 	m.runtime[meta.ID] = rt
 	return rt
 }
@@ -511,7 +592,7 @@ func (m *sessionManager) infoFor(meta memory.SessionMeta) protocol.SessionInfo {
 		status = rt.status
 	}
 	m.mu.RUnlock()
-	return protocol.SessionInfo{ID: meta.ID, Title: meta.Title, CWD: meta.CWD, MessageCount: meta.MessageCount, CreatedAt: formatTime(meta.CreatedAt), UpdatedAt: formatTime(meta.UpdatedAt), LastAttachedAt: formatTime(meta.LastAttachedAt), Status: protocol.SessionStatus(status), ClientCount: clientCount}
+	return protocol.SessionInfo{ID: meta.ID, Title: meta.Title, CWD: meta.CWD, ModelRef: meta.ModelRef, MessageCount: meta.MessageCount, CreatedAt: formatTime(meta.CreatedAt), UpdatedAt: formatTime(meta.UpdatedAt), LastAttachedAt: formatTime(meta.LastAttachedAt), Status: protocol.SessionStatus(status), ClientCount: clientCount}
 }
 
 func (m *sessionManager) snapshotForConn(connID string, meta memory.SessionMeta, rt *sessionRuntime, snap agent.SessionSnapshot) protocol.SessionSnapshot {
@@ -547,72 +628,4 @@ func (m *sessionManager) cancelAllRuns() {
 	for _, ag := range agents {
 		ag.CancelCurrentRun()
 	}
-}
-
-func (m *sessionManager) pruneInactive(ctx context.Context, age time.Duration) {
-	if m == nil || m.store == nil || age <= 0 {
-		return
-	}
-	items, err := m.store.List(ctx)
-	if err != nil {
-		return
-	}
-	cutoff := time.Now().Add(-age)
-	for _, item := range items {
-		if item.MessageCount <= 0 {
-			m.deleteInactive(ctx, item.ID)
-			continue
-		}
-		if item.UpdatedAt.IsZero() || item.UpdatedAt.After(cutoff) {
-			continue
-		}
-		m.deleteInactive(ctx, item.ID)
-	}
-}
-
-func (m *sessionManager) deleteInactive(ctx context.Context, sessionID string) {
-	m.mu.Lock()
-	if m.deleting[sessionID] {
-		m.mu.Unlock()
-		return
-	}
-	rt := m.runtime[sessionID]
-	active := rt != nil && (len(rt.clients) > 0 || rt.status != sessionIdle || rt.stateOps > 0)
-	if active {
-		m.mu.Unlock()
-		return
-	}
-	// prune 与 attach 共用 deleting 标记，避免后台清理删除正在 attach 的 session 存储。
-	m.deleting[sessionID] = true
-	m.mu.Unlock()
-	defer func() {
-		m.mu.Lock()
-		delete(m.deleting, sessionID)
-		delete(m.runtime, sessionID)
-		m.mu.Unlock()
-	}()
-	_ = m.states.Delete(ctx, sessionID)
-	_ = m.store.Delete(ctx, sessionID)
-	_ = os.RemoveAll(filepath.Join(m.root.Config().AttachmentsDir(), sessionID))
-}
-
-func canonicalCWD(cwd string) string {
-	cwd = strings.TrimSpace(cwd)
-	if cwd == "" {
-		cwd, _ = os.Getwd()
-	}
-	if abs, err := filepath.Abs(cwd); err == nil {
-		cwd = abs
-	}
-	if real, err := filepath.EvalSymlinks(cwd); err == nil {
-		cwd = real
-	}
-	return cwd
-}
-
-func formatTime(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.Format(time.RFC3339)
 }

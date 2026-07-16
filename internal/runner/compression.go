@@ -14,8 +14,8 @@ import (
 
 const minContextMarginTokens = 2048
 
-func (r *Runner) Compact(ctx context.Context, working *memory.WorkingMemory, sessionState string, contextWindow, outputBudget int) (before, after, turnsCompressed, truncated int, newSessionState string, err error) {
-	if r.Compressor == nil || working == nil {
+func (r *Runner) Compact(ctx context.Context, binding *model.ModelBinding, working *memory.WorkingMemory, sessionState string) (before, after, turnsCompressed, truncated int, newSessionState string, err error) {
+	if r.Compressor == nil || working == nil || binding == nil {
 		return 0, 0, 0, 0, "", fmt.Errorf("compressor not initialized")
 	}
 	msgs := working.Messages()
@@ -23,8 +23,10 @@ func (r *Runner) Compact(ctx context.Context, working *memory.WorkingMemory, ses
 	if len(msgs) <= 1 {
 		return before, before, 0, 0, sessionState, nil
 	}
+	contextWindow := binding.ContextWindow()
+	outputBudget := binding.MaxOutputTokens()
 	recentBudget := manualCompactRecentBudget(contextWindow, outputBudget)
-	compressed, state, folded, compErr := r.Compressor.CompressHistoryWithStateBudget(ctx, msgs, sessionState, contextWindow, recentBudget)
+	compressed, state, folded, compErr := r.Compressor.CompressHistoryWithStateBudget(ctx, binding, msgs, sessionState, contextWindow, outputBudget, recentBudget)
 	if compErr != nil {
 		return 0, 0, 0, 0, "", compErr
 	}
@@ -38,7 +40,7 @@ func (r *Runner) Compact(ctx context.Context, working *memory.WorkingMemory, ses
 	return before, after, turnsCompressed, truncated, state, nil
 }
 
-func (r *Runner) compactForRequest(ctx context.Context, working *memory.WorkingMemory, req *model.CompletionRequest, contextWindow int, sessionState string, coef float64, calibrated bool) (string, error) {
+func (r *Runner) compactForRequest(ctx context.Context, binding *model.ModelBinding, working *memory.WorkingMemory, req *model.CompletionRequest, contextWindow int, sessionState string, coef float64, calibrated bool) (string, error) {
 	if r.Compressor == nil || working == nil {
 		return sessionState, nil
 	}
@@ -51,7 +53,7 @@ func (r *Runner) compactForRequest(ctx context.Context, working *memory.WorkingM
 	requestTokens := estimateRequestTokens(req, coef)
 	logging.Info("memory", "session_compact_start", logging.Event{"mode": "auto", "purpose": req.Purpose, "model": req.Model, "context_window": contextWindow, "before_tokens": before, "request_tokens": requestTokens, "messages": len(msgs)})
 	recentBudget := compactRecentBudget(req, contextWindow, coef, calibrated)
-	compressed, state, folded, err := r.Compressor.CompressHistoryWithStateBudget(ctx, msgs, sessionState, contextWindow, recentBudget)
+	compressed, state, folded, err := r.Compressor.CompressHistoryWithStateBudget(ctx, binding, msgs, sessionState, contextWindow, req.MaxTokens, recentBudget)
 	if err != nil {
 		logging.Error("memory", "session_compact_failed", err, logging.Event{"mode": "auto", "purpose": req.Purpose, "model": req.Model, "context_window": contextWindow, "before_tokens": before, "request_tokens": requestTokens, "duration_ms": time.Since(started).Milliseconds()})
 		return sessionState, err

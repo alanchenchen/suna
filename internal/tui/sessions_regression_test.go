@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -14,7 +15,7 @@ import (
 func TestWelcomeUsesActiveSessionPicker(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24, ready: true, providerName: "test", modelName: "model"}
 	tui.sessions = []protocol.SessionInfo{
-		{ID: "active-1", CWD: "/tmp/a", Status: protocol.SessionStatusRunning},
+		{ID: "active-1", Title: "Fix welcome picker", CWD: "/tmp/a", Status: protocol.SessionStatusRunning},
 		{ID: "active-2", CWD: "/tmp/b", ClientCount: 1, Status: protocol.SessionStatusIdle},
 	}
 
@@ -48,6 +49,33 @@ func TestWelcomeUsesActiveSessionPicker(t *testing.T) {
 	}
 	if joinItems != 2 || !seen["active-1"] || !seen["active-2"] {
 		t.Fatalf("picker join items = %d seen=%v, want both active sessions", joinItems, seen)
+	}
+	for _, item := range items {
+		if item.SessionID == "active-1" && (item.Key != "Fix welcome picker" || item.CWD != "/tmp/a") {
+			t.Fatalf("active picker item = %+v, want friendly title and cwd", item)
+		}
+	}
+}
+
+func TestWelcomeInfoUsesConfiguredDefaultNotCurrentSession(t *testing.T) {
+	tui := &TUI{
+		i18n:           newTranslator(LocaleEN),
+		currentSession: protocol.SessionInfo{ID: "session-1", ModelRef: "session/session-model"},
+		configState: protocol.ConfigParams{
+			ActiveModel: "default/default-model",
+			Models: []protocol.ConfigModel{
+				{Provider: "default", Model: "default-model"},
+				{Provider: "session", Model: "session-model"},
+			},
+		},
+	}
+
+	info := stripANSIForTest(tui.renderWelcomeInfo())
+	if !strings.Contains(info, "default/default-model") {
+		t.Fatalf("welcome info = %q, want configured default model", info)
+	}
+	if strings.Contains(info, "session/session-model") {
+		t.Fatalf("welcome info = %q, must not show current session model", info)
 	}
 }
 

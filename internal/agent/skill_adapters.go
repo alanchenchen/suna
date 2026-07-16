@@ -40,10 +40,14 @@ func (agentSkillReviewer) ReviewSkill(ctx context.Context, req skill.LLMReviewRe
 		emitSkillReviewEvent(ctx, req.Name, "error", "", err.Error())
 		return "", err
 	}
-	modelRef := ag.router.ActiveRef()
-	modelID := resolveModelID(ag.cfg, modelRef)
-	request := &model.CompletionRequest{Model: modelID, Purpose: "skill_review", RequestID: uuid.New().String(), System: "You are reviewing an Agent Skill. Be concise, practical, and safety-focused.", Messages: []model.Message{model.NewTextMessage(model.RoleUser, reviewPrompt)}, Temperature: model.Float64Ptr(0)}
-	ch, err := ag.router.Complete(ctx, modelRef, request)
+	binding := model.BindingFromContext(ctx)
+	if binding == nil {
+		err := fmt.Errorf("skill review requires model binding")
+		emitSkillReviewEvent(ctx, req.Name, "error", "", err.Error())
+		return "", err
+	}
+	request := &model.CompletionRequest{Model: binding.ModelID(), Purpose: "skill_review", RequestID: uuid.New().String(), System: "You are reviewing an Agent Skill. Be concise, practical, and safety-focused.", Messages: []model.Message{model.NewTextMessage(model.RoleUser, reviewPrompt)}, Temperature: model.Float64Ptr(0)}
+	ch, err := binding.Complete(ctx, request)
 	if err != nil {
 		emitSkillReviewEvent(ctx, req.Name, "error", "", err.Error())
 		return "", err

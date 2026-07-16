@@ -1,7 +1,8 @@
 package agent
 
 import (
-	"context"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,6 +13,85 @@ import (
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/protocol"
 )
+
+func TestUpdateConfigEditingModelToDifferentProviderUsesOnlyNewProviderCredential(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini")}, "openai/gpt-4o-mini")
+	mustSaveCredential(t, dir, "openai", "sk-openai")
+	mustSaveCredential(t, dir, "anthropic", "sk-anthropic")
+	a := &Agent{cfg: cfg}
+
+	updated, err := a.UpdateConfig(ConfigSetParams{
+		Action:   protocol.ConfigActionUpsertModel,
+		ModelRef: "openai/gpt-4o-mini",
+		Model: ConfigModel{
+			Provider:        "anthropic",
+			Protocol:        config.ModelProtocolAnthropic,
+			Model:           "claude-sonnet-4",
+			BaseURL:         "https://api.anthropic.com",
+			ContextWindow:   200000,
+			MaxOutputTokens: 8192,
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfig() error = %v", err)
+	}
+	if got, want := updated.Models[0].APIKey, "sk-anthropic"; got != want {
+		t.Fatalf("updated model API key = %q, want new provider credential %q", got, want)
+	}
+	if got := loadModelCredential(t, dir, "anthropic", "claude-sonnet-4"); got != "sk-anthropic" {
+		t.Fatalf("reloaded model API key = %q, want scoped anthropic credential", got)
+	}
+}
+
+func TestUpdateConfigEditingModelToProviderWithoutCredentialFails(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini")}, "openai/gpt-4o-mini")
+	mustSaveCredential(t, dir, "openai", "sk-openai")
+	a := &Agent{cfg: cfg}
+
+	_, err := a.UpdateConfig(ConfigSetParams{
+		Action:   protocol.ConfigActionUpsertModel,
+		ModelRef: "openai/gpt-4o-mini",
+		Model: ConfigModel{
+			Provider:        "anthropic",
+			Protocol:        config.ModelProtocolAnthropic,
+			Model:           "claude-sonnet-4",
+			BaseURL:         "https://api.anthropic.com",
+			ContextWindow:   200000,
+			MaxOutputTokens: 8192,
+		},
+	})
+	if err == nil {
+		t.Fatal("UpdateConfig() error = nil, want missing new provider credential error")
+	}
+	if !strings.Contains(err.Error(), "missing api_key") {
+		t.Fatalf("UpdateConfig() error = %v, want missing API key error", err)
+	}
+}
+
+func TestUpdateConfigDeleteActiveModelSelectsFirstRemainingOrClearsDefault(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini"), openAIModel("gpt-4o")}, "openai/gpt-4o-mini")
+	mustSaveCredential(t, dir, "openai", "sk-openai")
+	a := &Agent{cfg: cfg}
+
+	updated, err := a.UpdateConfig(ConfigSetParams{Action: protocol.ConfigActionDeleteModel, ModelRef: "openai/gpt-4o-mini"})
+	if err != nil {
+		t.Fatalf("UpdateConfig() deleting active model: %v", err)
+	}
+	if got, want := updated.ActiveModel, "openai/gpt-4o"; got != want {
+		t.Fatalf("ActiveModel after deleting active model = %q, want first remaining model %q", got, want)
+	}
+
+	updated, err = a.UpdateConfig(ConfigSetParams{Action: protocol.ConfigActionDeleteModel, ModelRef: "openai/gpt-4o"})
+	if err != nil {
+		t.Fatalf("UpdateConfig() deleting last model: %v", err)
+	}
+	if got := updated.ActiveModel; got != "" {
+		t.Fatalf("ActiveModel after deleting last model = %q, want empty", got)
+	}
+}
 
 func TestUpdateConfigDeleteModelKeepsCredentialByDefault(t *testing.T) {
 	dir := t.TempDir()
@@ -55,56 +135,33 @@ func TestUpdateConfigDoesNotDeleteCredentialWhenProviderStillUsed(t *testing.T) 
 	}
 }
 
-func TestReloadRouterUpdatesMemoryWorkerProvider(t *testing.T) {
+func TestUpdateConfigAddsModelWithExistingProviderCredential(t *testing.T) {
 	dir := t.TempDir()
-	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini"), anthropicModel("claude-sonnet")}, "openai/gpt-4o-mini")
-	if err := cfg.Save(cfg.ConfigPath()); err != nil {
-		t.Fatalf("Save() error = %v", err)
-	}
+	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini")}, "openai/gpt-4o-mini")
 	mustSaveCredential(t, dir, "openai", "sk-openai")
-	mustSaveCredential(t, dir, "anthropic", "sk-anthropic")
-	if err := config.LoadCredentials(cfg); err != nil {
-		t.Fatalf("LoadCredentials() error = %v", err)
-	}
-	worker := newMemoryWorker(t, cfg)
-	router, err := model.NewRouter(cfg, media.NewStore(t.TempDir()))
-	if err != nil {
-		t.Fatalf("NewRouter() error = %v", err)
-	}
-	a := &Agent{cfg: cfg, router: router, mediaStore: media.NewStore(t.TempDir()), compressor: memory.NewCompressor(model.NewRoutedProvider(router)), extractWorker: worker}
+	a := &Agent{cfg: cfg}
 
-	initial := worker.Provider()
-	if initial == nil {
-		t.Fatalf("worker.Provider() = nil, want OpenAIResponsesProvider")
-	}
-	if got := initial.ContextWindow(); got != 128000 {
-		t.Fatalf("worker.Provider().ContextWindow() = %d, want 128000", got)
-	}
-	if _, err := a.UpdateConfig(ConfigSetParams{Action: protocol.ConfigActionActivateModel, ActiveModel: "anthropic/claude-sonnet"}); err != nil {
+	updated, err := a.UpdateConfig(ConfigSetParams{
+		Action: protocol.ConfigActionUpsertModel,
+		Model: ConfigModel{
+			Provider:        "openai",
+			Model:           "gpt-4o",
+			BaseURL:         "https://api.openai.com/v1",
+			ContextWindow:   128000,
+			MaxOutputTokens: 8192,
+		},
+	})
+	if err != nil {
 		t.Fatalf("UpdateConfig() error = %v", err)
 	}
-	updated := worker.Provider()
-	if updated == nil {
-		t.Fatalf("worker.Provider() after update = nil, want AnthropicProvider")
+	if got, want := len(updated.Models), 2; got != want {
+		t.Fatalf("configured model count = %d, want %d", got, want)
 	}
-	if got := updated.ContextWindow(); got != 200000 {
-		t.Fatalf("worker.Provider() after update ContextWindow() = %d, want 200000", got)
+	if got, want := updated.Models[1].APIKey, "sk-openai"; got != want {
+		t.Fatalf("new model API key = %q, want shared provider key %q", got, want)
 	}
-	if updated == initial {
-		t.Fatalf("worker.Provider() after update reused initial provider, want replacement")
-	}
-}
-
-func TestReloadRouterClearsMemoryWorkerProviderWithoutActiveModel(t *testing.T) {
-	provider := fakeProvider{}
-	worker := memory.NewWorker(nil, nil, nil, provider)
-	a := &Agent{extractWorker: worker}
-
-	if err := a.reloadRouterLocked(&config.Config{}); err != nil {
-		t.Fatalf("reloadRouterLocked() error = %v", err)
-	}
-	if got := worker.Provider(); got != nil {
-		t.Fatalf("worker.Provider() = %T, want nil", got)
+	if got, want := loadModelCredential(t, dir, "openai", "gpt-4o"), "sk-openai"; got != want {
+		t.Fatalf("reloaded new model API key = %q, want shared provider key %q", got, want)
 	}
 }
 
@@ -153,21 +210,8 @@ func newMemoryWorker(t *testing.T, cfg *config.Config) *memory.Worker {
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
 	}
-	return memory.NewWorker(memory.NewExtractQueue(store.DB()), memory.NewMemoryStore(store.DB()), store.DB(), model.NewRoutedProvider(router))
+	return memory.NewWorker(memory.NewExtractQueue(store.DB()), memory.NewMemoryStore(store.DB()), store.DB(), func(ref string) (*model.ModelBinding, error) { return router.Bind(ref) })
 }
-
-type fakeProvider struct{}
-
-func (fakeProvider) Complete(context.Context, *model.CompletionRequest) (<-chan model.Chunk, error) {
-	ch := make(chan model.Chunk)
-	close(ch)
-	return ch, nil
-}
-
-func (fakeProvider) EstimateTokens(string) int { return 0 }
-
-func (fakeProvider) ContextWindow() int   { return 128000 }
-func (fakeProvider) MaxOutputTokens() int { return 8192 }
 
 func TestModelRoutingSummaryFiltersSubtaskFor(t *testing.T) {
 	cfg := newAgentConfig(t.TempDir(), []config.ModelConfig{
@@ -179,7 +223,7 @@ func TestModelRoutingSummaryFiltersSubtaskFor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
 	}
-	a := &Agent{cfg: cfg, router: router}
+	a := &Agent{cfg: cfg, router: router, modelRef: "openai/gpt-4.1"}
 
 	summary := a.modelRoutingSummary()
 	if !strings.Contains(summary, "DF/MiniMax-M3") {
@@ -203,12 +247,116 @@ func TestAvailableModelRefsFiltersSubtaskFor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRouter() error = %v", err)
 	}
-	a := &Agent{cfg: cfg, router: router}
+	a := &Agent{cfg: cfg, router: router, modelRef: "openai/gpt-4.1"}
 
 	got := a.availableModelRefs()
 	want := []string{"DF/MiniMax-M3", "openai/gpt-4.1"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("availableModelRefs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestUpdateConfigRouterBuildFailureLeavesRuntimeAndDiskUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini")}, "openai/gpt-4o-mini")
+	mustSaveCredential(t, dir, "openai", "sk-openai")
+	if err := config.LoadCredentials(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.Save(cfg.ConfigPath()); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	beforeDisk, err := os.ReadFile(cfg.ConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, err := model.NewRouter(cfg, media.NewStore(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{cfg: cfg, router: router}
+
+	_, err = a.UpdateConfig(ConfigSetParams{
+		Action:   protocol.ConfigActionUpsertModel,
+		ModelRef: "openai/gpt-4o-mini",
+		Model:    ConfigModel{Provider: "openai", Model: "gpt-4o-mini", BaseURL: "", ContextWindow: 128000, MaxOutputTokens: 8192},
+	})
+	if err == nil {
+		t.Fatal("UpdateConfig() error = nil, want Router build failure")
+	}
+	if a.cfg != cfg || a.router != router {
+		t.Fatal("failed UpdateConfig() published a new runtime snapshot")
+	}
+	afterDisk, err := os.ReadFile(cfg.ConfigPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(afterDisk, beforeDisk) {
+		t.Fatalf("config.toml changed after failed update:\n got %q\nwant %q", afterDisk, beforeDisk)
+	}
+}
+
+func TestReloadConfigRouterBuildFailureLeavesRuntimeSnapshotUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini")}, "openai/gpt-4o-mini")
+	mustSaveCredential(t, dir, "openai", "sk-openai")
+	if err := config.LoadCredentials(cfg); err != nil {
+		t.Fatal(err)
+	}
+	router, err := model.NewRouter(cfg, media.NewStore(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalid := newAgentConfig(dir, []config.ModelConfig{{Provider: "openai", Model: "gpt-4o-mini", BaseURL: "", ContextWindow: 128000, MaxOutputTokens: 8192}}, "openai/gpt-4o-mini")
+	if err := invalid.Save(filepath.Join(dir, "config.toml")); err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{cfg: cfg, router: router}
+
+	if _, err := a.ReloadConfigFromDiskIfNeeded(); err == nil {
+		t.Fatal("ReloadConfigFromDiskIfNeeded() error = nil, want Router build failure")
+	}
+	if a.cfg != cfg || a.router != router || !a.configModTime.IsZero() {
+		t.Fatal("failed reload changed the published runtime snapshot")
+	}
+}
+
+func TestReloadConfigFromDiskUsesScopedDataDirCredentials(t *testing.T) {
+	defaultRoot := t.TempDir()
+	t.Setenv("HOME", defaultRoot)
+	defaultDir := config.DefaultDataDir()
+	if err := os.MkdirAll(defaultDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(defaultDir, "credentials.toml"), []byte("[openai\napi_key = \"broken\"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	scopedDir := t.TempDir()
+	stored := newAgentConfig(scopedDir, []config.ModelConfig{openAIModel("gpt-4o-mini")}, "openai/gpt-4o-mini")
+	if err := stored.Save(stored.ConfigPath()); err != nil {
+		t.Fatal(err)
+	}
+	mustSaveCredential(t, scopedDir, "openai", "sk-scoped")
+	cfg, err := config.LoadFromDataDir(stored.ConfigPath(), scopedDir)
+	if err != nil {
+		t.Fatalf("LoadFromDataDir() error = %v", err)
+	}
+	router, err := model.NewRouter(cfg, media.NewStore(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{cfg: cfg, router: router}
+
+	reloaded, err := a.ReloadConfigFromDiskIfNeeded()
+	if err != nil {
+		t.Fatalf("ReloadConfigFromDiskIfNeeded() error = %v", err)
+	}
+	if got, want := reloaded.DataDir, scopedDir; got != want {
+		t.Fatalf("reloaded DataDir = %q, want %q", got, want)
+	}
+	if got, want := reloaded.Models[0].APIKey, "sk-scoped"; got != want {
+		t.Fatalf("reloaded API key = %q, want scoped credential %q", got, want)
 	}
 }
 
