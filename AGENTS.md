@@ -67,6 +67,14 @@ Suna 是本地终端 AI Agent：CLI 启动 TUI，TUI 通过 protocol/local trans
 - TUI 测试优先验证状态和关键语义文本，避免脆弱的整屏快照；检查渲染文本时应去除 ANSI。
 - 提交前建议执行：`git diff --check`、`git status --short`、相关测试或全量测试。
 
+## Git 提交规范
+
+- 提交信息必须使用英文 Conventional Commits：`type(scope): imperative summary`。
+- `type` 优先使用 `feat`、`fix`、`refactor`、`perf`、`docs`、`test`、`chore`；`scope` 使用稳定模块名，例如 `session`、`model`、`daemon`、`agent`、`tui`、`memory`、`protocol`、`config`。跨模块且没有清晰归属时可省略 scope。
+- summary 使用简洁英文动词短语，首字母小写，不加句号；避免中文、泛泛的 `update` 和无意义的实现细节。
+- 重要 feature、跨模块 fix、refactor、协议变更或兼容迁移必须附英文 body，说明设计意图、关键行为、兼容/迁移影响与用户可见变化；微小且局部的修改可只写 subject。
+- 不兼容变更使用 `!`，并在 body 末尾使用英文 `BREAKING CHANGE:` footer 明确迁移要求，例如 `feat(protocol)!: replace legacy stream events`。
+
 ## 发版规则
 
 - 版本号使用 SemVer tag，不再使用日期版本；示例：`v0.3.0`、`v0.3.1`、`v0.4.0`。
