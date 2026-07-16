@@ -141,7 +141,7 @@ func (t *TUI) chatConnectionDot(state petState) string {
 		}
 	}
 	if badge != "" {
-		return badge + styleDim.Render("·") + conn
+		return badge + " " + conn
 	}
 	return conn
 }
@@ -170,16 +170,34 @@ func (t *TUI) chatTopMeta() string {
 	if model == "" {
 		model = "-"
 	}
+
 	modelRef := provider + "/" + model
-	reasoning := ""
-	if mc, ok := t.modelByRef(t.currentSession.ModelRef); ok {
-		reasoning = t.reasoningDisplay(mc)
-	}
-	if reasoning != "" {
-		modelRef += "·" + strings.ReplaceAll(reasoning, " / ", "/")
-	}
+	thinking := t.chatTopThinkingMeta()
 	available := max(10, t.width/2)
-	return styleHL.Render(textutil.TruncateRunes(modelRef, available))
+	if thinking == "" {
+		return styleHL.Render(textutil.TruncateRunes(modelRef, available))
+	}
+	thinkingWidth := lipgloss.Width(thinking)
+	if available <= thinkingWidth+12 {
+		return styleHL.Render(textutil.TruncateRunes(modelRef, available))
+	}
+	modelWidth := available - thinkingWidth
+	return styleHL.Render(textutil.TruncateRunes(modelRef, modelWidth)) + thinking
+}
+
+func (t *TUI) chatTopThinkingMeta() string {
+	mc, ok := t.modelByRef(t.currentSession.ModelRef)
+	if !ok {
+		return ""
+	}
+	reasoning := strings.TrimSpace(t.reasoningDisplay(mc))
+	if reasoning == "" {
+		return ""
+	}
+	if _, level, found := strings.Cut(reasoning, " / "); found {
+		reasoning = level
+	}
+	return styleDim.Render(" ┊ ") + styleThinkingIcon.Render("◇") + styleThinkingLabel.Render(" Think ") + styleThinkingValue.Render(reasoning)
 }
 
 func (t *TUI) observingRun() bool {

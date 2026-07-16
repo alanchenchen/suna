@@ -15,13 +15,10 @@ type Model struct {
 	SetupMode       bool
 	FormOpen        bool
 	WorkspaceOpen   bool
-	KindOpen        bool
-	KindCursor      int
 	DeleteCursor    int
 	ReasoningOpen   bool
 	ReasoningCursor int
 	ReasoningFamily string
-	ProviderKind    string
 	Page            string
 	DeleteConfirm   string
 	DetailRef       string

@@ -17,9 +17,6 @@ func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if t.config.ReasoningOpen {
 		return t.updateReasoning(msg)
 	}
-	if t.config.KindOpen {
-		return t.updateProviderKind(msg)
-	}
 	if t.config.WorkspaceOpen {
 		return t.updateWorkspaceForm(msg)
 	}
@@ -279,12 +276,14 @@ func (t *TUI) configRows() []tuiconfig.Row {
 
 func (t *TUI) configRowsDeps() tuiconfig.RowsDeps {
 	return tuiconfig.RowsDeps{
-		Tr:                  func(key string) string { return t.tr(key) },
-		ProvidersSummary:    func(total, needs int) string { return t.i18n.Tf("tui.config.providers_summary", total, needs) },
+		Tr:               func(key string) string { return t.tr(key) },
+		ProvidersSummary: func(total int, active string) string { return t.i18n.Tf("tui.config.providers_summary", total, active) },
+		ProviderModelsSummary: func(provider string, count int) string {
+			return t.i18n.Tf("tui.config.provider_models_summary", provider, count)
+		},
 		Models:              t.configModelsSnapshot(),
 		ActiveModel:         t.configState.ActiveModel,
 		IsActive:            t.isDefaultModelRef,
-		NeedsAttention:      t.modelNeedsAttention,
 		ModelSummary:        t.modelSummary,
 		CurrentLanguage:     t.currentLangDisplay(),
 		Theme:               t.themeDisplay(),
@@ -348,7 +347,8 @@ func (t *TUI) handleConfigAction(rows []tuiconfig.Row) tea.Cmd {
 	case "open_config_dir":
 		return t.openConfigDirCmd()
 	case "add_model", "add_provider_model":
-		t.openProviderKind()
+		t.openProviderForm("", nil)
+		return t.config.Inputs[t.config.InputFocus].Focus()
 	case "provider_add_model":
 		t.openProviderModelForm(row.Name)
 		return t.config.Inputs[t.config.InputFocus].Focus()
@@ -441,9 +441,6 @@ func (t *TUI) toggleLanguage() tea.Cmd {
 func (t *TUI) toggleTheme() tea.Cmd {
 	theme := nextTheme(t.theme)
 	t.setTheme(theme)
-	if t.mode == uipage.Chat {
-		t.syncContent()
-	}
 	return t.sendConfigSet(protocol.ConfigSetParams{Action: protocol.ConfigActionUpdateGeneral, Locale: string(t.i18n.Locale()), Theme: theme})
 }
 func (t *TUI) toggleGuardMode() tea.Cmd {

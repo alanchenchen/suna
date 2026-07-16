@@ -273,6 +273,27 @@ func TestSubtaskBlockPrioritizesFailureReasonOverLastChild(t *testing.T) {
 	}
 }
 
+func TestChatTopMetaRendersModelAndThinkingParameter(t *testing.T) {
+	tui := &TUI{
+		i18n:           newTranslator(LocaleEN),
+		width:          100,
+		currentSession: protocol.SessionInfo{ModelRef: "deepseek/deepseek-v4-flash"},
+		configState: protocol.ConfigParams{Models: []protocol.ConfigModel{{
+			Provider:  "deepseek",
+			Model:     "deepseek-v4-flash",
+			Reasoning: deepSeekReasoning("high"),
+		}}},
+	}
+
+	meta := stripANSIForTest(tui.chatTopMeta())
+	if !strings.Contains(meta, "deepseek/deepseek-v4-flash") {
+		t.Fatalf("chatTopMeta() = %q, want model ref", meta)
+	}
+	if !strings.Contains(meta, "◇ Think High") {
+		t.Fatalf("chatTopMeta() = %q, want compact thinking parameter", meta)
+	}
+}
+
 func TestChatTopMetaOmitsContextStats(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100}
 	tui.providerName = "openai"

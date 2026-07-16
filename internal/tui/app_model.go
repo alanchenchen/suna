@@ -38,6 +38,8 @@ type TUI struct {
 	height   int
 	ready    bool
 
+	// 终端背景色由 Bubble Tea 查询，仅用于 auto 主题选择。
+	terminalDark bool
 	// 全局配置与 daemon 快照。真实持久化状态由 daemon 持有，TUI 只缓存用于显示。
 	theme            string
 	providerName     string

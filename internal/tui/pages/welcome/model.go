@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/alanchenchen/suna/internal/tui/components/selection"
 	textutil "github.com/alanchenchen/suna/internal/tui/components/text"
 
 	"charm.land/bubbles/v2/list"
@@ -148,16 +149,13 @@ func (d delegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	if !ok {
 		return
 	}
-	cursor := "  "
+	cursor := selection.Rail(index == m.Index(), 0, d.m.deps.Styles.Cursor)
 	st := lipgloss.NewStyle()
 	if wi.Disabled {
 		st = d.m.deps.Styles.Dim
 	}
-	if index == m.Index() {
-		cursor = d.m.deps.Styles.Cursor.Render("▶ ")
-		if !wi.Disabled {
-			st = d.m.deps.Styles.Brand
-		}
+	if index == m.Index() && !wi.Disabled {
+		st = d.m.deps.Styles.Brand
 	}
 
 	if wi.Action == ActionJoin {

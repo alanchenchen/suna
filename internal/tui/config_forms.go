@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/alanchenchen/suna/internal/tui/components/selection"
 	tuiconfig "github.com/alanchenchen/suna/internal/tui/pages/config"
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 )
@@ -102,9 +103,7 @@ func (t *TUI) initProviderForm(mc *tuiconfig.ModelConfig) {
 			in.EchoMode = textinput.EchoPassword
 			in.EchoCharacter = '*'
 		}
-		styles := textinput.DefaultStyles(false)
-		styles.Focused.Prompt = lipgloss.NewStyle().Foreground(ColorBrand).Bold(true)
-		styles.Blurred.Prompt = lipgloss.NewStyle().Foreground(ColorDim)
+		styles := textInputStyles()
 		in.SetStyles(styles)
 		t.config.Inputs[i] = in
 	}
@@ -234,37 +233,6 @@ func (t *TUI) validateProviderForm(v tuiconfig.ProviderFormValues) error {
 	})
 }
 
-func (t *TUI) openProviderKind() {
-	t.config.OpenProviderKind()
-}
-func (t *TUI) providerKindOptions() []string {
-	return tuiconfig.ProviderKindOptions()
-}
-func (t *TUI) updateProviderKind(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch m := msg.(type) {
-	case tea.KeyPressMsg:
-		switch m.String() {
-		case "ctrl+c":
-			t.doQuit()
-			return t, tea.Quit
-		case "esc":
-			t.config.KindOpen = false
-			return t, nil
-		case "up":
-			t.config.MoveProviderKind(-1)
-			return t, nil
-		case "down":
-			t.config.MoveProviderKind(1)
-			return t, nil
-		case "enter":
-			t.config.SelectProviderKind()
-			t.openProviderForm("", nil)
-			return t, t.config.Inputs[t.config.InputFocus].Focus()
-		}
-	}
-	return t, nil
-}
-
 func (t *TUI) openWorkspaceForm() tea.Cmd {
 	t.config.OpenWorkspaceForm()
 	t.initWorkspaceForm()
@@ -276,9 +244,7 @@ func (t *TUI) initWorkspaceForm() {
 	in.Placeholder = t.tr("tui.config.workspace.placeholder")
 	in.SetValue(t.configState.Workspace)
 	in.SetWidth(64)
-	styles := textinput.DefaultStyles(false)
-	styles.Focused.Prompt = lipgloss.NewStyle().Foreground(ColorBrand).Bold(true)
-	styles.Blurred.Prompt = lipgloss.NewStyle().Foreground(ColorDim)
+	styles := textInputStyles()
 	in.SetStyles(styles)
 	t.config.Inputs = []textinput.Model{in}
 	t.config.InputFocus = 0
@@ -376,10 +342,9 @@ func (t *TUI) viewReasoning() string {
 	items := t.reasoningMenuItems()
 	var lines []string
 	for i, item := range items {
-		cursor := "  "
+		cursor := selection.Rail(i == t.config.ReasoningCursor, 0, styleCursor)
 		st := lipgloss.NewStyle()
 		if i == t.config.ReasoningCursor {
-			cursor = styleCursor.Render("▶ ")
 			st = styleHL
 		}
 		lines = append(lines, cursor+st.Render(item))
@@ -432,9 +397,7 @@ func (t *TUI) openReasoningCustom() {
 	in.Placeholder = `{"reasoning_effort":"high"}`
 	in.SetValue(data)
 	in.SetWidth(68)
-	styles := textinput.DefaultStyles(false)
-	styles.Focused.Prompt = lipgloss.NewStyle().Foreground(ColorBrand).Bold(true)
-	styles.Blurred.Prompt = lipgloss.NewStyle().Foreground(ColorDim)
+	styles := textInputStyles()
 	in.SetStyles(styles)
 	t.config.Inputs = []textinput.Model{in}
 	t.config.OpenReasoningCustom()

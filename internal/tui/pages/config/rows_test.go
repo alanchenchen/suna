@@ -1,19 +1,45 @@
 package config
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
 
-func TestModelRowsActiveModelUsesMarkerWithoutRepeatedActiveText(t *testing.T) {
+func TestHomeRowsUseModelConnectionsAsNavigationItem(t *testing.T) {
+	m := &Model{Page: "home"}
+	rows := m.HomeRows(RowsDeps{
+		Tr: func(key string) string {
+			switch key {
+			case "tui.config.model_connections":
+				return "Model connections"
+			case "tui.config.default_for_new_sessions":
+				return "Default for new sessions"
+			default:
+				return key
+			}
+		},
+		ProvidersSummary: func(total int, active string) string {
+			return "2 configured · New-session default openai/gpt"
+		},
+		Models: []ModelConfig{{Provider: "openai", Model: "gpt"}, {Provider: "anthropic", Model: "claude"}},
+	})
+
+	if got, want := rows[0].Kind, "label"; got != want {
+		t.Fatalf("rows[0].Kind = %q, want %q", got, want)
+	}
+	if got, want := rows[1], (Row{"section", "models", "2 configured · New-session default openai/gpt", ""}); got != want {
+		t.Fatalf("rows[1] = %#v, want %#v", got, want)
+	}
+	if got, want := rows[2], (Row{"info", "", "", ""}); got != want {
+		t.Fatalf("rows[2] = %#v, want %#v", got, want)
+	}
+}
+
+func TestModelRowsActiveModelKeepsPlainLabel(t *testing.T) {
 	m := &Model{Page: "models"}
 	rows := m.ModelRows(RowsDeps{
-		Tr: func(key string) string {
-			if key == "tui.config.activated_status" {
-				return "Activated"
-			}
-			return key
-		},
+		Tr:       func(key string) string { return key },
 		Models:   []ModelConfig{{Provider: "openai", Model: "gpt-4o", BaseURL: "https://example.test", ContextWindow: 128000, MaxOutputTokens: 8192, HasAPIKey: true}},
 		IsActive: func(ref string) bool { return ref == "openai/gpt-4o" },
 		ModelSummary: func(ModelConfig) string {
@@ -21,24 +47,16 @@ func TestModelRowsActiveModelUsesMarkerWithoutRepeatedActiveText(t *testing.T) {
 		},
 	})
 
-	var modelRow Row
 	for _, row := range rows {
-		if row.Kind == "model" {
-			modelRow = row
-			break
+		if row.Kind != "model" {
+			continue
 		}
+		if got, want := row.Label, "gpt-4o"; got != want {
+			t.Fatalf("active model label = %q, want %q", got, want)
+		}
+		return
 	}
-	if modelRow.Kind == "" {
-		t.Fatalf("ModelRows returned no model row: %#v", rows)
-	}
-	label := modelRow.Label
-	value := modelRow.Value
-	if !strings.HasPrefix(label, "◉ ") {
-		t.Fatalf("active model label = %q, want active marker prefix", label)
-	}
-	if strings.Contains(label, "Activated") || strings.Contains(value, "Activated") {
-		t.Fatalf("active model row = %q / %q, should not repeat active text", label, value)
-	}
+	t.Fatalf("ModelRows returned no model row: %#v", rows)
 }
 
 func TestModelSummaryKeepsCapabilitiesBriefAndPrioritizesStrengths(t *testing.T) {
@@ -109,6 +127,31 @@ func TestDetailRowsShowsSubtaskFor(t *testing.T) {
 		}
 	}
 	t.Fatalf("Subtask for row not found in %#v", rows)
+}
+
+func TestModelRowsIncludeProviderModelCount(t *testing.T) {
+	m := &Model{Page: "models"}
+	rows := m.ModelRows(RowsDeps{
+		Tr: func(key string) string { return key },
+		ProviderModelsSummary: func(provider string, count int) string {
+			return provider + " · " + strconv.Itoa(count) + " model(s)"
+		},
+		Models: []ModelConfig{
+			{Provider: "openai", Model: "gpt-a", BaseURL: "https://example.test", ContextWindow: 1000, MaxOutputTokens: 100, HasAPIKey: true},
+			{Provider: "openai", Model: "gpt-b", BaseURL: "https://example.test", ContextWindow: 1000, MaxOutputTokens: 100, HasAPIKey: true},
+		},
+		ModelSummary: func(ModelConfig) string { return "" },
+	})
+
+	for _, row := range rows {
+		if row.Kind == "provider_header" {
+			if got, want := row.Label, "openai · 2 model(s)"; got != want {
+				t.Fatalf("provider header = %q, want %q", got, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("ModelRows returned no provider header: %#v", rows)
 }
 
 func TestModelRowsGroupsModelsByProvider(t *testing.T) {

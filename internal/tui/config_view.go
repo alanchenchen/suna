@@ -7,7 +7,8 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
 
-	overlay "github.com/alanchenchen/suna/internal/tui/components/overlay"
+	"github.com/alanchenchen/suna/internal/tui/components/overlay"
+	"github.com/alanchenchen/suna/internal/tui/components/selection"
 	tuiconfig "github.com/alanchenchen/suna/internal/tui/pages/config"
 )
 
@@ -15,10 +16,6 @@ func (t *TUI) viewConfig() string {
 	if t.config.ReasoningOpen {
 		base := t.viewConfigPage()
 		return overlay.OverlayBlock(base, t.viewReasoning())
-	}
-	if t.config.KindOpen {
-		base := t.viewConfigPage()
-		return overlay.OverlayBlock(base, t.viewProviderKind())
 	}
 	if t.config.WorkspaceOpen {
 		return t.viewWorkspaceForm()
@@ -31,29 +28,6 @@ func (t *TUI) viewConfig() string {
 		return overlay.OverlayBlock(base, t.renderHelpOverlay(t.width))
 	}
 	return base
-}
-
-func (t *TUI) viewProviderKind() string {
-	view := t.config.ProviderKindView(tuiconfig.ProviderKindLabels{
-		Title: t.tr("tui.config.provider.kind_title"),
-		Help:  t.tr("tui.config.kind_help"),
-		Name:  func(opt string) string { return t.tr("tui.config.kind." + opt) },
-		Desc:  func(opt string) string { return t.tr("tui.config.kind." + opt + ".desc") },
-	}, min(max(48, t.width-8), 72))
-	var lines []string
-	for _, opt := range view.Options {
-		cursor := "  "
-		st := lipgloss.NewStyle()
-		if opt.Selected {
-			cursor = styleCursor.Render("▶ ")
-			st = styleHL
-		}
-		lines = append(lines, cursor+st.Render(opt.Name))
-		lines = append(lines, "    "+styleDim.Render(opt.Desc))
-	}
-	lines = append(lines, "", styleDim.Render(view.Help))
-	body := strings.Join(lines, "\n")
-	return boxStyle.Width(view.Width).Padding(1, 2).Render(styleHL.Render(view.Title) + "\n\n" + body)
 }
 
 func (t *TUI) viewConfigPage() string {
@@ -189,16 +163,15 @@ func (t *TUI) renderConfigRow(sb *strings.Builder, idx int, row tuiconfig.Row) {
 		sb.WriteString("\n")
 		return
 	}
-	cursor := "    "
+	prefix := selection.Rail(t.config.Cursor == idx, 2, styleCursor)
 	st := lipgloss.NewStyle()
 	if t.config.Cursor == idx {
-		cursor = styleCursor.Render("  ▶ ")
 		st = styleHL
 	}
 	if row.Kind == "add_provider_model" && t.config.Cursor != idx {
 		st = styleBrand
 	}
-	sb.WriteString(cursor + t.configRowLabelStyle(label, st))
+	sb.WriteString(prefix + t.configRowLabelStyle(label, st))
 	if value != "" {
 		valueStyle := styleDim
 		sb.WriteString(styleDim.Render("  ") + valueStyle.Render(value))
@@ -227,10 +200,9 @@ func (t *TUI) configModelLine(indent, content string) string {
 
 func (t *TUI) renderConfigProviderAddRow(sb *strings.Builder, idx int, row tuiconfig.Row) {
 	selected := t.config.Cursor == idx
-	prefix := "    "
+	prefix := selection.Rail(selected, 2, styleCursor)
 	label := t.tr("tui.config.add_model_short")
 	if selected {
-		prefix = "  " + styleCursor.Render("▶ ")
 		label = styleHL.Render("+ " + label)
 	} else {
 		label = styleDim.Render("+ ") + styleBrand.Render(label)
@@ -265,20 +237,10 @@ func (t *TUI) renderConfigModelRow(sb *strings.Builder, idx int, row tuiconfig.R
 	}
 	selected := t.config.Cursor == idx
 	active := t.isDefaultModelRef(mc.Ref())
-	prefix := "    "
+	prefix := selection.Rail(selected, 2, styleCursor)
 	bodyIndent := "      "
-	if selected {
-		prefix = "  " + styleCursor.Render("▶ ")
-		bodyIndent = "      "
-	} else if active {
-		prefix = "  " + styleBrand.Render("▌ ")
-		bodyIndent = "      "
-	}
 
 	nameStyle := lipgloss.NewStyle().Foreground(currentTheme.Text).Bold(true)
-	if active {
-		nameStyle = styleBrand
-	}
 	if selected {
 		nameStyle = styleHL
 	}

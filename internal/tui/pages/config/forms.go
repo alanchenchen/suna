@@ -71,20 +71,8 @@ func (m *Model) ProviderFormSpec(labels ProviderFormLabels, mc *ModelConfig) Pro
 		values[7] = strings.Join(mc.Strengths, ", ")
 		values[8] = strings.Join(mc.SubtaskFor, ", ")
 	} else {
-		switch m.ProviderKind {
-		case "openai":
-			values[0] = "openai"
-			values[1] = string(coreconfig.ModelProtocolOpenAIResponses)
-			values[4] = "https://api.openai.com/v1"
-			placeholders[2] = "gpt-4o-mini"
-		case "anthropic":
-			values[0] = "anthropic"
-			values[1] = string(coreconfig.ModelProtocolAnthropic)
-			values[4] = "https://api.anthropic.com"
-			placeholders[2] = "claude-sonnet-4-20250514"
-			placeholders[5] = "200000"
-			placeholders[6] = "8192"
-		}
+		values[0] = ""
+		values[1] = string(coreconfig.ModelProtocolOpenAIChat)
 	}
 	if m.FormProvider != "" {
 		values[0] = m.FormProvider

@@ -84,37 +84,3 @@ func DetailDefaultCursor(rows []Row, preferred string) int {
 	}
 	return 0
 }
-
-func ProviderKindOptions() []string {
-	return []string{"openai-compatible", "openai", "anthropic"}
-}
-
-func (m *Model) OpenProviderKind() {
-	m.KindOpen = true
-	m.KindCursor = 0
-	m.ProviderKind = "openai-compatible"
-}
-
-func (m *Model) MoveProviderKind(delta int) {
-	options := ProviderKindOptions()
-	m.KindCursor += delta
-	if m.KindCursor < 0 {
-		m.KindCursor = 0
-	}
-	if m.KindCursor >= len(options) {
-		m.KindCursor = len(options) - 1
-	}
-}
-
-func (m *Model) SelectProviderKind() string {
-	options := ProviderKindOptions()
-	if m.KindCursor < 0 {
-		m.KindCursor = 0
-	}
-	if m.KindCursor >= len(options) {
-		m.KindCursor = len(options) - 1
-	}
-	m.ProviderKind = options[m.KindCursor]
-	m.KindOpen = false
-	return m.ProviderKind
-}

@@ -1,8 +1,11 @@
 package tui
 
 import (
+	"image/color"
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 
 	textutil "github.com/alanchenchen/suna/internal/tui/components/text"
 )
@@ -40,25 +43,42 @@ func TestWrapLineLimitStopsAfterRequestedLines(t *testing.T) {
 
 func TestResolveThemeUsesExpectedTheme(t *testing.T) {
 	tests := []struct {
-		name  string
-		input string
-		want  string
+		name     string
+		input    string
+		autoDark bool
+		want     string
 	}{
-		{name: "auto defaults to light", input: ThemeAuto, want: ThemeLight},
+		{name: "auto uses light before terminal response", input: ThemeAuto, want: ThemeLight},
+		{name: "auto uses dark terminal response", input: ThemeAuto, autoDark: true, want: ThemeDark},
 		{name: "explicit dark", input: ThemeDark, want: ThemeDark},
+		{name: "explicit light", input: ThemeLight, autoDark: true, want: ThemeLight},
 	}
-
-	t.Setenv("COLORFGBG", "")
-	t.Setenv("TERMINAL_THEME", "")
-	t.Setenv("THEME", "")
-	t.Setenv("APPEARANCE", "")
 
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			if got := resolveTheme(tt.input).Name; got != tt.want {
-				t.Fatalf("resolveTheme(%q).Name = %q, want %q", tt.input, got, tt.want)
+			if got := resolveTheme(tt.input, tt.autoDark).Name; got != tt.want {
+				t.Fatalf("resolveTheme(%q, %t).Name = %q, want %q", tt.input, tt.autoDark, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestBackgroundColorMessageOnlyChangesAutoTheme(t *testing.T) {
+	applyTheme(ThemeDark)
+	t.Cleanup(func() { applyTheme(ThemeDark) })
+
+	tui := New(LocaleEN)
+	tui.ready = true
+
+	_, _ = tui.Update(tea.BackgroundColorMsg{Color: color.RGBA{0, 0, 0, 255}})
+	if got := currentTheme.Name; got != ThemeDark {
+		t.Fatalf("auto theme after dark background = %q, want %q", got, ThemeDark)
+	}
+
+	tui.setTheme(ThemeLight)
+	_, _ = tui.Update(tea.BackgroundColorMsg{Color: color.RGBA{0, 0, 0, 255}})
+	if got := currentTheme.Name; got != ThemeLight {
+		t.Fatalf("explicit light theme after dark background = %q, want %q", got, ThemeLight)
 	}
 }

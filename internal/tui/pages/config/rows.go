@@ -6,27 +6,27 @@ import (
 )
 
 type RowsDeps struct {
-	Tr                  func(string) string
-	ProvidersSummary    func(total, needs int) string
-	Models              []ModelConfig
-	ActiveModel         string
-	IsActive            func(string) bool
-	NeedsAttention      func(ModelConfig) bool
-	ModelSummary        func(ModelConfig) string
-	CurrentLanguage     string
-	Theme               string
-	GuardMode           string
-	Workspace           string
-	ConfigPath          string
-	CredentialsPath     string
-	AttachmentUsage     string
-	AttachmentAvailable bool
-	AttachmentDisabled  string
-	ConfigDir           string
-	DisplayEndpoint     func(string) string
-	ContextDisplay      func(ModelConfig) string
-	MaxOutputDisplay    func(ModelConfig) string
-	ReasoningDisplay    func(ModelConfig) string
+	Tr                    func(string) string
+	ProvidersSummary      func(total int, active string) string
+	ProviderModelsSummary func(provider string, count int) string
+	Models                []ModelConfig
+	ActiveModel           string
+	IsActive              func(string) bool
+	ModelSummary          func(ModelConfig) string
+	CurrentLanguage       string
+	Theme                 string
+	GuardMode             string
+	Workspace             string
+	ConfigPath            string
+	CredentialsPath       string
+	AttachmentUsage       string
+	AttachmentAvailable   bool
+	AttachmentDisabled    string
+	ConfigDir             string
+	DisplayEndpoint       func(string) string
+	ContextDisplay        func(ModelConfig) string
+	MaxOutputDisplay      func(ModelConfig) string
+	ReasoningDisplay      func(ModelConfig) string
 }
 
 func (m *Model) Rows(deps RowsDeps) []Row {
@@ -46,12 +46,6 @@ func (m *Model) HomeRows(deps RowsDeps) []Row {
 	if active == "" {
 		active = deps.Tr("tui.config.none")
 	}
-	needs := 0
-	for _, mc := range deps.Models {
-		if deps.NeedsAttention != nil && deps.NeedsAttention(mc) {
-			needs++
-		}
-	}
 	attachmentKind := "clear_attachments"
 	attachmentUsage := deps.AttachmentUsage
 	if !deps.AttachmentAvailable {
@@ -59,9 +53,8 @@ func (m *Model) HomeRows(deps RowsDeps) []Row {
 		attachmentUsage = deps.AttachmentDisabled
 	}
 	rows := []Row{
-		{"section", "models", "▸ " + deps.Tr("tui.config.model_connections"), ""},
-		{"info", "", "  " + deps.Tr("tui.config.active"), active},
-		{"info", "", "  " + deps.Tr("tui.config.providers"), deps.ProvidersSummary(len(deps.Models), needs)},
+		{"label", "", deps.Tr("tui.config.model_connections"), ""},
+		{"section", "models", deps.ProvidersSummary(len(deps.Models), active), ""},
 		{"info", "", "", ""},
 		{"label", "", deps.Tr("tui.config.general.section"), ""},
 		{"general_language", "", "  " + deps.Tr("tui.config.language"), deps.CurrentLanguage},
@@ -94,6 +87,10 @@ func (m *Model) ModelRows(deps RowsDeps) []Row {
 		m.EnsureCursor(rows)
 		return rows
 	}
+	providerCounts := make(map[string]int, len(models))
+	for _, mc := range models {
+		providerCounts[mc.Provider]++
+	}
 	currentProvider := ""
 	for _, mc := range models {
 		if mc.Provider != currentProvider {
@@ -102,13 +99,15 @@ func (m *Model) ModelRows(deps RowsDeps) []Row {
 				rows = append(rows, Row{"provider_end", currentProvider, "", ""})
 			}
 			currentProvider = mc.Provider
-			rows = append(rows, Row{"provider_header", currentProvider, currentProvider, ""})
+			heading := currentProvider
+			if deps.ProviderModelsSummary != nil {
+				heading = deps.ProviderModelsSummary(currentProvider, providerCounts[currentProvider])
+			}
+			rows = append(rows, Row{"provider_header", currentProvider, heading, ""})
 		}
 		ref := mc.Ref()
 		m.Models = append(m.Models, ref)
-		active := deps.IsActive != nil && deps.IsActive(ref)
-		label := ModelStatusMark(mc, active) + " " + mc.Model
-		rows = append(rows, Row{"model", ref, label, deps.ModelSummary(mc)})
+		rows = append(rows, Row{"model", ref, mc.Model, deps.ModelSummary(mc)})
 	}
 	if currentProvider != "" {
 		rows = append(rows, Row{"provider_add_model", currentProvider, deps.Tr("tui.config.add_model_short"), ""})
@@ -145,7 +144,7 @@ func (m *Model) DetailRows(deps RowsDeps) []Row {
 		{"info", "", deps.Tr("tui.config.provider.protocol"), modelProtocolDisplay(mc, deps.Tr)},
 		{"info", "", deps.Tr("tui.config.provider.endpoint"), deps.DisplayEndpoint(mc.BaseURL)},
 		{"info", "", deps.Tr("tui.config.provider.api_key"), apiKey},
-		{"info", "", deps.Tr("tui.config.provider.model"), ModelStatusMark(mc, deps.IsActive != nil && deps.IsActive(mc.Ref())) + " " + mc.Model},
+		{"info", "", deps.Tr("tui.config.provider.model"), mc.Model},
 		{"info", "", deps.Tr("tui.config.provider.context_window"), deps.ContextDisplay(mc)},
 		{"info", "", deps.Tr("tui.config.provider.max_output_tokens"), deps.MaxOutputDisplay(mc)},
 		{"info", "", deps.Tr("tui.config.reasoning"), deps.ReasoningDisplay(mc)},

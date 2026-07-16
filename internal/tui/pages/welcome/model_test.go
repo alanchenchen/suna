@@ -52,6 +52,12 @@ func TestSelectedItemUsesBrandStyle(t *testing.T) {
 	if !strings.Contains(view, "96m") {
 		t.Fatalf("selected item should use brand cyan style, view=%q", view)
 	}
+	if !strings.Contains(view, "▎") {
+		t.Fatalf("selected item should use selection rail, view=%q", view)
+	}
+	if strings.Contains(view, "▶") {
+		t.Fatalf("selected item should not use arrow cursor, view=%q", view)
+	}
 	if strings.Contains(view, "38;5;15") {
 		t.Fatalf("selected item should not use high-contrast white highlight, view=%q", view)
 	}

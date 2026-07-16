@@ -32,9 +32,13 @@ func (t *TUI) doQuit() {
 }
 
 func (t *TUI) Init() tea.Cmd {
-	return func() tea.Msg {
-		return tea.Batch(t.daemonStatusCmd(), t.configGetCmd(), t.sessionListCmd(), t.listMCPCmd())()
-	}
+	return tea.Batch(
+		tea.RequestBackgroundColor,
+		t.daemonStatusCmd(),
+		t.configGetCmd(),
+		t.sessionListCmd(),
+		t.listMCPCmd(),
+	)
 }
 
 func (t *TUI) refreshDaemonStatusCmd() tea.Cmd {

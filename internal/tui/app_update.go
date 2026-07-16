@@ -7,6 +7,10 @@ import (
 )
 
 func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if background, ok := msg.(tea.BackgroundColorMsg); ok {
+		t.applyDetectedBackground(background.IsDark())
+		return t, nil
+	}
 	if notif, ok := msg.(localNotification); ok {
 		msg = decodeLocalNotification(notif)
 	}
