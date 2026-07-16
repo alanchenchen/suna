@@ -49,11 +49,13 @@ type sessionManager struct {
 	creating              map[string]string
 	deleting              map[string]bool
 	deleteVersion         map[string]uint64
+	runtimeUnloadVersion  map[string]uint64
+	runtimeUnloadDelay    time.Duration
 	beforeAttachStateLoad func()
 }
 
 func newSessionManager(root *agent.Agent, store *memory.SessionStore) *sessionManager {
-	return &sessionManager{root: root, store: store, runtime: map[string]*sessionRuntime{}, attached: map[string]string{}, creating: map[string]string{}, deleting: map[string]bool{}, deleteVersion: map[string]uint64{}}
+	return &sessionManager{root: root, store: store, runtime: map[string]*sessionRuntime{}, attached: map[string]string{}, creating: map[string]string{}, deleting: map[string]bool{}, deleteVersion: map[string]uint64{}, runtimeUnloadVersion: map[string]uint64{}, runtimeUnloadDelay: defaultRuntimeUnloadDelay}
 }
 
 func (m *sessionManager) list(ctx context.Context, activeOnly bool) ([]protocol.SessionInfo, error) {
@@ -122,7 +124,9 @@ func (m *sessionManager) create(ctx context.Context, connID, cwd, title string) 
 	} else {
 		m.mu.Lock()
 		m.deleteVersion[id]++
+		m.invalidateRuntimeUnloadNoLock(id)
 		delete(m.runtime, id)
+		delete(m.runtimeUnloadVersion, id)
 		m.mu.Unlock()
 		m.removeSessionAttachments(id)
 	}
@@ -164,15 +168,19 @@ func (m *sessionManager) attach(ctx context.Context, connID, sessionID string, r
 		m.mu.Unlock()
 		return protocol.SessionSnapshot{}, fmt.Errorf("session not found")
 	}
-	rt := m.ensureRuntimeNoLock(meta)
+	rt := m.runtime[sessionID]
+	if requireActive && (rt == nil || (len(rt.clients) == 0 && rt.status == sessionIdle)) {
+		m.mu.Unlock()
+		return protocol.SessionSnapshot{}, fmt.Errorf("session is no longer active")
+	}
+	if rt == nil {
+		rt = m.ensureRuntimeNoLock(meta)
+	}
 	if rt == nil {
 		m.mu.Unlock()
 		return protocol.SessionSnapshot{}, fmt.Errorf("session model is not configured")
 	}
-	if requireActive && len(rt.clients) == 0 && rt.status == sessionIdle {
-		m.mu.Unlock()
-		return protocol.SessionSnapshot{}, fmt.Errorf("session is no longer active")
-	}
+	m.invalidateRuntimeUnloadNoLock(sessionID)
 	// 即使只读取 active 会话快照，也保留 runtime，避免读取和提交附着之间被删除。
 	rt.stateOps++
 	loadState := rt.status == sessionIdle
@@ -196,23 +204,17 @@ func (m *sessionManager) attach(ctx context.Context, connID, sessionID string, r
 
 	m.mu.Lock()
 	if m.deleting[sessionID] || m.deleteVersion[sessionID] != deleteVersion || m.runtime[sessionID] != rt {
-		if rt.stateOps > 0 {
-			rt.stateOps--
-		}
+		m.finishStateOpNoLock(sessionID, rt)
 		m.mu.Unlock()
 		return protocol.SessionSnapshot{}, fmt.Errorf("session not found")
 	}
 	if requireActive && len(rt.clients) == 0 && rt.status == sessionIdle {
-		if rt.stateOps > 0 {
-			rt.stateOps--
-		}
+		m.finishStateOpNoLock(sessionID, rt)
 		m.mu.Unlock()
 		return protocol.SessionSnapshot{}, fmt.Errorf("session is no longer active")
 	}
 	if creatingOwner := m.creating[sessionID]; creatingOwner != "" && creatingOwner != connID {
-		if rt.stateOps > 0 {
-			rt.stateOps--
-		}
+		m.finishStateOpNoLock(sessionID, rt)
 		m.mu.Unlock()
 		return protocol.SessionSnapshot{}, fmt.Errorf("session is being created")
 	}
@@ -230,10 +232,8 @@ func (m *sessionManager) attach(ctx context.Context, connID, sessionID string, r
 	}
 	m.mu.Unlock()
 
-	if oldID != "" && oldMaybeDelete {
-		if oldMeta, err := m.store.Get(context.Background(), oldID); err == nil && oldMeta != nil && oldMeta.MessageCount == 0 {
-			m.deleteInactive(context.Background(), oldID)
-		}
+	if oldID != "" {
+		m.handleDetachedSession(oldID, oldMaybeDelete)
 	}
 	_ = m.store.TouchAttached(ctx, sessionID)
 	return m.snapshotForConn(connID, *meta, rt, snap), nil
@@ -285,11 +285,7 @@ func (m *sessionManager) detach(connID string) string {
 	m.mu.Lock()
 	id, shouldMaybeDelete := m.detachConnNoLock(connID)
 	m.mu.Unlock()
-	if id != "" && shouldMaybeDelete {
-		if meta, err := m.store.Get(context.Background(), id); err == nil && meta != nil && meta.MessageCount == 0 {
-			m.deleteInactive(context.Background(), id)
-		}
-	}
+	m.handleDetachedSession(id, shouldMaybeDelete)
 	return id
 }
 
@@ -507,6 +503,7 @@ func (m *sessionManager) beginRun(connID string) (*sessionRuntime, string, error
 		return nil, "", fmt.Errorf("session_busy")
 	}
 	rt.runOwner = connID
+	m.invalidateRuntimeUnloadNoLock(id)
 	rt.phase = protocol.AgentRunPhaseModel
 	rt.status = sessionRunning
 	rt.waitingType = ""
@@ -519,7 +516,7 @@ func (m *sessionManager) finishStateOp(sessionID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if rt := m.runtime[sessionID]; rt != nil && rt.stateOps > 0 {
-		rt.stateOps--
+		m.finishStateOpNoLock(sessionID, rt)
 	}
 }
 
@@ -534,6 +531,9 @@ func (m *sessionManager) setStatus(sessionID string, status sessionStatus) {
 			rt.phase = ""
 			rt.assistant.Reset()
 			rt.reasoning.Reset()
+			m.scheduleRuntimeUnloadNoLock(sessionID)
+		} else {
+			m.invalidateRuntimeUnloadNoLock(sessionID)
 		}
 	}
 }
@@ -550,6 +550,7 @@ func (m *sessionManager) setWaiting(sessionID string, waitingType protocol.RunWa
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if rt := m.runtime[sessionID]; rt != nil {
+		m.invalidateRuntimeUnloadNoLock(sessionID)
 		rt.status = sessionWaiting
 		rt.waitingType = waitingType
 	}

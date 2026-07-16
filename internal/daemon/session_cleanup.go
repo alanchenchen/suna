@@ -76,7 +76,9 @@ func (m *sessionManager) delete(ctx context.Context, connID, sessionID string) e
 	}
 	m.mu.Lock()
 	m.deleteVersion[sessionID]++
+	m.invalidateRuntimeUnloadNoLock(sessionID)
 	delete(m.runtime, sessionID)
+	delete(m.runtimeUnloadVersion, sessionID)
 	m.mu.Unlock()
 	m.removeSessionAttachments(sessionID)
 	return nil
@@ -136,7 +138,9 @@ func (m *sessionManager) deleteInactive(ctx context.Context, sessionID string) {
 		delete(m.deleting, sessionID)
 		if deleted {
 			m.deleteVersion[sessionID]++
+			m.invalidateRuntimeUnloadNoLock(sessionID)
 			delete(m.runtime, sessionID)
+			delete(m.runtimeUnloadVersion, sessionID)
 		}
 		m.mu.Unlock()
 	}()
