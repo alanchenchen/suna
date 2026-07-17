@@ -410,7 +410,7 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"status.model_retrying_simple":          {LocaleEN: "Model request failed temporarily · retrying...", LocaleZH: "模型请求临时失败 · 正在自动重试..."},
 		"model_error.failed":                    {LocaleEN: "Model request failed: {}", LocaleZH: "模型请求失败：{}"},
 		"model_error.detail":                    {LocaleEN: "Details: {}", LocaleZH: "详情：{}"},
-		"model_error.action_retry":              {LocaleEN: "Suna has already retried this request. Press Enter to retry again, or type a new message to continue.", LocaleZH: "Suna 已自动重试过。按 Enter 再试一次，或输入新消息继续。"},
+		"model_error.action_retry":              {LocaleEN: "Press Enter to retry, or type a new message to continue.", LocaleZH: "按 Enter 重试，或输入新消息继续。"},
 		"model_error.action_check":              {LocaleEN: "Check your model configuration or provider status, then try again.", LocaleZH: "请检查模型配置或服务状态，然后再试。"},
 		"model_error.no_model_configured":       {LocaleEN: "No model is configured. Open Config to add a model connection.", LocaleZH: "尚未配置模型。请进入配置添加模型连接。"},
 		"model_error.session_model_unavailable": {LocaleEN: "The model selected for this session, \"{}\", is no longer configured.\n\nUse /model to select another model before continuing.", LocaleZH: "当前会话使用的模型「{}」已不存在。\n\n请使用 /model 选择其他模型后继续。"},
