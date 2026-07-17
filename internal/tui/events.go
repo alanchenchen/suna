@@ -47,6 +47,12 @@ type attachmentStatusResultMsg struct {
 type sessionListResultMsg struct{ Params protocol.SessionListResult }
 type sessionErrorMsg struct{ Message string }
 type sessionSnapshotResultMsg struct{ Params protocol.SessionSnapshot }
+
+// newSessionResultMsg 保留新会话快照；旧会话删除失败时仍必须切换到已创建的新会话。
+type newSessionResultMsg struct {
+	Params    protocol.SessionSnapshot
+	DeleteErr error
+}
 type sessionMetadataResultMsg struct{ Session protocol.SessionInfo }
 type sessionTitleUpdateResultMsg struct {
 	SessionID       string
@@ -428,7 +434,11 @@ func (t *TUI) handleSessionStateNotification(p protocol.SessionStateParams) {
 	if !updated {
 		t.sessions = append(t.sessions, p.Session)
 	}
-	t.chat.SetSessions(t.sessions)
+	if t.chat.SessionsOverlayOpen {
+		t.setSessionOverlaySessions()
+	} else {
+		t.chat.SetSessions(t.sessions)
+	}
 	t.pickWelcomeSessions()
 	if p.Session.ID == t.currentSession.ID {
 		t.currentSession = p.Session
@@ -452,7 +462,11 @@ func (t *TUI) restoreOptimisticSessionTitle(sessionID, optimisticTitle, oldTitle
 	if t.currentSession.ID == sessionID && t.currentSession.Title == optimisticTitle {
 		t.currentSession.Title = oldTitle
 	}
-	t.chat.SetSessions(t.sessions)
+	if t.chat.SessionsOverlayOpen {
+		t.setSessionOverlaySessions()
+	} else {
+		t.chat.SetSessions(t.sessions)
+	}
 	t.pickWelcomeSessions()
 	if t.mode == uipage.Welcome {
 		t.menu.SetItems(t.welcomeMenuItems(), t.width)

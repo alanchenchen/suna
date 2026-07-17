@@ -193,4 +193,6 @@ type Model struct {
 	SessionCursor       int
 	SessionsError       string
 	SessionConfirm      SessionConfirmMode
+	SessionConfirmID    string
+	SessionRowKinds     []SessionRowKind
 }

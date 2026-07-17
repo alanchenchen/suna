@@ -242,8 +242,9 @@ Ctrl+C             退出
 常用 Slash 命令：
 
 ```text
-/new              新建会话
-/model            打开模型选择器
+/new              以新会话替换当前独占且空闲的会话
+/sessions         加入其他位置的活跃会话或删除空闲会话
+/model            打开当前会话的模型选择器
 /model <ref>      切换当前会话模型，例如 /model openai/gpt-4o-mini
 /memory           查看 user profile memory
 /mcp              打开 MCP 面板

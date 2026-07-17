@@ -15,7 +15,7 @@
 
 主要页面：
 
-- Welcome：展示版本、新会话默认模型、用量、daemon uptime、memory、Guard、Workspace，并提供新会话、恢复会话、配置、帮助入口。
+- Welcome：展示版本、新会话默认模型、用量、daemon uptime、memory、Guard、Workspace。当前 cwd 有会话时提供恢复入口，否则提供新建入口；同时可加入其他 cwd 的活跃会话，或删除其他 cwd 的空闲会话。
 - Chat：对话、工具进度、AskUser、Guard、附件、模型选择、Skill/MCP 面板。
 - Config：配置模型、Guard、Workspace、UI、附件等。
 - Help：展示 slash commands 与帮助说明。
@@ -24,8 +24,9 @@ Chat slash commands：
 
 | 命令 | 当前行为 |
 |---|---|
-| `/new` | 清空 TUI 当前消息并请求 daemon 新建会话。 |
-| `/model` | 打开模型选择器。 |
+| `/new` | 仅当前会话独占且空闲时可用：先创建并切换到新会话，再删除旧会话及其附件；新建失败时保留旧会话。 |
+| `/sessions` | 展示当前工作区状态、其他 cwd 的活跃会话和空闲会话；可加入活跃会话，或删除空闲会话。 |
+| `/model` | 打开当前 session 的模型选择器。 |
 | `/model <ref>` | 切换当前 session 的模型；`<ref>` 可为完整 `provider/model`，也可在当前 session provider 下只写 model；不修改新会话默认模型。 |
 | `/memory` | 拉取并展示 user profile memory。 |
 | `/mcp` | 打开 MCP 面板，查看 server 状态，支持启停和 reload。 |

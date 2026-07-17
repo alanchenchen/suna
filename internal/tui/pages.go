@@ -29,14 +29,15 @@ func (t *TUI) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 			t.doQuit()
 			return t, tea.Quit
 		case "esc":
-			if t.welcomeNewConfirm {
-				t.welcomeNewConfirm = false
-				t.welcomeNotice = ""
+			if t.welcomeDeleteConfirm {
+				t.welcomeDeleteConfirm = false
+				t.welcomeDeleteID = ""
 				t.initWelcomeList()
 				return t, nil
 			}
-			if t.welcomeActivePicker {
+			if t.welcomeActivePicker || t.welcomeIdlePicker {
 				t.welcomeActivePicker = false
+				t.welcomeIdlePicker = false
 				t.initWelcomeList()
 			}
 			return t, nil
@@ -66,28 +67,10 @@ func (t *TUI) handleWelcomeAction(action welcomepage.Action) tea.Cmd {
 			t.openProviderForm("", nil)
 			return t.config.Inputs[t.config.InputFocus].Focus()
 		}
-		if t.cwdHasActiveSession() {
-			t.welcomeNotice = t.tr("tui.welcome.new_active_blocked")
-			return nil
-		}
-		if count := len(t.replaceableCWDSessions()); count > 0 {
-			t.welcomeNewConfirm = true
-			t.welcomeNotice = t.i18n.Tf("tui.welcome.new_confirm_notice", count)
-			t.initWelcomeList()
-			return nil
-		}
 		return t.startNewSession(t.newSessionCmd())
-	case welcomepage.ActionConfirmNew:
-		t.welcomeNewConfirm = false
-		t.welcomeNotice = ""
-		return t.startNewSession(t.newReplacingCWDSessionsCmd())
-	case welcomepage.ActionCancelNew:
-		t.welcomeNewConfirm = false
-		t.welcomeNotice = ""
-		t.initWelcomeList()
-		return nil
 	case welcomepage.ActionResume:
-		if t.resumeSessionID == "" {
+		sessionID := t.menu.SelectedItem().SessionID
+		if sessionID == "" {
 			return nil
 		}
 		t.mode = uipage.Chat
@@ -100,9 +83,15 @@ func (t *TUI) handleWelcomeAction(action welcomepage.Action) tea.Cmd {
 		t.resetConversationStats()
 		cmd := t.initChatComponents()
 		t.resetPhase()
-		return tea.Batch(cmd, t.attachSessionCmd(t.resumeSessionID, false))
+		return tea.Batch(cmd, t.attachSessionCmd(sessionID, false))
 	case welcomepage.ActionJoinPicker:
 		t.welcomeActivePicker = true
+		t.welcomeIdlePicker = false
+		t.initWelcomeList()
+		return nil
+	case welcomepage.ActionIdlePicker:
+		t.welcomeIdlePicker = true
+		t.welcomeActivePicker = false
 		t.initWelcomeList()
 		return nil
 	case welcomepage.ActionJoin:
@@ -121,8 +110,31 @@ func (t *TUI) handleWelcomeAction(action welcomepage.Action) tea.Cmd {
 		cmd := t.initChatComponents()
 		t.resetPhase()
 		return tea.Batch(cmd, t.attachSessionCmd(sessionID, true))
+	case welcomepage.ActionDelete:
+		selected := t.menu.SelectedItem()
+		if selected.SessionID == "" {
+			return nil
+		}
+		t.welcomeDeleteConfirm = true
+		t.welcomeDeleteID = selected.SessionID
+		t.initWelcomeList()
+		return nil
+	case welcomepage.ActionConfirmDelete:
+		if t.welcomeDeleteID == "" {
+			return nil
+		}
+		sessionID := t.welcomeDeleteID
+		t.welcomeDeleteConfirm = false
+		t.welcomeDeleteID = ""
+		return t.deleteSessionCmd(sessionID)
+	case welcomepage.ActionCancelDelete:
+		t.welcomeDeleteConfirm = false
+		t.welcomeDeleteID = ""
+		t.initWelcomeList()
+		return nil
 	case welcomepage.ActionBack:
 		t.welcomeActivePicker = false
+		t.welcomeIdlePicker = false
 		t.initWelcomeList()
 		return nil
 	case welcomepage.ActionConfig:
@@ -163,6 +175,7 @@ func (t *TUI) viewWelcome() string {
 		Pet:           renderPet(petIdle, t.width),
 		Info:          t.renderWelcomeInfo(),
 		Menu:          t.menu.View(),
+		Help:          t.welcomeHelp(),
 		HasConfigured: t.hasConfiguredModel(),
 	}, welcomepage.ViewDeps{
 		Tr:          func(key string) string { return t.tr(key) },
@@ -175,6 +188,7 @@ func (t *TUI) viewWelcome() string {
 }
 
 func (t *TUI) welcomeMenuItems() []welcomepage.Item {
+	t.updateSessionShortcuts()
 	noModel := !t.hasConfiguredModel()
 	var items []welcomepage.Item
 	if noModel {
@@ -183,13 +197,15 @@ func (t *TUI) welcomeMenuItems() []welcomepage.Item {
 		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.help_menu", Action: welcomepage.ActionHelp})
 		return items
 	}
-	if t.welcomeNewConfirm {
-		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.new_confirm", Action: welcomepage.ActionConfirmNew})
-		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.new_cancel", Action: welcomepage.ActionCancelNew})
+	if t.welcomeDeleteConfirm {
+		items = append(items,
+			welcomepage.Item{LabelKey: "tui.welcome.delete_confirm", Action: welcomepage.ActionConfirmDelete},
+			welcomepage.Item{LabelKey: "tui.welcome.delete_cancel", Action: welcomepage.ActionCancelDelete},
+		)
 		return items
 	}
 	if t.welcomeActivePicker {
-		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.back", DetailKey: "tui.welcome.help", Action: welcomepage.ActionBack})
+		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.back", DetailKey: "tui.welcome.join_help", Action: welcomepage.ActionBack})
 		for _, session := range t.activeWelcomeSessions() {
 			items = append(items, welcomepage.Item{
 				LabelKey:  "tui.welcome.join_one",
@@ -201,13 +217,31 @@ func (t *TUI) welcomeMenuItems() []welcomepage.Item {
 		}
 		return items
 	}
+	if t.welcomeIdlePicker {
+		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.back", DetailKey: "tui.welcome.idle_help", Action: welcomepage.ActionBack})
+		for _, session := range t.idleWelcomeSessions() {
+			items = append(items, welcomepage.Item{
+				LabelKey:  "tui.welcome.idle_one",
+				Key:       sessionTitle(session),
+				CWD:       session.CWD,
+				Deletable: true,
+				SessionID: session.ID,
+			})
+		}
+		return items
+	}
 	if t.resumeSessionID != "" {
 		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.resume", Action: welcomepage.ActionResume, SessionID: t.resumeSessionID})
+	} else {
+		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.new", Action: welcomepage.ActionNew})
 	}
-	items = append(items, welcomepage.Item{LabelKey: "tui.welcome.new", Action: welcomepage.ActionNew})
 	activeSessions := t.activeWelcomeSessions()
 	if len(activeSessions) > 0 {
 		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.join", Key: fmt.Sprintf("%d", len(activeSessions)), Action: welcomepage.ActionJoinPicker})
+	}
+	idleSessions := t.idleWelcomeSessions()
+	if len(idleSessions) > 0 {
+		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.idle", Key: fmt.Sprintf("%d", len(idleSessions)), Action: welcomepage.ActionIdlePicker})
 	}
 	items = append(items, welcomepage.Item{LabelKey: "tui.welcome.config", Action: welcomepage.ActionConfig})
 	items = append(items, welcomepage.Item{LabelKey: "tui.welcome.help_menu", Action: welcomepage.ActionHelp})
@@ -215,13 +249,38 @@ func (t *TUI) welcomeMenuItems() []welcomepage.Item {
 }
 
 func (t *TUI) activeWelcomeSessions() []protocol.SessionInfo {
+	cwd := t.currentTUICWD()
 	out := make([]protocol.SessionInfo, 0)
 	for _, session := range t.sessions {
-		if sessionActive(session) && session.ID != t.currentSession.ID {
+		if sessionActive(session) && canonicalTUICWD(session.CWD) != cwd {
 			out = append(out, session)
 		}
 	}
 	return out
+}
+
+func (t *TUI) idleWelcomeSessions() []protocol.SessionInfo {
+	cwd := t.currentTUICWD()
+	out := make([]protocol.SessionInfo, 0)
+	for _, session := range t.sessions {
+		if !sessionActive(session) && canonicalTUICWD(session.CWD) != cwd {
+			out = append(out, session)
+		}
+	}
+	return out
+}
+
+func (t *TUI) welcomeHelp() string {
+	if t.welcomeIdlePicker {
+		return t.tr("tui.welcome.idle_help")
+	}
+	if t.welcomeDeleteConfirm {
+		return t.tr("tui.welcome.delete_confirm_help")
+	}
+	if t.welcomeActivePicker {
+		return t.tr("tui.welcome.join_help")
+	}
+	return t.tr("tui.welcome.help")
 }
 
 func (t *TUI) renderWelcomeInfo() string {
@@ -253,9 +312,6 @@ func (t *TUI) renderWelcomeInfo() string {
 	}
 	rows = append(rows, fmt.Sprintf("%-8s %s", t.tr("tui.status.guard"), styleHL.Render(t.welcomeGuardStatus())))
 	rows = append(rows, fmt.Sprintf("%-8s %s", t.tr("tui.status.workspace"), styleHL.Render(t.welcomeWorkspaceStatus())))
-	if t.welcomeNotice != "" {
-		rows = append(rows, fmt.Sprintf("%-8s %s", t.tr("tui.status.notice"), styleError.Render(t.welcomeNotice)))
-	}
 	return strings.Join(rows, "\n")
 }
 

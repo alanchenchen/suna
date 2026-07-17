@@ -234,8 +234,9 @@ Ctrl+C             Quit
 Common slash commands:
 
 ```text
-/new              New conversation
-/model            Open model picker
+/new              Replace the current idle exclusive session with a new one
+/sessions         Join active sessions elsewhere or remove idle ones
+/model            Open model picker for the current conversation
 /model <ref>      Switch the current conversation model, e.g. /model openai/gpt-4o-mini
 /memory           View user profile memory
 /mcp              Open MCP panel

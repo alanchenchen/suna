@@ -18,11 +18,13 @@ type Action int
 const (
 	ActionNone Action = iota
 	ActionNew
-	ActionConfirmNew
-	ActionCancelNew
 	ActionResume
 	ActionJoin
 	ActionJoinPicker
+	ActionIdlePicker
+	ActionDelete
+	ActionConfirmDelete
+	ActionCancelDelete
 	ActionBack
 	ActionConfig
 	ActionHelp
@@ -34,7 +36,8 @@ type Item struct {
 	Action    Action
 	Disabled  bool
 	SessionID string
-	// CWD 显示在活跃会话选择器的标题下方。
+	Deletable bool
+	// CWD 显示在会话选择器的标题下方。
 	CWD string
 	// DetailKey 是双行菜单使用的可选本地化次行。
 	DetailKey string
@@ -71,7 +74,7 @@ func (m *Model) SetItems(items []Item, width int) {
 	joinPicker := false
 	for _, item := range items {
 		listItems = append(listItems, item)
-		joinPicker = joinPicker || item.Action == ActionJoin
+		joinPicker = joinPicker || item.Action == ActionJoin || item.Deletable
 	}
 	w := max(1, welcomeContentWidth(width)-6)
 	if joinPicker {
@@ -124,6 +127,12 @@ func (m *Model) UpdateKey(key string, items []Item) (Action, bool) {
 			return items[m.cursor].Action, true
 		}
 		return ActionNone, true
+	case "delete", "backspace":
+		if m.cursor >= 0 && m.cursor < len(items) && items[m.cursor].Deletable && !items[m.cursor].Disabled {
+			m.selected = items[m.cursor]
+			return ActionDelete, true
+		}
+		return ActionNone, false
 	default:
 		return ActionNone, false
 	}
@@ -158,7 +167,7 @@ func (d delegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 		st = d.m.deps.Styles.Brand
 	}
 
-	if wi.Action == ActionJoin {
+	if wi.Action == ActionJoin || wi.Deletable {
 		contentWidth := max(1, m.Width()-lipgloss.Width(cursor))
 		title := textutil.TruncateRunes(wi.Key, contentWidth)
 		cwd := textutil.TruncateRunes(wi.CWD, contentWidth)

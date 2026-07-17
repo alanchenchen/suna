@@ -165,37 +165,29 @@ func (t *TUI) sessionListCmd() tea.Cmd {
 	}
 }
 
-func (t *TUI) newSessionCmd() tea.Cmd {
-	return func() tea.Msg {
-		if t.localCli == nil {
-			return ipcErrorNotification(notifyConfigError, fmt.Errorf("%s", t.tr("error.not_connected")))
-		}
-		cwd, _ := os.Getwd()
-		result, err := t.localCli.CreateSession(cwd, defaultSessionTitle(cwd))
-		if err != nil {
-			return ipcErrorNotification(notifyConfigError, err)
-		}
-		return sessionSnapshotResultMsg{Params: result}
+func (t *TUI) newSessionCmd(replaceSessionIDs ...string) tea.Cmd {
+	replaceSessionID := ""
+	if len(replaceSessionIDs) > 0 {
+		replaceSessionID = replaceSessionIDs[0]
 	}
-}
-
-func (t *TUI) newReplacingCWDSessionsCmd() tea.Cmd {
-	targets := t.replaceableCWDSessions()
 	return func() tea.Msg {
 		if t.localCli == nil {
 			return ipcErrorNotification(notifyConfigError, fmt.Errorf("%s", t.tr("error.not_connected")))
 		}
-		for _, item := range targets {
-			if err := t.localCli.DeleteSession(item.ID); err != nil {
-				return sessionErrorMsg{Message: t.i18n.Tf("tui.sessions.delete_failed", err.Error())}
-			}
-		}
 		cwd, _ := os.Getwd()
-		result, err := t.localCli.CreateSession(cwd, defaultSessionTitle(cwd))
+		created, err := t.localCli.CreateSession(cwd, defaultSessionTitle(cwd))
 		if err != nil {
+			// 创建失败时旧会话仍保持附着，不能提前清空或删除它。
 			return ipcErrorNotification(notifyConfigError, err)
 		}
-		return sessionSnapshotResultMsg{Params: result}
+		if replaceSessionID == "" {
+			return newSessionResultMsg{Params: created}
+		}
+		// 创建/附着新会话成功后才删除旧会话；删除失败保留新会话并向用户报告。
+		if err := t.localCli.DeleteSession(replaceSessionID); err != nil {
+			return newSessionResultMsg{Params: created, DeleteErr: err}
+		}
+		return newSessionResultMsg{Params: created}
 	}
 }
 

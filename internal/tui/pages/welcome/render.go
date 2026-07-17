@@ -25,6 +25,7 @@ type ViewData struct {
 	Info          string
 	Menu          string
 	HasConfigured bool
+	Help          string
 }
 
 func RenderView(data ViewData, deps ViewDeps) string {
@@ -44,7 +45,7 @@ func RenderView(data ViewData, deps ViewDeps) string {
 	}
 	sb.WriteString("\n")
 	sb.WriteString(textutil.IndentLines(welcomeBoxStyle(w, deps).Render(strings.TrimRight(data.Menu, "\n")), pad) + "\n\n")
-	sb.WriteString(pad + truncateANSI(deps.Dim.Render(deps.Tr("tui.welcome.help")), w) + "\n")
+	sb.WriteString(pad + truncateANSI(deps.Dim.Render(data.Help), w) + "\n")
 	return sb.String()
 }
 

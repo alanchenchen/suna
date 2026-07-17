@@ -30,14 +30,12 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 
 	switch cmd {
 	case "/new":
-		t.chat.Messages = []chatMsg{}
-		t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}
-		t.chat.Attachments = nil
-		t.chat.ResumeAvailable = false
-		t.resetConversationStats()
-		t.resetPhase()
-		t.chat.LastAssistantText = ""
-		return t.newSessionCmd()
+		if !t.canReplaceCurrentSession() {
+			t.appendNonToolMessage(chatMsg{Role: "error", Content: t.tr("tui.command.new.unavailable")})
+			return nil
+		}
+		// 新会话创建成功前不能清空当前 transcript；失败时用户仍留在原会话。
+		return t.newSessionCmd(t.currentSession.ID)
 	case "/model":
 		if len(parts) > 1 {
 			return t.switchModelRef(parts[1])
@@ -299,6 +297,13 @@ func (t *TUI) updateSessionsOverlay(ks string) (tea.Model, tea.Cmd) {
 		return t, nil
 	case "down":
 		t.chat.MoveSessionCursor(1)
+		return t, nil
+	case "enter":
+		// 只有 Active elsewhere 可 Join；Idle elsewhere 的 Enter 明确无动作。
+		if sessionID, ok := t.chat.SelectedActiveSession(); ok {
+			t.chat.CloseSessionsOverlay()
+			return t, t.attachSessionCmd(sessionID, true)
+		}
 		return t, nil
 	case "delete", "backspace", "ctrl+h":
 		t.chat.BeginSessionDelete(t.currentSession.ID, t.tr("tui.sessions.cannot_delete_current"), t.tr("tui.sessions.cannot_delete_active"))
@@ -710,11 +715,28 @@ func (t *TUI) renderSessionsOverlay(width int) string {
 		start = t.chat.SessionCursor - bodyHeight + 1
 	}
 	end := min(len(t.chat.Sessions), start+bodyHeight)
+	lastKind := chatpage.SessionRowKind(-1)
 	for i := start; i < end; i++ {
+		kind := t.chat.SessionRowKindAt(i)
+		if kind != lastKind {
+			lines = append(lines, "", styleDim.Render(t.sessionGroupLabel(kind)))
+			lastKind = kind
+		}
 		lines = append(lines, t.renderSessionRow(i, t.chat.Sessions[i], inner)...)
 	}
 	lines = append(lines, "", styleDim.Render(t.sessionsHelpText(start, bodyHeight, len(t.chat.Sessions))))
 	return boxStyle.Width(w).Padding(1, 2).Render(strings.Join(lines, "\n"))
+}
+
+func (t *TUI) sessionGroupLabel(kind chatpage.SessionRowKind) string {
+	switch kind {
+	case chatpage.SessionRowCurrentWorkspace:
+		return t.tr("tui.sessions.group_current")
+	case chatpage.SessionRowActiveElsewhere:
+		return t.tr("tui.sessions.group_active")
+	default:
+		return t.tr("tui.sessions.group_idle")
+	}
 }
 
 func (t *TUI) renderSessionDeleteConfirm(width int) string {
@@ -775,7 +797,15 @@ func (t *TUI) renderSessionRow(i int, s protocol.SessionInfo, width int) []strin
 }
 
 func (t *TUI) sessionsHelpText(start, height, total int) string {
-	text := t.tr("tui.sessions.help")
+	text := t.tr("tui.sessions.help_current")
+	if t.chat.SessionCursor >= 0 && t.chat.SessionCursor < len(t.chat.Sessions) {
+		switch t.chat.SessionRowKindAt(t.chat.SessionCursor) {
+		case chatpage.SessionRowActiveElsewhere:
+			text = t.tr("tui.sessions.help_active")
+		case chatpage.SessionRowIdleElsewhere:
+			text = t.tr("tui.sessions.help_idle")
+		}
+	}
 	if total > height {
 		text += fmt.Sprintf(" · %d-%d/%d", start+1, min(total, start+height), total)
 	}

@@ -382,6 +382,9 @@ func (t *TUI) leaveCurrentSessionForWelcome() tea.Cmd {
 	t.currentRunCanControl = false
 	t.handoffRole = handoffRoleHost
 	t.welcomeActivePicker = false
+	t.welcomeIdlePicker = false
+	t.welcomeDeleteConfirm = false
+	t.welcomeDeleteID = ""
 	t.attachmentStatus = protocol.AttachmentStatusResult{}
 	t.chat.Attachments = nil
 	t.updateSessionShortcuts()

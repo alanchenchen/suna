@@ -18,11 +18,23 @@ func (t *TUI) handleProtocolResultMsg(msg tea.Msg) tea.Cmd {
 		t.handleAttachmentStatusNotification(m.Params)
 	case sessionListResultMsg:
 		t.sessions = m.Params.Sessions
-		t.chat.SetSessions(m.Params.Sessions)
+		if t.chat.SessionsOverlayOpen {
+			t.setSessionOverlaySessions()
+		} else {
+			t.chat.SetSessions(m.Params.Sessions)
+		}
 		t.pickWelcomeSessions()
 	case sessionErrorMsg:
 		t.chat.SessionsLoading = false
 		t.chat.SessionsError = m.Message
+	case newSessionResultMsg:
+		t.applySessionSnapshot(m.Params)
+		t.mode = uipage.Chat
+		schedule = true
+		if m.DeleteErr != nil {
+			t.appendNonToolMessage(chatMsg{Role: "error", Content: t.i18n.Tf("tui.command.new.delete_failed", m.DeleteErr.Error())})
+		}
+		return tea.Batch(t.attachmentStatusCmd(), t.scheduleTranscriptSync(), t.startChatSpinner())
 	case sessionSnapshotResultMsg:
 		t.applySessionSnapshot(m.Params)
 		t.mode = uipage.Chat
