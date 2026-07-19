@@ -18,10 +18,12 @@ func (t *TUI) handleProtocolResultMsg(msg tea.Msg) tea.Cmd {
 		t.handleAttachmentStatusNotification(m.Params)
 	case sessionListResultMsg:
 		t.sessions = m.Params.Sessions
-		if t.chat.SessionsOverlayOpen {
-			t.setSessionOverlaySessions()
-		} else {
-			t.chat.SetSessions(m.Params.Sessions)
+		if t.mode == uipage.Chat {
+			if t.chat.SessionsOverlayOpen {
+				t.setSessionOverlaySessions()
+			} else {
+				t.chat.SetSessions(m.Params.Sessions)
+			}
 		}
 		t.pickWelcomeSessions()
 	case sessionErrorMsg:

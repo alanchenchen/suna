@@ -376,7 +376,14 @@ func (t *TUI) updateChatEnter() (tea.Model, tea.Cmd) {
 }
 
 func (t *TUI) leaveCurrentSessionForWelcome() tea.Cmd {
-	// Welcome 表示当前窗口未进入任何 session；离开 Chat 必须 detach，避免继续占用 guest/client_count。
+	// Welcome 不保留当前 Chat session 的展示 runtime；daemon 仍保留持久化 session。
+	t.chat.ResetRuntime()
+	t.resetConversationStats()
+	t.transcriptSyncDirty = false
+	t.transcriptSyncScheduled = false
+	t.chatSpinnerTicking = false
+	t.lastTextStreamAt = time.Time{}
+	t.lastPasteAt = time.Time{}
 	t.mode = uipage.Welcome
 	t.currentSession = protocol.SessionInfo{}
 	t.currentRunCanControl = false
@@ -386,7 +393,6 @@ func (t *TUI) leaveCurrentSessionForWelcome() tea.Cmd {
 	t.welcomeDeleteConfirm = false
 	t.welcomeDeleteID = ""
 	t.attachmentStatus = protocol.AttachmentStatusResult{}
-	t.chat.Attachments = nil
 	t.updateSessionShortcuts()
 	return tea.Batch(t.detachSessionCmd(), t.refreshDaemonStatusCmd())
 }

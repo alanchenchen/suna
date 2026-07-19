@@ -82,6 +82,11 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 }
 
 func (t *TUI) handleNotificationMsg(msg notificationMsg) {
+	// Welcome 不消费与 Chat runtime 绑定的事件。detach 前已经进入本地队列的
+	// stream/tool/interaction 通知不能重新持有刚释放的展示内容。
+	if isChatRuntimeNotification(msg) && t.mode == uipage.Welcome && t.currentSession.ID == "" {
+		return
+	}
 	switch m := msg.(type) {
 	case agentDeltaMsg:
 		t.handleAgentDeltaNotification(m.Params)
@@ -127,6 +132,19 @@ func (t *TUI) handleNotificationMsg(msg notificationMsg) {
 		t.handleAttachmentStatusNotification(m.Params)
 	case requestErrorMsg:
 		t.handleRequestErrorNotification(m)
+	}
+}
+
+func isChatRuntimeNotification(msg notificationMsg) bool {
+	switch m := msg.(type) {
+	case agentDeltaMsg, agentRunMsg, userMessageMsg, usageMsg, toolStartMsg, toolGuardMsg, toolEndMsg, askUserMsg, guardConfirmMsg, interactionResolvedMsg, compactResultMsg, memoryListMsg, skillLoadMsg, skillReviewMsg:
+		return true
+	case attachmentStatusMsg:
+		return m.Params.SessionID != ""
+	case requestErrorMsg:
+		return m.Scope == notifyCompactError
+	default:
+		return false
 	}
 }
 
@@ -434,10 +452,12 @@ func (t *TUI) handleSessionStateNotification(p protocol.SessionStateParams) {
 	if !updated {
 		t.sessions = append(t.sessions, p.Session)
 	}
-	if t.chat.SessionsOverlayOpen {
-		t.setSessionOverlaySessions()
-	} else {
-		t.chat.SetSessions(t.sessions)
+	if t.mode == uipage.Chat {
+		if t.chat.SessionsOverlayOpen {
+			t.setSessionOverlaySessions()
+		} else {
+			t.chat.SetSessions(t.sessions)
+		}
 	}
 	t.pickWelcomeSessions()
 	if p.Session.ID == t.currentSession.ID {
@@ -462,10 +482,12 @@ func (t *TUI) restoreOptimisticSessionTitle(sessionID, optimisticTitle, oldTitle
 	if t.currentSession.ID == sessionID && t.currentSession.Title == optimisticTitle {
 		t.currentSession.Title = oldTitle
 	}
-	if t.chat.SessionsOverlayOpen {
-		t.setSessionOverlaySessions()
-	} else {
-		t.chat.SetSessions(t.sessions)
+	if t.mode == uipage.Chat {
+		if t.chat.SessionsOverlayOpen {
+			t.setSessionOverlaySessions()
+		} else {
+			t.chat.SetSessions(t.sessions)
+		}
 	}
 	t.pickWelcomeSessions()
 	if t.mode == uipage.Welcome {

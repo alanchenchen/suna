@@ -9,9 +9,60 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/alanchenchen/suna/internal/protocol"
+	"github.com/alanchenchen/suna/internal/tui/components/toolview"
+	chatpage "github.com/alanchenchen/suna/internal/tui/pages/chat"
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 	tuitransport "github.com/alanchenchen/suna/internal/tui/transport"
 )
+
+func TestLeaveCurrentSessionForWelcomeReleasesChatRuntime(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, width: 80, height: 24}
+	tui.initChatComponents()
+	tui.currentSession = protocol.SessionInfo{ID: "session-1"}
+	tui.chat.Messages = []chatpage.Msg{{Role: "assistant", Content: strings.Repeat("x", 4096)}}
+	tui.chat.ActiveTools = map[string]*toolEntry{"tool-1": {ID: "tool-1", Result: strings.Repeat("y", 4096)}}
+	tui.chat.ToolStartTimes = map[string]time.Time{"tool-1": time.Now()}
+	tui.chat.CurrentToolBlock = &toolBlock{Entries: map[string]*toolview.Entry{}}
+	tui.chat.InteractionQueue = []chatpage.Interaction{{ID: "ask-1"}}
+	tui.chat.Attachments = []attachmentItem{{Name: "image.png"}}
+	tui.chat.Viewport.SetContentLines([]string{"rendered transcript"})
+
+	tui.leaveCurrentSessionForWelcome()
+
+	if tui.mode != uipage.Welcome {
+		t.Fatalf("mode = %q, want welcome", tui.mode)
+	}
+	if tui.currentSession.ID != "" {
+		t.Fatalf("current session = %q, want empty", tui.currentSession.ID)
+	}
+	if len(tui.chat.Messages) != 0 || len(tui.chat.ActiveTools) != 0 || len(tui.chat.InteractionQueue) != 0 || len(tui.chat.Attachments) != 0 {
+		t.Fatal("chat runtime retains session data after leaving for welcome")
+	}
+	if tui.chat.CurrentToolBlock != nil {
+		t.Fatal("current tool block was retained")
+	}
+	if got := strings.TrimSpace(tui.chat.Viewport.View()); got != "" {
+		t.Fatalf("viewport content = %q, want blank viewport", got)
+	}
+}
+
+func TestWelcomeDropsLateChatRuntimeNotifications(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Welcome}
+	tui.handleNotificationMsg(agentDeltaMsg{Params: protocol.AgentDeltaParams{Content: "late output"}})
+	tui.handleNotificationMsg(toolStartMsg{Params: protocol.ToolStartParams{ID: "tool-1", Tool: "exec"}})
+	tui.handleNotificationMsg(skillLoadMsg{Params: protocol.SkillLoadParams{Name: "review", Status: "done"}})
+	tui.handleNotificationMsg(memoryListMsg{Params: protocol.MemoryListResult{Memories: []protocol.MemoryItem{{Content: "late memory"}}}})
+
+	if len(tui.chat.Messages) != 0 {
+		t.Fatalf("messages = %d, want no late chat messages", len(tui.chat.Messages))
+	}
+	if len(tui.chat.ActiveTools) != 0 {
+		t.Fatalf("active tools = %d, want no late tool state", len(tui.chat.ActiveTools))
+	}
+	if len(tui.chat.Memories) != 0 {
+		t.Fatalf("memories = %d, want no late memory state", len(tui.chat.Memories))
+	}
+}
 
 func TestThinkingBoxCollapsedShowsAdaptivePreviewAndStopsElapsed(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100}
