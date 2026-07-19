@@ -80,10 +80,9 @@ func (s *service) handleSessionAttach(ctx context.Context, req protocol.Request)
 }
 
 func (s *service) handleSessionDetach(ctx context.Context, req protocol.Request) (any, error) {
-	sessionID := s.daemon.sessions.detach(req.ConnID)
-	if sessionID != "" {
-		s.onClientDetached(ctx, req.ConnID, sessionID)
-		s.broadcastSessionState(ctx, sessionID)
+	detached := s.daemon.sessions.detach(req.ConnID)
+	if detached.sessionID != "" {
+		s.broadcastSessionState(ctx, detached.sessionID)
 	}
 	return map[string]string{"status": "detached"}, nil
 }

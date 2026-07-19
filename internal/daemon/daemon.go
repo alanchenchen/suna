@@ -61,14 +61,25 @@ func New(cfg *config.Config, transports []protocol.Transport, opts ...Options) (
 		return nil, fmt.Errorf("create agent: %w", err)
 	}
 
-	return &Daemon{
+	d := &Daemon{
 		cfg:        cfg,
 		opts:       options,
 		agent:      agent,
 		sessions:   newSessionManager(agent, agent.SessionStore()),
 		transports: transports,
 		sinks:      make(map[string]protocol.EventSink),
-	}, nil
+	}
+	d.sessions.onOrphan = func(sessionID string) {
+		if d.service != nil {
+			d.service.cancelPendingInteractions(sessionID)
+		}
+	}
+	d.sessions.onClientDetached = func(connID, sessionID string) {
+		if d.service != nil {
+			d.service.onClientDetached(context.Background(), connID, sessionID)
+		}
+	}
+	return d, nil
 }
 
 // Run 启动 daemon 主循环（前台阻塞）
@@ -153,15 +164,12 @@ func (d *Daemon) addConnection(connID string, sink protocol.EventSink) {
 }
 
 func (d *Daemon) removeConnection(connID string) {
-	var detachedSessionID string
+	var detached detachResult
 	if d.sessions != nil {
-		detachedSessionID = d.sessions.detach(connID)
+		detached = d.sessions.detach(connID)
 	}
-	if detachedSessionID != "" {
-		if d.service != nil {
-			d.service.onClientDetached(context.Background(), connID, detachedSessionID)
-		}
-		d.broadcastSessionState(context.Background(), detachedSessionID)
+	if detached.sessionID != "" {
+		d.broadcastSessionState(context.Background(), detached.sessionID)
 	}
 	d.mu.Lock()
 	delete(d.sinks, connID)

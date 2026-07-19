@@ -88,6 +88,37 @@ func TestSessionManagerDefersRuntimeUnloadUntilRunBecomesIdle(t *testing.T) {
 	waitForRuntimeUnloaded(t, m, snap.Session.ID)
 }
 
+func TestSessionManagerOrphansActiveRuntimeOnLastDetach(t *testing.T) {
+	ctx := context.Background()
+	m := newTestSessionManager(t)
+	m.runtimeUnloadDelay = 10 * time.Millisecond
+
+	snap, err := m.create(ctx, "client-a", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+	if err := m.store.SetMessageCount(ctx, snap.Session.ID, 1); err != nil {
+		t.Fatalf("SetMessageCount error = %v", err)
+	}
+	if _, _, err := m.beginRun("client-a"); err != nil {
+		t.Fatalf("beginRun error = %v", err)
+	}
+
+	detached := m.detach("client-a")
+	if !detached.orphaned {
+		t.Fatal("detach orphaned = false, want true")
+	}
+	if detached.idle {
+		t.Fatal("detach idle = true, want false for active runtime")
+	}
+	if detached.agent == nil {
+		t.Fatal("detach agent = nil, want active agent to cancel")
+	}
+
+	m.setStatus(snap.Session.ID, sessionIdle)
+	waitForRuntimeUnloaded(t, m, snap.Session.ID)
+}
+
 func runtimeForSession(t *testing.T, m *sessionManager, sessionID string) *sessionRuntime {
 	t.Helper()
 	m.mu.RLock()

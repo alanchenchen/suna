@@ -39,6 +39,13 @@ type sessionRuntime struct {
 	waitingType protocol.RunWaitingType
 }
 
+type detachResult struct {
+	sessionID string
+	orphaned  bool
+	idle      bool
+	agent     *agent.Agent
+}
+
 type sessionManager struct {
 	root                  *agent.Agent
 	store                 *memory.SessionStore
@@ -52,6 +59,12 @@ type sessionManager struct {
 	runtimeUnloadVersion  map[string]uint64
 	runtimeUnloadDelay    time.Duration
 	beforeAttachStateLoad func()
+	// onOrphan 在最后一个连接离开活动 runtime 后清理 daemon 侧的交互引用。
+	// 回调在 sessionManager 锁外执行，不能重入 sessionManager 锁。
+	onOrphan func(sessionID string)
+	// onClientDetached 在仍有其他连接使用同一 runtime 时交接等待中的交互。
+	// 回调在 sessionManager 锁外执行。
+	onClientDetached func(connID, sessionID string)
 }
 
 func newSessionManager(root *agent.Agent, store *memory.SessionStore) *sessionManager {
@@ -218,11 +231,10 @@ func (m *sessionManager) attach(ctx context.Context, connID, sessionID string, r
 		m.mu.Unlock()
 		return protocol.SessionSnapshot{}, fmt.Errorf("session is being created")
 	}
-	var oldID string
-	var oldMaybeDelete bool
+	var oldDetach detachResult
 	if old := m.attached[connID]; old != "" && old != sessionID {
 		// 切换 session 必须复用 detach 的客户端计数语义，避免旧 session 在其他 TUI 中残留为 active。
-		oldID, oldMaybeDelete = m.detachConnNoLock(connID)
+		oldDetach = m.detachConnNoLock(connID)
 	}
 	rt.clients[connID] = true
 	m.attached[connID] = sessionID
@@ -232,9 +244,7 @@ func (m *sessionManager) attach(ctx context.Context, connID, sessionID string, r
 	}
 	m.mu.Unlock()
 
-	if oldID != "" {
-		m.handleDetachedSession(oldID, oldMaybeDelete)
-	}
+	m.finishDetach(connID, oldDetach)
 	_ = m.store.TouchAttached(ctx, sessionID)
 	return m.snapshotForConn(connID, *meta, rt, snap), nil
 }
@@ -281,12 +291,12 @@ func (m *sessionManager) materializeLegacyModelRef(ctx context.Context, sessionI
 	return meta, nil
 }
 
-func (m *sessionManager) detach(connID string) string {
+func (m *sessionManager) detach(connID string) detachResult {
 	m.mu.Lock()
-	id, shouldMaybeDelete := m.detachConnNoLock(connID)
+	result := m.detachConnNoLock(connID)
 	m.mu.Unlock()
-	m.handleDetachedSession(id, shouldMaybeDelete)
-	return id
+	m.finishDetach(connID, result)
+	return result
 }
 
 func (m *sessionManager) currentSessionID(connID string) string {
@@ -295,18 +305,46 @@ func (m *sessionManager) currentSessionID(connID string) string {
 	return m.attached[connID]
 }
 
-func (m *sessionManager) detachConnNoLock(connID string) (string, bool) {
+func (m *sessionManager) detachConnNoLock(connID string) detachResult {
 	id := m.attached[connID]
 	delete(m.attached, connID)
 	if id == "" {
-		return "", false
+		return detachResult{}
 	}
 	rt := m.runtime[id]
 	if rt == nil {
-		return id, false
+		return detachResult{sessionID: id}
 	}
 	delete(rt.clients, connID)
-	return id, len(rt.clients) == 0 && rt.status == sessionIdle
+	if len(rt.clients) != 0 {
+		return detachResult{sessionID: id}
+	}
+	result := detachResult{sessionID: id, orphaned: true, idle: rt.status == sessionIdle}
+	if !result.idle {
+		result.agent = rt.agent
+	}
+	return result
+}
+
+// finishDetach 在锁外收敛连接离开后的 runtime。仍有连接时交接交互；最后一个
+// 连接离开时，活动 run 必须由 Agent 自行结束并将状态切回 idle，不能伪造 idle 状态。
+func (m *sessionManager) finishDetach(connID string, result detachResult) {
+	if result.sessionID == "" {
+		return
+	}
+	if result.orphaned {
+		if m.onOrphan != nil {
+			m.onOrphan(result.sessionID)
+		}
+	} else if m.onClientDetached != nil {
+		m.onClientDetached(connID, result.sessionID)
+	}
+	if result.agent != nil {
+		result.agent.CancelCurrentRun()
+	}
+	if result.idle {
+		m.handleDetachedSession(result.sessionID, true)
+	}
 }
 
 func (m *sessionManager) attachedSession(connID string) (*sessionRuntime, string, error) {
@@ -469,6 +507,19 @@ func (m *sessionManager) isClientAttached(connID, sessionID string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.attached[connID] == sessionID
+}
+
+// withAttachedClients 在持有读锁期间提交等待交互，保证最后一个连接 detach
+// 不会在清理 pending 后又留下迟到的 AskUser / GuardConfirm 记录。
+func (m *sessionManager) withAttachedClients(sessionID string, fn func()) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	rt := m.runtime[sessionID]
+	if rt == nil || len(rt.clients) == 0 {
+		return false
+	}
+	fn()
+	return true
 }
 
 func (m *sessionManager) ensureRunOwner(connID string) (*sessionRuntime, string, error) {

@@ -220,6 +220,9 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, inputLa
 	// Agent 只会在状态保存 defer 完成后关闭 events；因此只能在这里把会话转为 idle，
 	// 避免首轮 run 的 done 通知先到、客户端断开后被空会话清理。
 	defer func() {
+		// run 可能在最后一个连接离开时被取消；无论结束原因如何，都不能让
+		// AskUser / GuardConfirm 的协议交互继续保留 session runtime 的引用。
+		s.cancelPendingInteractions(sessionID)
 		s.daemon.sessions.setStatus(sessionID, sessionIdle)
 		emit(ctx, multiSink(s.daemon.sessions.sinksForSession(s.daemon, sessionID)), protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
 	}()
@@ -286,7 +289,9 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, inputLa
 				askID := uuid.NewString()
 				params := protocol.AskUserParams{Question: evt.Question, Options: evt.Options, ID: askID, SessionID: sessionID, AllowCustom: evt.AllowCustom}
 				if evt.Reply != nil {
-					s.pendingAsks.Store(askID, pendingInteraction{sessionID: sessionID, ownerID: connID, reply: evt.Reply, ask: &params})
+					s.daemon.sessions.withAttachedClients(sessionID, func() {
+						s.pendingAsks.Store(askID, pendingInteraction{sessionID: sessionID, ownerID: connID, reply: evt.Reply, ask: &params})
+					})
 				}
 				s.emitAskUser(ctx, sessionID, connID, params)
 			case agent.EventGuardConfirm:
@@ -297,7 +302,9 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, inputLa
 				guardID := uuid.NewString()
 				params := protocol.GuardConfirmParams{ID: guardID, ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, Params: evt.GuardParams, Risk: evt.GuardRisk, Reason: evt.GuardReason, Suggestion: evt.GuardSuggestion, ReviewCode: evt.GuardReviewCode, ReviewMessage: evt.GuardReviewMsg, SessionID: sessionID}
 				if evt.Reply != nil {
-					s.pendingGuards.Store(guardID, pendingInteraction{sessionID: sessionID, ownerID: connID, reply: evt.Reply, guard: &params})
+					s.daemon.sessions.withAttachedClients(sessionID, func() {
+						s.pendingGuards.Store(guardID, pendingInteraction{sessionID: sessionID, ownerID: connID, reply: evt.Reply, guard: &params})
+					})
 				}
 				s.emitGuardConfirm(ctx, sessionID, connID, params)
 			case agent.EventStatus:
@@ -431,6 +438,26 @@ func (s *service) onClientDetached(ctx context.Context, connID, sessionID string
 			p := *pending.guard
 			p.CanReply = true
 			emit(ctx, s.daemon.sinkFor(targetConnID, nil), protocol.NotifyGuardConfirm, p)
+		}
+		return true
+	})
+}
+
+// cancelPendingInteractions 删除已失去所有 attached client 的 session 的交互记录。
+// Agent run 会由取消 context 唤醒，因此这里不能关闭 reply，避免把零值误当成用户回复。
+func (s *service) cancelPendingInteractions(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	s.pendingAsks.Range(func(key, value any) bool {
+		if pending := value.(pendingInteraction); pending.sessionID == sessionID {
+			s.pendingAsks.Delete(key)
+		}
+		return true
+	})
+	s.pendingGuards.Range(func(key, value any) bool {
+		if pending := value.(pendingInteraction); pending.sessionID == sessionID {
+			s.pendingGuards.Delete(key)
 		}
 		return true
 	})

@@ -333,6 +333,33 @@ func TestSessionManagerAttachSwitchDetachesPreviousSession(t *testing.T) {
 	}
 }
 
+func TestSessionManagerAttachSwitchHandsOffRemainingClients(t *testing.T) {
+	ctx := context.Background()
+	m := newTestSessionManager(t)
+	first, err := m.create(ctx, "owner", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create first error = %v", err)
+	}
+	if _, err := m.attach(ctx, "observer", first.Session.ID, false); err != nil {
+		t.Fatalf("attach observer error = %v", err)
+	}
+	second, err := m.create(ctx, "other", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create second error = %v", err)
+	}
+
+	var gotConnID, gotSessionID string
+	m.onClientDetached = func(connID, sessionID string) {
+		gotConnID, gotSessionID = connID, sessionID
+	}
+	if _, err := m.attach(ctx, "owner", second.Session.ID, false); err != nil {
+		t.Fatalf("switch attach error = %v", err)
+	}
+	if gotConnID != "owner" || gotSessionID != first.Session.ID {
+		t.Fatalf("handoff = (%q, %q), want (%q, %q)", gotConnID, gotSessionID, "owner", first.Session.ID)
+	}
+}
+
 func TestSessionManagerModelUpdateDoesNotCommitWhenSnapshotReadFails(t *testing.T) {
 	ctx := context.Background()
 	m := newTestSessionManager(t)
