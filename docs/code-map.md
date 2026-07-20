@@ -6,14 +6,14 @@
 
 | 功能 | 主要代码位置 | 说明 |
 |---|---|---|
-| CLI 启动 | `main.go`, `daemon_cmd.go`, `runtime_cmd.go` | `suna` 打开 TUI；`status` / `stop` 管理后台 daemon；`runtime --transport stdio` 启动第三方客户端 runtime。 |
+| CLI 启动 | `main.go`, `daemon_cmd.go`, `serve_cmd.go` | `suna` 打开 TUI；`status` / `stop` 管理后台 daemon；`serve --json` 为第三方客户端确保 TCP daemon 已就绪。 |
 | daemon 自动拉起 | `daemon_cmd.go`, `internal/transport/local` | TUI 连接失败时后台启动同一可执行文件作为 daemon。 |
 | daemon 服务 | `internal/daemon` | 协调配置、会话、Agent、附件、Skill、MCP、状态通知。 |
 | daemon 生命周期 | `internal/daemon/lifecycle.go` | 根据 transport retention policy 和连接数决定退出；停止时取消当前 run。 |
 | protocol | `internal/protocol`, `docs/protocol.md` | 定义 method、result、notification、事件、错误和多模态消息结构。 |
-| JSON-RPC transport glue | `internal/transport/jsonrpc` | local / stdio 共用的 JSON-RPC request、response、notification、结构化错误和 hello gate。 |
+| JSON-RPC transport glue | `internal/transport/jsonrpc` | local / TCP 共用的 JSON-RPC request、response、notification、结构化错误和 hello gate。 |
 | 本地 transport | `internal/transport/local` | macOS/Linux Unix socket，Windows Named Pipe。 |
-| stdio runtime transport | `internal/transport/stdio` | 第三方 UI / 客户端通过 `suna runtime --transport stdio` 接入。 |
+| TCP transport | `internal/transport/tcp` | 第三方 UI / 客户端通过 loopback TCP 与 `suna serve --json` 接入共享 daemon。 |
 | TUI 主体 | `internal/tui` | Bubble Tea app、页面切换、事件适配、主题、i18n。 |
 | Chat 页面 | `internal/tui/pages/chat`, `internal/tui/chat*.go` | 对话、输入、附件、工具展示、Guard、AskUser、模型/Skill/MCP 浮层；transcript 使用全局 offset + visible window 渲染长历史。 |
 | Chat transcript 性能 | `internal/tui/pages/chat/transcript.go`, `internal/tui/chat.go`, `internal/tui/chat_render.go` | 维护 transcript blocks、全局滚动 offset、visible window、Markdown render cache 和滚轮/PageUp/PageDown 适配。 |
@@ -46,7 +46,7 @@
 
 ### 入口和 TUI
 
-- `main.go`、`daemon_cmd.go`、`runtime_cmd.go`：CLI 命令、daemon 进程管理和第三方 runtime 入口。
+- `main.go`、`daemon_cmd.go`、`serve_cmd.go`：CLI 命令、daemon 进程管理和第三方 TCP 客户端入口。
 - `internal/tui`：终端 UI、页面、快捷键、slash command、daemon 事件适配。
 - `internal/tui/transport`：TUI 侧本地连接适配，不承载业务语义；method response 转为本地 typed message，daemon notification 走 notification pump。
 
@@ -54,10 +54,10 @@ TUI 不应直接调用 `agent`、`runner`、`tools`、`guard`、`memory`、`skil
 
 ### 通信和 daemon
 
-- `internal/protocol`：TUI、第三方 runtime 客户端与 daemon 的方法、参数、结果和通知类型；事件语义见 [Protocol](protocol.md)。
-- `internal/transport/jsonrpc`：local / stdio 共用的 JSON-RPC 编解码、结构化错误和 hello gate。
+- `internal/protocol`：TUI、第三方 TCP 客户端与 daemon 的方法、参数、结果和通知类型；事件语义见 [Protocol](protocol.md)。
+- `internal/transport/jsonrpc`：local / TCP 共用的 JSON-RPC 编解码、结构化错误和 hello gate。
 - `internal/transport/local`：Unix socket / Named Pipe 本地 transport。
-- `internal/transport/stdio`：第三方 runtime stdio transport。
+- `internal/transport/tcp`：loopback TCP transport，供第三方客户端使用。
 - global runtime：`internal/daemon` 协调全局 config、Model Router、工具目录、Guard、Skill/MCP runtime 和 memory worker；它不持有某个 session 的当前模型。
 - session runtime：按 session 建立隔离的 cwd、状态和 run 上下文，从 `sessions.model_ref` 创建显式 `ModelBinding`；主 run、Guard、Skill、compact 和 memory candidate extraction 都复用该 binding。
 - `internal/daemon`：长期运行服务，协调配置、会话、Agent、附件和状态通知。
@@ -266,7 +266,7 @@ runner 使用指定 model 运行子任务
 - 想看“风险操作怎么拦”：`internal/agent/tools.go`、`internal/guard/guard.go`、`internal/guard/tool_risk.go`。
 - 想看“模型怎么接入”：`internal/model/provider.go`、`router.go` 和具体 provider 文件。
 - 想看“TUI 怎么和 daemon 通信”：`internal/tui/transport/client.go`、`internal/protocol`、`internal/transport/local`。
-- 想看“第三方 UI 怎么接入”：`docs/runtime-stdio.md`、`runtime_cmd.go`、`internal/transport/stdio`、`internal/transport/jsonrpc`。
+- 想看“第三方 UI 怎么接入”：`docs/tcp-client.md`、`serve_cmd.go`、`internal/transport/tcp`、`internal/transport/jsonrpc`。
 - 想看“Skill 怎么生效”：`internal/skill/runtime.go`、`internal/tools/skilltools/provider.go`、`internal/agent/skill_adapters.go`。
 - 想看“Subtask 如何动态分配模型和工具”：`docs/subtask.md`、`internal/agent/tools.go`、`internal/subtask/subtask.go`、`internal/tools/agenttools/provider.go`。
 - 想看“MCP 怎么接入”：`internal/mcp/runtime.go` 和 `internal/tools/mcptools/provider.go`。

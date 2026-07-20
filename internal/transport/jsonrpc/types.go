@@ -70,10 +70,13 @@ type Conn interface {
 }
 
 type Options struct {
-	// RequireHello 为公开 stdio runtime 打开首包握手门禁；local/TUI 内部 transport 不强制。
+	// RequireHello 为需要显式协商 protocol version 的 transport 打开首包握手门禁。
 	RequireHello bool
 	// Transport 是承载层真实名称，会覆盖 runtime.hello params 中客户端伪造的 transport。
 	Transport string
+	// OnHandshake 会在 runtime.hello 被 service 成功接受后调用，用于 transport
+	// 解除仅适用于未认证连接的临时限制。
+	OnHandshake func()
 }
 
 type connSink struct{ conn Conn }

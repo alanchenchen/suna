@@ -12,7 +12,7 @@ import (
 Lifecycle 管理 daemon 的自动退出策略。
 
 transport 声明自身 retention policy，daemon 根据所有 transport 的声明和当前连接数统一决定退出；
-这样 local/TUI、stdio runtime 和未来 WebSocket 可以共享 daemon core，而不把生命周期写死到某个命令或 transport 中。
+这样 local/TUI、TCP 客户端和未来 WebSocket 可以共享 daemon core，而不把生命周期写死到某个命令或 transport 中。
 */
 
 const (

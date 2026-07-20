@@ -675,6 +675,12 @@ func (s *service) handleConfigSet(ctx context.Context, req protocol.Request, sin
 func (s *service) buildDaemonStatus(ctx context.Context) protocol.DaemonStatusParams {
 	s.ensureConfigLoaded()
 	params := protocol.DaemonStatusParams{PID: os.Getpid(), AgentStatus: "idle", Uptime: s.daemon.Uptime().Truncate(time.Second).String(), Connections: s.daemon.ConnectionCount()}
+	for _, tr := range s.daemon.transports {
+		if tcpTransport, ok := tr.(interface{ Endpoint() string }); ok && tr.Name() == "tcp" {
+			params.TCPEndpoint = tcpTransport.Endpoint()
+			break
+		}
+	}
 	if s.daemon.agent != nil {
 		activeMem, coreMem, queuedMem := s.daemon.agent.MemoryStats(ctx)
 		params.Memory = &protocol.MemoryStats{Active: activeMem, Core: coreMem, Queued: queuedMem}

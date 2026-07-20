@@ -336,6 +336,7 @@ type DaemonStatusParams struct {
 	PID           int           `json:"pid"`
 	Uptime        string        `json:"uptime"`
 	Connections   int           `json:"connections"`
+	TCPEndpoint   string        `json:"tcp_endpoint,omitempty"`
 	Triggers      int           `json:"triggers"`
 	AgentStatus   string        `json:"agent_status"`
 	Provider      string        `json:"provider,omitempty"`

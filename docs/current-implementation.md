@@ -7,7 +7,7 @@
 - `suna` 默认打开 TUI。
 - `suna status` 查询 daemon 状态。
 - `suna stop` 请求 daemon 正常停止；daemon 不可达但 PID 文件存在时，会尝试 fallback 停止旧进程并清理 PID 文件。
-- `suna runtime --transport stdio` 启动单进程 headless runtime，供第三方 UI、桌面端、IDE 插件或本地 Web 服务通过 stdio 接入。
+- `suna serve [--listen ADDRESS] [--json]` 确保 headless daemon 已启动，并返回第三方客户端使用的 TCP endpoint。
 - `SUNA_RUN_DAEMON=1` 是内部 daemon 启动入口，普通用户不需要直接使用。
 - TUI 启动前会先确保 daemon 可用；如果本地 endpoint 不可达，会后台拉起同一个可执行文件作为 daemon。
 
@@ -49,13 +49,11 @@ TUI 仍依赖 Bubble Tea/Bubbles 负责 terminal renderer、alt screen、mouse/k
 
 ## Daemon 生命周期
 
-当前 daemon / runtime 是按需运行的本地服务，不是长期任务调度器：
+当前 daemon 是按需运行的本地服务，不是长期任务调度器：
 
-- TUI 或 CLI status/stop 通过本地 transport 连接后台 daemon。
-- `suna runtime --transport stdio` 以前台单进程运行，父进程通过 stdio 连接 runtime。
+- TUI、CLI status/stop 与第三方 TCP client 都连接同一后台 daemon。
 - 每个连接建立时注册 event sink，断开时注销。
-- local transport 使用 `idle_exit`：最后一个客户端断开后进入短暂宽限期；若没有新客户端连接，则取消当前 agent run 并退出。
-- stdio transport 使用 `client_bound`：stdio 连接结束后 runtime 退出。
+- local 与 TCP transport 都使用 `idle_exit`：最后一个客户端断开后进入约 2 秒宽限期；若没有新客户端连接，则取消当前 agent run 并退出。
 - 未处理的 `memory_queue` 保存在 SQLite 中，不在退出时强制 drain；下次启动后 worker 按批量策略继续处理。
 - 目前没有 trigger、定时任务、文件监听、cowork/perception 等长期后台活动。
 
@@ -63,11 +61,11 @@ TUI 仍依赖 Bubble Tea/Bubbles 负责 terminal renderer、alt screen、mouse/k
 
 - macOS/Linux local transport 使用 Unix socket。
 - Windows local transport 使用 Named Pipe。
-- 第三方 runtime 使用 stdio transport，命令为 `suna runtime --transport stdio`。
-- local / stdio 都使用统一 protocol 和 JSON-RPC 2.0 风格 request / response / notification；local / stdio 的 framing 是 NDJSON。
+- 第三方客户端使用 loopback TCP transport，通过 `suna serve --json` 获取实际 endpoint。
+- local / TCP 都使用统一 protocol 和 JSON-RPC 2.0 风格 request / response / notification；framing 是 NDJSON。
 - method request 必须返回明确 result 或结构化 error；daemon 主动事件通过 notification 下发。
 - 模型输出使用 `agent.delta`，run 生命周期和错误恢复使用 `agent.run`，usage/context 使用 `agent.usage`。
-- TUI 和第三方客户端都只通过 protocol 与 daemon/runtime 通信，不直接调用 agent、runner、tools、guard、memory、skill、mcp 等业务包。
+- TUI 和第三方客户端都只通过 protocol 与 daemon 通信，不直接调用 agent、runner、tools、guard、memory、skill、mcp 等业务包。
 
 ## 模型与请求
 

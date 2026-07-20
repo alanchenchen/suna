@@ -9,7 +9,8 @@ import (
 type RetentionPolicy string
 
 const (
-	// RetentionClientBound 表示进程生命周期绑定当前客户端连接；连接结束后立即退出，适合 stdio runtime。
+	// RetentionClientBound 表示 transport 不允许 daemon 在无客户端时后台驻留。
+	// 所有活跃连接断开后，daemon 应立即退出。
 	RetentionClientBound RetentionPolicy = "client_bound"
 	// RetentionIdleExit 表示最后一个客户端断开后等待 IdleTimeout，再退出，适合官方 TUI 的 local daemon。
 	RetentionIdleExit RetentionPolicy = "idle_exit"
@@ -25,7 +26,7 @@ type TransportInfo struct {
 	IdleTimeout time.Duration
 }
 
-// Transport 是 daemon 唯一需要认识的通信入口抽象。Unix socket、Named Pipe、stdio、WebSocket 都通过 Mount 挂载同一个 Service。
+// Transport 是 daemon 唯一需要认识的通信入口抽象。Unix socket、Named Pipe、TCP、WebSocket 都通过 Mount 挂载同一个 Service。
 type Transport interface {
 	Name() string
 	Mount(ctx context.Context, svc Service) error

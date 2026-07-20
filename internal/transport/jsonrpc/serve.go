@@ -31,10 +31,17 @@ func (s connSink) Emit(ctx context.Context, event protocol.Event) error {
 func ServeConn(ctx context.Context, conn Conn, svc protocol.Service, opts Options, onDone func()) {
 	defer onDone()
 	sink := connSink{conn: conn}
-	svc.OnConnect(ctx, conn.ID(), sink)
-	defer svc.OnDisconnect(ctx, conn.ID())
+	connected := !opts.RequireHello
+	if connected {
+		svc.OnConnect(ctx, conn.ID(), sink)
+	}
+	defer func() {
+		if connected {
+			svc.OnDisconnect(ctx, conn.ID())
+		}
+	}()
 
-	// RequireHello=false 用于 local/TUI 内部连接；RequireHello=true 用于公开 stdio runtime。
+	// RequireHello=false 用于 local/TUI 内部连接；RequireHello=true 用于公开 transport。
 	handshaked := !opts.RequireHello
 	for {
 		select {
@@ -70,6 +77,13 @@ func ServeConn(ctx context.Context, conn Conn, svc protocol.Service, opts Option
 		}
 		if req.Method == protocol.MethodRuntimeHello {
 			handshaked = true
+			if !connected {
+				svc.OnConnect(ctx, conn.ID(), sink)
+				connected = true
+			}
+			if opts.OnHandshake != nil {
+				opts.OnHandshake()
+			}
 		}
 		sendResult(conn, req.ID, result)
 	}

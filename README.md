@@ -2,11 +2,11 @@
 
 > Local-first agent runtime with isolated subtasks, intent-aware Guard, memory, Skills, MCP, and a terminal UI.
 
-[中文 README](README.zh-CN.md) · [Documentation](docs/README.md) · [stdio runtime](docs/runtime-stdio.md) · [Subtasks](docs/subtask.md)
+[中文 README](README.zh-CN.md) · [Documentation](docs/README.md) · [Subtasks](docs/subtask.md)
 
 Suna is not just another terminal chat agent. It is a local agent runtime where a main agent can delegate work to **isolated subtasks** with different models, explicit context, selected images, and a per-task tool whitelist — while risky actions still go through an **intent-aware Guard**.
 
-The built-in TUI is the default client. The same runtime can also be used by third-party desktop apps, IDE extensions, local web UIs, or scripts through `suna runtime --transport stdio` and JSON-RPC/NDJSON.
+The built-in TUI is the default client. Third-party desktop apps, IDE extensions, local web UIs, or scripts can connect to the same daemon through TCP JSON-RPC/NDJSON after `suna serve --json`.
 
 > Suna is under active development. If an upgrade breaks local state, update to the latest release first and back up important data before removing `.db` files under the Suna data directory.
 
@@ -34,7 +34,7 @@ Suna separates UI from a shared local runtime. The daemon owns the model catalog
 
 ```text
 Built-in TUI / third-party UI / script
-        ↓ JSON-RPC over local or stdio transport
+        ↓ JSON-RPC over local or TCP transport
 Daemon / shared runtime
     ├─ model catalog, providers, tools, Guard, memory, Skills, MCP
     └─ sessions
@@ -71,7 +71,7 @@ Use Suna to:
 - run local commands for diagnostics, tests, builds, and automation;
 - call HTTP APIs and turn responses into readable summaries;
 - create reusable Skills for repeated workflows;
-- connect external tools through MCP or third-party clients through stdio runtime.
+- connect external tools through MCP or third-party clients through the TCP daemon.
 
 ## What makes Suna different?
 
@@ -84,7 +84,7 @@ Use Suna to:
 | Safety | Confirm, auto, or coarse allowlist | Intent-aware Guard plus hard workspace/sensitive-path rules |
 | Skill lifecycle | Prompt/file injection | Static check, optional LLM review, then user confirmation |
 | UI architecture | CLI/TUI app | Local daemon/runtime plus protocol plus TUI client |
-| Third-party UI | Usually not a stable boundary | `suna runtime --transport stdio` with JSON-RPC/NDJSON |
+| Third-party UI | Usually not a stable boundary | `suna serve --json` with JSON-RPC/NDJSON |
 
 ## Install
 
@@ -278,19 +278,18 @@ Default data directory:
 
 For troubleshooting, check `~/.suna/logs/app.log` first.
 
-## Runtime for third-party clients
+## TCP daemon for third-party clients
 
-Suna can run as a headless runtime over stdio:
+Start or discover the local daemon and print its TCP endpoint:
 
 ```bash
-suna runtime --transport stdio
+suna serve --json
 ```
 
-This is intended for third-party UIs, desktop apps, IDE plugins, local web services, and scripts. The protocol is JSON-RPC-style NDJSON.
+The TCP endpoint defaults to `127.0.0.1:7632` and accepts JSON-RPC-style NDJSON after `runtime.hello`. It is intended for trusted local desktop apps, IDE plugins, local web gateways, and scripts; remote listening is not supported without a future authenticated transport.
 
 Start here:
 
-- [stdio runtime guide](docs/runtime-stdio.md)
 - [Protocol reference](docs/protocol.md)
 - [Configuration reference](docs/configuration.md)
 
@@ -312,7 +311,7 @@ Do not rely on these as complete product features yet:
 
 - triggers, scheduled jobs, file watching, or proactive perception;
 - multi-session management UI, full history search, vector memory, or knowledge base;
-- full MCP support beyond tools-only stdio runtime;
+- full MCP support beyond tools-only stdio MCP server integration;
 - Skill sandbox, Skill marketplace, or complex lifecycle hooks;
 - complete cost accounting and provider price calculation;
 - full OS sandbox;

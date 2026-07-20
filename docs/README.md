@@ -8,7 +8,7 @@
 
 ### 第三方 UI / 客户端开发
 
-1. [stdio runtime 接入指南](runtime-stdio.md)：从第三方 UI、桌面端、IDE 插件或本地 Web 服务接入 Suna runtime。先看这个。
+1. [TCP 客户端接入指南](tcp-client.md)：从第三方 UI、桌面端、IDE 插件或本地 Web 服务接入共享 Suna daemon。先看这个。
 2. [Protocol](protocol.md)：了解 TUI 与 daemon 的统一 method / notification / schema 语义。
 3. [配置说明](configuration.md)：如果 UI 需要做模型、Guard、MCP、Skill 配置页，再看这里。
 4. [架构说明](architecture.md)：需要理解 daemon、transport、TUI 和核心包边界时再看。
@@ -36,7 +36,7 @@
 
 - 根目录 `README.md`：英文项目介绍、核心差异、快速开始、常用操作、安全提醒和 docs 入口。
 - `README.zh-CN.md`：中文项目介绍、核心差异、快速开始、常用操作、安全提醒和 docs 入口。
-- `docs/runtime-stdio.md`：第三方 UI / 客户端通过 `suna runtime --transport stdio` 接入 Suna runtime 的官方入口文档。
+- `docs/tcp-client.md`：第三方 UI / 客户端通过 `suna serve --json` 和 TCP protocol 接入 daemon 的开发者手册。
 - `docs/protocol.md`：统一 protocol 语义，说明 method、notification、事件和错误边界。
 - `docs/design.md`：关键设计和取舍，解释“为什么这样做”。
 - `docs/performance.md`：daemon、模型流、上下文、工具和 TUI 的当前性能优化。

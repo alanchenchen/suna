@@ -19,25 +19,19 @@ Daemon 是 Suna runtime / 后台 daemon 的核心结构。
 
 设计原则：
   - TUI 只负责交互与渲染，核心业务由 daemon 持有
-  - daemon core 不假设具体进程形态：官方 TUI 使用后台 local daemon，第三方接入使用前台 stdio runtime
-  - 生命周期由 transport 声明的 retention policy 决定：local 可 idle_exit，stdio 可 client_bound，未来 server transport 可 persistent
-  - PID 文件只属于后台 local daemon 管理语义，runtime 入口默认不写 sunad.pid
+  - 官方 TUI 和第三方客户端共享同一个后台 daemon，分别通过 local 与 TCP transport 接入
+  - 生命周期由 transport 声明的 retention policy 决定；默认 transport 在无客户端后按 idle_exit 自动退出
+  - daemon 始终写入 PID，供 status/stop 的本地管理路径使用
   - 记忆提取队列持久化到 SQLite，未开始的后台记忆整理可留到下次启动恢复
-  - 只挂载 protocol.Transport，不关心 local/stdio/web 等具体通信实现
+  - 只挂载 protocol.Transport，不关心 local/TCP/WebSocket 等具体通信实现
 
 生命周期：
- 1. 启动 → 按入口选项注册 PID → 挂载 transports
+ 1. 启动 → 注册 PID → 挂载 transports
  2. 运行 → protocol.Service 处理请求 → 驱动 Agent Loop
  3. 退出 → transport lifecycle / stop 请求 / 系统信号 → 关闭 Agent 与 transports
 */
-type Options struct {
-	// RegisterPID 只用于后台 local daemon；stdio runtime 或未来公开 transport 不应默认写 sunad.pid。
-	RegisterPID bool
-}
-
 type Daemon struct {
 	cfg      *config.Config
-	opts     Options
 	agent    *agent.Agent
 	sessions *sessionManager
 	service  *service
@@ -51,11 +45,7 @@ type Daemon struct {
 }
 
 // New 创建 Daemon 实例。具体 transport 由入口层注入，daemon 只认识 protocol.Transport。
-func New(cfg *config.Config, transports []protocol.Transport, opts ...Options) (*Daemon, error) {
-	options := Options{}
-	if len(opts) > 0 {
-		options = opts[0]
-	}
+func New(cfg *config.Config, transports []protocol.Transport) (*Daemon, error) {
 	agent, err := agent.NewAgent(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create agent: %w", err)
@@ -63,7 +53,6 @@ func New(cfg *config.Config, transports []protocol.Transport, opts ...Options) (
 
 	d := &Daemon{
 		cfg:        cfg,
-		opts:       options,
 		agent:      agent,
 		sessions:   newSessionManager(agent, agent.SessionStore()),
 		transports: transports,
@@ -82,17 +71,9 @@ func New(cfg *config.Config, transports []protocol.Transport, opts ...Options) (
 	return d, nil
 }
 
-// Run 启动 daemon 主循环（前台阻塞）
+// Run 启动 daemon 主循环（前台阻塞）。
 func (d *Daemon) Run() error {
 	return d.run("sunad")
-}
-
-// RunAs 启动 daemon 主循环，并使用指定进程标签输出人类诊断；协议数据仍由 transport 决定。
-func (d *Daemon) RunAs(label string) error {
-	if label == "" {
-		label = "sunad"
-	}
-	return d.run(label)
 }
 
 func (d *Daemon) run(label string) error {
@@ -101,13 +82,10 @@ func (d *Daemon) run(label string) error {
 	d.cancelFn = cancel
 	defer cancel()
 
-	if d.opts.RegisterPID {
-		// PID 文件是 local daemon 管理命令的发现机制；runtime 入口通过 Options 显式关闭。
-		if err := d.writePID(); err != nil {
-			return fmt.Errorf("write pid: %w", err)
-		}
-		defer d.removePID()
+	if err := d.writePID(); err != nil {
+		return fmt.Errorf("write pid: %w", err)
 	}
+	defer d.removePID()
 
 	d.service = newService(d)
 	for _, tr := range d.transports {

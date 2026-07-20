@@ -21,7 +21,11 @@ func showStatus() {
 	defer cancel()
 	status, err := queryDaemonStatus(ctx)
 	if err == nil {
-		fmt.Printf("sunad is running (pid %d, uptime %s, connections %d)\n", status.PID, status.Uptime, status.Connections)
+		if status.TCPEndpoint != "" {
+			fmt.Printf("sunad is running (pid %d, uptime %s, connections %d, tcp %s)\n", status.PID, status.Uptime, status.Connections, status.TCPEndpoint)
+		} else {
+			fmt.Printf("sunad is running (pid %d, uptime %s, connections %d)\n", status.PID, status.Uptime, status.Connections)
+		}
 		return
 	}
 	if pid, err := readPID(); err == nil {
@@ -68,7 +72,10 @@ func ensureDaemonRunning() {
 	if err == nil {
 		return
 	}
-	startDaemon()
+	if err := startDaemon(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to start daemon: %s\n", err)
+		os.Exit(1)
+	}
 }
 
 type daemonProbeError struct {
@@ -93,29 +100,35 @@ func (e daemonProbeError) Unwrap() error {
 	return e.DialErr
 }
 
-func startDaemon() {
+func startDaemon() error {
+	return startDaemonWithTCP("", false)
+}
+
+func startDaemonWithTCP(listen string, defaultListen bool) error {
 	exe, err := os.Executable()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: cannot determine executable path: %s\n", err)
-		os.Exit(1)
+		return fmt.Errorf("cannot determine executable path: %w", err)
 	}
 
 	cmd := exec.Command(exe)
 	cmd.Env = append(os.Environ(), daemonEnvName+"=1")
+	if listen != "" {
+		cmd.Env = append(cmd.Env, tcpListenEnv+"="+listen)
+	}
+	if defaultListen {
+		cmd.Env = append(cmd.Env, tcpDefaultListenEnv+"=1")
+	}
 	cmd.Stdin = nil
 	cmd.Stdout = nil
 	cmd.Stderr = os.Stderr
 
 	if err := startBackground(cmd); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: failed to start daemon: %s\n", err)
-		os.Exit(1)
+		return fmt.Errorf("start background daemon: %w", err)
 	}
-
 	if waitUntilDaemonAvailable(10 * time.Second) {
-		return
+		return nil
 	}
-	fmt.Fprintf(os.Stderr, "Error: daemon failed to start within 10 seconds (check logs at %s)\n", config.DefaultLogPath())
-	os.Exit(1)
+	return fmt.Errorf("daemon failed to start within 10 seconds (check logs at %s)", config.DefaultLogPath())
 }
 
 func waitUntilDaemonAvailable(timeout time.Duration) bool {
