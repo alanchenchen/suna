@@ -29,6 +29,7 @@ func (s connSink) Emit(ctx context.Context, event protocol.Event) error {
 
 // ServeConn 处理单条 JSON-RPC 连接。transport 只提供 Conn；业务请求统一进入 protocol.Service。
 func ServeConn(ctx context.Context, conn Conn, svc protocol.Service, opts Options, onDone func()) {
+	ctx = protocol.WithTransport(ctx, opts.Transport)
 	defer onDone()
 	sink := connSink{conn: conn}
 	connected := !opts.RequireHello

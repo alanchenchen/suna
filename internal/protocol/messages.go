@@ -1,5 +1,7 @@
 package protocol
 
+import "time"
+
 type RuntimeHelloParams struct {
 	// ProtocolVersion 是客户端期望的协议版本；为空时按当前默认 0.2 处理。
 	ProtocolVersion string `json:"protocol_version,omitempty"`
@@ -387,6 +389,24 @@ type MemoryStats struct {
 	Active int `json:"active"`
 	Core   int `json:"core"`
 	Queued int `json:"queued"`
+}
+
+// DebugMemoryParams 控制 daemon 内存快照；GC 只在诊断结束时显式请求。
+type DebugMemoryParams struct {
+	GC bool `json:"gc,omitempty"`
+}
+
+// DebugMemoryResult 只包含 Go runtime 的低成本内存统计，不会遍历业务对象。
+type DebugMemoryResult struct {
+	Timestamp    time.Time `json:"timestamp"`
+	PID          int       `json:"pid"`
+	HeapAlloc    uint64    `json:"heap_alloc"`
+	HeapInuse    uint64    `json:"heap_inuse"`
+	HeapIdle     uint64    `json:"heap_idle"`
+	HeapReleased uint64    `json:"heap_released"`
+	Sys          uint64    `json:"sys"`
+	NumGC        uint32    `json:"num_gc"`
+	Goroutines   int       `json:"goroutines"`
 }
 
 type SessionStats struct {

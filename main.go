@@ -28,6 +28,8 @@ func main() {
 		runTUI()
 	case "serve":
 		runServe(os.Args[2:])
+	case "debug":
+		runDebug(os.Args[2:])
 	case "help":
 		printHelp()
 	case "stop":
@@ -68,6 +70,8 @@ func parseCLI(args []string) string {
 		return "update"
 	case "serve":
 		return "serve"
+	case "debug":
+		return "debug"
 	default:
 		return fs.Arg(0)
 	}
@@ -83,6 +87,8 @@ Usage:
   suna update          Check for updates, show release notes, and ask before installing.
   suna serve [--listen ADDRESS] [--json]
                         Ensure the headless daemon is ready for TCP clients.
+  suna debug memory [--interval DURATION]
+                        Monitor daemon memory and write a local diagnostic report.
   suna help            Show this help.
 
 Notes:

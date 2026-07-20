@@ -2,6 +2,19 @@ package protocol
 
 import "context"
 
+type transportContextKey struct{}
+
+// WithTransport 将 transport 已确认的连接身份附加到请求 context；客户端参数不可覆盖该值。
+func WithTransport(ctx context.Context, transport string) context.Context {
+	return context.WithValue(ctx, transportContextKey{}, transport)
+}
+
+// TransportFromContext 返回实际 transport 身份；空字符串表示调用方未注入连接元数据。
+func TransportFromContext(ctx context.Context) string {
+	transport, _ := ctx.Value(transportContextKey{}).(string)
+	return transport
+}
+
 type Event struct {
 	Method string
 	Params any

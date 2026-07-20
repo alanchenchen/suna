@@ -56,6 +56,9 @@ func (s *service) OnDisconnect(ctx context.Context, connID string) {
 func (s *service) Handle(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
 	logging.Info("ipc", "request", logging.Event{"conn_id": req.ConnID, "method": req.Method, "request_id": req.ID})
 	sink = s.daemon.sinkFor(req.ConnID, sink)
+	if req.Method == protocol.MethodDebugMemory {
+		return s.handleDebugMemory(ctx, req)
+	}
 	s.ensureConfigLoaded()
 	if skill.IsProtocolMethod(req.Method) {
 		if s.daemon.agent.Skills() == nil {

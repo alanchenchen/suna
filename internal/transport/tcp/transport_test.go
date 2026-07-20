@@ -15,6 +15,8 @@ type testService struct {
 	mu           sync.Mutex
 	connected    int
 	disconnected int
+	lastRequest  protocol.Request
+	lastContext  context.Context
 }
 
 func (s *testService) OnConnect(_ context.Context, _ string, _ protocol.EventSink) {
@@ -29,7 +31,11 @@ func (s *testService) OnDisconnect(_ context.Context, _ string) {
 	s.mu.Unlock()
 }
 
-func (s *testService) Handle(_ context.Context, req protocol.Request, _ protocol.EventSink) (any, error) {
+func (s *testService) Handle(ctx context.Context, req protocol.Request, _ protocol.EventSink) (any, error) {
+	s.mu.Lock()
+	s.lastRequest = req
+	s.lastContext = ctx
+	s.mu.Unlock()
 	return map[string]string{"method": req.Method}, nil
 }
 
@@ -104,7 +110,8 @@ func TestTransportServesJSONRPCOverTCP(t *testing.T) {
 
 	tr := New("127.0.0.1:17631")
 	defer tr.Close(context.Background())
-	if err := tr.Mount(ctx, &testService{}); err != nil {
+	service := &testService{}
+	if err := tr.Mount(ctx, service); err != nil {
 		t.Fatalf("Mount error = %v", err)
 	}
 	if got := tr.Info().Retention; got != protocol.RetentionIdleExit {
@@ -130,6 +137,12 @@ func TestTransportServesJSONRPCOverTCP(t *testing.T) {
 		t.Fatalf("echo Write error = %v", err)
 	}
 	assertMethodResponse(t, decoder, 2, "echo")
+	service.mu.Lock()
+	gotTransport := protocol.TransportFromContext(service.lastContext)
+	service.mu.Unlock()
+	if got, want := gotTransport, "tcp"; got != want {
+		t.Fatalf("request transport = %q, want %q", got, want)
+	}
 }
 
 func assertHelloResponse(t *testing.T, decoder *json.Decoder, id int) {

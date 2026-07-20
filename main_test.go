@@ -133,6 +133,12 @@ func TestParseCLIServe(t *testing.T) {
 	}
 }
 
+func TestParseCLIDebug(t *testing.T) {
+	if got := parseCLI([]string{"debug", "memory"}); got != "debug" {
+		t.Fatalf("parseCLI(debug) = %q, want debug", got)
+	}
+}
+
 func TestParseCLIRuntimeIsUnknownCommand(t *testing.T) {
 	if got := parseCLI([]string{"runtime"}); got != "runtime" {
 		t.Fatalf("parseCLI(runtime) = %q, want runtime", got)

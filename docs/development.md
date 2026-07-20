@@ -47,7 +47,9 @@ git push origin v0.3.0
 ./suna              # 打开 TUI，必要时自动启动 daemon
 ./suna status       # 查看 daemon 状态
 ./suna update       # 检查新版本、展示 release notes，并在确认后安装
-./suna stop         # 停止 daemon
+./suna serve --json # 启动或发现 daemon，并输出 TCP endpoint
+./suna debug memory # 监控运行中 daemon 的 Go 内存并写入诊断报告
+./suna stop          # 停止 daemon
 ```
 
 运行数据默认位于 `~/.suna/`，排查问题时优先查看：

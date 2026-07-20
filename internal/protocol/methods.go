@@ -36,6 +36,7 @@ const (
 const (
 	MethodDaemonStatus = "daemon.status"
 	MethodDaemonStop   = "daemon.stop"
+	MethodDebugMemory  = "debug.memory"
 )
 
 const (
