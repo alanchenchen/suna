@@ -63,8 +63,13 @@ func ProviderFormRef(v ProviderFormValues) string {
 }
 
 func ModelCursorForActive(rows []Row, active string) int {
+	return ModelCursorForRef(rows, active)
+}
+
+// ModelCursorForRef 返回指定模型在列表中的位置；目标已不存在时回退到首个可选项。
+func ModelCursorForRef(rows []Row, ref string) int {
 	for i, row := range rows {
-		if row.Kind == "model" && row.Name == active {
+		if row.Kind == "model" && row.Name == ref {
 			return i
 		}
 	}

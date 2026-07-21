@@ -205,7 +205,7 @@ func (t *TUI) welcomeMenuItems() []welcomepage.Item {
 		return items
 	}
 	if t.welcomeActivePicker {
-		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.back", DetailKey: "tui.welcome.join_help", Action: welcomepage.ActionBack})
+		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.back", Action: welcomepage.ActionBack})
 		for _, session := range t.activeWelcomeSessions() {
 			items = append(items, welcomepage.Item{
 				LabelKey:  "tui.welcome.join_one",
@@ -218,7 +218,7 @@ func (t *TUI) welcomeMenuItems() []welcomepage.Item {
 		return items
 	}
 	if t.welcomeIdlePicker {
-		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.back", DetailKey: "tui.welcome.idle_help", Action: welcomepage.ActionBack})
+		items = append(items, welcomepage.Item{LabelKey: "tui.welcome.back", Action: welcomepage.ActionBack})
 		for _, session := range t.idleWelcomeSessions() {
 			items = append(items, welcomepage.Item{
 				LabelKey:  "tui.welcome.idle_one",

@@ -9,6 +9,7 @@ import (
 
 	"github.com/alanchenchen/suna/internal/protocol"
 	chatpage "github.com/alanchenchen/suna/internal/tui/pages/chat"
+	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 	welcomepage "github.com/alanchenchen/suna/internal/tui/pages/welcome"
 )
 
@@ -97,6 +98,59 @@ func TestWelcomeIdleSessionDeleteRequiresConfirmation(t *testing.T) {
 	}
 	if !tui.welcomeDeleteConfirm || tui.welcomeDeleteID != "idle" {
 		t.Fatalf("delete confirmation = (%v, %q), want (true, %q)", tui.welcomeDeleteConfirm, tui.welcomeDeleteID, "idle")
+	}
+}
+
+func TestWelcomeIdlePickerDoesNotRepeatHelpInBackItem(t *testing.T) {
+	tui := &TUI{
+		i18n:              newTranslator(LocaleEN),
+		width:             80,
+		height:            24,
+		ready:             true,
+		providerName:      "test",
+		modelName:         "model",
+		welcomeIdlePicker: true,
+		sessions: []protocol.SessionInfo{
+			{ID: "idle", CWD: "/tmp/other", Status: protocol.SessionStatusIdle},
+		},
+	}
+
+	tui.initWelcomeList()
+	view := stripANSIForTest(tui.viewWelcome())
+	if got, want := strings.Count(view, tui.tr("tui.welcome.idle_help")), 1; got != want {
+		t.Fatalf("idle help occurrences = %d, want %d: %q", got, want, view)
+	}
+}
+
+func TestWelcomeReturnsToMenuAfterDeletingLastIdleSession(t *testing.T) {
+	tui := &TUI{
+		i18n:                 newTranslator(LocaleEN),
+		width:                80,
+		height:               24,
+		ready:                true,
+		mode:                 uipage.Welcome,
+		providerName:         "test",
+		modelName:            "model",
+		welcomeIdlePicker:    true,
+		welcomeDeleteID:      "idle",
+		welcomeDeleteConfirm: true,
+		sessions: []protocol.SessionInfo{
+			{ID: "idle", CWD: "/tmp/other", Status: protocol.SessionStatusIdle},
+		},
+	}
+
+	tui.handleProtocolResultMsg(sessionListResultMsg{Params: protocol.SessionListResult{}})
+
+	if tui.welcomeIdlePicker {
+		t.Fatal("welcomeIdlePicker = true, want false after deleting last idle session")
+	}
+	if tui.welcomeDeleteConfirm || tui.welcomeDeleteID != "" {
+		t.Fatalf("delete state = (%v, %q), want (false, empty)", tui.welcomeDeleteConfirm, tui.welcomeDeleteID)
+	}
+	for _, item := range tui.welcomeMenuItems() {
+		if item.Action == welcomepage.ActionBack || item.Action == welcomepage.ActionIdlePicker {
+			t.Fatalf("welcome item = %+v, should not remain after deleting last idle session", item)
+		}
 	}
 }
 

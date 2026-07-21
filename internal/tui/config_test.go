@@ -86,6 +86,34 @@ func TestSwitchModelRefUpdatesCurrentSessionModel(t *testing.T) {
 	}
 }
 
+func TestLeaveConfigKeepsCurrentDetailModelSelected(t *testing.T) {
+	tui := &TUI{
+		i18n:   newTranslator(LocaleEN),
+		config: tuiconfig.Model{Page: "detail", DetailRef: "openai/gpt-4o"},
+		configState: protocol.ConfigParams{
+			ActiveModel: "anthropic/claude-sonnet",
+			Models: []protocol.ConfigModel{
+				{Provider: "anthropic", Model: "claude-sonnet"},
+				{Provider: "openai", Model: "gpt-4o-mini"},
+				{Provider: "openai", Model: "gpt-4o"},
+			},
+		},
+	}
+
+	tui.leaveConfig()
+
+	rows := tui.configModelRows()
+	if tui.config.Page != "models" {
+		t.Fatalf("page = %q, want models", tui.config.Page)
+	}
+	if tui.config.Cursor < 0 || tui.config.Cursor >= len(rows) {
+		t.Fatalf("cursor = %d, rows = %#v", tui.config.Cursor, rows)
+	}
+	if got, want := rows[tui.config.Cursor].Name, "openai/gpt-4o"; got != want {
+		t.Fatalf("selected model = %q, want %q", got, want)
+	}
+}
+
 func TestConfigModelRefAfterEditUsesNewRef(t *testing.T) {
 	tui := &TUI{
 		i18n:   newTranslator(LocaleEN),
@@ -212,7 +240,7 @@ func TestReasoningLabelMatch(t *testing.T) {
 }
 
 func TestMiniMaxReasoningLabelMatch(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleEN), config: tuiconfig.Model{DetailRef: "DF/MiniMax-M3"}, configState: testReasoningConfig("DF", "MiniMax-M3")}
+	tui := &TUI{i18n: newTranslator(LocaleEN), config: tuiconfig.Model{DetailRef: "minimax/MiniMax-M3"}, configState: testReasoningConfig("minimax", "MiniMax-M3")}
 	mc := tui.configModelsSnapshot()[0]
 	mc.Reasoning = tuiconfig.MiniMaxReasoning()
 	if got := tui.reasoningDisplay(mc); got != "MiniMax M3 / Split" {

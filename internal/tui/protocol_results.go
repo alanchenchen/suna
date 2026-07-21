@@ -26,6 +26,12 @@ func (t *TUI) handleProtocolResultMsg(msg tea.Msg) tea.Cmd {
 			}
 		}
 		t.pickWelcomeSessions()
+		if t.mode == uipage.Welcome && t.welcomeIdlePicker && len(t.idleWelcomeSessions()) == 0 {
+			// 删除最后一个可见空闲会话后直接回到 Welcome，避免只剩无意义的返回项。
+			t.welcomeIdlePicker = false
+			t.welcomeDeleteConfirm = false
+			t.welcomeDeleteID = ""
+		}
 	case sessionErrorMsg:
 		t.chat.SessionsLoading = false
 		t.chat.SessionsError = m.Message

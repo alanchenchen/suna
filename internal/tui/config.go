@@ -424,7 +424,11 @@ func (t *TUI) sendConfigSet(params protocol.ConfigSetParams) tea.Cmd {
 	}
 }
 func (t *TUI) leaveConfig() tea.Cmd {
+	detailRef := t.config.DetailRef
 	target := t.config.LeaveTarget()
+	if detailRef != "" && t.config.Page == "models" {
+		t.config.Cursor = t.configModelCursorForRef(detailRef)
+	}
 	if target != uipage.None {
 		t.mode = target
 	}
@@ -479,6 +483,10 @@ func (t *TUI) configModelCursorForActive() int {
 	}
 	return tuiconfig.ModelCursorForActive(t.configModelRows(), active)
 }
+func (t *TUI) configModelCursorForRef(ref string) int {
+	return tuiconfig.ModelCursorForRef(t.configModelRows(), ref)
+}
+
 func (t *TUI) configDetailDefaultCursor(ref string) int {
 	preferred := "edit_model"
 	if mc, ok := t.modelByRef(ref); ok && !t.modelNeedsAttention(mc) && !t.isDefaultModelRef(mc.Ref()) {
