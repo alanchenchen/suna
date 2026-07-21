@@ -17,8 +17,8 @@ import (
 func TestUpdateConfigEditingModelToDifferentProviderUsesOnlyNewProviderCredential(t *testing.T) {
 	dir := t.TempDir()
 	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini")}, "openai/gpt-4o-mini")
-	mustSaveCredential(t, dir, "openai", "sk-openai")
-	mustSaveCredential(t, dir, "anthropic", "sk-anthropic")
+	mustSaveCredential(t, dir, "openai", "test-openai-key")
+	mustSaveCredential(t, dir, "anthropic", "test-anthropic-key")
 	a := &Agent{cfg: cfg}
 
 	updated, err := a.UpdateConfig(ConfigSetParams{
@@ -36,10 +36,10 @@ func TestUpdateConfigEditingModelToDifferentProviderUsesOnlyNewProviderCredentia
 	if err != nil {
 		t.Fatalf("UpdateConfig() error = %v", err)
 	}
-	if got, want := updated.Models[0].APIKey, "sk-anthropic"; got != want {
+	if got, want := updated.Models[0].APIKey, "test-anthropic-key"; got != want {
 		t.Fatalf("updated model API key = %q, want new provider credential %q", got, want)
 	}
-	if got := loadModelCredential(t, dir, "anthropic", "claude-sonnet-4"); got != "sk-anthropic" {
+	if got := loadModelCredential(t, dir, "anthropic", "claude-sonnet-4"); got != "test-anthropic-key" {
 		t.Fatalf("reloaded model API key = %q, want scoped anthropic credential", got)
 	}
 }
@@ -47,7 +47,7 @@ func TestUpdateConfigEditingModelToDifferentProviderUsesOnlyNewProviderCredentia
 func TestUpdateConfigEditingModelToProviderWithoutCredentialFails(t *testing.T) {
 	dir := t.TempDir()
 	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini")}, "openai/gpt-4o-mini")
-	mustSaveCredential(t, dir, "openai", "sk-openai")
+	mustSaveCredential(t, dir, "openai", "test-openai-key")
 	a := &Agent{cfg: cfg}
 
 	_, err := a.UpdateConfig(ConfigSetParams{
@@ -73,7 +73,7 @@ func TestUpdateConfigEditingModelToProviderWithoutCredentialFails(t *testing.T) 
 func TestUpdateConfigDeleteActiveModelSelectsFirstRemainingOrClearsDefault(t *testing.T) {
 	dir := t.TempDir()
 	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini"), openAIModel("gpt-4o")}, "openai/gpt-4o-mini")
-	mustSaveCredential(t, dir, "openai", "sk-openai")
+	mustSaveCredential(t, dir, "openai", "test-openai-key")
 	a := &Agent{cfg: cfg}
 
 	updated, err := a.UpdateConfig(ConfigSetParams{Action: protocol.ConfigActionDeleteModel, ModelRef: "openai/gpt-4o-mini"})
@@ -96,21 +96,21 @@ func TestUpdateConfigDeleteActiveModelSelectsFirstRemainingOrClearsDefault(t *te
 func TestUpdateConfigDeleteModelKeepsCredentialByDefault(t *testing.T) {
 	dir := t.TempDir()
 	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini")}, "openai/gpt-4o-mini")
-	mustSaveCredential(t, dir, "openai", "sk-openai")
+	mustSaveCredential(t, dir, "openai", "test-openai-key")
 	a := &Agent{cfg: cfg}
 
 	if _, err := a.UpdateConfig(ConfigSetParams{Action: protocol.ConfigActionDeleteModel, ModelRef: "openai/gpt-4o-mini"}); err != nil {
 		t.Fatalf("UpdateConfig() error = %v", err)
 	}
-	if got := loadModelCredential(t, dir, "openai", "gpt-4o-mini"); got != "sk-openai" {
-		t.Fatalf("loaded API key = %q, want %q", got, "sk-openai")
+	if got := loadModelCredential(t, dir, "openai", "gpt-4o-mini"); got != "test-openai-key" {
+		t.Fatalf("loaded API key = %q, want %q", got, "test-openai-key")
 	}
 }
 
 func TestUpdateConfigDeleteLastProviderModelCanDeleteCredential(t *testing.T) {
 	dir := t.TempDir()
 	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini")}, "openai/gpt-4o-mini")
-	mustSaveCredential(t, dir, "openai", "sk-openai")
+	mustSaveCredential(t, dir, "openai", "test-openai-key")
 	a := &Agent{cfg: cfg}
 
 	if _, err := a.UpdateConfig(ConfigSetParams{Action: protocol.ConfigActionDeleteModel, ModelRef: "openai/gpt-4o-mini", DeleteAPIKey: true}); err != nil {
@@ -124,21 +124,21 @@ func TestUpdateConfigDeleteLastProviderModelCanDeleteCredential(t *testing.T) {
 func TestUpdateConfigDoesNotDeleteCredentialWhenProviderStillUsed(t *testing.T) {
 	dir := t.TempDir()
 	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini"), openAIModel("gpt-4o")}, "openai/gpt-4o-mini")
-	mustSaveCredential(t, dir, "openai", "sk-openai")
+	mustSaveCredential(t, dir, "openai", "test-openai-key")
 	a := &Agent{cfg: cfg}
 
 	if _, err := a.UpdateConfig(ConfigSetParams{Action: protocol.ConfigActionDeleteModel, ModelRef: "openai/gpt-4o-mini", DeleteAPIKey: true}); err != nil {
 		t.Fatalf("UpdateConfig() error = %v", err)
 	}
-	if got := loadModelCredential(t, dir, "openai", "gpt-4o"); got != "sk-openai" {
-		t.Fatalf("loaded API key = %q, want %q", got, "sk-openai")
+	if got := loadModelCredential(t, dir, "openai", "gpt-4o"); got != "test-openai-key" {
+		t.Fatalf("loaded API key = %q, want %q", got, "test-openai-key")
 	}
 }
 
 func TestUpdateConfigAddsModelWithExistingProviderCredential(t *testing.T) {
 	dir := t.TempDir()
 	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini")}, "openai/gpt-4o-mini")
-	mustSaveCredential(t, dir, "openai", "sk-openai")
+	mustSaveCredential(t, dir, "openai", "test-openai-key")
 	a := &Agent{cfg: cfg}
 
 	updated, err := a.UpdateConfig(ConfigSetParams{
@@ -157,10 +157,10 @@ func TestUpdateConfigAddsModelWithExistingProviderCredential(t *testing.T) {
 	if got, want := len(updated.Models), 2; got != want {
 		t.Fatalf("configured model count = %d, want %d", got, want)
 	}
-	if got, want := updated.Models[1].APIKey, "sk-openai"; got != want {
+	if got, want := updated.Models[1].APIKey, "test-openai-key"; got != want {
 		t.Fatalf("new model API key = %q, want shared provider key %q", got, want)
 	}
-	if got, want := loadModelCredential(t, dir, "openai", "gpt-4o"), "sk-openai"; got != want {
+	if got, want := loadModelCredential(t, dir, "openai", "gpt-4o"), "test-openai-key"; got != want {
 		t.Fatalf("reloaded new model API key = %q, want shared provider key %q", got, want)
 	}
 }
@@ -215,9 +215,9 @@ func newMemoryWorker(t *testing.T, cfg *config.Config) *memory.Worker {
 
 func TestModelRoutingSummaryFiltersSubtaskFor(t *testing.T) {
 	cfg := newAgentConfig(t.TempDir(), []config.ModelConfig{
-		{Provider: "openai", Model: "gpt-4.1", BaseURL: "https://api.example.com/v1", ContextWindow: 400000, MaxOutputTokens: 8192, APIKey: "sk-test"},
-		{Provider: "DF", Model: "MiniMax-M3", BaseURL: "https://api.example.com/v1", ContextWindow: 1000000, MaxOutputTokens: 8192, APIKey: "sk-test", SubtaskFor: []string{"openai/**"}},
-		{Provider: "DF", Model: "glm-5.2", BaseURL: "https://api.example.com/v1", ContextWindow: 1000000, MaxOutputTokens: 8192, APIKey: "sk-test", SubtaskFor: []string{"DF/**"}},
+		{Provider: "openai", Model: "gpt-4.1", BaseURL: "https://api.example.com/v1", ContextWindow: 400000, MaxOutputTokens: 8192, APIKey: "test-api-key"},
+		{Provider: "anthropic", Model: "claude-sonnet-4", BaseURL: "https://api.anthropic.com", ContextWindow: 200000, MaxOutputTokens: 8192, APIKey: "test-api-key", SubtaskFor: []string{"openai/**"}},
+		{Provider: "anthropic", Model: "claude-3-5-haiku-20241022", BaseURL: "https://api.anthropic.com", ContextWindow: 200000, MaxOutputTokens: 8192, APIKey: "test-api-key", SubtaskFor: []string{"anthropic/**"}},
 	}, "openai/gpt-4.1")
 	router, err := model.NewRouter(cfg, media.NewStore(t.TempDir()))
 	if err != nil {
@@ -226,10 +226,10 @@ func TestModelRoutingSummaryFiltersSubtaskFor(t *testing.T) {
 	a := &Agent{cfg: cfg, router: router, modelRef: "openai/gpt-4.1"}
 
 	summary := a.modelRoutingSummary()
-	if !strings.Contains(summary, "DF/MiniMax-M3") {
+	if !strings.Contains(summary, "anthropic/claude-sonnet-4") {
 		t.Fatalf("modelRoutingSummary() = %q, want matching subtask model", summary)
 	}
-	if strings.Contains(summary, "DF/glm-5.2") {
+	if strings.Contains(summary, "anthropic/claude-3-5-haiku-20241022") {
 		t.Fatalf("modelRoutingSummary() = %q, should hide non-matching subtask model", summary)
 	}
 	if !strings.Contains(summary, "openai/gpt-4.1") {
@@ -239,9 +239,9 @@ func TestModelRoutingSummaryFiltersSubtaskFor(t *testing.T) {
 
 func TestAvailableModelRefsFiltersSubtaskFor(t *testing.T) {
 	cfg := newAgentConfig(t.TempDir(), []config.ModelConfig{
-		{Provider: "openai", Model: "gpt-4.1", BaseURL: "https://api.example.com/v1", ContextWindow: 400000, MaxOutputTokens: 8192, APIKey: "sk-test"},
-		{Provider: "DF", Model: "MiniMax-M3", BaseURL: "https://api.example.com/v1", ContextWindow: 1000000, MaxOutputTokens: 8192, APIKey: "sk-test", SubtaskFor: []string{"openai/**"}},
-		{Provider: "DF", Model: "glm-5.2", BaseURL: "https://api.example.com/v1", ContextWindow: 1000000, MaxOutputTokens: 8192, APIKey: "sk-test", SubtaskFor: []string{"DF/**"}},
+		{Provider: "openai", Model: "gpt-4.1", BaseURL: "https://api.example.com/v1", ContextWindow: 400000, MaxOutputTokens: 8192, APIKey: "test-api-key"},
+		{Provider: "anthropic", Model: "claude-sonnet-4", BaseURL: "https://api.anthropic.com", ContextWindow: 200000, MaxOutputTokens: 8192, APIKey: "test-api-key", SubtaskFor: []string{"openai/**"}},
+		{Provider: "anthropic", Model: "claude-3-5-haiku-20241022", BaseURL: "https://api.anthropic.com", ContextWindow: 200000, MaxOutputTokens: 8192, APIKey: "test-api-key", SubtaskFor: []string{"anthropic/**"}},
 	}, "openai/gpt-4.1")
 	router, err := model.NewRouter(cfg, media.NewStore(t.TempDir()))
 	if err != nil {
@@ -250,7 +250,7 @@ func TestAvailableModelRefsFiltersSubtaskFor(t *testing.T) {
 	a := &Agent{cfg: cfg, router: router, modelRef: "openai/gpt-4.1"}
 
 	got := a.availableModelRefs()
-	want := []string{"DF/MiniMax-M3", "openai/gpt-4.1"}
+	want := []string{"anthropic/claude-sonnet-4", "openai/gpt-4.1"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("availableModelRefs() = %#v, want %#v", got, want)
 	}
@@ -259,7 +259,7 @@ func TestAvailableModelRefsFiltersSubtaskFor(t *testing.T) {
 func TestUpdateConfigRouterBuildFailureLeavesRuntimeAndDiskUnchanged(t *testing.T) {
 	dir := t.TempDir()
 	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini")}, "openai/gpt-4o-mini")
-	mustSaveCredential(t, dir, "openai", "sk-openai")
+	mustSaveCredential(t, dir, "openai", "test-openai-key")
 	if err := config.LoadCredentials(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestUpdateConfigRouterBuildFailureLeavesRuntimeAndDiskUnchanged(t *testing.
 func TestReloadConfigRouterBuildFailureLeavesRuntimeSnapshotUnchanged(t *testing.T) {
 	dir := t.TempDir()
 	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini")}, "openai/gpt-4o-mini")
-	mustSaveCredential(t, dir, "openai", "sk-openai")
+	mustSaveCredential(t, dir, "openai", "test-openai-key")
 	if err := config.LoadCredentials(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestReloadConfigFromDiskUsesScopedDataDirCredentials(t *testing.T) {
 	if err := stored.Save(stored.ConfigPath()); err != nil {
 		t.Fatal(err)
 	}
-	mustSaveCredential(t, scopedDir, "openai", "sk-scoped")
+	mustSaveCredential(t, scopedDir, "openai", "test-scoped-key")
 	cfg, err := config.LoadFromDataDir(stored.ConfigPath(), scopedDir)
 	if err != nil {
 		t.Fatalf("LoadFromDataDir() error = %v", err)
@@ -355,7 +355,7 @@ func TestReloadConfigFromDiskUsesScopedDataDirCredentials(t *testing.T) {
 	if got, want := reloaded.DataDir, scopedDir; got != want {
 		t.Fatalf("reloaded DataDir = %q, want %q", got, want)
 	}
-	if got, want := reloaded.Models[0].APIKey, "sk-scoped"; got != want {
+	if got, want := reloaded.Models[0].APIKey, "test-scoped-key"; got != want {
 		t.Fatalf("reloaded API key = %q, want scoped credential %q", got, want)
 	}
 }
@@ -363,7 +363,7 @@ func TestReloadConfigFromDiskUsesScopedDataDirCredentials(t *testing.T) {
 func TestUpdateConfigPreservesSubtaskFor(t *testing.T) {
 	dir := t.TempDir()
 	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini")}, "openai/gpt-4o-mini")
-	mustSaveCredential(t, dir, "openai", "sk-openai")
+	mustSaveCredential(t, dir, "openai", "test-openai-key")
 	a := &Agent{cfg: cfg}
 
 	updated, err := a.UpdateConfig(ConfigSetParams{

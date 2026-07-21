@@ -351,7 +351,7 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"tui.config.provider.strengths":             {LocaleEN: "Strengths", LocaleZH: "擅长"},
 		"tui.config.provider.subtask_for":           {LocaleEN: "Subtask for", LocaleZH: "子任务适用"},
 		"tui.config.strengths_placeholder":          {LocaleEN: "General, reasoning, coding", LocaleZH: "通用，思考，代码"},
-		"tui.config.subtask_for_placeholder":        {LocaleEN: "Empty = all, e.g. openai/**, DF/glm-*", LocaleZH: "留空=全部，如 openai/**，DF/glm-*"},
+		"tui.config.subtask_for_placeholder":        {LocaleEN: "Empty = all, e.g. openai/**, anthropic/claude-*", LocaleZH: "留空=全部，如 openai/**，anthropic/claude-*"},
 		"tui.config.subtask_for_all":                {LocaleEN: "all main models", LocaleZH: "所有主模型"},
 		"tui.config.status":                         {LocaleEN: "Status", LocaleZH: "状态"},
 		"tui.config.activated_status":               {LocaleEN: "Activated", LocaleZH: "已激活"},

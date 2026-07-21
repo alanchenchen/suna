@@ -10,7 +10,7 @@ import (
 
 func TestRouterBindReturnsStructuredModelNotFoundError(t *testing.T) {
 	cfg := &config.Config{Models: []config.ModelConfig{{
-		Provider: "vendor", Model: "model", BaseURL: "https://api.example.com/v1", ContextWindow: 128000, MaxOutputTokens: 8192, APIKey: "sk-test",
+		Provider: "vendor", Model: "model", BaseURL: "https://api.example.com/v1", ContextWindow: 128000, MaxOutputTokens: 8192, APIKey: "test-api-key",
 	}}}
 	router, err := NewRouter(cfg, nil)
 	if err != nil {
@@ -32,7 +32,7 @@ func TestRouterAndBindingDeepCopyModelConfig(t *testing.T) {
 		"nested": map[string]any{"values": []any{map[string]any{"level": "original"}}},
 	}
 	cfg := &config.Config{Models: []config.ModelConfig{{
-		Provider: "vendor", Model: "model", BaseURL: "https://api.example.com/v1", ContextWindow: 128000, MaxOutputTokens: 8192, APIKey: "sk-test",
+		Provider: "vendor", Model: "model", BaseURL: "https://api.example.com/v1", ContextWindow: 128000, MaxOutputTokens: 8192, APIKey: "test-api-key",
 		Strengths: []string{"code"}, SubtaskFor: []string{"vendor/**"}, Reasoning: reasoning,
 	}}}
 	router, err := NewRouter(cfg, nil)
@@ -79,7 +79,7 @@ func TestRouterAndBindingDeepCopyModelConfig(t *testing.T) {
 }
 
 func TestCreateProviderUsesProtocolNotProviderName(t *testing.T) {
-	mc := config.ModelConfig{Provider: "vendor", Protocol: config.ModelProtocolAnthropic, Model: "claude", BaseURL: "https://api.example.com", ContextWindow: 200000, MaxOutputTokens: 8192, APIKey: "sk-test"}
+	mc := config.ModelConfig{Provider: "vendor", Protocol: config.ModelProtocolAnthropic, Model: "claude", BaseURL: "https://api.example.com", ContextWindow: 200000, MaxOutputTokens: 8192, APIKey: "test-api-key"}
 	p, err := createProvider(mc, nil)
 	if err != nil {
 		t.Fatalf("createProvider() error = %v", err)
@@ -90,7 +90,7 @@ func TestCreateProviderUsesProtocolNotProviderName(t *testing.T) {
 }
 
 func TestCreateProviderDefaultsMissingProtocolToOpenAIChat(t *testing.T) {
-	mc := config.ModelConfig{Provider: "openai", Model: "gpt", BaseURL: "https://api.example.com/v1", ContextWindow: 128000, MaxOutputTokens: 8192, APIKey: "sk-test"}
+	mc := config.ModelConfig{Provider: "openai", Model: "gpt", BaseURL: "https://api.example.com/v1", ContextWindow: 128000, MaxOutputTokens: 8192, APIKey: "test-api-key"}
 	p, err := createProvider(mc, nil)
 	if err != nil {
 		t.Fatalf("createProvider() error = %v", err)

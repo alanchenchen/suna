@@ -379,7 +379,7 @@ transport = "stdio"
 command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
 # 当前不会展开 ${GITHUB_TOKEN}，需要写入实际值或由 server 自行读取环境。
-env = { GITHUB_TOKEN = "ghp_xxx" }
+env = { GITHUB_TOKEN = "<GITHUB_TOKEN>" }
 
 # 远程 transport 配置字段可保存，但当前基础 MCP runtime 只支持 stdio。
 [mcp.servers.context7]

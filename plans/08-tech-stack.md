@@ -362,7 +362,7 @@ command = "npx"
 args = ["-y", "@modelcontextprotocol/server-github"]
 
 [mcp.servers.github.env]
-GITHUB_TOKEN = "ghp_xxx" # 当前不会展开 ${GITHUB_TOKEN}，需要写入实际值或由 server 自行读取环境
+GITHUB_TOKEN = "<GITHUB_TOKEN>" # 当前不会展开 ${GITHUB_TOKEN}，需要写入实际值或由 server 自行读取环境
 
 # Hooks 当前为预留配置，结构已支持持久化，但执行闭环尚未完成。
 [[hooks]]
@@ -441,13 +441,13 @@ reason = "常用只读命令直接放行"
 
 ```toml
 [glm]
-api_key = "..."
+api_key = "<API_KEY>"
 
 [anthropic]
-api_key = "..."
+api_key = "<API_KEY>"
 
 [moonshot]
-api_key = "..."
+api_key = "<API_KEY>"
 ```
 
 注意：`models.provider` 必须和 `credentials.toml` 的 table 名一致，否则 `ResolveAPIKey()` 会返回缺失 key。`provider` 是协议适配器语义，不是官方厂商 endpoint：`openai` 走 OpenAI Responses 协议，`anthropic` 走 Anthropic Messages 协议，其它 provider 走 OpenAI-compatible Chat Completions 协议。所有模型都必须显式配置 `base_url`。

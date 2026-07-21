@@ -8,8 +8,8 @@ import (
 )
 
 func TestProviderFormRoundTripsSubtaskFor(t *testing.T) {
-	m := Model{EditingName: "DF/MiniMax-M3"}
-	mc := &ModelConfig{Provider: "DF", Protocol: "openai_chat", Model: "MiniMax-M3", BaseURL: "https://api.example.com/v1", ContextWindow: 1000000, MaxOutputTokens: 8192, Strengths: []string{"fast"}, SubtaskFor: []string{"openai/**", "anthropic/**"}}
+	m := Model{EditingName: "anthropic/claude-3-5-sonnet-latest"}
+	mc := &ModelConfig{Provider: "anthropic", Protocol: "openai_chat", Model: "claude-3-5-sonnet-latest", BaseURL: "https://api.example.com/v1", ContextWindow: 1000000, MaxOutputTokens: 8192, Strengths: []string{"fast"}, SubtaskFor: []string{"openai/**", "anthropic/**"}}
 	labels := ProviderFormLabels{Provider: "Provider", Protocol: "Protocol", Model: "Model", APIKey: "API", Endpoint: "Endpoint", ContextWindow: "Context", MaxOutputTokens: "Output", Strengths: "Strengths", SubtaskFor: "Subtask for", StrengthsHint: "strengths", SubtaskForHint: "patterns"}
 
 	spec := m.ProviderFormSpec(labels, mc)
@@ -29,7 +29,7 @@ func TestProviderFormRoundTripsSubtaskFor(t *testing.T) {
 
 func TestBuildReasoningSavePreservesSubtaskFor(t *testing.T) {
 	m := Model{}
-	mc := ModelConfig{Provider: "DF", Protocol: "openai_chat", Model: "MiniMax-M3", BaseURL: "https://api.example.com/v1", ContextWindow: 1000000, MaxOutputTokens: 8192, SubtaskFor: []string{"openai/**"}}
+	mc := ModelConfig{Provider: "anthropic", Protocol: "openai_chat", Model: "claude-3-5-sonnet-latest", BaseURL: "https://api.example.com/v1", ContextWindow: 1000000, MaxOutputTokens: 8192, SubtaskFor: []string{"openai/**"}}
 
 	params := m.BuildReasoningSave(mc, map[string]any{"reasoning_split": true})
 	want := []string{"openai/**"}
@@ -39,7 +39,7 @@ func TestBuildReasoningSavePreservesSubtaskFor(t *testing.T) {
 }
 
 func TestSnapshotFromProtocolCopiesSubtaskFor(t *testing.T) {
-	models := SnapshotFromProtocol(protocol.ConfigParams{Models: []protocol.ConfigModel{{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"openai/**"}}}})
+	models := SnapshotFromProtocol(protocol.ConfigParams{Models: []protocol.ConfigModel{{Provider: "anthropic", Model: "claude-3-5-sonnet-latest", SubtaskFor: []string{"openai/**"}}}})
 	if len(models) != 1 {
 		t.Fatalf("models len = %d, want 1", len(models))
 	}

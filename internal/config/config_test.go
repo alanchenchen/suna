@@ -111,10 +111,10 @@ func TestConfigReasoningSavesInlineThinkingTable(t *testing.T) {
 	dir := t.TempDir()
 	workspace := mkdir(t, filepath.Join(dir, "workspace"))
 	cfg := &Config{
-		ActiveModel: "DF/GLM-5.1",
+		ActiveModel: "openai/gpt-4o",
 		Models: []ModelConfig{{
-			Provider:        "DF",
-			Model:           "GLM-5.1",
+			Provider:        "openai",
+			Model:           "gpt-4o",
 			BaseURL:         "https://api.example.com/v1",
 			ContextWindow:   128000,
 			MaxOutputTokens: 8192,
@@ -213,14 +213,14 @@ func TestConfigSaveWritesMCPLikeConfigurationDocs(t *testing.T) {
 			Transport:      "stdio",
 			Command:        "npx",
 			Args:           []string{"-y", "@modelcontextprotocol/server-github"},
-			Env:            map[string]string{"GITHUB_TOKEN": "ghp_xxx"},
+			Env:            map[string]string{"GITHUB_TOKEN": "test-github-token"},
 			TimeoutSeconds: 30,
 		},
 		"context7": {
 			Enabled:        false,
 			Transport:      "streamable_http",
 			URL:            "https://mcp.context7.com/mcp",
-			Headers:        map[string]string{"Authorization": "Bearer xxx"},
+			Headers:        map[string]string{"Authorization": "Bearer <TOKEN>"},
 			TimeoutSeconds: 30,
 		},
 	}
@@ -234,13 +234,13 @@ func TestConfigSaveWritesMCPLikeConfigurationDocs(t *testing.T) {
 		`  transport = "streamable_http"`,
 		`  url = "https://mcp.context7.com/mcp"`,
 		"[mcp.servers.context7.headers]",
-		`  Authorization = "Bearer xxx"`,
+		`  Authorization = "Bearer <TOKEN>"`,
 		"[mcp.servers.filesystem]",
 		`  args = ["-y", "@modelcontextprotocol/server-filesystem", "/Users/me/project"]`,
 		`  cwd = "/Users/me/project"`,
 		"[mcp.servers.github]",
 		"[mcp.servers.github.env]",
-		`  GITHUB_TOKEN = "ghp_xxx"`,
+		`  GITHUB_TOKEN = "test-github-token"`,
 	} {
 		if !strings.Contains(data, want) {
 			t.Fatalf("saved config = %q, want substring %q", data, want)
@@ -254,8 +254,8 @@ func TestConfigSaveWritesMCPLikeConfigurationDocs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if got := loaded.MCP.Servers["github"].Env["GITHUB_TOKEN"]; got != "ghp_xxx" {
-		t.Fatalf("loaded github token = %q, want ghp_xxx", got)
+	if got := loaded.MCP.Servers["github"].Env["GITHUB_TOKEN"]; got != "test-github-token" {
+		t.Fatalf("loaded github token = %q, want test-github-token", got)
 	}
 }
 
@@ -284,8 +284,8 @@ func TestConfigSaveWritesHooksLikeConfigurationDocs(t *testing.T) {
 
 func TestDeleteCredentialRemovesOnlyRequestedProvider(t *testing.T) {
 	dir := t.TempDir()
-	mustSaveCredential(t, dir, "openai", "sk-openai")
-	mustSaveCredential(t, dir, "anthropic", "sk-anthropic")
+	mustSaveCredential(t, dir, "openai", "test-openai-key")
+	mustSaveCredential(t, dir, "anthropic", "test-anthropic-key")
 
 	if err := DeleteCredential(dir, "openai"); err != nil {
 		t.Fatalf("DeleteCredential() error = %v", err)
@@ -294,40 +294,40 @@ func TestDeleteCredentialRemovesOnlyRequestedProvider(t *testing.T) {
 	if _, ok := creds["openai"]; ok {
 		t.Fatalf("credentials[openai] exists in %#v, want absent", creds)
 	}
-	if got := creds["anthropic"].APIKey; got != "sk-anthropic" {
-		t.Fatalf("credentials[anthropic].APIKey = %q, want %q", got, "sk-anthropic")
+	if got := creds["anthropic"].APIKey; got != "test-anthropic-key" {
+		t.Fatalf("credentials[anthropic].APIKey = %q, want %q", got, "test-anthropic-key")
 	}
 }
 
 func TestDeleteCredentialMissingProviderIsNoop(t *testing.T) {
 	dir := t.TempDir()
-	mustSaveCredential(t, dir, "openai", "sk-openai")
+	mustSaveCredential(t, dir, "openai", "test-openai-key")
 
 	if err := DeleteCredential(dir, "missing"); err != nil {
 		t.Fatalf("DeleteCredential() error = %v", err)
 	}
 	creds := loadCredentials(t, dir)
-	if got := creds["openai"].APIKey; got != "sk-openai" {
-		t.Fatalf("credentials[openai].APIKey = %q, want %q", got, "sk-openai")
+	if got := creds["openai"].APIKey; got != "test-openai-key" {
+		t.Fatalf("credentials[openai].APIKey = %q, want %q", got, "test-openai-key")
 	}
 }
 
 func TestSaveCredentialTrimsWhitespace(t *testing.T) {
 	dir := t.TempDir()
 
-	if err := SaveCredential(dir, "openai", " \n\tsk-openai\r\n "); err != nil {
+	if err := SaveCredential(dir, "openai", " \n\ttest-openai-key\r\n "); err != nil {
 		t.Fatalf("SaveCredential() error = %v", err)
 	}
 
 	creds := loadCredentials(t, dir)
-	if got := creds["openai"].APIKey; got != "sk-openai" {
-		t.Fatalf("credentials[openai].APIKey = %q, want %q", got, "sk-openai")
+	if got := creds["openai"].APIKey; got != "test-openai-key" {
+		t.Fatalf("credentials[openai].APIKey = %q, want %q", got, "test-openai-key")
 	}
 }
 
 func TestLoadCredentialsTrimsStoredWhitespace(t *testing.T) {
 	dir := t.TempDir()
-	body := "[openai]\napi_key = \" \\n\\tsk-openai\\r\\n \"\n"
+	body := "[openai]\napi_key = \" \\n\\ttest-openai-key\\r\\n \"\n"
 	if err := os.WriteFile(filepath.Join(dir, "credentials.toml"), []byte(body), 0600); err != nil {
 		t.Fatalf("WriteFile(credentials.toml) error = %v", err)
 	}
@@ -336,8 +336,8 @@ func TestLoadCredentialsTrimsStoredWhitespace(t *testing.T) {
 	if err := LoadCredentials(cfg); err != nil {
 		t.Fatalf("LoadCredentials() error = %v", err)
 	}
-	if got := cfg.Models[0].APIKey; got != "sk-openai" {
-		t.Fatalf("loaded APIKey = %q, want %q", got, "sk-openai")
+	if got := cfg.Models[0].APIKey; got != "test-openai-key" {
+		t.Fatalf("loaded APIKey = %q, want %q", got, "test-openai-key")
 	}
 }
 
@@ -405,16 +405,16 @@ func TestModelConfigAvailableAsSubtaskFor(t *testing.T) {
 		activeRef string
 		want      bool
 	}{
-		{name: "empty matches all", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3"}, activeRef: "openai/gpt-4.1", want: true},
-		{name: "self always matches", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"openai/**"}}, activeRef: "DF/MiniMax-M3", want: true},
-		{name: "exact match", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"openai/gpt-4.1"}}, activeRef: "openai/gpt-4.1", want: true},
-		{name: "provider glob", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"openai/**"}}, activeRef: "openai/gpt-4o", want: true},
-		{name: "model glob", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"DF/glm-*"}}, activeRef: "DF/glm-5.2", want: true},
-		{name: "or semantics miss", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"openai/**", "anthropic/**"}}, activeRef: "DF/glm-5.2", want: false},
-		{name: "star matches all", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"*"}}, activeRef: "Any/model", want: true},
-		{name: "provider double star crosses slash", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"openai/**"}}, activeRef: "openai/family/gpt-4.1", want: true},
-		{name: "star does not cross slash", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"openai/*"}}, activeRef: "openai/family/gpt-4.1", want: false},
-		{name: "invalid-looking pattern treated literal", model: ModelConfig{Provider: "DF", Model: "MiniMax-M3", SubtaskFor: []string{"["}}, activeRef: "openai/gpt-4.1", want: false},
+		{name: "empty matches all", model: ModelConfig{Provider: "anthropic", Model: "claude-3-5-sonnet-latest"}, activeRef: "openai/gpt-4.1", want: true},
+		{name: "self always matches", model: ModelConfig{Provider: "anthropic", Model: "claude-3-5-sonnet-latest", SubtaskFor: []string{"openai/**"}}, activeRef: "anthropic/claude-3-5-sonnet-latest", want: true},
+		{name: "exact match", model: ModelConfig{Provider: "anthropic", Model: "claude-3-5-sonnet-latest", SubtaskFor: []string{"openai/gpt-4.1"}}, activeRef: "openai/gpt-4.1", want: true},
+		{name: "provider glob", model: ModelConfig{Provider: "anthropic", Model: "claude-3-5-sonnet-latest", SubtaskFor: []string{"openai/**"}}, activeRef: "openai/gpt-4o", want: true},
+		{name: "model glob", model: ModelConfig{Provider: "anthropic", Model: "claude-3-5-sonnet-latest", SubtaskFor: []string{"anthropic/claude-*"}}, activeRef: "anthropic/claude-3-7-sonnet-latest", want: true},
+		{name: "or semantics miss", model: ModelConfig{Provider: "anthropic", Model: "claude-3-5-sonnet-latest", SubtaskFor: []string{"openai/**", "anthropic/**"}}, activeRef: "provider-a/model", want: false},
+		{name: "star matches all", model: ModelConfig{Provider: "anthropic", Model: "claude-3-5-sonnet-latest", SubtaskFor: []string{"*"}}, activeRef: "Any/model", want: true},
+		{name: "provider double star crosses slash", model: ModelConfig{Provider: "anthropic", Model: "claude-3-5-sonnet-latest", SubtaskFor: []string{"openai/**"}}, activeRef: "openai/family/gpt-4.1", want: true},
+		{name: "star does not cross slash", model: ModelConfig{Provider: "anthropic", Model: "claude-3-5-sonnet-latest", SubtaskFor: []string{"openai/*"}}, activeRef: "openai/family/gpt-4.1", want: false},
+		{name: "invalid-looking pattern treated literal", model: ModelConfig{Provider: "anthropic", Model: "claude-3-5-sonnet-latest", SubtaskFor: []string{"["}}, activeRef: "openai/gpt-4.1", want: false},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -430,11 +430,11 @@ func TestConfigSubtaskForRoundTrips(t *testing.T) {
 	dir := t.TempDir()
 	workspace := mkdir(t, filepath.Join(dir, "workspace"))
 	cfg := &Config{
-		ActiveModel: "DF/MiniMax-M3",
+		ActiveModel: "anthropic/claude-3-5-sonnet-latest",
 		Models: []ModelConfig{{
-			Provider:        "DF",
-			Model:           "MiniMax-M3",
-			BaseURL:         "https://api.example.com/v1",
+			Provider:        "anthropic",
+			Model:           "claude-3-5-sonnet-latest",
+			BaseURL:         "https://api.anthropic.com/v1",
 			ContextWindow:   1000000,
 			MaxOutputTokens: 8192,
 			SubtaskFor:      []string{"openai/**", "anthropic/**"},
@@ -477,7 +477,7 @@ max_output_tokens = 8192
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "credentials.toml"), []byte(`["vendor"]
-api_key = "sk-test"
+api_key = "test-api-key"
 `), 0600); err != nil {
 		t.Fatal(err)
 	}

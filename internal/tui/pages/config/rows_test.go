@@ -22,7 +22,7 @@ func TestHomeRowsUseModelConnectionsAsNavigationItem(t *testing.T) {
 		ProvidersSummary: func(total int, active string) string {
 			return "2 configured · New-session default openai/gpt"
 		},
-		Models: []ModelConfig{{Provider: "openai", Model: "gpt"}, {Provider: "anthropic", Model: "claude"}},
+		Models: []ModelConfig{{Provider: "openai", Model: "gpt"}, {Provider: "anthropic", Model: "gpt-4o"}},
 	})
 
 	if got, want := rows[0].Kind, "label"; got != want {
@@ -61,8 +61,8 @@ func TestModelRowsActiveModelKeepsPlainLabel(t *testing.T) {
 
 func TestModelSummaryKeepsCapabilitiesBriefAndPrioritizesStrengths(t *testing.T) {
 	mc := ModelConfig{
-		Provider:        "DF",
-		Model:           "MiniMax-M3",
+		Provider:        "anthropic",
+		Model:           "claude-3-5-sonnet-latest",
 		BaseURL:         "https://example.test",
 		ContextWindow:   1000000,
 		MaxOutputTokens: 128000,
@@ -84,7 +84,7 @@ func TestModelSummaryKeepsCapabilitiesBriefAndPrioritizesStrengths(t *testing.T)
 	if got != want {
 		t.Fatalf("ModelSummary() = %q, want %q", got, want)
 	}
-	for _, unexpected := range []string{"DF", "MiniMax-M3", "endpoint_configured", "active"} {
+	for _, unexpected := range []string{"anthropic", "claude-3-5-sonnet-latest", "endpoint_configured", "active"} {
 		if strings.Contains(got, unexpected) {
 			t.Fatalf("ModelSummary() = %q, should not contain %q", got, unexpected)
 		}
@@ -92,7 +92,7 @@ func TestModelSummaryKeepsCapabilitiesBriefAndPrioritizesStrengths(t *testing.T)
 }
 
 func TestModelSummaryOmitsSubtaskFor(t *testing.T) {
-	mc := ModelConfig{Provider: "DF", Model: "MiniMax-M3", ContextWindow: 1000000, MaxOutputTokens: 8192, SubtaskFor: []string{"openai/**"}, HasAPIKey: true}
+	mc := ModelConfig{Provider: "anthropic", Model: "claude-3-5-sonnet-latest", ContextWindow: 1000000, MaxOutputTokens: 8192, SubtaskFor: []string{"openai/**"}, HasAPIKey: true}
 	got := ModelSummary(mc, false, func(int) string { return "x" })
 	if strings.Contains(got, "openai") || strings.Contains(got, "subtask") {
 		t.Fatalf("ModelSummary() = %q, should omit subtask_for", got)
@@ -100,7 +100,7 @@ func TestModelSummaryOmitsSubtaskFor(t *testing.T) {
 }
 
 func TestDetailRowsShowsSubtaskFor(t *testing.T) {
-	m := &Model{Page: "detail", DetailRef: "DF/MiniMax-M3"}
+	m := &Model{Page: "detail", DetailRef: "anthropic/claude-3-5-sonnet-latest"}
 	rows := m.DetailRows(RowsDeps{
 		Tr: func(key string) string {
 			switch key {
@@ -112,7 +112,7 @@ func TestDetailRowsShowsSubtaskFor(t *testing.T) {
 				return key
 			}
 		},
-		Models:           []ModelConfig{{Provider: "DF", Model: "MiniMax-M3", ContextWindow: 1000000, MaxOutputTokens: 8192, SubtaskFor: []string{"openai/**", "anthropic/**"}}},
+		Models:           []ModelConfig{{Provider: "anthropic", Model: "claude-3-5-sonnet-latest", ContextWindow: 1000000, MaxOutputTokens: 8192, SubtaskFor: []string{"openai/**", "anthropic/**"}}},
 		DisplayEndpoint:  func(string) string { return "" },
 		ContextDisplay:   func(ModelConfig) string { return "" },
 		MaxOutputDisplay: func(ModelConfig) string { return "" },
@@ -159,8 +159,8 @@ func TestModelRowsGroupsModelsByProvider(t *testing.T) {
 	rows := m.ModelRows(RowsDeps{
 		Tr: func(key string) string { return key },
 		Models: []ModelConfig{
-			{Provider: "Oio", Model: "claude", BaseURL: "https://oio.example", ContextWindow: 1000, MaxOutputTokens: 100, HasAPIKey: true},
-			{Provider: "DF", Model: "glm", BaseURL: "https://df.example", ContextWindow: 1000, MaxOutputTokens: 100, HasAPIKey: true},
+			{Provider: "openai", Model: "gpt-4o", BaseURL: "https://api.openai.com/v1", ContextWindow: 1000, MaxOutputTokens: 100, HasAPIKey: true},
+			{Provider: "anthropic", Model: "claude-3-5-sonnet-latest", BaseURL: "https://api.anthropic.com/v1", ContextWindow: 1000, MaxOutputTokens: 100, HasAPIKey: true},
 		},
 		IsActive:     func(string) bool { return false },
 		ModelSummary: func(ModelConfig) string { return "summary" },

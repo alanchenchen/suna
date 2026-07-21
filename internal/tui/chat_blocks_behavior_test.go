@@ -31,7 +31,7 @@ func TestSubtaskPanelKeyboardAndToolDetail(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 30, mode: uipage.Chat}
 	tui.initChatComponents()
 	block := tui.ensureToolBlock()
-	block.Add(&toolEntry{ID: "spawn-1", Name: "Spawn", RawName: "spawn", Intent: "调研提示词", Status: toolRunning, ParamsRaw: map[string]any{"model": "DF/glm-5.2", "tools": []string{"http"}, "task": "调研主流 agent 提示词"}, StartedAt: time.Now().Add(-time.Second)})
+	block.Add(&toolEntry{ID: "spawn-1", Name: "Spawn", RawName: "spawn", Intent: "调研提示词", Status: toolRunning, ParamsRaw: map[string]any{"model": "example-provider/model", "tools": []string{"http"}, "task": "调研主流 agent 提示词"}, StartedAt: time.Now().Add(-time.Second)})
 	block.Add(&toolEntry{ID: "spawn:spawn-1:http-1", ParentID: "spawn-1", Name: "HTTP", RawName: "http", Intent: "获取资料", ParamsRaw: map[string]any{"url": "https://kilo.ai/"}, Params: `{"url":"https://kilo.ai/"}`, Result: strings.Repeat("result\n", 20), Status: toolRunning, StartedAt: time.Now().Add(-time.Second)})
 	block.Add(&toolEntry{ID: "spawn-2", Name: "Spawn", RawName: "spawn", Intent: "结果复核", Status: toolRunning})
 
@@ -515,7 +515,7 @@ func TestSubtaskSectionDividerReachesRightEdge(t *testing.T) {
 		Intent:  "研究渲染机制",
 		Status:  toolRunning,
 		ParamsRaw: map[string]any{
-			"model": "DF/MiniMax-M3",
+			"model": "provider-a/model",
 			"tools": "[http exec]",
 			"task":  "研究 TUI 渲染刷新机制",
 		},

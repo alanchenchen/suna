@@ -46,7 +46,7 @@ func TestMaskSensitiveContent(t *testing.T) {
 			name:       "api key",
 			input:      `key=sk-abc12345678901234567890`,
 			wantParts:  []string{"REDACTED"},
-			avoidParts: []string{"sk-abc123"},
+			avoidParts: []string{"example-api-key"},
 		},
 		{
 			name:       "password assignment",

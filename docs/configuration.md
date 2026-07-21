@@ -39,7 +39,7 @@ locale = "en"
 
 ```toml
 [openai]
-api_key = "sk-..."
+api_key = "<API_KEY>"
 ```
 
 ## 完整示例
@@ -103,10 +103,10 @@ max_output_tokens = 64000
 reasoning = { thinking = { type = "adaptive", display = "summarized" }, output_config = { effort = "xhigh" } }
 
 [[models]]
-provider = "dreamfield"
+provider = "custom"
 protocol = "openai_chat"
-model = "kimi-k2.6"
-base_url = "https://example.com/v1"
+model = "custom-model"
+base_url = "https://api.example.com/v1"
 context_window = 256000
 max_output_tokens = 8192
 strengths = ["multimodal", "long context"]
@@ -165,7 +165,7 @@ timeout_seconds = 30
 # 注意：Suna 当前不会展开 ${GITHUB_TOKEN}；这里会作为字面量传给子进程。
 # 如需 token，当前必须写实际值，或让 MCP server 通过其它方式读取。
 [mcp.servers.github.env]
-GITHUB_TOKEN = "ghp_xxx"
+GITHUB_TOKEN = "<GITHUB_TOKEN>"
 
 # URL / headers 字段可以被保存，但当前 MCP runtime 不支持远程 transport。
 [mcp.servers.context7]
@@ -175,7 +175,7 @@ url = "https://mcp.context7.com/mcp"
 timeout_seconds = 30
 
 [mcp.servers.context7.headers]
-Authorization = "Bearer xxx"
+Authorization = "Bearer <TOKEN>"
 
 # Hooks 结构可保存，但当前执行链路未接入。
 [[hooks]]
@@ -188,16 +188,16 @@ command = "echo checking"
 
 ```toml
 [openai]
-api_key = "sk-..."
+api_key = "<API_KEY>"
 
 [anthropic]
-api_key = "sk-ant-..."
+api_key = "<API_KEY>"
 
 [deepseek]
-api_key = "..."
+api_key = "<API_KEY>"
 
-[dreamfield]
-api_key = "..."
+[custom]
+api_key = "<API_KEY>"
 ```
 
 `models.provider` 必须和 `credentials.toml` 的 table 名一致。同一个 provider 下的多个模型共享一份 API key。
@@ -270,7 +270,7 @@ context_window = 200000
 max_output_tokens = 8192
 ```
 
-`provider` 不是固定枚举。你可以写 `deepseek`、`glm`、`dreamfield` 等，只要：
+`provider` 不是固定枚举。你可以写 `deepseek`、`glm`、`custom` 等，只要：
 
 1. `base_url` 指向兼容服务；
 2. `credentials.toml` 中存在同名 table；
@@ -333,10 +333,10 @@ max_output_tokens = 8192
 reasoning = { reasoning_effort = "high" }
 
 [[models]]
-provider = "dreamfield"
+provider = "custom"
 protocol = "openai_chat"
-model = "kimi-k2.6"
-base_url = "https://example.com/v1"
+model = "custom-model"
+base_url = "https://api.example.com/v1"
 context_window = 256000
 max_output_tokens = 8192
 reasoning = { thinking = { type = "disabled" } }

@@ -55,7 +55,7 @@ func (m *Model) OpenProviderModelForm(provider string) {
 
 func (m *Model) ProviderFormSpec(labels ProviderFormLabels, mc *ModelConfig) ProviderFormSpec {
 	fieldLabels := []string{labels.Provider, labels.Protocol, labels.Model, labels.APIKey, labels.Endpoint, labels.ContextWindow, labels.MaxOutputTokens, labels.Strengths, labels.SubtaskFor}
-	placeholders := []string{"Zhipu", "OpenAI Chat", "glm-5.1", "sk-...", "https://api.example.com/v1", "128000", "8192", labels.StrengthsHint, labels.SubtaskForHint}
+	placeholders := []string{"Zhipu", "OpenAI Chat", "glm-5.1", "<API_KEY>", "https://api.example.com/v1", "128000", "8192", labels.StrengthsHint, labels.SubtaskForHint}
 	values := []string{"", string(coreconfig.ModelProtocolOpenAIChat), "", "", "", "", "", "", ""}
 	if mc != nil {
 		values[0] = mc.Provider

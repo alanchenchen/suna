@@ -232,8 +232,8 @@ func TestExecuteSpawnToolRejectsModelHiddenBySubtaskFor(t *testing.T) {
 	cfg := &config.Config{
 		ActiveModel: "openai/gpt-4.1",
 		Models: []config.ModelConfig{
-			{Provider: "openai", Model: "gpt-4.1", BaseURL: "https://api.example.com/v1", ContextWindow: 400000, MaxOutputTokens: 8192, APIKey: "sk-test"},
-			{Provider: "DF", Model: "MiniMax-M3", BaseURL: "https://api.example.com/v1", ContextWindow: 1000000, MaxOutputTokens: 8192, APIKey: "sk-test", SubtaskFor: []string{"DF/**"}},
+			{Provider: "openai", Model: "gpt-4.1", BaseURL: "https://api.example.com/v1", ContextWindow: 400000, MaxOutputTokens: 8192, APIKey: "test-api-key"},
+			{Provider: "anthropic", Model: "claude-sonnet-4", BaseURL: "https://api.anthropic.com", ContextWindow: 200000, MaxOutputTokens: 8192, APIKey: "test-api-key", SubtaskFor: []string{"anthropic/**"}},
 		},
 	}
 	router, err := model.NewRouter(cfg, media.NewStore(t.TempDir()))
@@ -247,7 +247,7 @@ func TestExecuteSpawnToolRejectsModelHiddenBySubtaskFor(t *testing.T) {
 
 	result := a.ExecuteSpawnTool(ctx, "spawn-1", map[string]any{
 		"task":  "check something",
-		"model": "DF/MiniMax-M3",
+		"model": "anthropic/claude-sonnet-4",
 		"tools": []any{},
 	})
 	if !result.IsError {
@@ -256,7 +256,7 @@ func TestExecuteSpawnToolRejectsModelHiddenBySubtaskFor(t *testing.T) {
 	if !strings.Contains(result.Error, "not available for session model") {
 		t.Fatalf("ExecuteSpawnTool() error = %q, want availability message", result.Error)
 	}
-	if strings.Contains(result.Error, "DF/MiniMax-M3") && strings.Contains(result.Error, "Choose one of: DF/MiniMax-M3") {
+	if strings.Contains(result.Error, "anthropic/claude-sonnet-4") && strings.Contains(result.Error, "Choose one of: anthropic/claude-sonnet-4") {
 		t.Fatalf("ExecuteSpawnTool() error = %q, should not list hidden model as choice", result.Error)
 	}
 }

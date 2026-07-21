@@ -175,16 +175,16 @@ API key 不在 config.toml 中配置，统一存储在凭证文件中：
 ```toml
 # 按 provider 维度存 key，同一 provider 下的多个模型共享一个 key
 [glm]
-api_key = "sk-xxx..."
+api_key = "<API_KEY>"
 
 [anthropic]
-api_key = "sk-ant-xxx..."
+api_key = "<API_KEY>"
 
 [moonshot]
-api_key = "sk-xxx..."
+api_key = "<API_KEY>"
 
 [openai]
-api_key = "sk-xxx..."
+api_key = "<API_KEY>"
 ```
 
 查找逻辑：
