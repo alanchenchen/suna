@@ -8,6 +8,13 @@ type InputPolicy struct {
 	AllowCancel bool
 }
 
+// InteractionPresentation 统一描述当前输入区的真实交互状态，避免按键已被接管时仍渲染为普通输入。
+type InteractionPresentation struct {
+	InputPolicy
+	TerminalSelection bool
+	GuardActive       bool
+}
+
 // InputPolicyState 是推导输入锁定行为所需的最小运行态快照。
 type InputPolicyState struct {
 	Compacting      bool
@@ -43,7 +50,26 @@ func CurrentInputPolicy(state InputPolicyState) InputPolicy {
 	if state.InteractionKind == InteractionAskUser && !state.AskAllowCustom {
 		return InputPolicy{Locked: true, Placeholder: state.RespondingLabel}
 	}
+	if state.InteractionKind == InteractionGuardConfirm {
+		return InputPolicy{Locked: true}
+	}
 	return InputPolicy{}
+}
+
+// CurrentInteractionPresentation 将本地终端选择状态与 Chat runtime 状态投影为同一份输入呈现。
+// 终端选择是纯本地状态，Guard 则始终优先，避免安全交互被选择模式遮蔽。
+func CurrentInteractionPresentation(state InputPolicyState, terminalSelection bool) InteractionPresentation {
+	policy := CurrentInputPolicy(state)
+	presentation := InteractionPresentation{InputPolicy: policy}
+	if state.InteractionKind == InteractionGuardConfirm {
+		presentation.GuardActive = true
+		return presentation
+	}
+	if terminalSelection {
+		presentation.TerminalSelection = true
+		presentation.Locked = true
+	}
+	return presentation
 }
 
 func (p InputPolicy) DisplayPlaceholder(respondingLabel, cancelLabel string) string {

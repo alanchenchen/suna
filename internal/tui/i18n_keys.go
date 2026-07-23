@@ -193,6 +193,8 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"tui.guard.reject":                         {LocaleEN: "Reject", LocaleZH: "拒绝"},
 		"tui.guard.rejected":                       {LocaleEN: "Guard rejected", LocaleZH: "已拒绝安全确认"},
 		"tui.guard.help":                           {LocaleEN: "←→ choose · Enter selected · Esc reject", LocaleZH: "←→ 选择 · Enter 确认所选 · Esc 拒绝"},
+		"tui.guard.input_waiting":                  {LocaleEN: "Waiting for safety confirmation", LocaleZH: "正在等待安全确认"},
+		"tui.selection_mode.input_waiting":         {LocaleEN: "Selecting terminal text", LocaleZH: "正在选择终端文本"},
 		"tui.overlay.scroll":                       {LocaleEN: "scroll", LocaleZH: "滚动"},
 		"tui.overlay.content_hidden":               {LocaleEN: "content hidden; enlarge terminal to view", LocaleZH: "内容已隐藏，可放大终端查看"},
 

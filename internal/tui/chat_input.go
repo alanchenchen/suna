@@ -33,7 +33,7 @@ func (t *TUI) startInputCursorBlink() tea.Cmd {
 
 // updateInputCursorBlink 只在 chat 输入态翻转可见性；其他页面保持常亮，但 tick 链永不断，回到 chat 后必然继续闪烁。
 func (t *TUI) updateInputCursorBlink() tea.Cmd {
-	if t.mode == uipage.Chat {
+	if t.mode == uipage.Chat && !t.currentInteractionPresentation().Locked {
 		t.inputCursorVisible = !t.inputCursorVisible
 	} else {
 		t.inputCursorVisible = true
@@ -41,8 +41,8 @@ func (t *TUI) updateInputCursorBlink() tea.Cmd {
 	return t.inputCursorBlinkCmd()
 }
 
-func (t *TUI) currentInputPolicy() chatpage.InputPolicy {
-	return chatpage.CurrentInputPolicy(chatpage.InputPolicyState{
+func (t *TUI) currentInteractionPresentation() chatpage.InteractionPresentation {
+	return chatpage.CurrentInteractionPresentation(chatpage.InputPolicyState{
 		Compacting:      t.chat.Compacting,
 		Loading:         t.chat.Loading,
 		ObservingRun:    t.observingRun(),
@@ -53,7 +53,11 @@ func (t *TUI) currentInputPolicy() chatpage.InputPolicy {
 		CompactRunning:  t.compactRunningLabel(),
 		RespondingLabel: t.tr("status.responding"),
 		ObservingLabel:  t.tr("tui.chat.observe_input"),
-	})
+	}, t.selectionMode)
+}
+
+func (t *TUI) currentInputPolicy() chatpage.InputPolicy {
+	return t.currentInteractionPresentation().InputPolicy
 }
 
 func activeAskAllowCustom(ask *chatpage.AskUserView) bool {
@@ -69,7 +73,7 @@ func (t *TUI) allowLockedInputKey(ks string) bool {
 }
 
 func (t *TUI) syncInputFocus() tea.Cmd {
-	if t.chat.SyncInputFocus(t.inputLocked()) {
+	if t.chat.SyncInputFocus(t.currentInteractionPresentation().Locked) {
 		return t.chat.Textarea.Focus()
 	}
 	return nil
@@ -215,7 +219,11 @@ func (t *TUI) updateChatKey(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 	case chatpage.KeyTargetDiscardDraft:
 		return t.updateDiscardDraftConfirm(ks, msg)
 	case chatpage.KeyTargetGuard:
-		return t.updateGuardConfirm(ks)
+		keyMsg, ok := msg.(tea.KeyPressMsg)
+		if !ok {
+			return t, nil
+		}
+		return t.updateGuardConfirm(keyMsg)
 	case chatpage.KeyTargetAskUser:
 		return t.updateAskUser(ks, msg)
 	case chatpage.KeyTargetModelPicker:
@@ -392,6 +400,7 @@ func (t *TUI) leaveCurrentSessionForWelcome() tea.Cmd {
 	t.welcomeIdlePicker = false
 	t.welcomeDeleteConfirm = false
 	t.welcomeDeleteID = ""
+	t.selectionMode = false
 	t.attachmentStatus = protocol.AttachmentStatusResult{}
 	t.updateSessionShortcuts()
 	return tea.Batch(t.detachSessionCmd(), t.refreshDaemonStatusCmd())

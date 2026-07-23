@@ -323,12 +323,20 @@ func (t *TUI) handleAskUserNotification(p protocol.AskUserParams) {
 	if p.SessionID != "" && t.currentSession.ID != "" && p.SessionID != t.currentSession.ID {
 		return
 	}
+	if p.CanReply {
+		// 阻塞交互必须优先于本地终端选择，避免选择模式吞掉用户对 AskUser 的按键。
+		t.selectionMode = false
+		t.chat.Textarea.Blur()
+	}
 	if !p.CanReply {
 		t.appendNonToolMessage(chatMsg{Role: "system", Content: "❓ " + p.Question + "\n" + t.tr("handoff.waiting_owner")})
 		t.resetPhase()
 		return
 	}
 	t.chat.EnqueueAskUser(p)
+	if activeAskAllowCustom(t.chat.ActiveAsk()) {
+		_ = t.syncInputFocus()
+	}
 	t.appendNonToolMessage(chatMsg{Role: "system", Content: "❓ " + p.Question})
 	t.resetPhase()
 }
@@ -336,6 +344,11 @@ func (t *TUI) handleAskUserNotification(p protocol.AskUserParams) {
 func (t *TUI) handleGuardConfirmNotification(p protocol.GuardConfirmParams) {
 	if p.SessionID != "" && t.currentSession.ID != "" && p.SessionID != t.currentSession.ID {
 		return
+	}
+	if p.CanReply {
+		// Guard 接管输入时必须同时退出本地选择，确保可见状态与按键归属一致。
+		t.selectionMode = false
+		t.chat.Textarea.Blur()
 	}
 	if !p.CanReply {
 		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.tr("handoff.waiting_owner")})
@@ -350,6 +363,8 @@ func (t *TUI) handleInteractionResolvedNotification(p protocol.InteractionResolv
 		return
 	}
 	if t.chat.RemoveInteraction(p.ID) {
+		// 外部 resolve 可能使队列推进到允许自定义输入的 AskUser；焦点必须跟随新的交互呈现恢复。
+		_ = t.syncInputFocus()
 		t.syncContent()
 	}
 }

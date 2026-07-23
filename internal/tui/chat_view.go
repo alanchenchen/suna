@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -438,6 +439,7 @@ func renderInputSeparator(width int) string {
 }
 
 func (t *TUI) renderInputArea() string {
+	presentation := t.currentInteractionPresentation()
 	confirm := ""
 	if t.chat.HasDiscardDraftConfirm() {
 		confirm = styleError.Render(t.tr("tui.chat.discard_draft")) + " " + styleDim.Render(t.tr("tui.chat.discard_draft_help"))
@@ -447,11 +449,15 @@ func (t *TUI) renderInputArea() string {
 	// 输入区 placeholder 只按原始输入值判断，不能复用 HasDraft()。
 	// HasDraft() 会 trim 空白用于发送/退出判断；如果用户刚输入空格或换行，
 	// 这里仍应立刻隐藏 placeholder，避免 Bubble textarea 与外层占位文案不同步。
-	emptyInput := !t.inputLocked() && t.chat.Textarea.Value() == "" && len(t.chat.Attachments) == 0
-	if t.inputLocked() && !t.hasDraft() {
+	emptyInput := !presentation.Locked && t.chat.Textarea.Value() == "" && len(t.chat.Attachments) == 0
+	if presentation.Locked && !t.hasDraft() {
 		text = styleDim.Render(t.lockedInputPlaceholder())
 	}
-	if emptyInput {
+	if presentation.GuardActive {
+		text = styleError.Render(t.tr("tui.guard.input_waiting"))
+	} else if presentation.TerminalSelection {
+		text = styleBrand.Render(t.tr("tui.selection_mode.input_waiting"))
+	} else if emptyInput {
 		text = styleDim.Render(t.tr("tui.chat.input_placeholder"))
 	}
 	bar := renderInputComposerBar(width, strings.Split(text, "\n"), emptyInput, t.inputCursorVisible)
@@ -496,7 +502,14 @@ func renderInputComposerBar(width int, lines []string, emptyInput bool, cursorVi
 }
 
 func (t *TUI) lockedInputPlaceholder() string {
-	policy := t.currentInputPolicy()
+	presentation := t.currentInteractionPresentation()
+	if presentation.GuardActive {
+		return t.tr("tui.guard.input_waiting")
+	}
+	if presentation.TerminalSelection {
+		return t.tr("tui.selection_mode.input_waiting")
+	}
+	policy := presentation.InputPolicy
 	if policy.Placeholder != "" {
 		return policy.Placeholder
 	}
@@ -504,7 +517,11 @@ func (t *TUI) lockedInputPlaceholder() string {
 }
 
 func (t *TUI) renderPreInputHint() string {
-	if t.selectionMode {
+	presentation := t.currentInteractionPresentation()
+	if presentation.GuardActive {
+		return styleError.Render("  ⚠ "+t.tr("tui.guard.input_waiting")) + styleDim.Render(" · ") + styleDim.Render(t.tr("tui.guard.help"))
+	}
+	if presentation.TerminalSelection {
 		return styleBrand.Render("  "+t.tr("tui.selection_mode.title")) + styleDim.Render(" · ") + styleDim.Render(t.tr("tui.selection_mode.hint"))
 	}
 	if block := t.renderHandoffBlock(); block != "" {
@@ -528,7 +545,11 @@ func (t *TUI) inputHint() string {
 }
 
 func (t *TUI) inputHelp() string {
-	if t.inputLocked() {
+	presentation := t.currentInteractionPresentation()
+	if presentation.TerminalSelection || presentation.GuardActive {
+		return ""
+	}
+	if presentation.Locked {
 		if t.chat.Compacting {
 			return ""
 		}
@@ -561,12 +582,13 @@ func (t *TUI) responseNavHint() string {
 	return styleDim.Render(t.tr(key))
 }
 
-func (t *TUI) updateGuardConfirm(ks string) (tea.Model, tea.Cmd) {
-	switch ks {
-	case "ctrl+c":
+func (t *TUI) updateGuardConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	keys := chatpage.DefaultKeyMap
+	switch {
+	case key.Matches(msg, keys.Quit):
 		t.doQuit()
 		return t, tea.Quit
-	case "left", "right":
+	case key.Matches(msg, keys.GuardPrevious), key.Matches(msg, keys.GuardNext):
 		if t.chat.GuardCursor == 0 {
 			t.chat.GuardCursor = 1
 		} else {
@@ -574,25 +596,25 @@ func (t *TUI) updateGuardConfirm(ks string) (tea.Model, tea.Cmd) {
 		}
 		t.syncContent()
 		return t, nil
-	case "up":
-		t.scrollGuardOverlay(-1)
+	case key.Matches(msg, keys.GuardScrollUp):
+		if msg.String() == "pgup" {
+			t.scrollGuardOverlay(-max(1, t.guardOverlayBodyHeight()-1))
+		} else {
+			t.scrollGuardOverlay(-1)
+		}
 		t.syncContent()
 		return t, nil
-	case "down":
-		t.scrollGuardOverlay(1)
+	case key.Matches(msg, keys.GuardScrollDown):
+		if msg.String() == "pgdown" {
+			t.scrollGuardOverlay(max(1, t.guardOverlayBodyHeight()-1))
+		} else {
+			t.scrollGuardOverlay(1)
+		}
 		t.syncContent()
 		return t, nil
-	case "pgup":
-		t.scrollGuardOverlay(-max(1, t.guardOverlayBodyHeight()-1))
-		t.syncContent()
-		return t, nil
-	case "pgdown":
-		t.scrollGuardOverlay(max(1, t.guardOverlayBodyHeight()-1))
-		t.syncContent()
-		return t, nil
-	case "esc":
+	case key.Matches(msg, keys.GuardReject):
 		return t, t.submitGuardDecision("reject")
-	case "enter":
+	case key.Matches(msg, keys.GuardConfirm):
 		if t.chat.GuardCursor == 0 {
 			return t, t.submitGuardDecision("approve")
 		}
@@ -612,11 +634,14 @@ func (t *TUI) submitGuardDecision(decision string) tea.Cmd {
 	}
 	t.advanceGuardQueue()
 	restartSpinner := false
-	if t.chat.ActiveGuard() == nil {
+	if !t.chat.HasBlockingInteraction() {
 		t.currentRunCanControl = true
 		t.chat.Textarea.Blur()
 		t.chat.ResumeToolPhase(time.Now())
 		restartSpinner = true
+	} else {
+		// 队列可能已推进到允许自定义输入的 AskUser；焦点必须跟随新的交互呈现恢复。
+		_ = t.syncInputFocus()
 	}
 	cmd := t.guardReplyCmd(id, decision)
 	if restartSpinner && !t.chat.HasBlockingInteraction() {

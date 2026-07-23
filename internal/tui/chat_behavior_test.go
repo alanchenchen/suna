@@ -15,6 +15,23 @@ import (
 	tuitransport "github.com/alanchenchen/suna/internal/tui/transport"
 )
 
+func TestGuardVisibleInFinalChatViewAndLocksComposer(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 100, height: 30}
+	tui.initChatComponents()
+	tui.chat.EnqueueGuardConfirm(&chatpage.GuardConfirmView{ID: "guard-1", Tool: "writefile", Risk: "high", Reason: "needs confirmation"})
+	_ = tui.syncInputFocus()
+
+	view := stripANSIForTest(tui.viewChat())
+	for _, want := range []string{"安全确认", "正在等待安全确认", "←→ 选择 · Enter 确认所选 · Esc 拒绝"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("viewChat() = %q, want %q", view, want)
+		}
+	}
+	if tui.chat.Textarea.Focused() {
+		t.Fatal("textarea.Focused() = true while final chat view has an active guard")
+	}
+}
+
 func TestLeaveCurrentSessionForWelcomeReleasesChatRuntime(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, width: 80, height: 24}
 	tui.initChatComponents()
@@ -26,6 +43,7 @@ func TestLeaveCurrentSessionForWelcomeReleasesChatRuntime(t *testing.T) {
 	tui.chat.InteractionQueue = []chatpage.Interaction{{ID: "ask-1"}}
 	tui.chat.Attachments = []attachmentItem{{Name: "image.png"}}
 	tui.chat.Viewport.SetContentLines([]string{"rendered transcript"})
+	tui.selectionMode = true
 
 	tui.leaveCurrentSessionForWelcome()
 
@@ -34,6 +52,9 @@ func TestLeaveCurrentSessionForWelcomeReleasesChatRuntime(t *testing.T) {
 	}
 	if tui.currentSession.ID != "" {
 		t.Fatalf("current session = %q, want empty", tui.currentSession.ID)
+	}
+	if tui.selectionMode {
+		t.Fatal("selectionMode = true after leaving Chat for Welcome")
 	}
 	if len(tui.chat.Messages) != 0 || len(tui.chat.ActiveTools) != 0 || len(tui.chat.InteractionQueue) != 0 || len(tui.chat.Attachments) != 0 {
 		t.Fatal("chat runtime retains session data after leaving for welcome")
