@@ -114,6 +114,17 @@ func (t *TUI) handleSend() tea.Cmd {
 	if input == "" && len(attachments) == 0 {
 		return t.syncInputFocus()
 	}
+	// 已注册的本地指令永远不写入 transcript，也不发送给 Agent。命令本身
+	// 不消费附件：先保留附件草稿，用户完成本地操作后仍可继续发送它们。
+	if chatpage.IsRegisteredSlashCommand(input) {
+		cmd := t.handleCommand(input)
+		t.syncContent()
+		if cmd != nil {
+			return cmd
+		}
+		return t.syncInputFocus()
+	}
+
 	t.appendNonToolMessage(chatMsg{Role: "user", Content: userMessageContent{Text: input, Attachments: attachments}})
 	t.scrollToBottomOnNextSync()
 	t.chat.Attachments = nil
@@ -137,14 +148,6 @@ func (t *TUI) handleSend() tea.Cmd {
 		return tea.Batch(t.askReplyCmd(askID, answer), t.startChatSpinner())
 	}
 
-	if strings.HasPrefix(input, "/") && chatpage.IsRegisteredSlashCommand(input) {
-		cmd := t.handleCommand(input)
-		t.syncContent()
-		if cmd != nil {
-			return cmd
-		}
-		return t.syncInputFocus()
-	}
 	return t.runAgent(input, attachments)
 }
 
@@ -227,11 +230,11 @@ func (t *TUI) updateChatKey(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 	case chatpage.KeyTargetAskUser:
 		return t.updateAskUser(ks, msg)
 	case chatpage.KeyTargetModelPicker:
-		return t.updateModelPicker(ks)
+		return t.updateModelPicker(ks, msg)
 	case chatpage.KeyTargetSkills:
-		return t.updateSkillsOverlay(ks)
+		return t.updateSkillsOverlay(ks, msg)
 	case chatpage.KeyTargetMCP:
-		return t.updateMCPOverlay(ks)
+		return t.updateMCPOverlay(ks, msg)
 	case chatpage.KeyTargetMemory:
 		return t.updateMemoryOverlay(ks)
 	case chatpage.KeyTargetSessions:

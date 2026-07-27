@@ -11,6 +11,7 @@ import (
 	"github.com/alanchenchen/suna/internal/protocol"
 	textutil "github.com/alanchenchen/suna/internal/tui/components/text"
 	chatpage "github.com/alanchenchen/suna/internal/tui/pages/chat"
+	tuiconfig "github.com/alanchenchen/suna/internal/tui/pages/config"
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 )
 
@@ -40,8 +41,8 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 		if len(parts) > 1 {
 			return t.switchModelRef(parts[1])
 		}
-		t.openModelPicker()
 		t.syncContent()
+		t.openModelPicker()
 		return nil
 	case "/memory":
 		return t.handleMemory(parts)
@@ -113,31 +114,47 @@ func (t *TUI) updateSessionModelCmd(sessionID, modelRef string) tea.Cmd {
 	}
 }
 
-func (t *TUI) openModelPicker() {
-	t.chat.OpenModelPicker(chatpage.ModelRefs(t.configModelsSnapshot()), t.currentSession.ModelRef)
+func (t *TUI) openModelPicker() tea.Cmd {
+	models := t.configModelsSnapshot()
+	rows := make([]chatpage.ModelPickerRow, 0, len(models))
+	for _, model := range models {
+		rows = append(rows, chatpage.ModelPickerRow{
+			Ref:     model.Ref(),
+			Summary: t.modelSummary(model),
+			Mark:    tuiconfig.ModelStatusMark(model, t.isCurrentSessionModelRef(model.Ref())),
+		})
+	}
+	t.chat.OpenModelPicker(rows, t.currentSession.ModelRef)
+	t.chat.Textarea.Blur()
+	return nil
 }
 
-func (t *TUI) updateModelPicker(key string) (tea.Model, tea.Cmd) {
-	models := t.configModelsSnapshot()
-	refs := chatpage.ModelRefs(models)
-	if len(refs) == 0 {
-		t.chat.CloseModelPicker()
-		return t, nil
+func (t *TUI) updateModelPicker(key string, msg tea.Msg) (tea.Model, tea.Cmd) {
+	if t.chat.ModelPickerFiltering() {
+		switch key {
+		case "up":
+			t.chat.ModelList.MoveCursor(-1)
+			return t, nil
+		case "down":
+			t.chat.ModelList.MoveCursor(1)
+			return t, nil
+		case "enter":
+			if ref, ok := t.chat.SelectedModelRef(); ok {
+				return t, t.switchModelRef(ref)
+			}
+			return t, nil
+		}
 	}
-	switch key {
-	case "esc":
+	if key == "esc" && !t.chat.ModelPickerFiltering() {
 		t.chat.CloseModelPicker()
-	case "up":
-		t.chat.MoveModelPicker(-1, len(refs))
-	case "down":
-		t.chat.MoveModelPicker(1, len(refs))
-	case "enter":
-		if ref, ok := t.chat.SelectedModelRef(refs); ok {
+		return t, t.syncInputFocus()
+	}
+	if key == "enter" {
+		if ref, ok := t.chat.SelectedModelRef(); ok {
 			return t, t.switchModelRef(ref)
 		}
 	}
-	t.syncContent()
-	return t, nil
+	return t, t.chat.UpdateModelPicker(msg)
 }
 
 func (t *TUI) handleMemory(parts []string) tea.Cmd {
@@ -167,24 +184,33 @@ func (t *TUI) handleSkills(parts []string) tea.Cmd {
 	return t.listSkillsCmd()
 }
 
-func (t *TUI) updateSkillsOverlay(ks string) (tea.Model, tea.Cmd) {
-	switch ks {
-	case "esc":
+func (t *TUI) updateSkillsOverlay(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
+	if t.chat.SkillsList.Filtering() {
+		switch ks {
+		case "up":
+			t.chat.SkillsList.MoveCursor(-1)
+			return t, nil
+		case "down":
+			t.chat.SkillsList.MoveCursor(1)
+			return t, nil
+		case "enter":
+			if action, ok := t.chat.SelectSkill(t.tr("tui.skills.cannot_toggle")); ok {
+				return t, t.setSkillOverlayCmd(action.Name, action.Enabled)
+			}
+			return t, nil
+		}
+	}
+	if ks == "esc" && !t.chat.SkillsList.Filtering() {
 		t.chat.CloseSkillsOverlay()
 		return t, t.syncInputFocus()
-	case "up":
-		t.chat.MoveSkillsCursor(-1)
-		return t, nil
-	case "down":
-		t.chat.MoveSkillsCursor(1)
-		return t, nil
-	case "enter", " ", "space":
+	}
+	if ks == "enter" || ks == " " || ks == "space" {
 		if action, ok := t.chat.SelectSkill(t.tr("tui.skills.cannot_toggle")); ok {
 			return t, t.setSkillOverlayCmd(action.Name, action.Enabled)
 		}
 		return t, nil
 	}
-	return t, nil
+	return t, t.chat.UpdateSkillsList(msg)
 }
 
 func (t *TUI) setSkillOverlayCmd(name string, enabled bool) tea.Cmd {
@@ -321,31 +347,42 @@ func (t *TUI) handleMCP(parts []string) tea.Cmd {
 	return t.listMCPCmd()
 }
 
-func (t *TUI) updateMCPOverlay(ks string) (tea.Model, tea.Cmd) {
-	switch ks {
-	case "esc":
+func (t *TUI) updateMCPOverlay(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
+	if t.chat.MCPList.Filtering() {
+		switch ks {
+		case "up":
+			t.chat.MCPList.MoveCursor(-1)
+			return t, nil
+		case "down":
+			t.chat.MCPList.MoveCursor(1)
+			return t, nil
+		case "enter":
+			if name, ok := t.chat.SelectMCPForReload(); ok {
+				t.chat.SetMCPActionServer(name)
+				return t, t.reloadMCPOverlayCmd(name)
+			}
+			return t, nil
+		}
+	}
+	if ks == "esc" && !t.chat.MCPList.Filtering() {
 		t.chat.CloseMCPOverlay()
 		return t, t.syncInputFocus()
-	case "up":
-		t.chat.MoveMCPCursor(-1)
-		return t, nil
-	case "down":
-		t.chat.MoveMCPCursor(1)
-		return t, nil
-	case " ", "space":
+	}
+	if ks == "space" || ks == " " {
 		if action, ok := t.chat.SelectMCPForToggle(); ok {
 			t.chat.SetMCPActionServer(action.Name)
 			return t, t.setMCPOverlayCmd(action.Name, action.Active)
 		}
 		return t, nil
-	case "enter":
+	}
+	if ks == "enter" {
 		if name, ok := t.chat.SelectMCPForReload(); ok {
 			t.chat.SetMCPActionServer(name)
 			return t, t.reloadMCPOverlayCmd(name)
 		}
 		return t, nil
 	}
-	return t, nil
+	return t, t.chat.UpdateMCPList(msg)
 }
 
 func (t *TUI) setMCPOverlayCmd(name string, active bool) tea.Cmd {
@@ -381,137 +418,21 @@ func (t *TUI) reloadMCPOverlayCmd(name string) tea.Cmd {
 }
 
 func (t *TUI) renderMCPOverlay(width int) string {
-	view := t.chat.MCPOverlayView(width, t.overlayMaxHeight())
-	var body []string
-	if view.Loading {
-		body = append(body, styleDim.Render(t.tr("tui.mcp.loading")))
-	} else if view.Empty {
-		body = append(body, styleDim.Render(t.tr("tui.mcp.empty")))
-	} else {
-		for _, row := range view.Rows {
-			body = append(body, t.renderMCPRowView(row, view.Inner))
+	return t.renderNativeListOverlay(chatpage.NativeListMCP, &t.chat.MCPList, width, t.nativeListText().Reload, "tui.mcp.empty", func() string {
+		if t.chat.MCPLoading && len(t.chat.MCPServers) == 0 {
+			return t.tr("tui.mcp.loading")
 		}
-	}
-	body, start, total := scrollWindow(body, view.Height, &t.chat.MCPScroll)
-	title := t.tr("tui.mcp.title", view.Active, view.Total, view.Tools, view.Issues)
-	lines := []string{styleHL.Render(title), ""}
-	lines = append(lines, body...)
-	if view.Error != "" {
-		lines = append(lines, "", styleError.Render(view.Error))
-	}
-	lines = append(lines, "", styleDim.Render(t.mcpHelpText(start, view.Height, total)))
-	return boxStyle.Width(view.Width).Padding(1, 2).Render(strings.Join(lines, "\n"))
-}
-
-func (t *TUI) renderMCPRowView(row chatpage.MCPRowView, width int) string {
-	cursor := "  "
-	nameStyle := lipgloss.NewStyle()
-	if row.Selected {
-		cursor = styleCursor.Render("▶ ")
-		nameStyle = styleHL
-	}
-	mark := mcpActiveMark(row)
-	name := truncateDisplay(row.Server.Name, max(12, width/3))
-	transport := strings.TrimSpace(row.Server.Transport)
-	if transport == "" {
-		transport = "stdio"
-	}
-	status := fmt.Sprintf("%s · %s %d", transport, t.tr("tui.mcp.tools"), row.Server.ToolCount)
-	if row.Loading {
-		status = t.tr("tui.mcp.reloading")
-	} else if row.Issue {
-		status = t.tr("tui.mcp.error")
-	} else if !row.Active {
-		status = t.tr("tui.mcp.inactive")
-	}
-	line := fmt.Sprintf("%s%s %-22s %s", cursor, mark, nameStyle.Render(name), mcpStatusStyle(row).Render(truncateDisplay(status, max(10, width-30))))
-	cmd := strings.TrimSpace(row.Server.Command)
-	if cmd != "" {
-		line += "  " + styleToolDim.Render(truncateDisplay(cmd, max(8, width-lipgloss.Width(line)-2)))
-	}
-	if row.Issue && row.Server.Error != "" {
-		line += "  " + styleToolErr.Render(truncateDisplay(row.Server.Error, max(8, width-lipgloss.Width(line)-2)))
-	}
-	return line
-}
-
-func (t *TUI) mcpHelpText(start, height, total int) string {
-	text := t.tr("tui.mcp.help")
-	if total > height {
-		text += fmt.Sprintf(" · %d-%d/%d", start+1, min(total, start+height), total)
-	}
-	return text
-}
-
-func mcpActiveMark(row chatpage.MCPRowView) string {
-	if row.Loading {
-		return styleToolRun.Render("◌")
-	}
-	if row.Issue {
-		return styleToolErr.Render("!")
-	}
-	if row.Active {
-		return styleToolOk.Render("●")
-	}
-	return styleDim.Render("○")
-}
-
-func mcpStatusStyle(row chatpage.MCPRowView) lipgloss.Style {
-	if row.Loading {
-		return styleToolRun
-	}
-	if row.Issue {
-		return styleToolErr
-	}
-	if row.Active {
-		return styleToolOk
-	}
-	return styleDim
+		return ""
+	}(), t.chat.MCPError)
 }
 
 func (t *TUI) renderSkillsOverlay(width int) string {
-	view := t.chat.SkillsOverlayView(width, t.overlayMaxHeight())
-	var body []string
-	if view.Loading {
-		body = append(body, styleDim.Render(t.tr("tui.skills.loading")))
-	} else if view.Empty {
-		body = append(body, styleDim.Render(t.tr("tui.skills.empty")))
-	} else {
-		for _, row := range view.Rows {
-			body = append(body, t.renderSkillRowView(row, view.Inner))
+	return t.renderNativeListOverlay(chatpage.NativeListSkills, &t.chat.SkillsList, width, t.nativeListText().Toggle, "tui.skills.empty", func() string {
+		if t.chat.SkillsLoading && len(t.chat.Skills) == 0 {
+			return t.tr("tui.skills.loading")
 		}
-	}
-	body, start, total := scrollWindow(body, view.Height, &t.chat.SkillsScroll)
-	title := t.tr("tui.skills.title", view.Active, view.Total, view.Issues)
-	lines := []string{styleHL.Render(title), ""}
-	lines = append(lines, body...)
-	if view.Error != "" {
-		lines = append(lines, "", styleError.Render(view.Error))
-	}
-	lines = append(lines, "", styleDim.Render(t.skillsHelpText(start, view.Height, total)))
-	return boxStyle.Width(view.Width).Padding(1, 2).Render(strings.Join(lines, "\n"))
-}
-
-func (t *TUI) renderSkillRowView(row chatpage.SkillRowView, width int) string {
-	cursor := "  "
-	nameStyle := lipgloss.NewStyle()
-	if row.Selected {
-		cursor = styleCursor.Render("▶ ")
-		nameStyle = styleHL
-	}
-	mark := skillActiveMark(row.Active)
-	status := t.tr("tui.skills.inactive")
-	statusStyle := styleDim
-	if row.Active {
-		status = t.tr("tui.skills.active")
-		statusStyle = styleToolOk
-	}
-	name := truncateDisplay(row.Skill.Name, max(12, width-24))
-	line := fmt.Sprintf("%s%s %-24s %-10s", cursor, mark, nameStyle.Render(name), statusStyle.Render(status))
-	if row.Issue {
-		line += "  " + styleTool.Render(skillIssueText(t, row.Skill))
-	}
-	return line
+		return ""
+	}(), t.chat.SkillsError)
 }
 
 func (t *TUI) renderMemoryOverlay(width int) string {
@@ -594,33 +515,9 @@ func (t *TUI) memoryHelpText(start, height, total int) string {
 	return text
 }
 
-func (t *TUI) renderSkillRow(i int, s protocol.SkillInfo, width int) string {
-	return t.renderSkillRowView(chatpage.SkillRowView{Skill: s, Selected: i == t.chat.SkillsCursor, Active: chatpage.SkillIsActive(s), Issue: chatpage.SkillHasIssue(s)}, width)
-}
-
-func (t *TUI) skillsHelpText(start, height, total int) string {
-	text := t.tr("tui.skills.help")
-	if total > height {
-		text += fmt.Sprintf(" · %d-%d/%d", start+1, min(total, start+height), total)
-	}
-	return text
-}
-
-func skillIssueText(t *TUI, s protocol.SkillInfo) string {
-	if strings.TrimSpace(s.Error) != "" {
-		return t.tr("tui.skills.issue_error")
-	}
-	if len(s.Reasons) > 0 {
-		return t.tr("tui.skills.issue_reasons", len(s.Reasons))
-	}
-	return t.tr("tui.skills.issue_review")
-}
-
-func skillActiveMark(active bool) string {
-	if active {
-		return styleToolOk.Render("●")
-	}
-	return styleDim.Render("○")
+func nativeListWidth(viewport, preferred int) int {
+	// 外层浮层还会增加左右边框与内边距，窄终端不能用固定最小宽度反向撑破视口。
+	return max(1, min(preferred, max(1, viewport-6)))
 }
 
 func truncateDisplay(s string, maxWidth int) string {

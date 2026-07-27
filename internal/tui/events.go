@@ -511,6 +511,12 @@ func (t *TUI) restoreOptimisticSessionTitle(sessionID, optimisticTitle, oldTitle
 }
 
 func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) {
+	previousSessionID := t.currentSession.ID
+	if previousSessionID != "" && previousSessionID != p.Session.ID {
+		// 在 Chat 内 join 另一会话不会经过 Welcome 的 ResetRuntime；列表数据、筛选词
+		// 和选中项必须随 session 切换清空，避免显示或操作前一会话的项目。
+		t.chat.ResetNativeLists()
+	}
 	if t.handoffRole == "" {
 		t.handoffRole = handoffRoleHost
 	}
@@ -567,6 +573,7 @@ func (t *TUI) handleConfigStateNotification(p protocol.ConfigParams) {
 	}
 	if t.configState.Locale != "" {
 		t.i18n.SetLocale(LocaleID(t.configState.Locale))
+		t.refreshNativeLists()
 	}
 	if t.configState.Theme != "" {
 		t.setTheme(t.configState.Theme)

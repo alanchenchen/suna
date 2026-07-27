@@ -7,6 +7,23 @@ import (
 	"github.com/alanchenchen/suna/internal/protocol"
 )
 
+func TestSessionSwitchClearsNativeListState(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 18}
+	tui.initChatComponents()
+	tui.currentSession = protocol.SessionInfo{ID: "session-a"}
+	tui.chat.SetSkills([]protocol.SkillInfo{{Name: "previous-skill", Valid: true}})
+	tui.chat.SetMCPServers([]protocol.MCPServerInfo{{Name: "previous-server", Configured: true}})
+	tui.chat.InitNativeLists(false, tui.nativeListStyles(), tui.nativeListText())
+	tui.chat.SkillsList.List().SetFilterText("previous")
+	tui.chat.MCPList.List().SetFilterText("previous")
+
+	tui.applySessionSnapshot(protocol.SessionSnapshot{Session: protocol.SessionInfo{ID: "session-b"}})
+
+	if got := tui.chat.MCPList.List().FilterValue(); got != "" {
+		t.Fatalf("MCP filter after session switch = %q, want empty", got)
+	}
+}
+
 func TestStreamErrorUsesStructuredResumeFlag(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 18}
 	tui.initChatComponents()

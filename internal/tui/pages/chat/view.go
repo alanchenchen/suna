@@ -23,6 +23,7 @@ type ViewDeps struct {
 
 	ToolDetailOverlay string
 	HelpOverlay       string
+	ModelOverlay      string
 	SkillsOverlay     string
 	MCPOverlay        string
 	MemoryOverlay     string
@@ -57,6 +58,9 @@ func (m Model) View(deps ViewDeps) string {
 	}
 	if deps.HelpOverlay != "" {
 		content = overlay(content, deps.HelpOverlay, deps.Overlay)
+	}
+	if m.ModelPickerOpen && deps.ModelOverlay != "" {
+		content = overlay(content, deps.ModelOverlay, deps.Overlay)
 	}
 	if m.SkillsOverlayOpen && deps.SkillsOverlay != "" {
 		content = overlay(content, deps.SkillsOverlay, deps.Overlay)

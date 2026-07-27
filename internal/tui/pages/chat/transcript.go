@@ -43,7 +43,6 @@ type TranscriptDeps struct {
 	RenderAskSelected    func(string) string
 	RenderAskOption      func(string) string
 	RenderAskHelp        func(string) string
-	RenderModelPicker    func() string
 }
 
 type transcriptBlock struct {
@@ -259,9 +258,6 @@ func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptB
 		if deps.RenderAskHelp != nil {
 			addBlock(-1, false, deps.RenderAskHelp(help))
 		}
-	}
-	if m.ModelPickerOpen && deps.RenderModelPicker != nil {
-		addBlock(-1, false, deps.RenderModelPicker())
 	}
 
 	return blocks, nav

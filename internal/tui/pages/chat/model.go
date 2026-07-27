@@ -10,6 +10,7 @@ import (
 
 	"github.com/alanchenchen/suna/internal/protocol"
 	"github.com/alanchenchen/suna/internal/tui/components/attachment"
+	"github.com/alanchenchen/suna/internal/tui/components/overlaylist"
 	"github.com/alanchenchen/suna/internal/tui/components/toolview"
 )
 
@@ -139,7 +140,7 @@ type Model struct {
 	CmdSuggestions    []CommandSpec
 	CmdSuggestionIdx  int
 	ModelPickerOpen   bool
-	ModelPickerCursor int
+	ModelList         overlaylist.Model
 
 	ShowToolDetail      bool
 	ShowReasoningDetail bool
@@ -164,17 +165,15 @@ type Model struct {
 	AttachmentDelete bool
 
 	Skills            []protocol.SkillInfo
+	SkillsList        overlaylist.Model
 	SkillsOverlayOpen bool
 	SkillsLoading     bool
-	SkillsCursor      int
-	SkillsScroll      int
 	SkillsError       string
 
 	MCPServers      []protocol.MCPServerInfo
+	MCPList         overlaylist.Model
 	MCPOverlayOpen  bool
 	MCPLoading      bool
-	MCPCursor       int
-	MCPScroll       int
 	MCPError        string
 	MCPActionServer string
 

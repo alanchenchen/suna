@@ -11,8 +11,8 @@ func (m *Model) OpenMCPOverlay() {
 	m.MCPOverlayOpen = true
 	m.MCPLoading = true
 	m.MCPError = ""
-	m.MCPCursor = ClampMCPCursor(m.MCPCursor, len(m.MCPServers))
 	m.SkillsOverlayOpen = false
+	m.ModelPickerOpen = false
 }
 
 func (m *Model) CloseMCPOverlay() {
@@ -21,32 +21,37 @@ func (m *Model) CloseMCPOverlay() {
 	m.MCPActionServer = ""
 }
 
-func (m *Model) MoveMCPCursor(delta int) {
-	m.MCPCursor = ClampMCPCursor(m.MCPCursor+delta, len(m.MCPServers))
-}
-
 func (m *Model) SelectMCPForToggle() (MCPAction, bool) {
-	if len(m.MCPServers) == 0 || m.MCPCursor < 0 || m.MCPCursor >= len(m.MCPServers) {
+	selected, ok := m.MCPList.Selected()
+	if !ok {
 		return MCPAction{}, false
 	}
-	item := m.MCPServers[m.MCPCursor]
-	return MCPAction{Name: item.Name, Active: !item.Active}, true
+	row, ok := selected.(mcpItem)
+	if !ok {
+		return MCPAction{}, false
+	}
+	return MCPAction{Name: row.server.Name, Active: !row.server.Active}, true
 }
 
 func (m *Model) SelectMCPForReload() (string, bool) {
-	if len(m.MCPServers) == 0 || m.MCPCursor < 0 || m.MCPCursor >= len(m.MCPServers) {
+	selected, ok := m.MCPList.Selected()
+	if !ok {
 		return "", false
 	}
-	return m.MCPServers[m.MCPCursor].Name, true
+	row, ok := selected.(mcpItem)
+	if !ok {
+		return "", false
+	}
+	return row.server.Name, true
 }
 
 func (m *Model) SetMCPServers(servers []protocol.MCPServerInfo) {
 	m.MCPServers = servers
 	m.MCPLoading = false
 	m.MCPActionServer = ""
-	m.MCPCursor = ClampMCPCursor(m.MCPCursor, len(m.MCPServers))
-	if m.MCPCursor < m.MCPScroll {
-		m.MCPScroll = m.MCPCursor
+	// 初始通知可能在 Chat 列表组件创建前抵达；原始数据已保存，初始化后会统一构建列表。
+	if m.MCPList.Initialized() {
+		m.MCPList.SetItems(mcpItems(servers))
 	}
 }
 
@@ -59,30 +64,4 @@ func (m *Model) SetMCPError(err string) {
 func (m *Model) SetMCPActionServer(name string) {
 	m.MCPActionServer = name
 	m.MCPError = ""
-}
-
-func MCPSummaryCounts(servers []protocol.MCPServerInfo) (active, tools, issues int) {
-	for _, s := range servers {
-		if s.Active {
-			active++
-		}
-		tools += s.ToolCount
-		if s.Error != "" {
-			issues++
-		}
-	}
-	return
-}
-
-func ClampMCPCursor(cursor, n int) int {
-	if n <= 0 {
-		return 0
-	}
-	if cursor < 0 {
-		return 0
-	}
-	if cursor >= n {
-		return n - 1
-	}
-	return cursor
 }

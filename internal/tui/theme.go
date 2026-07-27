@@ -164,6 +164,7 @@ func (t *TUI) applyResolvedTheme() {
 	t.applyConfigInputTheme()
 	if t.mode == uipage.Chat {
 		t.applyTextAreaTheme()
+		t.refreshNativeLists()
 		t.syncContent()
 	}
 	t.chat.Spinner.Style = lipgloss.NewStyle().Foreground(ColorBrand)

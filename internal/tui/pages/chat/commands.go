@@ -35,20 +35,19 @@ func Suggestions(input string, max int) []CommandSpec {
 }
 
 func IsRegisteredSlashCommand(input string) bool {
-	input = strings.TrimSpace(input)
-	if input == "" {
+	parts := strings.Fields(input)
+	if len(parts) == 0 {
 		return false
 	}
 	for _, spec := range AllCommands() {
-		if input == spec.Cmd || strings.HasPrefix(input, spec.Cmd+" ") {
-			return true
-		}
-		if !strings.Contains(spec.Cmd, " ") {
+		command := strings.Fields(spec.Cmd)
+		if len(command) == 0 {
 			continue
 		}
-		parts := strings.Fields(input)
-		if len(parts) > 0 && parts[0] == strings.Fields(spec.Cmd)[0] {
-			return strings.HasPrefix(spec.Cmd, input)
+		// 所有当前命令以第一个 token 为稳定命令名；参数由具体命令处理。
+		// 使用 Fields 可让 Tab、粘贴换行等空白形式和普通空格保持一致。
+		if parts[0] == command[0] {
+			return true
 		}
 	}
 	return false

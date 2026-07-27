@@ -11,8 +11,8 @@ func (m *Model) OpenSkillsOverlay() {
 	m.SkillsOverlayOpen = true
 	m.SkillsLoading = true
 	m.SkillsError = ""
-	m.SkillsCursor = ClampSkillCursor(m.SkillsCursor, len(m.Skills))
 	m.MCPOverlayOpen = false
+	m.ModelPickerOpen = false
 }
 
 func (m *Model) CloseSkillsOverlay() {
@@ -20,42 +20,27 @@ func (m *Model) CloseSkillsOverlay() {
 	m.SkillsError = ""
 }
 
-func (m *Model) MoveSkillsCursor(delta int) {
-	m.SkillsCursor = ClampSkillCursor(m.SkillsCursor+delta, len(m.Skills))
-}
-
 func (m *Model) SelectSkill(cannotToggleMessage string) (SkillAction, bool) {
-	if len(m.Skills) == 0 || m.SkillsCursor < 0 || m.SkillsCursor >= len(m.Skills) {
+	selected, ok := m.SkillsList.Selected()
+	if !ok {
 		return SkillAction{}, false
 	}
-	item := m.Skills[m.SkillsCursor]
-	if !SkillCanToggle(item) {
+	row, ok := selected.(skillItem)
+	if !ok || !SkillCanToggle(row.skill) {
 		m.SkillsError = cannotToggleMessage
 		return SkillAction{}, false
 	}
-	return SkillAction{Name: item.Name, Enabled: !SkillIsActive(item)}, true
+	return SkillAction{Name: row.skill.Name, Enabled: !SkillIsActive(row.skill)}, true
 }
 
 func (m *Model) SetSkills(skills []protocol.SkillInfo) {
 	m.Skills = skills
 	m.SkillsLoading = false
 	m.SkillsError = ""
-	m.SkillsCursor = ClampSkillCursor(m.SkillsCursor, len(m.Skills))
-	if m.SkillsCursor < m.SkillsScroll {
-		m.SkillsScroll = m.SkillsCursor
+	// 初始通知可能在 Chat 列表组件创建前抵达；原始数据已保存，初始化后会统一构建列表。
+	if m.SkillsList.Initialized() {
+		m.SkillsList.SetItems(skillItems(skills))
 	}
-}
-
-func SkillSummaryCounts(skills []protocol.SkillInfo) (active, issues int) {
-	for _, s := range skills {
-		if SkillIsActive(s) {
-			active++
-		}
-		if SkillHasIssue(s) {
-			issues++
-		}
-	}
-	return
 }
 
 func SkillIsActive(s protocol.SkillInfo) bool {
@@ -68,17 +53,4 @@ func SkillCanToggle(s protocol.SkillInfo) bool {
 
 func SkillHasIssue(s protocol.SkillInfo) bool {
 	return len(s.Reasons) > 0 || s.Error != "" || !s.Valid
-}
-
-func ClampSkillCursor(cursor, n int) int {
-	if n <= 0 {
-		return 0
-	}
-	if cursor < 0 {
-		return 0
-	}
-	if cursor >= n {
-		return n - 1
-	}
-	return cursor
 }

@@ -14,7 +14,6 @@ import (
 	"github.com/alanchenchen/suna/internal/tui/components/overlay"
 	textutil "github.com/alanchenchen/suna/internal/tui/components/text"
 	chatpage "github.com/alanchenchen/suna/internal/tui/pages/chat"
-	tuiconfig "github.com/alanchenchen/suna/internal/tui/pages/config"
 )
 
 func (t *TUI) viewChat() string {
@@ -32,6 +31,10 @@ func (t *TUI) viewChat() string {
 	toolOverlay := ""
 	if t.chat.ShowToolDetail {
 		toolOverlay = t.renderToolDetailOverlay(t.width)
+	}
+	modelOverlay := ""
+	if t.chat.ModelPickerOpen {
+		modelOverlay = t.renderModelOverlay(t.width)
 	}
 	skillsOverlay := ""
 	if t.chat.SkillsOverlayOpen {
@@ -76,6 +79,7 @@ func (t *TUI) viewChat() string {
 		StatusBar:          t.renderChatStatusBar(),
 		ToolDetailOverlay:  toolOverlay,
 		HelpOverlay:        helpOverlay,
+		ModelOverlay:       modelOverlay,
 		SkillsOverlay:      skillsOverlay,
 		MCPOverlay:         mcpOverlay,
 		MemoryOverlay:      memoryOverlay,
@@ -148,7 +152,12 @@ func (t *TUI) chatConnectionDot(state petState) string {
 }
 
 func (t *TUI) mcpBadge() string {
-	active, _, _ := chatpage.MCPSummaryCounts(t.chat.MCPServers)
+	active := 0
+	for _, server := range t.chat.MCPServers {
+		if server.Active {
+			active++
+		}
+	}
 	total := len(t.chat.MCPServers)
 	if total == 0 {
 		return styleDim.Render("MCP 0")
@@ -398,34 +407,8 @@ func (t *TUI) renderCommandSuggestions() string {
 	return boxStyle.Width(width).Render(strings.Join(lines, "\n"))
 }
 
-func (t *TUI) renderModelPicker() string {
-	models := t.configModelsSnapshot()
-	rows := make([]chatpage.ModelPickerRow, 0, len(models))
-	for _, mc := range models {
-		isCurrent := t.isCurrentSessionModelRef(mc.Ref())
-		rows = append(rows, chatpage.ModelPickerRow{Ref: mc.Ref(), Summary: t.modelSummary(mc), Mark: tuiconfig.ModelStatusMark(mc, isCurrent)})
-	}
-	view := t.chat.ModelPickerView(rows, chatpage.ModelPickerLabels{
-		Empty: t.tr("cmd.model_none"),
-		Title: t.tr("cmd.model_choose"),
-		Help:  t.tr("cmd.model_picker_help"),
-	}, max(40, min(72, t.width-6)))
-	if len(view.Rows) == 0 {
-		return "  " + styleDim.Render(view.Empty) + "\n"
-	}
-	var lines []string
-	lines = append(lines, styleHL.Render(view.Title))
-	for i, row := range view.Rows {
-		cursor := "  "
-		st := lipgloss.NewStyle()
-		if i == view.Selected {
-			cursor = styleCursor.Render("▶ ")
-			st = styleHL
-		}
-		lines = append(lines, cursor+st.Render(row.Mark+" "+row.Ref)+styleDim.Render("  "+row.Summary))
-	}
-	lines = append(lines, styleDim.Render(view.Help))
-	return textutil.IndentLines(boxStyle.Width(view.Width).Padding(1, 2).Render(strings.Join(lines, "\n")), "  ") + "\n"
+func (t *TUI) renderModelOverlay(width int) string {
+	return t.renderNativeListOverlay(chatpage.NativeListModels, &t.chat.ModelList, width, t.nativeListText().Select, "cmd.model_none", "", "")
 }
 
 const subtaskTimelineMaxRows = 5

@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/alanchenchen/suna/internal/tui/components/overlaylist"
 	"github.com/alanchenchen/suna/internal/tui/components/toolview"
 	chatpage "github.com/alanchenchen/suna/internal/tui/pages/chat"
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
@@ -88,6 +89,7 @@ func (t *TUI) initChatComponents() tea.Cmd {
 		TextareaStyles: textareaStyles(),
 		SpinnerStyle:   lipgloss.NewStyle().Foreground(ColorBrand),
 	})
+	t.chat.InitNativeLists(currentTheme.Name == ThemeDark, t.nativeListStyles(), t.nativeListText())
 
 	t.syncContent()
 	t.layoutChat()
@@ -132,7 +134,6 @@ func (t *TUI) syncContent() {
 		RenderAskHelp: func(help string) string {
 			return styleDim.Render("  "+help) + "\n\n"
 		},
-		RenderModelPicker: t.renderModelPicker,
 	})
 }
 
@@ -178,6 +179,26 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		return t.updateChatKey(m.String(), msg)
+
+	case overlaylist.BatchMessage:
+		return t, tea.Batch(m.Commands...)
+
+	case overlaylist.Message:
+		switch m.Owner {
+		case "skills":
+			if t.chat.SkillsOverlayOpen {
+				return t, t.chat.UpdateSkillsList(m.Inner)
+			}
+		case "mcp":
+			if t.chat.MCPOverlayOpen {
+				return t, t.chat.UpdateMCPList(m.Inner)
+			}
+		case "models":
+			if t.chat.ModelPickerOpen {
+				return t, t.chat.UpdateModelPicker(m.Inner)
+			}
+		}
+		return t, nil
 
 	case spinner.TickMsg:
 		if t.chat.Loading || t.chat.Compacting {

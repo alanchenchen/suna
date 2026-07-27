@@ -110,6 +110,74 @@ func TestThinkingBoxCollapsedShowsAdaptivePreviewAndStopsElapsed(t *testing.T) {
 	}
 }
 
+func TestRegisteredSlashCommandDoesNotAppendUserMessage(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 18, localCli: tuitransport.NewClient()}
+	tui.initChatComponents()
+	tui.chat.Textarea.SetValue("/mcp")
+
+	tui.handleSend()
+
+	if got := len(tui.chat.Messages); got != 0 {
+		t.Fatalf("messages = %d after /mcp, want 0", got)
+	}
+	if !tui.chat.MCPOverlayOpen {
+		t.Fatal("MCPOverlayOpen = false after /mcp, want true")
+	}
+}
+
+func TestAllRegisteredSlashCommandsDoNotAppendUserMessage(t *testing.T) {
+	for _, spec := range chatpage.AllCommands() {
+		t.Run(spec.Cmd, func(t *testing.T) {
+			tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 18, localCli: tuitransport.NewClient()}
+			tui.initChatComponents()
+			tui.chat.Textarea.SetValue(spec.Cmd)
+
+			tui.handleSend()
+
+			for _, msg := range tui.chat.Messages {
+				if msg.Role == "user" {
+					t.Fatalf("registered command %q appended a user transcript message", spec.Cmd)
+				}
+			}
+		})
+	}
+}
+
+func TestRegisteredSlashCommandKeepsAttachmentsAsDraft(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 18, localCli: tuitransport.NewClient()}
+	tui.initChatComponents()
+	tui.chat.Textarea.SetValue("/mcp")
+	tui.chat.Attachments = []attachmentItem{{Name: "note.txt"}}
+
+	tui.handleSend()
+
+	if !tui.chat.MCPOverlayOpen {
+		t.Fatal("MCPOverlayOpen = false after /mcp, want true")
+	}
+	if got := len(tui.chat.Messages); got != 0 {
+		t.Fatalf("messages = %d after /mcp with attachment, want 0", got)
+	}
+	if got := len(tui.chat.Attachments); got != 1 {
+		t.Fatalf("attachments = %d after /mcp, want preserved draft", got)
+	}
+}
+
+func TestRegisteredSlashCommandTakesPriorityOverCustomAskUser(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 18, localCli: tuitransport.NewClient()}
+	tui.initChatComponents()
+	tui.chat.EnqueueInteraction(chatpage.Interaction{Kind: chatpage.InteractionAskUser, ID: "ask-1", Ask: &chatpage.AskUserView{ID: "ask-1", AllowCustom: true}})
+	tui.chat.Textarea.SetValue("/mcp")
+
+	tui.handleSend()
+
+	if !tui.chat.MCPOverlayOpen {
+		t.Fatal("MCPOverlayOpen = false after /mcp during custom AskUser, want true")
+	}
+	if ask := tui.chat.ActiveAsk(); ask == nil || ask.ID != "ask-1" {
+		t.Fatalf("ActiveAsk() = %#v after /mcp, want original AskUser", ask)
+	}
+}
+
 func TestSendingMessageForcesScrollToBottom(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 18}
 	tui.initChatComponents()

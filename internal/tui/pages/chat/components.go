@@ -60,6 +60,31 @@ func (m *Model) RestorePendingInput() {
 	m.PendingInput = ""
 }
 
+// ResetNativeLists 清理与当前 session 关联的原生列表数据和交互状态。
+// list.Model 实例可跨 session 复用，因此必须显式清空筛选、分页和选中项，
+// 不能让下一会话继承旧 session 的查询或可操作条目。
+func (m *Model) ResetNativeLists() {
+	m.Skills = nil
+	if m.SkillsList.Initialized() {
+		m.SkillsList.Reset()
+	}
+	m.SkillsOverlayOpen = false
+	m.SkillsLoading = false
+	m.SkillsError = ""
+	m.MCPServers = nil
+	if m.MCPList.Initialized() {
+		m.MCPList.Reset()
+	}
+	m.MCPOverlayOpen = false
+	m.MCPLoading = false
+	m.MCPError = ""
+	m.MCPActionServer = ""
+	if m.ModelList.Initialized() {
+		m.ModelList.Reset()
+	}
+	m.ModelPickerOpen = false
+}
+
 // ResetRuntime 释放当前 Chat 页面与某个 session 绑定的临时展示状态。
 // 组件实例会在下次进入 Chat 时重新初始化；这里不触及 daemon 或持久化 session 数据。
 func (m *Model) ResetRuntime() {
@@ -107,8 +132,7 @@ func (m *Model) ResetRuntime() {
 	m.CmdSuggestion = ""
 	m.CmdSuggestions = nil
 	m.CmdSuggestionIdx = 0
-	m.ModelPickerOpen = false
-	m.ModelPickerCursor = 0
+	m.ResetNativeLists()
 	m.ShowToolDetail = false
 	m.ShowReasoningDetail = false
 	m.ToolDetailScroll = 0
@@ -133,19 +157,6 @@ func (m *Model) ResetRuntime() {
 	m.AttachmentMode = false
 	m.AttachmentCursor = 0
 	m.AttachmentDelete = false
-	m.Skills = nil
-	m.SkillsOverlayOpen = false
-	m.SkillsLoading = false
-	m.SkillsCursor = 0
-	m.SkillsScroll = 0
-	m.SkillsError = ""
-	m.MCPServers = nil
-	m.MCPOverlayOpen = false
-	m.MCPLoading = false
-	m.MCPCursor = 0
-	m.MCPScroll = 0
-	m.MCPError = ""
-	m.MCPActionServer = ""
 	m.Memories = nil
 	m.MemoryOverlayOpen = false
 	m.MemoryLoading = false
