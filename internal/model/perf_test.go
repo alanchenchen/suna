@@ -72,7 +72,7 @@ func BenchmarkOpenAIResponsesToolCallAccumLongArgs(b *testing.B) {
 }
 
 func TestOpenAIResponsesBuildInputAllowsMatchedToolResult(t *testing.T) {
-	p := NewOpenAIResponsesProvider("test-key", "", "gpt-test", 128000, 8192, nil)
+	p := NewOpenAIResponsesAdapter(testAdapterSpec("gpt-test"), AdapterDependencies{})
 	input, err := p.buildInput(context.Background(), &CompletionRequest{Messages: []Message{
 		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call-1", Name: "readfile", Arguments: `{"path":"a"}`}}},
 		{Role: RoleTool, ToolCallID: "call-1", TextContent: "result"},

@@ -14,7 +14,7 @@ import (
 
 const minContextMarginTokens = 2048
 
-func (r *Runner) Compact(ctx context.Context, binding *model.ModelBinding, working *memory.WorkingMemory, sessionState string) (before, after, turnsCompressed, truncated int, newSessionState string, err error) {
+func (r *Runner) Compact(ctx context.Context, binding *model.ModelBinding, invocation model.Invocation, working *memory.WorkingMemory, sessionState string) (before, after, turnsCompressed, truncated int, newSessionState string, err error) {
 	if r.Compressor == nil || working == nil || binding == nil {
 		return 0, 0, 0, 0, "", fmt.Errorf("compressor not initialized")
 	}
@@ -26,7 +26,7 @@ func (r *Runner) Compact(ctx context.Context, binding *model.ModelBinding, worki
 	contextWindow := binding.ContextWindow()
 	outputBudget := binding.MaxOutputTokens()
 	recentBudget := manualCompactRecentBudget(contextWindow, outputBudget)
-	compressed, state, folded, compErr := r.Compressor.CompressHistoryWithStateBudget(ctx, binding, msgs, sessionState, contextWindow, outputBudget, recentBudget)
+	compressed, state, folded, compErr := r.Compressor.CompressHistoryWithStateBudget(ctx, binding, invocation, msgs, sessionState, contextWindow, outputBudget, recentBudget)
 	if compErr != nil {
 		return 0, 0, 0, 0, "", compErr
 	}
@@ -53,7 +53,7 @@ func (r *Runner) compactForRequest(ctx context.Context, binding *model.ModelBind
 	requestTokens := estimateRequestTokens(req, coef)
 	logging.Info("memory", "session_compact_start", logging.Event{"mode": "auto", "purpose": req.Purpose, "model": req.Model, "context_window": contextWindow, "before_tokens": before, "request_tokens": requestTokens, "messages": len(msgs)})
 	recentBudget := compactRecentBudget(req, contextWindow, coef, calibrated)
-	compressed, state, folded, err := r.Compressor.CompressHistoryWithStateBudget(ctx, binding, msgs, sessionState, contextWindow, req.MaxTokens, recentBudget)
+	compressed, state, folded, err := r.Compressor.CompressHistoryWithStateBudget(ctx, binding, req.Invocation, msgs, sessionState, contextWindow, req.MaxTokens, recentBudget)
 	if err != nil {
 		logging.Error("memory", "session_compact_failed", err, logging.Event{"mode": "auto", "purpose": req.Purpose, "model": req.Model, "context_window": contextWindow, "before_tokens": before, "request_tokens": requestTokens, "duration_ms": time.Since(started).Milliseconds()})
 		return sessionState, err

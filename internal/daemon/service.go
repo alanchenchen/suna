@@ -163,7 +163,7 @@ func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHell
 		return protocol.RuntimeHelloResult{}, invalidParams(err.Error())
 	}
 	requestedVersion := strings.TrimSpace(params.ProtocolVersion)
-	if requestedVersion != "" && requestedVersion != "0.2" {
+	if requestedVersion != "" && requestedVersion != "0.3" {
 		return protocol.RuntimeHelloResult{}, protocolError{code: -32602, message: "unsupported protocol version", data: protocol.ProtocolErrorData{Kind: "unsupported_capability", Reason: "protocol_version"}}
 	}
 	transport := strings.TrimSpace(params.Transport)
@@ -171,7 +171,7 @@ func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHell
 		transport = "unknown"
 	}
 	return protocol.RuntimeHelloResult{
-		ProtocolVersion: "0.2",
+		ProtocolVersion: "0.3",
 		RuntimeVersion:  version.Current(),
 		Transport:       transport,
 		Capabilities: map[string]bool{
@@ -264,7 +264,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, inputLa
 				if evt.OutputTokens > 0 && evt.DurationMs > 0 {
 					speed = float64(evt.OutputTokens) / (float64(evt.DurationMs) / 1000)
 				}
-				emit(ctx, sink, protocol.NotifyUsage, protocol.UsageParams{InputTokens: evt.InputTokens, OutputTokens: evt.OutputTokens, CachedTokens: evt.CachedTokens, ContextTokens: evt.ContextTokens, EstimatedContextTokens: evt.EstimatedContextTokens, ContextWindow: evt.ContextWindow, DurationMs: evt.DurationMs, TokensPerSec: speed})
+				emit(ctx, sink, protocol.NotifyUsage, protocol.UsageParams{InputTokens: evt.InputTokens, OutputTokens: evt.OutputTokens, CacheReadTokens: evt.CacheReadTokens, CacheCreationTokens: evt.CacheCreationTokens, ContextTokens: evt.ContextTokens, EstimatedContextTokens: evt.EstimatedContextTokens, ContextWindow: evt.ContextWindow, DurationMs: evt.DurationMs, TokensPerSec: speed})
 			case agent.EventToolCall:
 				flush()
 				s.daemon.sessions.setPhase(sessionID, protocol.AgentRunPhaseTool)

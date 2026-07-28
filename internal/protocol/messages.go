@@ -3,7 +3,7 @@ package protocol
 import "time"
 
 type RuntimeHelloParams struct {
-	// ProtocolVersion 是客户端期望的协议版本；为空时按当前默认 0.2 处理。
+	// ProtocolVersion 是客户端期望的协议版本；为空时按当前默认 0.3 处理。
 	ProtocolVersion string `json:"protocol_version,omitempty"`
 	// Transport 由 JSON-RPC transport 层注入并覆盖客户端输入，用于 runtime.hello 返回真实承载方式。
 	Transport string `json:"transport,omitempty"`
@@ -253,7 +253,8 @@ type UsageParams struct {
 	RunID                  string  `json:"run_id,omitempty"`
 	InputTokens            int     `json:"input_tokens"`
 	OutputTokens           int     `json:"output_tokens"`
-	CachedTokens           int     `json:"cached_tokens,omitempty"`
+	CacheReadTokens        int     `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens    int     `json:"cache_creation_tokens,omitempty"`
 	ContextTokens          int     `json:"context_tokens,omitempty"`
 	EstimatedContextTokens int     `json:"estimated_context_tokens,omitempty"`
 	ContextWindow          int     `json:"context_window,omitempty"`

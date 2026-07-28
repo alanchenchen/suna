@@ -22,10 +22,10 @@
 | Help 页面 | `internal/tui/pages/help` | 快捷键和 slash commands。 |
 | 附件识别 | `internal/tui/components/attachment`, `internal/tui/clipboard` | 识别本地图片路径、图片 URL、data URI，并在收到 `ctrl+v` fallback 时读取系统剪贴板图片。 | |
 | 附件存储 | `internal/media`, `internal/daemon/attachments.go` | 本地附件缓存和消息附件提交。 |
-| 模型路由与绑定 | `internal/model/router.go`, `internal/model/binding.go` | Router 是 global runtime 的模型 provider/config registry，按显式 ref 创建不可变 `ModelBinding`；binding 承载一次调用的模型配置、限流、reasoning、日志和校验，不存在隐式 active model。 |
-| OpenAI Responses | `internal/model/openai_responses.go` | `protocol = "openai_responses"` 的请求和流式响应适配。 |
-| Anthropic Messages | `internal/model/anthropic.go` | `protocol = "anthropic"` 的 Messages 流式请求和响应适配，会把 thinking/text/tool use 归一为 Suna `Chunk`。 |
-| OpenAI-compatible | `internal/model/openai_chat.go` | `protocol = "openai_chat"` 的 Chat Completions 兼容协议。 |
+| 模型路由与绑定 | `internal/model/router.go`, `internal/model/binding.go`, `internal/model/adapter_factory.go` | Router 是 global runtime 的模型 adapter/config registry，按显式 ref 创建不可变 `ModelBinding`；registry 按 protocol 创建 Adapter，binding 承载一次调用的模型配置、限流、reasoning、日志和校验，不存在隐式 active model。 |
+| OpenAI Responses | `internal/model/openai_responses_adapter.go` | `protocol = "openai_responses"` 的请求和流式响应适配。 |
+| Anthropic Messages | `internal/model/anthropic_adapter.go` | `protocol = "anthropic"` 的 Messages 流式请求和响应适配，会把 thinking/text/tool use 归一为 Suna `Chunk`。 |
+| OpenAI-compatible | `internal/model/openai_chat_adapter.go` | `protocol = "openai_chat"` 的 Chat Completions 兼容协议。 |
 | Agent 编排 | `internal/agent` | 构造上下文、处理工具、Guard、记忆、Skill、MCP、Subtask。 |
 | Runner | `internal/runner` | 模型流式调用、tool call 循环、上下文压缩。 |
 | 工具目录 | `internal/tools` | 工具 Provider、schema、Manager、执行路由。 |
@@ -66,21 +66,22 @@ TUI 不应直接调用 `agent`、`runner`、`tools`、`guard`、`memory`、`skil
 
 - `internal/agent`：主 Agent 编排、上下文、工具执行入口、Guard、Skill/MCP/Subtask 适配。
 - `internal/runner`：模型调用循环、流式输出、工具调用循环和上下文压缩。
-- `internal/model`：模型 provider、路由、请求/响应适配和 token 估算。
+- `internal/model`：模型 Adapter、路由、请求/响应适配和 token 估算。
 
 #### `internal/model` 分层约定
 
-`internal/model` 只保留两类核心职责：协议 provider 和服务 provider/router 的公共支撑。新增模型协议时应优先遵守以下分层，避免把某个 SDK 或某个厂商的特殊字段泄漏到公共逻辑里：
+`internal/model` 只保留两类核心职责：协议 Adapter 和服务 adapter/router 的公共支撑。新增模型协议时应优先遵守以下分层，避免把某个 SDK 或某个厂商的特殊字段泄漏到公共逻辑里：
 
-- `provider.go`：定义 Suna 统一模型请求、消息、工具调用、流式 `Chunk` 和 `Provider` 接口；这里不能依赖任何具体 SDK。
-- `router.go`：维护全局 provider/config registry，按显式 model ref 创建 binding；不拥有“当前模型”。
-- `binding.go`：`ModelBinding` 是一次显式模型选择的不可变快照，统一承载 provider、配置、限流、reasoning 注入、LLM 日志和工具调用配对校验；Guard、Skill、compact 等辅助请求必须复用它。
+- `adapter.go`：定义 Suna 统一模型请求、消息、工具调用、流式 `Chunk` 和 `Adapter` 接口；这里不能依赖任何具体 SDK。
+- `adapter_factory.go`：按 protocol 注册并创建 Adapter；Router 不直接依赖具体协议实现。
+- `router.go`：维护全局 adapter/config registry，按显式 model ref 创建 binding；不拥有“当前模型”。
+- `binding.go`：`ModelBinding` 是一次显式模型选择的不可变快照，统一承载 Adapter、配置、限流、reasoning 注入、LLM 日志和工具调用配对校验；Guard、Skill、compact 等辅助请求必须复用它。
 
-- `openai_chat.go`、`openai_responses.go`、`anthropic.go`：具体协议实现，只负责把 `CompletionRequest` 转成对应协议请求，并把流式响应归一为 `Chunk`。
+- `openai_chat_adapter.go`、`openai_responses_adapter.go`、`anthropic_adapter.go`：具体协议实现，只负责把 `CompletionRequest` 转成对应协议请求，并把流式响应归一为 `Chunk`。
 - `reasoning_fields.go`：公共 reasoning 字段校验/合并逻辑，不依赖 OpenAI、Anthropic 或其他 SDK。`models.reasoning` 是 Suna 对各协议“思考/推理强度相关参数”的统一抽象入口，Suna 只防止它覆盖 core 已生成字段。
 - `reasoning_fields_openai.go`、`reasoning_fields_anthropic.go`：SDK adapter，只负责把公共 reasoning fields 转成对应 SDK 的 request option；后续新增协议应新增自己的 adapter，而不是在公共文件里 import 该 SDK。
 
-Provider 不应解析 TUI preset 的业务含义，例如“Adaptive XHigh”、“xhigh” 或 “max”。TUI preset 只生成 `map[string]any`；provider 只做协议注入和响应归一。
+Adapter 不应解析 TUI preset 的业务含义，例如“Adaptive XHigh”、“xhigh” 或 “max”。TUI preset 只生成 `map[string]any`；Adapter 只做协议注入和响应归一。
 - `internal/subtask`：独立上下文的子任务执行器，由主 Agent 通过 `spawn` 动态分配模型、输入和工具白名单。
 
 ### 工具、安全和扩展
@@ -264,7 +265,7 @@ runner 使用指定 model 运行子任务
 - 想看“一轮对话怎么跑”：`internal/daemon/service.go` → `internal/agent/agent.go` → `internal/runner/runner.go`。
 - 想看“工具怎么暴露给模型”：`internal/tools/manager.go` 和各 `internal/tools/*/provider.go`。
 - 想看“风险操作怎么拦”：`internal/agent/tools.go`、`internal/guard/guard.go`、`internal/guard/tool_risk.go`。
-- 想看“模型怎么接入”：`internal/model/provider.go`、`router.go` 和具体 provider 文件。
+- 想看“模型怎么接入”：`internal/model/adapter.go`、`adapter_factory.go`、`router.go` 和具体 adapter 文件。
 - 想看“TUI 怎么和 daemon 通信”：`internal/tui/transport/client.go`、`internal/protocol`、`internal/transport/local`。
 - 想看“第三方 UI 怎么接入”：`docs/tcp-client.md`、`serve_cmd.go`、`internal/transport/tcp`、`internal/transport/jsonrpc`。
 - 想看“Skill 怎么生效”：`internal/skill/runtime.go`、`internal/tools/skilltools/provider.go`、`internal/agent/skill_adapters.go`。

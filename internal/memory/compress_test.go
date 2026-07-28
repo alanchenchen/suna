@@ -26,7 +26,7 @@ func TestCompressHistoryBuildsSessionState(t *testing.T) {
 		model.NewTextMessage(model.RoleUser, "不要新增复杂语义，复用现有 compact。"),
 		model.NewTextMessage(model.RoleAssistant, "好的，改为 continuation state。"),
 	}
-	compressed, summary, folded, err := compressor.compressHistoryKeepingState(context.Background(), binding, messages, "", 1, 0, 0)
+	compressed, summary, folded, err := compressor.compressHistoryKeepingState(context.Background(), binding, model.Invocation{}, messages, "", 1, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestCompressHistoryPreservesToolCallParentForRecentToolResult(t *testing.T)
 		{Role: model.RoleAssistant, ToolCalls: []model.ToolCall{{ID: "call-1", Name: "readfile", Arguments: `{"path":"a"}`}}},
 		{Role: model.RoleTool, ToolCallID: "call-1", TextContent: "result"},
 	}
-	compressed, _, _, err := compressor.compressHistoryKeepingState(context.Background(), binding, messages, "", 1, 400000, 0)
+	compressed, _, _, err := compressor.compressHistoryKeepingState(context.Background(), binding, model.Invocation{}, messages, "", 1, 400000, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,7 +97,7 @@ func TestCompressHistoryPreservesParallelToolCallParentForRecentToolResult(t *te
 		{Role: model.RoleTool, ToolCallID: "call-a", TextContent: "result a"},
 		{Role: model.RoleTool, ToolCallID: "call-b", TextContent: "result b"},
 	}
-	compressed, _, _, err := compressor.compressHistoryKeepingState(context.Background(), binding, messages, "", 1, 400000, 0)
+	compressed, _, _, err := compressor.compressHistoryKeepingState(context.Background(), binding, model.Invocation{}, messages, "", 1, 400000, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

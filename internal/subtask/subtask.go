@@ -13,12 +13,13 @@ import (
 )
 
 type Request struct {
-	ID       string
-	Task     string
-	Input    []model.ContentBlock
-	Binding  *model.ModelBinding
-	System   string
-	ToolDefs []model.ToolDef
+	ID         string
+	Task       string
+	Input      []model.ContentBlock
+	Binding    *model.ModelBinding
+	Invocation model.Invocation
+	System     string
+	ToolDefs   []model.ToolDef
 
 	MaxTurns     int
 	MaxToolCalls int
@@ -90,6 +91,8 @@ func (s *Subtask) Run(ctx context.Context, r *runner.Runner) (Result, error) {
 	working.AddMessage(model.Message{Role: model.RoleUser, TextContent: s.req.Task, Content: blocks})
 	res, err := r.Run(ctx, runner.Request{
 		Binding:       s.req.Binding,
+		Purpose:       "subtask",
+		Invocation:    s.req.Invocation,
 		System:        s.req.System,
 		Working:       working,
 		ToolDefs:      s.toolDefs,

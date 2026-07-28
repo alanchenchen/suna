@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/openai/openai-go/v3/responses"
@@ -112,5 +113,49 @@ func TestMergeResponseToolCallKeepsInterleavedCallsSeparate(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("toolCalls[%d] = %#v, want %#v", i, got[i], want[i])
 		}
+	}
+}
+
+func TestOpenAIResponsesPromptCacheKeyIsStableAndScoped(t *testing.T) {
+	adapter := &OpenAIResponsesAdapter{cacheNamespace: responseCacheNamespace(AdapterSpec{
+		BaseURL: "https://api.example.com/v1",
+		ModelID: "example-model",
+	})}
+	request := CompletionRequest{Purpose: "chat", Invocation: Invocation{SessionScope: SessionScope("session-a")}}
+	got := adapter.promptCacheKey(request)
+	if got == "" {
+		t.Fatal("prompt cache key is empty")
+	}
+	if retry := adapter.promptCacheKey(request); retry != got {
+		t.Fatalf("retry prompt cache key = %q, want %q", retry, got)
+	}
+	if other := adapter.promptCacheKey(CompletionRequest{Purpose: "compact", Invocation: request.Invocation}); other == got {
+		t.Fatalf("compact prompt cache key = %q, must differ from chat key", other)
+	}
+	otherAdapter := &OpenAIResponsesAdapter{cacheNamespace: responseCacheNamespace(AdapterSpec{
+		BaseURL: "https://api.other.example.com/v1",
+		ModelID: "example-model",
+	})}
+	if other := otherAdapter.promptCacheKey(request); other == got {
+		t.Fatalf("other endpoint prompt cache key = %q, must differ", other)
+	}
+	if other := adapter.promptCacheKey(CompletionRequest{Purpose: "chat", Invocation: Invocation{SessionScope: SessionScope("session-b")}}); other == got {
+		t.Fatalf("other session prompt cache key = %q, must differ", other)
+	}
+	if strings.Contains(got, "session-a") {
+		t.Fatalf("prompt cache key exposes session ID: %q", got)
+	}
+}
+
+func TestSessionScopeIsStableAndAnonymous(t *testing.T) {
+	got := SessionScope("session-a")
+	if got == "" || got == "session-a" {
+		t.Fatalf("SessionScope = %q, must be a non-empty anonymous value", got)
+	}
+	if retry := SessionScope("session-a"); retry != got {
+		t.Fatalf("SessionScope retry = %q, want %q", retry, got)
+	}
+	if other := SessionScope("session-b"); other == got {
+		t.Fatalf("different SessionScope = %q, must differ", other)
 	}
 }

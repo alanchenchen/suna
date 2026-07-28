@@ -302,7 +302,7 @@ func (t *TUI) handleUsageNotification(p protocol.UsageParams) {
 	t.hasUsage = true
 	t.lastInputTok = p.InputTokens
 	t.lastOutputTok = p.OutputTokens
-	t.lastCachedTok = p.CachedTokens
+	t.lastCachedTok = p.CacheReadTokens
 	t.lastTokensPerSec = p.TokensPerSec
 	if p.DurationMs > 0 {
 		t.lastDuration = time.Duration(p.DurationMs) * time.Millisecond
@@ -311,7 +311,7 @@ func (t *TUI) handleUsageNotification(p protocol.UsageParams) {
 	}
 	t.sessionInputTok += p.InputTokens
 	t.sessionOutputTok += p.OutputTokens
-	t.sessionCachedTok += p.CachedTokens
+	t.sessionCachedTok += p.CacheReadTokens
 	contextTokens := p.EstimatedContextTokens
 	if contextTokens <= 0 {
 		contextTokens = p.ContextTokens

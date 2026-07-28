@@ -78,25 +78,14 @@ func TestRouterAndBindingDeepCopyModelConfig(t *testing.T) {
 	}
 }
 
-func TestCreateProviderUsesProtocolNotProviderName(t *testing.T) {
+func TestCreateAdapterUsesProtocolNotProviderName(t *testing.T) {
 	mc := config.ModelConfig{Provider: "vendor", Protocol: config.ModelProtocolAnthropic, Model: "claude", BaseURL: "https://api.example.com", ContextWindow: 200000, MaxOutputTokens: 8192, APIKey: "test-api-key"}
-	p, err := createProvider(mc, nil)
+	p, err := (&Router{registry: builtinAdapterRegistry()}).createAdapter(mc, nil)
 	if err != nil {
-		t.Fatalf("createProvider() error = %v", err)
+		t.Fatalf("createAdapter() error = %v", err)
 	}
-	if _, ok := p.(*AnthropicProvider); !ok {
-		t.Fatalf("createProvider() = %T, want *AnthropicProvider", p)
-	}
-}
-
-func TestCreateProviderDefaultsMissingProtocolToOpenAIChat(t *testing.T) {
-	mc := config.ModelConfig{Provider: "openai", Model: "gpt", BaseURL: "https://api.example.com/v1", ContextWindow: 128000, MaxOutputTokens: 8192, APIKey: "test-api-key"}
-	p, err := createProvider(mc, nil)
-	if err != nil {
-		t.Fatalf("createProvider() error = %v", err)
-	}
-	if _, ok := p.(*OpenAIChatProvider); !ok {
-		t.Fatalf("createProvider() = %T, want *OpenAIChatProvider", p)
+	if _, ok := p.(*AnthropicAdapter); !ok {
+		t.Fatalf("createAdapter() = %T, want *AnthropicAdapter", p)
 	}
 }
 

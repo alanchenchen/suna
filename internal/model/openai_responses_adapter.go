@@ -2,7 +2,9 @@ package model
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
@@ -12,43 +14,48 @@ import (
 	"github.com/openai/openai-go/v3/responses"
 )
 
-type OpenAIResponsesProvider struct {
+type OpenAIResponsesAdapter struct {
 	client          openai.Client
 	model           string
 	contextWindow   int
 	maxOutputTokens int
 	media           MediaResolver
+	cacheNamespace  string
 }
 
-func NewOpenAIResponsesProvider(apiKey, baseURL, model string, contextWindow, maxOutputTokens int, mediaResolver MediaResolver) *OpenAIResponsesProvider {
+func NewOpenAIResponsesAdapter(spec AdapterSpec, deps AdapterDependencies) *OpenAIResponsesAdapter {
 	httpClient := compatibleHTTPClient(&http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}})
 	// 关闭 SDK 隐式重试，避免一次 Suna Complete 在上游产生多次不可见请求；
 	// 未来如需重试应由 Suna 自己实现并记录日志。
-	client := openai.NewClient(option.WithAPIKey(apiKey), option.WithBaseURL(baseURL), option.WithHTTPClient(httpClient), option.WithMaxRetries(0))
-	return &OpenAIResponsesProvider{client: client, model: model, contextWindow: contextWindow, maxOutputTokens: maxOutputTokens, media: mediaResolver}
+	client := openai.NewClient(option.WithAPIKey(spec.APIKey), option.WithBaseURL(spec.BaseURL), option.WithHTTPClient(httpClient), option.WithMaxRetries(0))
+	cacheNamespace := responseCacheNamespace(spec)
+	return &OpenAIResponsesAdapter{client: client, model: spec.ModelID, contextWindow: spec.ContextWindow, maxOutputTokens: spec.MaxOutputTokens, media: deps.MediaResolver, cacheNamespace: cacheNamespace}
 }
 
-func (p *OpenAIResponsesProvider) Complete(ctx context.Context, req *CompletionRequest) (<-chan Chunk, error) {
+func (p *OpenAIResponsesAdapter) Complete(ctx context.Context, req CompletionRequest) (<-chan Chunk, error) {
 	if p.maxOutputTokens <= 0 {
 		return nil, fmt.Errorf("max_output_tokens is required for model %q", p.model)
 	}
 	maxTokens := p.resolveMaxTokens(req.MaxTokens)
-	req.MaxTokens = maxTokens
-	input, err := p.buildInput(ctx, req)
+
+	input, err := p.buildInput(ctx, &req)
 	if err != nil {
 		return nil, err
 	}
 	params := responses.ResponseNewParams{
-		Model:             responses.ResponsesModel(p.resolveModel(req.Model)),
+		Model:             responses.ResponsesModel(p.model),
 		Input:             responses.ResponseNewParamsInputUnion{OfInputItemList: input},
 		MaxOutputTokens:   openai.Int(int64(maxTokens)),
 		ParallelToolCalls: openai.Bool(true),
 	}
-	if req.Temperature != nil {
-		params.Temperature = openai.Float(*req.Temperature)
+	if cacheKey := p.promptCacheKey(req); cacheKey != "" {
+		params.PromptCacheKey = openai.String(cacheKey)
 	}
 	if req.System != "" {
 		params.Instructions = openai.String(req.System)
+	}
+	if req.Temperature != nil {
+		params.Temperature = openai.Float(*req.Temperature)
 	}
 	if tools := p.buildTools(req.Tools); len(tools) > 0 {
 		params.Tools = tools
@@ -58,7 +65,7 @@ func (p *OpenAIResponsesProvider) Complete(ctx context.Context, req *CompletionR
 		return nil, err
 	}
 
-	ch := make(chan Chunk, providerChunkBuffer)
+	ch := make(chan Chunk, adapterChunkBuffer)
 	go func() {
 		defer close(ch)
 		stream := p.client.Responses.NewStreaming(ctx, params, opts...)
@@ -85,18 +92,18 @@ func (p *OpenAIResponsesProvider) Complete(ctx context.Context, req *CompletionR
 			case "response.completed":
 				u := event.Response.Usage
 				if event.JSON.Response.Valid() {
-					usage = &Usage{InputTokens: int(u.InputTokens), OutputTokens: int(u.OutputTokens), CachedTokens: int(u.InputTokensDetails.CachedTokens), TotalTokens: int(u.TotalTokens)}
+					usage = &Usage{InputTokens: int(u.InputTokens), OutputTokens: int(u.OutputTokens), CacheReadTokens: int(u.InputTokensDetails.CachedTokens), TotalTokens: int(u.TotalTokens)}
 					finish = responseFinishInfo(event.Response.Status, event.Response.IncompleteDetails.Reason)
 					collectResponseOutputToolCalls(event.Response.Output, toolCallsByID, &toolCallOrder)
 				}
 			case "error":
 				err := fmt.Errorf("responses error: %s", event.Message)
-				ch <- Chunk{Done: true, Error: modelErrorFromProvider(err, "openai", p.resolveModel(req.Model))}
+				ch <- Chunk{Done: true, Error: modelErrorFromProvider(err, "openai", p.model)}
 				return
 			}
 		}
 		if err := stream.Err(); err != nil {
-			ch <- Chunk{Done: true, Error: modelErrorFromProvider(err, "openai", p.resolveModel(req.Model))}
+			ch <- Chunk{Done: true, Error: modelErrorFromProvider(err, "openai", p.model)}
 			return
 		}
 		toolCalls := orderedResponseToolCalls(toolCallsByID, toolCallOrder)
@@ -112,8 +119,21 @@ func (p *OpenAIResponsesProvider) Complete(ctx context.Context, req *CompletionR
 	return ch, nil
 }
 
+func responseCacheNamespace(spec AdapterSpec) string {
+	sum := sha256.Sum256([]byte("suna:openai-responses:v1\x00" + spec.BaseURL + "\x00" + spec.ModelID))
+	return hex.EncodeToString(sum[:16])
+}
+
+func (p *OpenAIResponsesAdapter) promptCacheKey(req CompletionRequest) string {
+	if req.Invocation.SessionScope == "" || req.Purpose == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("suna:prompt-cache:v1\x00" + p.cacheNamespace + "\x00" + req.Invocation.SessionScope + "\x00" + req.Purpose))
+	return "suna-" + hex.EncodeToString(sum[:16])
+}
+
 func responsesGeneratedKeys() map[string]bool {
-	return map[string]bool{"model": true, "input": true, "max_output_tokens": true, "temperature": true, "parallel_tool_calls": true, "instructions": true, "tools": true, "stream": true}
+	return map[string]bool{"model": true, "input": true, "max_output_tokens": true, "temperature": true, "parallel_tool_calls": true, "instructions": true, "tools": true, "stream": true, "prompt_cache_key": true}
 }
 
 func responseReasoningContent(event responses.ResponseStreamEventUnion) string {
@@ -138,29 +158,22 @@ func responseFinishInfo(status responses.ResponseStatus, incompleteReason string
 	return finish
 }
 
-func (p *OpenAIResponsesProvider) EstimateTokens(text string) int { return len(text) / 4 }
+func (p *OpenAIResponsesAdapter) EstimateTokens(text string) int { return len(text) / 4 }
 
-func (p *OpenAIResponsesProvider) ContextWindow() int { return p.contextWindow }
+func (p *OpenAIResponsesAdapter) ContextWindow() int { return p.contextWindow }
 
-func (p *OpenAIResponsesProvider) MaxOutputTokens() int {
+func (p *OpenAIResponsesAdapter) MaxOutputTokens() int {
 	return p.maxOutputTokens
 }
 
-func (p *OpenAIResponsesProvider) resolveModel(m string) string {
-	if m != "" {
-		return m
-	}
-	return p.model
-}
-
-func (p *OpenAIResponsesProvider) resolveMaxTokens(m int) int {
+func (p *OpenAIResponsesAdapter) resolveMaxTokens(m int) int {
 	if m > 0 && m < p.maxOutputTokens {
 		return m
 	}
 	return p.maxOutputTokens
 }
 
-func (p *OpenAIResponsesProvider) buildInput(ctx context.Context, req *CompletionRequest) (responses.ResponseInputParam, error) {
+func (p *OpenAIResponsesAdapter) buildInput(ctx context.Context, req *CompletionRequest) (responses.ResponseInputParam, error) {
 	input := make(responses.ResponseInputParam, 0, len(req.Messages)*2+1)
 	if state := FormatSessionStateForModel(req.SessionState); state != "" {
 		input = append(input, responses.ResponseInputItemParamOfMessage(state, responses.EasyInputMessageRoleUser))
@@ -187,7 +200,7 @@ func (p *OpenAIResponsesProvider) buildInput(ctx context.Context, req *Completio
 	return input, nil
 }
 
-func (p *OpenAIResponsesProvider) buildInputContent(ctx context.Context, m Message) (responses.ResponseInputMessageContentListParam, error) {
+func (p *OpenAIResponsesAdapter) buildInputContent(ctx context.Context, m Message) (responses.ResponseInputMessageContentListParam, error) {
 	blocks := make(responses.ResponseInputMessageContentListParam, 0, len(m.Content))
 	for _, c := range m.Content {
 		switch c.Type {
@@ -213,7 +226,7 @@ func (p *OpenAIResponsesProvider) buildInputContent(ctx context.Context, m Messa
 	return blocks, nil
 }
 
-func (p *OpenAIResponsesProvider) openAIImageURL(ctx context.Context, block ContentBlock) (string, error) {
+func (p *OpenAIResponsesAdapter) openAIImageURL(ctx context.Context, block ContentBlock) (string, error) {
 	if block.Media == nil || p.media == nil {
 		return "", fmt.Errorf("image media resolver is unavailable")
 	}
@@ -234,7 +247,7 @@ func (p *OpenAIResponsesProvider) openAIImageURL(ctx context.Context, block Cont
 	return "data:" + mimeType + ";base64," + resolved.Base64, nil
 }
 
-func (p *OpenAIResponsesProvider) buildTools(tools []ToolDef) []responses.ToolUnionParam {
+func (p *OpenAIResponsesAdapter) buildTools(tools []ToolDef) []responses.ToolUnionParam {
 	if len(tools) == 0 {
 		return nil
 	}

@@ -8,12 +8,12 @@ import (
 	"github.com/alanchenchen/suna/internal/config"
 )
 
-// ModelBinding 是一次显式模型选择的不可变快照。它实现 Provider，所有调用均通过
+// ModelBinding 是一次显式模型选择的不可变快照。它实现 Adapter，所有调用均通过
 // Router 共享的限流、reasoning 注入、LLM 日志和工具调用配对校验。
 type ModelBinding struct {
 	ref       string
 	modelID   string
-	provider  Provider
+	adapter   Adapter
 	config    config.ModelConfig
 	rateLimit *RateLimiter
 }
@@ -81,38 +81,40 @@ func cloneBindingOptionValue(value any) any {
 }
 
 func (b *ModelBinding) EstimateTokens(text string) int {
-	if b == nil || b.provider == nil {
+	if b == nil || b.adapter == nil {
 		return EstimateTokens(text)
 	}
-	return b.provider.EstimateTokens(text)
+	return b.adapter.EstimateTokens(text)
 }
 
 func (b *ModelBinding) ContextWindow() int {
-	if b == nil || b.provider == nil {
+	if b == nil || b.adapter == nil {
 		return 0
 	}
-	return b.provider.ContextWindow()
+	return b.adapter.ContextWindow()
 }
 
 func (b *ModelBinding) MaxOutputTokens() int {
-	if b == nil || b.provider == nil {
+	if b == nil || b.adapter == nil {
 		return 0
 	}
-	return b.provider.MaxOutputTokens()
+	return b.adapter.MaxOutputTokens()
 }
 
-func (b *ModelBinding) Complete(ctx context.Context, req *CompletionRequest) (<-chan Chunk, error) {
-	if b == nil || b.provider == nil {
+func (b *ModelBinding) Complete(ctx context.Context, req CompletionRequest) (<-chan Chunk, error) {
+	if b == nil || b.adapter == nil {
 		return nil, fmt.Errorf("model binding is not configured")
 	}
-	if req != nil {
-		ensureRequestID(req)
-		if len(req.Reasoning) == 0 && len(b.config.Reasoning) > 0 {
-			req.Reasoning = cloneBindingOptions(b.config.Reasoning)
-		}
-		if err := validateToolResultPairs(req.Messages); err != nil {
-			return nil, err
-		}
+	if req.Model != "" && req.Model != b.modelID {
+		return nil, fmt.Errorf("model binding %q cannot complete request for model %q", b.modelID, req.Model)
+	}
+	req.Model = b.modelID
+	ensureRequestID(&req)
+	if len(req.Reasoning) == 0 && len(b.config.Reasoning) > 0 {
+		req.Reasoning = cloneBindingOptions(b.config.Reasoning)
+	}
+	if err := validateToolResultPairs(req.Messages); err != nil {
+		return nil, err
 	}
 	if b.rateLimit != nil {
 		if err := b.rateLimit.Wait(ctx, b.ref); err != nil {
@@ -120,11 +122,11 @@ func (b *ModelBinding) Complete(ctx context.Context, req *CompletionRequest) (<-
 		}
 	}
 	started := time.Now()
-	route := newLLMRoute(b.ref, b.config, req)
-	raw, err := b.provider.Complete(ctx, req)
+	route := newLLMRoute(b.ref, b.config, &req)
+	raw, err := b.adapter.Complete(ctx, req)
 	if err != nil {
-		logLLMRequestStartFailure(req, route, started, err)
+		logLLMRequestStartFailure(&req, route, started, err)
 		return nil, err
 	}
-	return logAndForwardLLMRequestStream(raw, req, route, started), nil
+	return logAndForwardLLMRequestStream(raw, &req, route, started), nil
 }

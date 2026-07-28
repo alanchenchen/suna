@@ -11,7 +11,7 @@ import (
 )
 
 type llmRoute struct {
-	Provider string
+	Adapter  string
 	Protocol string
 	ModelRef string
 	Model    string
@@ -39,7 +39,7 @@ func ensureRequestID(req *CompletionRequest) string {
 
 func newLLMRoute(ref string, mc config.ModelConfig, req *CompletionRequest) llmRoute {
 	return llmRoute{
-		Provider: mc.Provider,
+		Adapter:  mc.Provider,
 		Protocol: string(mc.ProtocolOrDefault()),
 		ModelRef: ref,
 		Model:    resolvedRequestModel(mc, req),
@@ -62,7 +62,7 @@ func logLLMRequestStartFailure(req *CompletionRequest, route llmRoute, started t
 // logAndForwardLLMRequestStream 消费 provider 原始 stream，统计日志后原样转发给调用方。
 // Go channel 不能被旁路监听；如果日志 goroutine 直接读取 raw，会和正常流程抢 chunk。
 func logAndForwardLLMRequestStream(raw <-chan Chunk, req *CompletionRequest, route llmRoute, started time.Time) <-chan Chunk {
-	out := make(chan Chunk, providerChunkBuffer)
+	out := make(chan Chunk, adapterChunkBuffer)
 	go func() {
 		defer close(out)
 		usage, stats, failed, modelErr := collectLLMRequestStream(raw, out, started)
@@ -115,7 +115,8 @@ func llmRequestFields(started time.Time, usage *Usage) logging.Event {
 	if usage != nil {
 		fields["input_tokens"] = usage.InputTokens
 		fields["output_tokens"] = usage.OutputTokens
-		fields["cached_tokens"] = usage.CachedTokens
+		fields["cache_read_tokens"] = usage.CacheReadTokens
+		fields["cache_creation_tokens"] = usage.CacheCreationTokens
 		fields["context_tokens"] = usage.TotalTokens
 	}
 	return fields
@@ -204,8 +205,8 @@ func logLLMRequest(level string, req *CompletionRequest, route llmRoute, status 
 	fields["request_id"] = requestID(req)
 	fields["purpose"] = purpose(req)
 	fields["status"] = status
-	if route.Provider != "" {
-		fields["provider"] = route.Provider
+	if route.Adapter != "" {
+		fields["provider"] = route.Adapter
 	}
 	if route.Protocol != "" {
 		fields["protocol"] = route.Protocol

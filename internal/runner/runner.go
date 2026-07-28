@@ -68,6 +68,7 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			Model:        modelID,
 			Purpose:      req.Purpose,
 			RequestID:    uuid.New().String(),
+			Invocation:   req.Invocation,
 			System:       req.System,
 			SessionState: req.SessionState,
 			Messages:     messages,
@@ -142,7 +143,8 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 				r.Sink.Usage(UsageEvent{
 					InputTokens:            usage.InputTokens,
 					OutputTokens:           usage.OutputTokens,
-					CachedTokens:           usage.CachedTokens,
+					CacheReadTokens:        usage.CacheReadTokens,
+					CacheCreationTokens:    usage.CacheCreationTokens,
 					ContextTokens:          contextTokens,
 					EstimatedContextTokens: estimatedContextTokens,
 					ContextWindow:          contextWindow,
@@ -226,7 +228,7 @@ func (r *Runner) completeWithRecovery(ctx context.Context, binding *model.ModelB
 	}
 	var lastErr error
 	for attempt := 1; attempt <= modelRequestMaxAttempts; attempt++ {
-		ch, err := binding.Complete(ctx, completionReq)
+		ch, err := binding.Complete(ctx, *completionReq)
 		if err != nil {
 			lastErr = err
 		} else {

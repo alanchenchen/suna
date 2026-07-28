@@ -33,11 +33,11 @@ daemon 在 agent 事件出口对 `agent.delta` 文本做传输级 micro-batching
 
 ### 有界事件缓冲
 
-provider chunk channel 和 agent event channel 使用有界缓冲，吸收高速碎片化 SSE 的短时尖峰，同时避免 daemon 常驻内存无限增长。
+Adapter chunk channel 和 agent event channel 使用有界缓冲，吸收高速碎片化 SSE 的短时尖峰，同时避免 daemon 常驻内存无限增长。
 
 相关代码：
 
-- `internal/model/provider.go`
+- `internal/model/adapter.go`
 - `internal/agent/events.go`
 
 ### 连接和写阻塞边界
@@ -50,7 +50,7 @@ local transport 发送带 context timeout；daemon 可以支持多个本地连�
 - `internal/tui/local_commands.go`
 - `internal/tui/events/events.go`
 
-## Provider streaming 兼容性
+## Adapter streaming 兼容性
 
 OpenAI Responses 和 OpenAI-compatible Chat streaming 使用 `openai-go` stream；Suna 注册兼容 `text/event-stream` decoder：
 
@@ -63,8 +63,8 @@ OpenAI Responses 和 OpenAI-compatible Chat streaming 使用 `openai-go` stream�
 
 - `internal/model/sse_decoder.go`
 - `internal/model/sse_decoder_test.go`
-- `internal/model/openai_chat.go`
-- `internal/model/openai_responses.go`
+- `internal/model/openai_chat_adapter.go`
+- `internal/model/openai_responses_adapter.go`
 
 这个优化提升中转站兼容性，避免空 SSE payload 被当作 JSON 解析导致 `unexpected end of JSON input`。
 
@@ -83,13 +83,13 @@ OpenAI Responses 和 OpenAI-compatible Chat streaming 使用 `openai-go` stream�
 
 关键点：
 
-- Session State 不拼进 system prompt，而是作为独立上下文字段注入 provider 请求。
+- Session State 不拼进 system prompt，而是作为独立上下文字段注入 Adapter 请求。
 - compact 后 working memory 只保留 budget-aware recent window；写回 `WorkingMemory` 时复制新 slice，避免 Go subslice/backing array 继续持有被压缩掉的旧历史。
 - recent window 由代码按 token budget 选择，不能交给 LLM 随意决定。
-- compact 失败时不 fallback、不伪压缩、不硬裁剪继续，避免带着不可靠状态撞 provider context limit。
-- Suna 采用 proactive compaction：优先在安全边界前用 Session State 做高质量压缩，而不是把上下文塞到 provider 极限后依赖 overflow retry。
+- compact 失败时不 fallback、不伪压缩、不硬裁剪继续，避免带着不可靠状态撞 Adapter context limit。
+- Suna 采用 proactive compaction：优先在安全边界前用 Session State 做高质量压缩，而不是把上下文塞到 Adapter 极限后依赖 overflow retry。
 - 基础输入预算按模型配置计算：`context_window - max_output_tokens - margin`，其中 `margin = max(2048, context_window / 200)`。`max_output_tokens` 会作为完整输出预留扣除，因此比只预留默认输出长度更安全，但也可能更早 compact。
-- 自动 compact 不直接使用 provider 返回的 `input_tokens` / `context_tokens`。这些 usage 只用于统计、对账和诊断；压缩判断使用 Suna 请求前的本地估算。
+- 自动 compact 不直接使用 Adapter 返回的 `input_tokens` / `context_tokens`。这些 usage 只用于统计、对账和诊断；压缩判断使用 Suna 请求前的本地估算。
 - 实际判断使用 `compact_context_tokens = estimated_context_tokens + estimator_safety_tokens`，其中 `estimator_safety_tokens = max(8192, estimated_context_tokens / 16)`。TUI `ctx` 显示 raw `estimated_context_tokens`，不会把 safety 混入 UI 数字。
 - Suna 不再使用 `context_window * 0.8` 作为压缩阈值，也不提供单独的 `reserved_output_tokens` / `default_output_tokens`；如需降低 compact 频率，不能简单降低 `max_output_tokens`，因为它也会限制真实输出。
 - `max_output_tokens` 是所有 LLM 请求的默认硬输出上限，包括 chat、subtask、Guard review、Skill review、Session State compact 和 memory compact。
@@ -99,9 +99,9 @@ OpenAI Responses 和 OpenAI-compatible Chat streaming 使用 `openai-go` stream�
 - `internal/runner/compression.go`
 - `internal/memory/compress.go`
 - `internal/model/session_state.go`
-- `internal/model/openai_chat.go`
-- `internal/model/openai_responses.go`
-- `internal/model/anthropic.go`
+- `internal/model/openai_chat_adapter.go`
+- `internal/model/openai_responses_adapter.go`
+- `internal/model/anthropic_adapter.go`
 
 ### 缓存友好请求结构
 

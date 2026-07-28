@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 )
 
-const providerChunkBuffer = 2048
+const adapterChunkBuffer = 2048
 
 // Role 表示发送给模型的消息角色，和主流 Chat Completion 协议保持一致。
 type Role string
@@ -115,11 +115,19 @@ type ToolDef struct {
 }
 
 // CompletionRequest 是 provider 的统一请求格式，对应设计文档中的 Model Router 输出。
+type Invocation struct {
+	// SessionScope 是当前会话派生的稳定匿名范围，Adapter 可用于上游会话或缓存路由。
+	// 它不是原始 session ID，且不得包含用户内容、路径或凭据。
+	SessionScope string `json:"-"`
+}
+
+// CompletionRequest 是 Adapter 的完整调用输入；Adapter 不应修改传入值及其引用成员。
 type CompletionRequest struct {
-	Model     string `json:"model"`
-	Purpose   string `json:"purpose,omitempty"`
-	RequestID string `json:"request_id,omitempty"`
-	System    string `json:"system,omitempty"`
+	Model      string     `json:"model"`
+	Purpose    string     `json:"purpose,omitempty"`
+	RequestID  string     `json:"request_id,omitempty"`
+	Invocation Invocation `json:"-"`
+	System     string     `json:"system,omitempty"`
 	// SessionState 是会话压缩后的连续性上下文，由 provider 序列化为内部上下文块。
 	SessionState string    `json:"session_state,omitempty"`
 	Messages     []Message `json:"messages"`
@@ -136,7 +144,7 @@ func Float64Ptr(value float64) *float64 {
 }
 
 // FinishInfo 是 provider 从协议原生响应中透传的结束信息。
-// Provider 只做字段映射，不在这里判断空回复、reasoning-only 等业务语义。
+// Adapter 只做字段映射，不在这里判断空回复、reasoning-only 等业务语义。
 type FinishInfo struct {
 	Reason           string `json:"reason,omitempty"`
 	Status           string `json:"status,omitempty"`
@@ -158,15 +166,16 @@ type Chunk struct {
 
 // Usage 记录一次模型调用的 token 用量，用于 TUI 状态栏和 usage_log。
 type Usage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	CachedTokens int `json:"cached_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	InputTokens         int `json:"input_tokens"`
+	CacheReadTokens     int `json:"cache_read_tokens"`
+	CacheCreationTokens int `json:"cache_creation_tokens"`
+	OutputTokens        int `json:"output_tokens"`
+	TotalTokens         int `json:"total_tokens"`
 }
 
-// Provider 抽象具体模型供应商，Agent 只依赖这个接口而不直接依赖 SDK。
-type Provider interface {
-	Complete(ctx context.Context, req *CompletionRequest) (<-chan Chunk, error)
+// Adapter 抽象具体模型供应商，Agent 只依赖这个接口而不直接依赖 SDK。
+type Adapter interface {
+	Complete(ctx context.Context, req CompletionRequest) (<-chan Chunk, error)
 	EstimateTokens(text string) int
 	ContextWindow() int
 	MaxOutputTokens() int

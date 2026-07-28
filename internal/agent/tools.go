@@ -219,7 +219,7 @@ func (a *Agent) ExecuteSpawnTool(ctx context.Context, id string, params map[stri
 	}
 	ctx = model.WithBinding(ctx, binding)
 	r := a.newSubtaskRunner(events, spawnID, allowedTools)
-	st := subtask.New(subtask.Request{ID: spawnID, Task: task, Input: inputBlocks, Binding: binding, System: subtaskPrompt, ToolDefs: toolDefs})
+	st := subtask.New(subtask.Request{ID: spawnID, Task: task, Input: inputBlocks, Binding: binding, Invocation: model.Invocation{SessionScope: model.SessionScope(a.sessionID)}, System: subtaskPrompt, ToolDefs: toolDefs})
 	res, err := st.Run(ctx, r)
 	if err != nil && res.Status == "" {
 		res = subtask.Result{
@@ -629,8 +629,8 @@ func (a *Agent) guardLLMReview(ctx context.Context, req guard.ReviewRequest) (st
 	if binding == nil {
 		return "", fmt.Errorf("guard review requires model binding")
 	}
-	request := &model.CompletionRequest{Model: binding.ModelID(), Purpose: "guard_review", RequestID: uuid.New().String(), System: "Reply with JSON only.", Messages: []model.Message{model.NewTextMessage(model.RoleUser, reviewPrompt)}, Temperature: model.Float64Ptr(0)}
-	ch, err := binding.Complete(ctx, request)
+	request := &model.CompletionRequest{Model: binding.ModelID(), Invocation: model.Invocation{SessionScope: model.SessionScope(a.sessionID)}, Purpose: "guard_review", RequestID: uuid.New().String(), System: "Reply with JSON only.", Messages: []model.Message{model.NewTextMessage(model.RoleUser, reviewPrompt)}, Temperature: model.Float64Ptr(0)}
+	ch, err := binding.Complete(ctx, *request)
 	if err != nil {
 		return "", err
 	}

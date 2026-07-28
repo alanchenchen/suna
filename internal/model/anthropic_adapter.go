@@ -13,7 +13,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
 
-type AnthropicProvider struct {
+type AnthropicAdapter struct {
 	client          *anthropic.Client
 	model           string
 	contextWindow   int
@@ -21,40 +21,37 @@ type AnthropicProvider struct {
 	media           MediaResolver
 }
 
-func NewAnthropicProvider(apiKey, baseURL, model string, contextWindow, maxOutputTokens int, mediaResolver MediaResolver) *AnthropicProvider {
+func NewAnthropicAdapter(spec AdapterSpec, deps AdapterDependencies) *AnthropicAdapter {
 	httpClient := compatibleHTTPClient(&http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}})
 	// 关闭 SDK 隐式重试，避免一次 Suna Complete 在上游产生多次不可见请求；
 	// 未来如需重试应由 Suna 自己实现并记录日志。
-	opts := []option.RequestOption{option.WithAPIKey(apiKey), option.WithHTTPClient(httpClient), option.WithMaxRetries(0)}
-	if baseURL != "" {
-		opts = append(opts, option.WithBaseURL(baseURL))
+	opts := []option.RequestOption{option.WithAPIKey(spec.APIKey), option.WithHTTPClient(httpClient), option.WithMaxRetries(0)}
+	if spec.BaseURL != "" {
+		opts = append(opts, option.WithBaseURL(spec.BaseURL))
 	}
 	client := anthropic.NewClient(opts...)
-	return &AnthropicProvider{
+	return &AnthropicAdapter{
 		client:          &client,
-		model:           model,
-		contextWindow:   contextWindow,
-		maxOutputTokens: maxOutputTokens,
-		media:           mediaResolver,
+		model:           spec.ModelID,
+		contextWindow:   spec.ContextWindow,
+		maxOutputTokens: spec.MaxOutputTokens,
+		media:           deps.MediaResolver,
 	}
 }
 
-func (p *AnthropicProvider) Complete(ctx context.Context, req *CompletionRequest) (<-chan Chunk, error) {
+func (p *AnthropicAdapter) Complete(ctx context.Context, req CompletionRequest) (<-chan Chunk, error) {
 	if p.maxOutputTokens <= 0 {
 		return nil, fmt.Errorf("max_output_tokens is required for model %q", p.model)
 	}
 	maxTokens := p.resolveMaxTokens(req.MaxTokens)
-	req.MaxTokens = maxTokens
-	messages, buildErr := p.buildMessages(ctx, req)
+
+	messages, buildErr := p.buildMessages(ctx, &req)
 	if buildErr != nil {
 		return nil, buildErr
 	}
 	tools := p.buildTools(req.Tools)
 
 	modelName := p.model
-	if req.Model != "" {
-		modelName = req.Model
-	}
 	params := anthropic.MessageNewParams{
 		Model:     modelName,
 		MaxTokens: int64(maxTokens),
@@ -76,7 +73,7 @@ func (p *AnthropicProvider) Complete(ctx context.Context, req *CompletionRequest
 		return nil, err
 	}
 
-	ch := make(chan Chunk, providerChunkBuffer)
+	ch := make(chan Chunk, adapterChunkBuffer)
 	go func() {
 		defer close(ch)
 		stream := p.client.Messages.NewStreaming(ctx, params, opts...)
@@ -230,8 +227,11 @@ func mergeAnthropicUsage(prev, next *Usage) *Usage {
 	if merged.InputTokens == 0 {
 		merged.InputTokens = prev.InputTokens
 	}
-	if merged.CachedTokens == 0 {
-		merged.CachedTokens = prev.CachedTokens
+	if merged.CacheReadTokens == 0 {
+		merged.CacheReadTokens = prev.CacheReadTokens
+	}
+	if merged.CacheCreationTokens == 0 {
+		merged.CacheCreationTokens = prev.CacheCreationTokens
 	}
 	if merged.TotalTokens == merged.OutputTokens && merged.InputTokens > 0 {
 		merged.TotalTokens = merged.InputTokens + merged.OutputTokens
@@ -242,31 +242,32 @@ func mergeAnthropicUsage(prev, next *Usage) *Usage {
 func anthropicUsage(inputTokens, cacheCreationTokens, cacheReadTokens, outputTokens int) *Usage {
 	inputTotal := inputTokens + cacheCreationTokens + cacheReadTokens
 	return &Usage{
-		InputTokens:  inputTotal,
-		OutputTokens: outputTokens,
-		CachedTokens: cacheReadTokens,
-		TotalTokens:  inputTotal + outputTokens,
+		InputTokens:         inputTotal,
+		OutputTokens:        outputTokens,
+		CacheReadTokens:     cacheReadTokens,
+		CacheCreationTokens: cacheCreationTokens,
+		TotalTokens:         inputTotal + outputTokens,
 	}
 }
 
-func (p *AnthropicProvider) EstimateTokens(text string) int {
+func (p *AnthropicAdapter) EstimateTokens(text string) int {
 	return len(text) / 4
 }
 
-func (p *AnthropicProvider) ContextWindow() int { return p.contextWindow }
+func (p *AnthropicAdapter) ContextWindow() int { return p.contextWindow }
 
-func (p *AnthropicProvider) MaxOutputTokens() int {
+func (p *AnthropicAdapter) MaxOutputTokens() int {
 	return p.maxOutputTokens
 }
 
-func (p *AnthropicProvider) resolveMaxTokens(m int) int {
+func (p *AnthropicAdapter) resolveMaxTokens(m int) int {
 	if m > 0 && m < p.maxOutputTokens {
 		return m
 	}
 	return p.maxOutputTokens
 }
 
-func (p *AnthropicProvider) buildMessages(ctx context.Context, req *CompletionRequest) ([]anthropic.MessageParam, error) {
+func (p *AnthropicAdapter) buildMessages(ctx context.Context, req *CompletionRequest) ([]anthropic.MessageParam, error) {
 	msgs := make([]anthropic.MessageParam, 0, len(req.Messages)+1)
 	if state := FormatSessionStateForModel(req.SessionState); state != "" {
 		msgs = append(msgs, anthropic.NewUserMessage(anthropic.NewTextBlock(state)))
@@ -301,7 +302,7 @@ func (p *AnthropicProvider) buildMessages(ctx context.Context, req *CompletionRe
 	return msgs, nil
 }
 
-func (p *AnthropicProvider) buildUserBlocks(ctx context.Context, m Message) ([]anthropic.ContentBlockParamUnion, error) {
+func (p *AnthropicAdapter) buildUserBlocks(ctx context.Context, m Message) ([]anthropic.ContentBlockParamUnion, error) {
 	var blocks []anthropic.ContentBlockParamUnion
 	for _, c := range m.Content {
 		switch c.Type {
@@ -323,7 +324,7 @@ func (p *AnthropicProvider) buildUserBlocks(ctx context.Context, m Message) ([]a
 	return blocks, nil
 }
 
-func (p *AnthropicProvider) buildAssistantBlocks(ctx context.Context, m Message) ([]anthropic.ContentBlockParamUnion, error) {
+func (p *AnthropicAdapter) buildAssistantBlocks(ctx context.Context, m Message) ([]anthropic.ContentBlockParamUnion, error) {
 	var blocks []anthropic.ContentBlockParamUnion
 	for _, c := range m.Content {
 		switch c.Type {
@@ -351,7 +352,7 @@ func (p *AnthropicProvider) buildAssistantBlocks(ctx context.Context, m Message)
 	return blocks, nil
 }
 
-func (p *AnthropicProvider) anthropicImageBlock(ctx context.Context, block ContentBlock) (anthropic.ContentBlockParamUnion, bool, error) {
+func (p *AnthropicAdapter) anthropicImageBlock(ctx context.Context, block ContentBlock) (anthropic.ContentBlockParamUnion, bool, error) {
 	if block.Media == nil || p.media == nil {
 		return anthropic.ContentBlockParamUnion{}, false, fmt.Errorf("image media resolver is unavailable")
 	}
@@ -373,7 +374,7 @@ func (p *AnthropicProvider) anthropicImageBlock(ctx context.Context, block Conte
 	return anthropic.ContentBlockParamUnion{}, false, fmt.Errorf("resolved image is empty")
 }
 
-func (p *AnthropicProvider) buildTools(tools []ToolDef) []anthropic.ToolUnionParam {
+func (p *AnthropicAdapter) buildTools(tools []ToolDef) []anthropic.ToolUnionParam {
 	if len(tools) == 0 {
 		return nil
 	}

@@ -11,6 +11,7 @@ import (
 
 type Request struct {
 	Binding       *model.ModelBinding
+	Invocation    model.Invocation
 	System        string
 	Purpose       string
 	Working       *memory.WorkingMemory
@@ -83,7 +84,8 @@ type ToolResultEvent struct {
 type UsageEvent struct {
 	InputTokens            int
 	OutputTokens           int
-	CachedTokens           int
+	CacheReadTokens        int
+	CacheCreationTokens    int
 	ContextTokens          int
 	EstimatedContextTokens int
 	ContextWindow          int

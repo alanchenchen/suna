@@ -300,6 +300,7 @@ func (a *Agent) runCurrentWorking(runCtx context.Context, inputText string, even
 	r := a.newRunner(events)
 	res, err := r.Run(runCtx, runner.Request{
 		Binding:       binding,
+		Invocation:    model.Invocation{SessionScope: model.SessionScope(a.sessionID)},
 		System:        systemPrompt,
 		Working:       a.working,
 		Messages:      a.buildRequestMessages,
@@ -449,7 +450,8 @@ func (s eventSink) Usage(usage runner.UsageEvent) {
 		Type:                   EventUsage,
 		InputTokens:            usage.InputTokens,
 		OutputTokens:           usage.OutputTokens,
-		CachedTokens:           usage.CachedTokens,
+		CacheReadTokens:        usage.CacheReadTokens,
+		CacheCreationTokens:    usage.CacheCreationTokens,
 		ContextTokens:          usage.ContextTokens,
 		EstimatedContextTokens: usage.EstimatedContextTokens,
 		ContextWindow:          usage.ContextWindow,

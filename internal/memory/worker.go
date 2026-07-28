@@ -216,10 +216,15 @@ func (w *Worker) retry(ids []string, cause error) {
 }
 
 func (w *Worker) compact(ctx context.Context, binding *model.ModelBinding, current []UserMemory, items []QueueItem, requestID string) ([]UserMemory, error) {
+	if binding == nil {
+		return nil, fmt.Errorf("memory compaction model binding is not configured")
+	}
 	systemPrompt := w.renderCompactionPrompt(current, items)
 	// 记忆整理是异步 LLM 调用，一次处理多条 queue event，并要求模型返回完整的新列表。
 	// 主请求链路不会等待这个调用，因此不会影响用户看到回复的延迟。
-	ch, err := binding.Complete(ctx, &model.CompletionRequest{Purpose: "memory_compact", RequestID: requestID, System: systemPrompt, Messages: []model.Message{model.NewTextMessage(model.RoleUser, "Return the new user profile memory JSON now.")}})
+	// 记忆为单一用户资料聚合，使用稳定的匿名用户 scope；它不绑定某个会话，避免后台批处理漏用 Responses 缓存。
+	invocation := model.Invocation{SessionScope: model.SessionScope(DefaultUserID)}
+	ch, err := binding.Complete(ctx, model.CompletionRequest{Invocation: invocation, Purpose: "memory_compact", RequestID: requestID, System: systemPrompt, Messages: []model.Message{model.NewTextMessage(model.RoleUser, "Return the new user profile memory JSON now.")}})
 	if err != nil {
 		return nil, err
 	}

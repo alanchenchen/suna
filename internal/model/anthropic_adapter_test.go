@@ -8,7 +8,7 @@ import (
 )
 
 func TestAnthropicBuildMessagesGroupsConsecutiveToolResults(t *testing.T) {
-	p := NewAnthropicProvider("test-key", "", "claude-test", 128000, 8192, nil)
+	p := NewAnthropicAdapter(testAdapterSpec("claude-test"), AdapterDependencies{})
 	req := &CompletionRequest{Messages: []Message{
 		{
 			Role:        RoleAssistant,
@@ -93,8 +93,8 @@ func TestAnthropicUsageIncludesCacheTokensInInputTotal(t *testing.T) {
 	if got, want := u.InputTokens, 17; got != want {
 		t.Fatalf("InputTokens = %d, want %d", got, want)
 	}
-	if got, want := u.CachedTokens, 4; got != want {
-		t.Fatalf("CachedTokens = %d, want %d", got, want)
+	if got, want := u.CacheReadTokens, 4; got != want {
+		t.Fatalf("CacheReadTokens = %d, want %d", got, want)
 	}
 	if got, want := u.OutputTokens, 5; got != want {
 		t.Fatalf("OutputTokens = %d, want %d", got, want)
@@ -105,7 +105,7 @@ func TestAnthropicUsageIncludesCacheTokensInInputTotal(t *testing.T) {
 }
 
 func TestAnthropicBuildAssistantToolUseInputIsObject(t *testing.T) {
-	p := NewAnthropicProvider("test-key", "", "claude-test", 128000, 8192, nil)
+	p := NewAnthropicAdapter(testAdapterSpec("claude-test"), AdapterDependencies{})
 	blocks, err := p.buildAssistantBlocks(context.Background(), Message{
 		Role: RoleAssistant,
 		ToolCalls: []ToolCall{
@@ -143,8 +143,8 @@ func TestMergeAnthropicUsagePreservesStartInputForOutputOnlyDelta(t *testing.T) 
 	if got, want := merged.InputTokens, 17; got != want {
 		t.Fatalf("InputTokens = %d, want %d", got, want)
 	}
-	if got, want := merged.CachedTokens, 4; got != want {
-		t.Fatalf("CachedTokens = %d, want %d", got, want)
+	if got, want := merged.CacheReadTokens, 4; got != want {
+		t.Fatalf("CacheReadTokens = %d, want %d", got, want)
 	}
 	if got, want := merged.OutputTokens, 5; got != want {
 		t.Fatalf("OutputTokens = %d, want %d", got, want)
@@ -155,7 +155,7 @@ func TestMergeAnthropicUsagePreservesStartInputForOutputOnlyDelta(t *testing.T) 
 }
 
 func TestAnthropicToolInputSchemaPreservesRequiredAndProperties(t *testing.T) {
-	p := NewAnthropicProvider("test-key", "", "claude-test", 128000, 8192, nil)
+	p := NewAnthropicAdapter(testAdapterSpec("claude-test"), AdapterDependencies{})
 	tools := p.buildTools([]ToolDef{{
 		Name:        "readfile",
 		Description: "read a file",

@@ -13,7 +13,7 @@ import (
 	"github.com/openai/openai-go/v3/option"
 )
 
-type OpenAIChatProvider struct {
+type OpenAIChatAdapter struct {
 	client          openai.Client
 	model           string
 	contextWindow   int
@@ -21,29 +21,29 @@ type OpenAIChatProvider struct {
 	media           MediaResolver
 }
 
-func NewOpenAIChatProvider(apiKey, baseURL, model string, contextWindow, maxOutputTokens int, mediaResolver MediaResolver) *OpenAIChatProvider {
+func NewOpenAIChatAdapter(spec AdapterSpec, deps AdapterDependencies) *OpenAIChatAdapter {
 	httpClient := compatibleHTTPClient(&http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}})
 	// 关闭 SDK 隐式重试，避免一次 Suna Complete 在上游产生多次不可见请求；
 	// 未来如需重试应由 Suna 自己实现并记录日志。
-	opts := []option.RequestOption{option.WithAPIKey(apiKey), option.WithHTTPClient(httpClient), option.WithMaxRetries(0)}
-	if baseURL != "" {
-		opts = append(opts, option.WithBaseURL(baseURL))
+	opts := []option.RequestOption{option.WithAPIKey(spec.APIKey), option.WithHTTPClient(httpClient), option.WithMaxRetries(0)}
+	if spec.BaseURL != "" {
+		opts = append(opts, option.WithBaseURL(spec.BaseURL))
 	}
-	return &OpenAIChatProvider{client: openai.NewClient(opts...), model: model, contextWindow: contextWindow, maxOutputTokens: maxOutputTokens, media: mediaResolver}
+	return &OpenAIChatAdapter{client: openai.NewClient(opts...), model: spec.ModelID, contextWindow: spec.ContextWindow, maxOutputTokens: spec.MaxOutputTokens, media: deps.MediaResolver}
 }
 
-func (p *OpenAIChatProvider) Complete(ctx context.Context, req *CompletionRequest) (<-chan Chunk, error) {
+func (p *OpenAIChatAdapter) Complete(ctx context.Context, req CompletionRequest) (<-chan Chunk, error) {
 	if p.maxOutputTokens <= 0 {
 		return nil, fmt.Errorf("max_output_tokens is required for model %q", p.model)
 	}
 	maxTokens := p.resolveMaxTokens(req.MaxTokens)
-	req.MaxTokens = maxTokens
-	messages, err := p.buildMessages(ctx, req)
+
+	messages, err := p.buildMessages(ctx, &req)
 	if err != nil {
 		return nil, err
 	}
 	params := openai.ChatCompletionNewParams{
-		Model:     openai.ChatModel(p.resolveModel(req.Model)),
+		Model:     openai.ChatModel(p.model),
 		Messages:  messages,
 		MaxTokens: openai.Int(int64(maxTokens)),
 		StreamOptions: openai.ChatCompletionStreamOptionsParam{
@@ -62,7 +62,7 @@ func (p *OpenAIChatProvider) Complete(ctx context.Context, req *CompletionReques
 		return nil, err
 	}
 
-	ch := make(chan Chunk, providerChunkBuffer)
+	ch := make(chan Chunk, adapterChunkBuffer)
 	go func() {
 		defer close(ch)
 		stream := p.client.Chat.Completions.NewStreaming(ctx, params, opts...)
@@ -75,7 +75,7 @@ func (p *OpenAIChatProvider) Complete(ctx context.Context, req *CompletionReques
 			chunk := stream.Current()
 			if chunk.JSON.Usage.Valid() {
 				u := chunk.Usage
-				usage = &Usage{InputTokens: int(u.PromptTokens), OutputTokens: int(u.CompletionTokens), TotalTokens: int(u.TotalTokens), CachedTokens: int(u.PromptTokensDetails.CachedTokens)}
+				usage = &Usage{InputTokens: int(u.PromptTokens), OutputTokens: int(u.CompletionTokens), TotalTokens: int(u.TotalTokens), CacheReadTokens: int(u.PromptTokensDetails.CachedTokens)}
 			}
 			if len(chunk.Choices) == 0 {
 				continue
@@ -93,7 +93,7 @@ func (p *OpenAIChatProvider) Complete(ctx context.Context, req *CompletionReques
 			mergeChatToolDeltas(choice.Delta.ToolCalls, &toolCallsAcc)
 		}
 		if err := stream.Err(); err != nil {
-			ch <- Chunk{Done: true, Error: modelErrorFromProvider(err, "openai-compatible", p.resolveModel(req.Model))}
+			ch <- Chunk{Done: true, Error: modelErrorFromProvider(err, "openai-compatible", p.model)}
 			return
 		}
 		toolCalls := accumulateChatToolCalls(toolCallsAcc)
@@ -155,29 +155,22 @@ func chatReasoningDetails(field interface{ Raw() string }) string {
 	return strings.Join(parts, "")
 }
 
-func (p *OpenAIChatProvider) EstimateTokens(text string) int { return len(text) / 4 }
+func (p *OpenAIChatAdapter) EstimateTokens(text string) int { return len(text) / 4 }
 
-func (p *OpenAIChatProvider) ContextWindow() int { return p.contextWindow }
+func (p *OpenAIChatAdapter) ContextWindow() int { return p.contextWindow }
 
-func (p *OpenAIChatProvider) MaxOutputTokens() int {
+func (p *OpenAIChatAdapter) MaxOutputTokens() int {
 	return p.maxOutputTokens
 }
 
-func (p *OpenAIChatProvider) resolveModel(m string) string {
-	if m != "" {
-		return m
-	}
-	return p.model
-}
-
-func (p *OpenAIChatProvider) resolveMaxTokens(m int) int {
+func (p *OpenAIChatAdapter) resolveMaxTokens(m int) int {
 	if m > 0 && m < p.maxOutputTokens {
 		return m
 	}
 	return p.maxOutputTokens
 }
 
-func (p *OpenAIChatProvider) buildMessages(ctx context.Context, req *CompletionRequest) ([]openai.ChatCompletionMessageParamUnion, error) {
+func (p *OpenAIChatAdapter) buildMessages(ctx context.Context, req *CompletionRequest) ([]openai.ChatCompletionMessageParamUnion, error) {
 	msgs := make([]openai.ChatCompletionMessageParamUnion, 0, len(req.Messages)+1)
 	if req.System != "" {
 		msgs = append(msgs, openai.SystemMessage(req.System))
@@ -202,7 +195,7 @@ func (p *OpenAIChatProvider) buildMessages(ctx context.Context, req *CompletionR
 	return msgs, nil
 }
 
-func (p *OpenAIChatProvider) buildChatUserMessage(ctx context.Context, m Message) (openai.ChatCompletionMessageParamUnion, error) {
+func (p *OpenAIChatAdapter) buildChatUserMessage(ctx context.Context, m Message) (openai.ChatCompletionMessageParamUnion, error) {
 	if !hasImagePart(m.Content) {
 		return openai.UserMessage(m.Text()), nil
 	}
@@ -256,7 +249,7 @@ func hasImagePart(blocks []ContentBlock) bool {
 	return false
 }
 
-func (p *OpenAIChatProvider) openAIImageURL(ctx context.Context, block ContentBlock) (string, error) {
+func (p *OpenAIChatAdapter) openAIImageURL(ctx context.Context, block ContentBlock) (string, error) {
 	if block.Media == nil || p.media == nil {
 		return "", fmt.Errorf("image media resolver is unavailable")
 	}
@@ -277,7 +270,7 @@ func (p *OpenAIChatProvider) openAIImageURL(ctx context.Context, block ContentBl
 	return "data:" + mimeType + ";base64," + resolved.Base64, nil
 }
 
-func (p *OpenAIChatProvider) buildTools(tools []ToolDef) []openai.ChatCompletionToolUnionParam {
+func (p *OpenAIChatAdapter) buildTools(tools []ToolDef) []openai.ChatCompletionToolUnionParam {
 	if len(tools) == 0 {
 		return nil
 	}

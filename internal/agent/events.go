@@ -70,7 +70,8 @@ type Event struct {
 
 	InputTokens            int
 	OutputTokens           int
-	CachedTokens           int
+	CacheReadTokens        int
+	CacheCreationTokens    int
 	ContextTokens          int
 	EstimatedContextTokens int
 	ContextWindow          int

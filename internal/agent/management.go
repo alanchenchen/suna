@@ -49,7 +49,7 @@ func (a *Agent) ListModels() []string {
 	if a.router == nil {
 		return nil
 	}
-	return a.router.ListProviders()
+	return a.router.ListModelRefs()
 }
 
 type ModelRuntime struct {
@@ -153,7 +153,7 @@ func (a *Agent) Compact(ctx context.Context) (int, int, int, int, int, error) {
 		messageCount = a.working.Len()
 	}
 	logging.Info("memory", "session_compact_start", logging.Event{"mode": "manual", "context_window": contextWindow, "output_budget": outputBudget, "before_tokens": beforeEstimate, "messages": messageCount})
-	before, after, turnsCompressed, truncated, state, err := r.Compact(runCtx, binding, a.working, a.sessionState)
+	before, after, turnsCompressed, truncated, state, err := r.Compact(runCtx, binding, model.Invocation{SessionScope: model.SessionScope(a.sessionID)}, a.working, a.sessionState)
 	if err != nil {
 		logging.Error("memory", "session_compact_failed", err, logging.Event{"mode": "manual", "context_window": contextWindow, "output_budget": outputBudget, "before_tokens": beforeEstimate, "messages": messageCount, "duration_ms": time.Since(started).Milliseconds()})
 		return 0, 0, 0, 0, 0, err

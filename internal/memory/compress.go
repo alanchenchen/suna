@@ -134,15 +134,11 @@ func isUTF8Boundary(b byte) bool {
 	return b&0xC0 != 0x80
 }
 
-func (c *Compressor) CompressHistoryWithState(ctx context.Context, binding *model.ModelBinding, messages []model.Message, previousState string, contextWindow, outputBudget int) ([]model.Message, string, int, error) {
-	return c.CompressHistoryWithStateBudget(ctx, binding, messages, previousState, contextWindow, outputBudget, recentWindowTokenBudget(contextWindow, outputBudget))
+func (c *Compressor) CompressHistoryWithStateBudget(ctx context.Context, binding *model.ModelBinding, invocation model.Invocation, messages []model.Message, previousState string, contextWindow, outputBudget, recentTokenBudget int) ([]model.Message, string, int, error) {
+	return c.compressHistoryKeepingState(ctx, binding, invocation, messages, previousState, chooseRecentKeepWithBudget(messages, contextWindow, recentTokenBudget), contextWindow, outputBudget)
 }
 
-func (c *Compressor) CompressHistoryWithStateBudget(ctx context.Context, binding *model.ModelBinding, messages []model.Message, previousState string, contextWindow, outputBudget, recentTokenBudget int) ([]model.Message, string, int, error) {
-	return c.compressHistoryKeepingState(ctx, binding, messages, previousState, chooseRecentKeepWithBudget(messages, contextWindow, recentTokenBudget), contextWindow, outputBudget)
-}
-
-func (c *Compressor) compressHistoryKeepingState(ctx context.Context, binding *model.ModelBinding, messages []model.Message, previousState string, keepRecent int, contextWindow, outputBudget int) ([]model.Message, string, int, error) {
+func (c *Compressor) compressHistoryKeepingState(ctx context.Context, binding *model.ModelBinding, invocation model.Invocation, messages []model.Message, previousState string, keepRecent int, contextWindow, outputBudget int) ([]model.Message, string, int, error) {
 	if len(messages) == 0 {
 		return messages, "", 0, nil
 	}
@@ -197,13 +193,14 @@ func (c *Compressor) compressHistoryKeepingState(ctx context.Context, binding *m
 		return nil, "", 0, fmt.Errorf("render compress prompt: empty prompt")
 	}
 	req := &model.CompletionRequest{
-		Purpose: "compress",
+		Invocation: invocation,
+		Purpose:    "compress",
 		Messages: []model.Message{
 			model.NewTextMessage(model.RoleUser, promptText),
 		},
 		MaxTokens: outputBudget,
 	}
-	ch, err := binding.Complete(ctx, req)
+	ch, err := binding.Complete(ctx, *req)
 	if err != nil {
 		return nil, "", 0, err
 	}
