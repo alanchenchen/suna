@@ -358,12 +358,12 @@ func (t *TUI) renderChatStatusBar() string {
 	}
 	ctxPart := styleDim.Render(fmt.Sprintf("ctx %s/%s ", ctx, window)) + ctxPct
 	if !t.hasUsage {
-		return "  " + ctxPart + styleDim.Render(" · ") + styleDim.Render("↑? ↓? ↻? · ?t/s")
+		return "  " + ctxPart + styleDim.Render(" · ") + styleDim.Render("↑? ↓? cached ? · ?t/s")
 	}
 	tokParts := []string{
 		styleUser.Render("↑" + fmtTok(t.lastInputTok)),
 		styleAgent.Render("↓" + fmtTok(t.lastOutputTok)),
-		styleDim.Render("↻" + fmtTok(t.lastCachedTok)),
+		styleBrand.Render("cached " + fmtTok(t.lastCachedTok)),
 	}
 	parts := []string{ctxPart, joinNonEmpty(tokParts, " ")}
 	if t.lastTokensPerSec > 0 {

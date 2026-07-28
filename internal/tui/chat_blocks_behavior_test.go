@@ -322,7 +322,7 @@ func TestRenderChatStatusBarShowsContextAndUsage(t *testing.T) {
 
 	raw := tui.renderChatStatusBar()
 	got := stripANSIForTest(raw)
-	for _, want := range []string{"ctx 36.2k/400k", "9%", "↑32.6k", "↓2.3k", "↻29.7k", "50t/s"} {
+	for _, want := range []string{"ctx 36.2k/400k", "9%", "↑32.6k", "↓2.3k", "cached 29.7k", "50t/s"} {
 		if !strings.Contains(got, want) && !strings.Contains(raw, want) {
 			t.Fatalf("renderChatStatusBar() = %q, want %q", got, want)
 		}
