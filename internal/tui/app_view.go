@@ -7,6 +7,7 @@ import (
 
 func (t *TUI) View() tea.View {
 	v := tea.NewView("")
+	v.WindowTitle = t.windowTitle()
 	v.AltScreen = true
 	if t.selectionMode {
 		v.MouseMode = tea.MouseModeNone
