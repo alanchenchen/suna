@@ -1,6 +1,7 @@
 package guard
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,12 +10,13 @@ import (
 	"strings"
 
 	"github.com/alanchenchen/suna/internal/config"
+	"github.com/alanchenchen/suna/internal/tools"
 )
 
-var execPathTokenPattern = regexp.MustCompile(`(?:^|[\s=])["']?((?:~|\.\.?|/|[A-Za-z0-9._-]+/)[^"'\s;|&<>]*)`)
+var execPathTokenPattern = regexp.MustCompile(`(?:^|[\s=])["']?((?:~(?:/|$)|\.\.?(?:/|$)|/|[^"'\s;|&<>]+/\.\.?/)[^"'\s;|&<>]*)`)
 var execRedirectionPattern = regexp.MustCompile(`[<>]{1,2}\s*([^\s;|&]+)`)
 var execQuotedAbsPathPattern = regexp.MustCompile(`["'](/[^"']*)["']`)
-var execShellExpansionPattern = regexp.MustCompile(`\$(?:\{|[A-Za-z_])`)
+var execShellExpansionPattern = regexp.MustCompile("(?:\\$\\(|\\$\\{|\\$[A-Za-z_0-9?@*#$!\\-]|\\x60)")
 
 func normalizeWorkspaceRoot(path string) string {
 	path = strings.TrimSpace(path)
@@ -28,9 +30,9 @@ func normalizeWorkspaceRoot(path string) string {
 	return filepath.Clean(path)
 }
 
-func (g *Guard) checkWorkspace(tool string, params map[string]any) (bool, string) {
+func (g *Guard) checkWorkspace(ctx context.Context, tool string, params map[string]any) (bool, string, string) {
 	if g == nil || g.workspace == "" {
-		return false, ""
+		return false, "", ""
 	}
 	switch tool {
 	case "readfile", "listdir", "writefile", "editfile", "search":
@@ -38,65 +40,74 @@ func (g *Guard) checkWorkspace(tool string, params map[string]any) (bool, string
 		return g.checkWorkspacePath(tool, "path", path, g.workspace)
 	case "filesystem":
 		path, _ := params["path"].(string)
-		if blocked, reason := g.checkWorkspacePath(tool, "path", path, g.workspace); blocked {
-			return true, reason
+		if blocked, reason, auditReason := g.checkWorkspacePath(tool, "path", path, g.workspace); blocked {
+			return true, reason, auditReason
 		}
 		if dst, _ := params["destination"].(string); strings.TrimSpace(dst) != "" {
 			return g.checkWorkspacePath(tool, "destination", dst, g.workspace)
 		}
-		return false, ""
+		return false, "", ""
 	case "exec":
-		cwd, _ := params["cwd"].(string)
-		if cwd == "" {
-			cwd = g.workspace
+		requestedCWD, _ := params["cwd"].(string)
+		cwd, err := tools.EffectiveCWD(ctx, requestedCWD)
+		if err != nil {
+			return true, fmt.Sprintf("workspace boundary: cannot resolve exec.cwd: %v", err), "workspace_unavailable"
 		}
-		if blocked, reason := g.checkWorkspacePath(tool, "cwd", cwd, ""); blocked {
-			return true, reason
+		if blocked, reason, auditReason := g.checkWorkspacePath(tool, "cwd", cwd, ""); blocked {
+			return true, reason, auditReason
 		}
 		command, _ := params["command"].(string)
 		return g.checkExecWorkspacePaths(command, cwd)
 	default:
-		return false, ""
+		return false, "", ""
 	}
 }
 
-func (g *Guard) checkWorkspacePath(tool string, field string, path string, baseDir string) (bool, string) {
+func (g *Guard) checkWorkspacePath(tool string, field string, path string, baseDir string) (bool, string, string) {
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return true, fmt.Sprintf("workspace boundary: %s.%s is required when guard.workspace is set to %s", tool, field, g.workspace)
+		return true, fmt.Sprintf("workspace boundary: %s.%s is required when guard.workspace is set to %s", tool, field, g.workspace), "workspace_path_missing"
 	}
 	resolved, err := resolveWorkspaceTarget(path, baseDir)
 	if err != nil {
-		return true, fmt.Sprintf("workspace boundary: cannot resolve %s.%s %q: %v", tool, field, path, err)
+		return true, fmt.Sprintf("workspace boundary: cannot resolve %s.%s %q: %v", tool, field, path, err), "workspace_unavailable"
 	}
 	// Suna 自有数据目录始终允许访问。用户经常会让 Suna 排查 ~/.suna 下的配置、日志或 Skill；
 	// 默认数据目录由 config paths 统一给出，避免在 Guard 内部硬编码路径字符串。
 	if isPathInside(config.DefaultDataDir(), resolved) {
-		return false, ""
+		return false, "", ""
 	}
 	if !isPathInside(g.workspace, resolved) {
-		return true, fmt.Sprintf("workspace boundary: %s.%s %q resolves to %q outside workspace %q", tool, field, path, resolved, g.workspace)
+		return true, fmt.Sprintf("workspace boundary: %s.%s %q resolves to %q outside workspace %q", tool, field, path, resolved, g.workspace), workspaceAuditReason(field)
 	}
-	return false, ""
+	return false, "", ""
 }
 
-func (g *Guard) checkExecWorkspacePaths(command string, cwd string) (bool, string) {
+func workspaceAuditReason(field string) string {
+	switch field {
+	case "cwd":
+		return "workspace_cwd_outside"
+	case "redirection":
+		return "workspace_redirect_outside"
+	default:
+		return "workspace_path_outside"
+	}
+}
+
+func (g *Guard) checkExecWorkspacePaths(command string, cwd string) (bool, string, string) {
 	command = strings.TrimSpace(command)
 	if command == "" {
-		return false, ""
+		return false, "", ""
 	}
-	if execShellExpansionPattern.MatchString(command) {
-		return true, "workspace boundary: exec.command uses shell expansion that cannot be safely checked against workspace"
-	}
-	if blocked, reason := g.checkExecPathTokens(command, cwd); blocked {
-		return true, reason
+	if blocked, reason, auditReason := g.checkExecPathTokens(command, cwd); blocked {
+		return true, reason, auditReason
 	}
 	for _, match := range execQuotedAbsPathPattern.FindAllStringSubmatch(command, -1) {
 		if len(match) < 2 {
 			continue
 		}
-		if blocked, reason := g.checkWorkspacePath("exec", "command", match[1], cwd); blocked {
-			return true, reason
+		if blocked, reason, auditReason := g.checkWorkspacePath("exec", "command", match[1], cwd); blocked {
+			return true, reason, auditReason
 		}
 	}
 	for _, match := range execRedirectionPattern.FindAllStringSubmatch(command, -1) {
@@ -107,14 +118,22 @@ func (g *Guard) checkExecWorkspacePaths(command string, cwd string) (bool, strin
 		if path == "" || isShellDescriptor(path) {
 			continue
 		}
-		if blocked, reason := g.checkWorkspacePath("exec", "redirection", path, cwd); blocked {
-			return true, reason
+		if blocked, reason, auditReason := g.checkWorkspacePath("exec", "redirection", path, cwd); blocked {
+			return true, reason, auditReason
 		}
 	}
-	return false, ""
+	return false, "", ""
 }
 
-func (g *Guard) checkExecPathTokens(command string, cwd string) (bool, string) {
+func isDynamicExecWorkspaceExpression(tool string, params map[string]any) bool {
+	if tool != "exec" {
+		return false
+	}
+	command, _ := params["command"].(string)
+	return execShellExpansionPattern.MatchString(command)
+}
+
+func (g *Guard) checkExecPathTokens(command string, cwd string) (bool, string, string) {
 	for _, match := range execPathTokenPattern.FindAllStringSubmatch(command, -1) {
 		if len(match) < 2 {
 			continue
@@ -126,11 +145,11 @@ func (g *Guard) checkExecPathTokens(command string, cwd string) (bool, string) {
 		if runtime.GOOS == "windows" && strings.HasPrefix(path, "/") && len(path) > 1 && path[1] != '/' {
 			continue
 		}
-		if blocked, reason := g.checkWorkspacePath("exec", "command", path, cwd); blocked {
-			return true, reason
+		if blocked, reason, auditReason := g.checkWorkspacePath("exec", "command", path, cwd); blocked {
+			return true, reason, auditReason
 		}
 	}
-	return false, ""
+	return false, "", ""
 }
 
 func resolveWorkspaceTarget(path string, baseDir string) (string, error) {

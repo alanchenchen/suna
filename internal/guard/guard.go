@@ -176,13 +176,18 @@ func (g *Guard) SetLLMReviewer(reviewer LLMReviewer) {
 func (g *Guard) Check(ctx context.Context, tool string, params map[string]any, reviewCtx ...ReviewContext) *GuardResult {
 	risk := g.assessRisk(tool, params)
 
-	if blocked, reason := g.checkWorkspace(tool, params); blocked {
-		g.audit(ctx, tool, params, risk, "workspace_reject", reason)
+	if blocked, reason, auditReason := g.checkWorkspace(ctx, tool, params); blocked {
+		g.audit(ctx, tool, params, risk, "workspace_reject", auditReason)
 		return &GuardResult{Decision: Reject, Reason: reason, Risk: risk, Source: "rule", Audit: "workspace_reject"}
 	}
 	if blocked, reason := g.checkBlocked(tool, params); blocked {
 		g.audit(ctx, tool, params, risk, "blocked", reason)
 		return &GuardResult{Decision: Reject, Reason: reason, Risk: risk, Source: "rule", Audit: "blocked"}
+	}
+	if isDynamicExecWorkspaceExpression(tool, params) {
+		const reason = "workspace_dynamic_expression"
+		g.audit(ctx, tool, params, risk, reason, reason)
+		return &GuardResult{Decision: Confirm, Reason: reason, Risk: risk, Source: "rule", Audit: reason}
 	}
 	if allowed, reason := g.checkAllowed(tool, params); allowed {
 		if reason == "" {

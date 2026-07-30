@@ -3,12 +3,13 @@ package builtin
 import (
 	"context"
 	"fmt"
-	"github.com/alanchenchen/suna/internal/tools"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/alanchenchen/suna/internal/tools"
 )
 
 const (
@@ -44,15 +45,10 @@ func (Exec) Execute(ctx context.Context, params map[string]any) tools.Result {
 		timeout = time.Duration(int(t)) * time.Second
 	}
 
-	cwd, _ := params["cwd"].(string)
-	if cwd == "" {
-		if execCtx, ok := tools.ExecutionContextFrom(ctx); ok && execCtx.CWD != "" {
-			cwd = execCtx.CWD
-		} else {
-			cwd, _ = os.Getwd()
-		}
-	} else {
-		cwd = expandPathWithContext(ctx, cwd)
+	cwdParam, _ := params["cwd"].(string)
+	cwd, err := tools.EffectiveCWD(ctx, cwdParam)
+	if err != nil {
+		return tools.ErrorResult(fmt.Sprintf("resolve working directory: %s", err))
 	}
 
 	shell := "auto"
@@ -91,7 +87,7 @@ func (Exec) Execute(ctx context.Context, params map[string]any) tools.Result {
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 
 	outStr := stdout.String()
 	errStr := stderr.String()

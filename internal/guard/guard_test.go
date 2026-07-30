@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alanchenchen/suna/internal/tools"
 )
 
 func TestGuardRiskLowOnlyForStrictReadOnlyExec(t *testing.T) {
@@ -228,6 +230,31 @@ func TestWorkspacePrecedesAllowedAndAuto(t *testing.T) {
 	}
 }
 
+func TestWorkspaceExecUsesExecutionContextCWD(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	g := NewGuardWithConfigModeAndWorkspace(nil, "test", ModeAuto, root, nil, nil, nil, nil)
+	ctx := tools.WithExecutionContext(context.Background(), tools.ExecutionContext{CWD: root})
+
+	inside := g.Check(ctx, "exec", map[string]any{"command": "pwd"})
+	if inside.Decision == Reject || inside.Audit == "workspace_reject" {
+		t.Fatalf("inside execution context decision/audit = %s/%q, want non-workspace rejection", inside.Decision, inside.Audit)
+	}
+	outsideCWD := g.Check(ctx, "exec", map[string]any{"command": "pwd", "cwd": outside})
+	if outsideCWD.Decision != Reject || outsideCWD.Audit != "workspace_reject" {
+		t.Fatalf("outside cwd decision/audit = %s/%q, want reject/workspace_reject", outsideCWD.Decision, outsideCWD.Audit)
+	}
+}
+
+func TestWorkspaceExecDoesNotTreatOrdinarySlashArgumentAsPath(t *testing.T) {
+	root := t.TempDir()
+	g := NewGuardWithConfigModeAndWorkspace(nil, "test", ModeAuto, root, nil, nil, nil, nil)
+	result := g.Check(context.Background(), "exec", map[string]any{"command": "printf '%s' namespace/resource", "cwd": root})
+	if result.Audit == "workspace_reject" {
+		t.Fatalf("ordinary slash argument audit = %q, want normal Guard flow", result.Audit)
+	}
+}
+
 func TestWorkspaceBlocksExecCWDAndCommandPaths(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
@@ -244,12 +271,19 @@ func TestWorkspaceBlocksExecCWDAndCommandPaths(t *testing.T) {
 		{name: "cd outside", params: map[string]any{"command": "cd " + outside, "cwd": root}, reasonPart: "outside workspace"},
 		{name: "cd parent", params: map[string]any{"command": "cd ..", "cwd": root}, reasonPart: "outside workspace"},
 		{name: "quoted interpreter path", params: map[string]any{"command": `python -c 'print(open("/etc/passwd").read())'`, "cwd": root}, reasonPart: "outside workspace"},
-		{name: "shell expansion", params: map[string]any{"command": `cat "$HOME/.ssh/id_rsa"`, "cwd": root}, reasonPart: "cannot be safely checked"},
+		{name: "dynamic shell expression", params: map[string]any{"command": `cat "$HOME/.ssh/id_rsa"`, "cwd": root}, reasonPart: "workspace_dynamic_expression"},
+		{name: "dynamic positional expression", params: map[string]any{"command": `printf '%s' "$1"`, "cwd": root}, reasonPart: "workspace_dynamic_expression"},
 	}
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			result := g.Check(context.Background(), "exec", tt.params)
+			if tt.reasonPart == "workspace_dynamic_expression" {
+				if result.Decision != Confirm || result.Audit != tt.reasonPart {
+					t.Fatalf("exec %s decision/audit = %s/%q, want confirm/%q", tt.name, result.Decision, result.Audit, tt.reasonPart)
+				}
+				return
+			}
 			if result.Decision != Reject || !strings.Contains(result.Reason, tt.reasonPart) {
 				t.Fatalf("exec %s decision/reason = %s/%q, want reject with %q", tt.name, result.Decision, result.Reason, tt.reasonPart)
 			}
