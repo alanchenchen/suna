@@ -10,6 +10,12 @@ Suna 不只是“又一个终端聊天 Agent”。它更像一个运行在本地
 
 内置 TUI 是默认客户端。相同 daemon 可通过 `suna serve --json` 获取 TCP JSON-RPC/NDJSON endpoint，接给第三方桌面端、IDE 插件、本地 Web UI 或脚本。
 
+<p align="center">
+  <img src="docs/assets/tui-overview.png" alt="Suna 终端 UI：Agent 对话、工具活动与用量状态" width="74%" />
+</p>
+
+> 真实 Suna 会话：流式输出、工具活动、Guard 决策和用量状态。
+
 > Suna 目前处于快速开发状态。如果升级或使用过程中遇到功能失效，建议先升级到最新版本，并在备份必要数据后清理 Suna 数据目录中的 `.db` 文件。
 
 ## 为什么是 Suna？
@@ -25,6 +31,12 @@ Suna 不只是“又一个终端聊天 Agent”。它更像一个运行在本地
 - 子任务结束后返回状态、结果、错误和副作用披露，由主 Agent 汇总决策。
 
 这样 Subtask 不是失控的“第二个 Agent”，而是可解释、可审查、可限制的委派单元。
+
+<p align="center">
+  <img src="docs/assets/tui-subtasks.png" alt="Suna 终端 UI：隔离 Subtask 时间线" width="66%" />
+</p>
+
+> 隔离 Subtask 的任务时间线、工具活动和结果会清晰回流主会话。
 
 ### 意图感知 Guard
 

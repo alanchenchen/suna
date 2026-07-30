@@ -8,6 +8,12 @@ Suna is not just another terminal chat agent. It is a local agent runtime where 
 
 The built-in TUI is the default client. Third-party desktop apps, IDE extensions, local web UIs, or scripts can connect to the same daemon through TCP JSON-RPC/NDJSON after `suna serve --json`.
 
+<p align="center">
+  <img src="docs/assets/tui-overview.png" alt="Suna terminal UI showing an agent conversation, tool activity, and usage status" width="74%" />
+</p>
+
+> A real Suna session with streaming output, tool activity, Guard decisions, and usage status.
+
 > Suna is under active development. If an upgrade breaks local state, update to the latest release first and back up important data before removing `.db` files under the Suna data directory.
 
 ## Why Suna?
@@ -23,6 +29,12 @@ Most terminal agents run one model with one shared context and one shared toolse
 - return structured status, result text, error, and side-effect disclosure to the main agent.
 
 This makes delegation explainable and auditable instead of becoming an uncontrolled second agent.
+
+<p align="center">
+  <img src="docs/assets/tui-subtasks.png" alt="Suna terminal UI showing an isolated subtask timeline" width="66%" />
+</p>
+
+> An isolated subtask keeps its task timeline, tool activity, and result visible to the main session.
 
 ### Intent-aware Guard
 
