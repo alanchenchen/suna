@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/alanchenchen/suna/internal/config"
 )
 
 const (
@@ -30,9 +32,9 @@ type Logger struct {
 func Init(dataDir string) {
 	defaultLogger.mu.Lock()
 	defer defaultLogger.mu.Unlock()
-	defaultLogger.dir = filepath.Join(dataDir, "logs")
+	defaultLogger.dir = config.DataDirLogsDir(dataDir)
 	_ = os.MkdirAll(defaultLogger.dir, 0755)
-	file, err := os.OpenFile(filepath.Join(defaultLogger.dir, "app.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	file, err := os.OpenFile(config.DataDirLogPath(dataDir), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err == nil {
 		log.SetOutput(file)
 		log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)

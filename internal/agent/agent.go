@@ -99,7 +99,7 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 	if err := mcpRuntime.Start(context.Background()); err != nil {
 		return nil, fmt.Errorf("init mcp: %w", err)
 	}
-	toolManager.RegisterProvider(mcptools.NewProvider(mcpRuntime, cfg.AttachmentsDir()))
+	toolManager.RegisterProvider(mcptools.NewProvider(mcpRuntime))
 	prompts, err := prompt.New()
 	if err != nil {
 		return nil, fmt.Errorf("init prompts: %w", err)

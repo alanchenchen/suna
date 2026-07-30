@@ -237,7 +237,7 @@ api_key = "<API_KEY>"
 | `mcp.servers.<name>.command` | string | stdio 必填 | 空 | stdio server 启动命令，不经过 shell。 |
 | `mcp.servers.<name>.args` | string[] | 否 | 空 | stdio server 参数。 |
 | `mcp.servers.<name>.env` | table | 否 | 空 | 额外传给子进程的环境变量；当前不展开 `${VAR}`。 |
-| `mcp.servers.<name>.cwd` | string | 否 | 空 | 子进程工作目录。 |
+| `mcp.servers.<name>.cwd` | string | 否 | `~/.suna/mcp-workdirs/<server>/` | 子进程工作目录。显式设置时使用配置目录；省略时使用按 server ID 稳定复用的默认目录，避免继承 daemon 的启动目录。该目录只是进程初始 CWD，不是 OS sandbox。 |
 | `mcp.servers.<name>.timeout_seconds` | int | 否 | `30` | initialize、tools/list、tools/call 的超时。 |
 | `mcp.servers.<name>.url` | string | 否 | 空 | 远程 transport 预留字段；当前不用于实际连接。 |
 | `mcp.servers.<name>.headers` | table | 否 | 空 | 远程 transport 预留字段；当前不用于实际连接。 |

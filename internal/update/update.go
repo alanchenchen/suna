@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/version"
 )
 
@@ -462,16 +463,9 @@ func replaceBinary(target, source string) error {
 
 func updateCacheRoot(dataDir string) string {
 	if strings.TrimSpace(dataDir) == "" {
-		dataDir = filepath.Join(homeDir(), ".suna")
+		dataDir = config.DefaultDataDir()
 	}
-	return filepath.Join(dataDir, "update")
-}
-
-func homeDir() string {
-	if home, err := os.UserHomeDir(); err == nil {
-		return home
-	}
-	return "."
+	return config.DataDirUpdateDir(dataDir)
 }
 
 func shouldUpdate(current, latest string) bool {

@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -20,10 +20,9 @@ import (
 const prefix = "mcp__"
 
 type Provider struct {
-	runtime       *mcp.Runtime
-	attachmentDir string
-	mu            sync.RWMutex
-	nameMap       map[string]toolRef
+	runtime *mcp.Runtime
+	mu      sync.RWMutex
+	nameMap map[string]toolRef
 }
 
 type toolRef struct {
@@ -31,8 +30,8 @@ type toolRef struct {
 	Tool   string
 }
 
-func NewProvider(runtime *mcp.Runtime, attachmentDir string) *Provider {
-	return &Provider{runtime: runtime, attachmentDir: attachmentDir, nameMap: map[string]toolRef{}}
+func NewProvider(runtime *mcp.Runtime) *Provider {
+	return &Provider{runtime: runtime, nameMap: map[string]toolRef{}}
 }
 
 func (p *Provider) Specs(ctx context.Context) ([]tools.Spec, error) {
@@ -77,7 +76,7 @@ func (p *Provider) Execute(ctx context.Context, call tools.Call) (tools.Result, 
 	if err != nil {
 		return tools.ErrorResult(err.Error()), true
 	}
-	content := p.formatResult(ref.Server, ref.Tool, res)
+	content := p.formatResult(ctx, ref.Server, ref.Tool, res)
 	if res.IsError {
 		return tools.Result{Content: content, Error: content, IsError: true}, true
 	}
@@ -132,7 +131,7 @@ func sanitizeName(s string) string {
 	return s
 }
 
-func (p *Provider) formatResult(server, toolName string, res mcp.CallResult) string {
+func (p *Provider) formatResult(ctx context.Context, server, toolName string, res mcp.CallResult) string {
 	var parts []string
 	for _, item := range res.Content {
 		switch item.Type {
@@ -141,10 +140,10 @@ func (p *Provider) formatResult(server, toolName string, res mcp.CallResult) str
 				parts = append(parts, item.Text)
 			}
 		case "image":
-			parts = append(parts, p.saveBinaryContent(server, toolName, item, "image"))
+			parts = append(parts, p.saveBinaryContent(ctx, server, toolName, item, "image"))
 		default:
 			if item.Data != "" {
-				parts = append(parts, p.saveBinaryContent(server, toolName, item, item.Type))
+				parts = append(parts, p.saveBinaryContent(ctx, server, toolName, item, item.Type))
 			} else if item.Text != "" {
 				parts = append(parts, item.Text)
 			} else {
@@ -158,32 +157,66 @@ func (p *Provider) formatResult(server, toolName string, res mcp.CallResult) str
 	return strings.Join(parts, "\n")
 }
 
-func (p *Provider) saveBinaryContent(server, toolName string, item mcp.Content, kind string) string {
-	if p.attachmentDir == "" || item.Data == "" {
+func (p *Provider) saveBinaryContent(ctx context.Context, server, toolName string, item mcp.Content, kind string) string {
+	if item.Data == "" {
+		return fmt.Sprintf("[MCP %s content omitted: %s]", kind, item.MimeType)
+	}
+	// 附件目录只能来自当前 session，禁止无上下文时使用全局兜底目录。
+	if ctx == nil {
+		return fmt.Sprintf("[MCP %s content omitted: %s]", kind, item.MimeType)
+	}
+	execCtx, ok := tools.ExecutionContextFrom(ctx)
+	if !ok || strings.TrimSpace(execCtx.AttachmentDir) == "" {
 		return fmt.Sprintf("[MCP %s content omitted: %s]", kind, item.MimeType)
 	}
 	data, err := base64.StdEncoding.DecodeString(item.Data)
 	if err != nil {
 		return fmt.Sprintf("[MCP %s content decode failed: %v]", kind, err)
 	}
-	if err := os.MkdirAll(p.attachmentDir, 0755); err != nil {
+	attachmentDir := execCtx.AttachmentDir
+	if err := os.MkdirAll(attachmentDir, 0755); err != nil {
 		return fmt.Sprintf("[MCP %s content save failed: %v]", kind, err)
 	}
-	name := item.Name
-	if name == "" {
-		name = fmt.Sprintf("mcp-%s-%s-%d-%s%s", sanitizeName(server), sanitizeName(toolName), time.Now().UnixNano(), uuid.New().String()[:8], extFromMime(item.MimeType))
+	// MCP 提供的 name 仅作为可读标签，不能影响目录或覆盖已有文件。
+	name := fmt.Sprintf("mcp-%s-%s-%s-%s%s", attachmentLabel(server), attachmentLabel(toolName), attachmentLabel(item.Name), uuid.New().String(), extFromMime(item.MimeType))
+	path := filepath.Join(attachmentDir, name)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return fmt.Sprintf("[MCP %s content save failed: %v]", kind, err)
 	}
-	path := filepath.Join(p.attachmentDir, filepath.Base(name))
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	written, err := file.Write(data)
+	if err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return fmt.Sprintf("[MCP %s content save failed: %v]", kind, err)
+	}
+	if written != len(data) {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return fmt.Sprintf("[MCP %s content save failed: %v]", kind, io.ErrShortWrite)
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
 		return fmt.Sprintf("[MCP %s content save failed: %v]", kind, err)
 	}
 	return fmt.Sprintf("[MCP %s content saved: %s (%s, %d bytes)]", kind, path, item.MimeType, len(data))
+}
+
+func attachmentLabel(value string) string {
+	const maxBytes = 48
+	value = sanitizeName(value)
+	if len(value) > maxBytes {
+		value = value[:maxBytes]
+	}
+	return value
 }
 
 func extFromMime(mime string) string {
 	switch mime {
 	case "image/jpeg":
 		return ".jpg"
+	case "image/png":
+		return ".png"
 	case "image/webp":
 		return ".webp"
 	case "image/gif":

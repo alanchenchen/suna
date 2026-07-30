@@ -273,6 +273,7 @@ Default data directory:
 ~/.suna/memory.db          # memory, session state, usage
 ~/.suna/skills/            # Skills
 ~/.suna/attachments/       # images and binary attachments
+~/.suna/mcp-workdirs/      # default working directories for stdio MCP servers
 ~/.suna/logs/app.log       # logs
 ```
 

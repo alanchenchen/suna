@@ -25,6 +25,9 @@ func DataDirDBPath(dataDir string) string          { return filepath.Join(dataDi
 func DataDirPIDPath(dataDir string) string         { return filepath.Join(dataDir, "sunad.pid") }
 func DataDirSocketPath(dataDir string) string      { return filepath.Join(dataDir, "sunad.sock") }
 func DataDirAttachmentsDir(dataDir string) string  { return filepath.Join(dataDir, "attachments") }
+func DataDirMCPWorkdirsDir(dataDir string) string  { return filepath.Join(dataDir, "mcp-workdirs") }
+func DataDirDebugMemoryDir(dataDir string) string  { return filepath.Join(dataDir, "debug", "memory") }
+func DataDirUpdateDir(dataDir string) string       { return filepath.Join(dataDir, "update") }
 
 func DefaultConfigPath() string      { return DataDirConfigPath(DefaultDataDir()) }
 func DefaultCredentialsPath() string { return DataDirCredentialsPath(DefaultDataDir()) }
@@ -35,6 +38,8 @@ func DefaultDBPath() string          { return DataDirDBPath(DefaultDataDir()) }
 func DefaultPIDPath() string         { return DataDirPIDPath(DefaultDataDir()) }
 func DefaultSocketPath() string      { return DataDirSocketPath(DefaultDataDir()) }
 func DefaultAttachmentsDir() string  { return DataDirAttachmentsDir(DefaultDataDir()) }
+func DefaultMCPWorkdirsDir() string  { return DataDirMCPWorkdirsDir(DefaultDataDir()) }
+func DefaultDebugMemoryDir() string  { return DataDirDebugMemoryDir(DefaultDataDir()) }
 
 func (c *Config) DBPath() string          { return DataDirDBPath(c.DataDir) }
 func (c *Config) ConfigPath() string      { return DataDirConfigPath(c.DataDir) }

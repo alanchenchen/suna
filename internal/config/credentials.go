@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -62,7 +61,7 @@ func LoadCredentials(cfg *Config) error {
 }
 
 func readCredentials(dataDir string) (credentialsFile, error) {
-	credPath := filepath.Join(dataDir, "credentials.toml")
+	credPath := DataDirCredentialsPath(dataDir)
 	var creds credentialsFile
 	if _, err := toml.DecodeFile(credPath, &creds); err != nil {
 		return nil, err
@@ -81,7 +80,7 @@ func writeCredentials(dataDir string, creds credentialsFile) error {
 		buf.WriteString(fmt.Sprintf("[%q]\n", ref))
 		buf.WriteString(fmt.Sprintf("api_key = %q\n\n", creds[ref].APIKey))
 	}
-	return os.WriteFile(filepath.Join(dataDir, "credentials.toml"), []byte(buf.String()), 0600)
+	return os.WriteFile(DataDirCredentialsPath(dataDir), []byte(buf.String()), 0600)
 }
 
 func (c *Config) ValidateAPIKeys() error {

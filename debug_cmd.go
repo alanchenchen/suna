@@ -133,7 +133,7 @@ func debugMemory(args []string, deps debugMemoryDeps) error {
 	}
 
 	// 纳秒时间戳保证并发或连续启动的诊断会话不会写入同一份报告。
-	dir := filepath.Join(config.DefaultDataDir(), "debug", "memory", deps.now().Format("20060102-150405.000000000"))
+	dir := filepath.Join(config.DefaultDebugMemoryDir(), deps.now().Format("20060102-150405.000000000"))
 	if err := deps.mkdir(dir, 0755); err != nil {
 		return fmt.Errorf("create report directory: %w", err)
 	}

@@ -281,6 +281,7 @@ Workspace 是可选目录边界：设置后，本地文件和命令操作会限�
 ~/.suna/memory.db          # 记忆、会话、用量等本地数据
 ~/.suna/skills/            # Skill 目录
 ~/.suna/attachments/       # 图片和二进制附件
+~/.suna/mcp-workdirs/      # stdio MCP server 的默认工作目录
 ~/.suna/logs/app.log       # 日志
 ```
 

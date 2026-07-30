@@ -2,7 +2,10 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -11,14 +14,21 @@ import (
 )
 
 type Runtime struct {
-	cfg     config.MCPConfig
-	mu      sync.RWMutex
-	clients map[string]*Client
-	errors  map[string]string
+	cfg config.MCPConfig
+	// defaultWorkdirsDir 是未配置 CWD 的 MCP server 工作目录根路径。
+	defaultWorkdirsDir string
+	mu                 sync.RWMutex
+	clients            map[string]*Client
+	errors             map[string]string
 }
 
 func NewRuntime(cfg config.MCPConfig) *Runtime {
-	return &Runtime{cfg: cfg, clients: map[string]*Client{}, errors: map[string]string{}}
+	return &Runtime{
+		cfg:                cfg,
+		defaultWorkdirsDir: config.DefaultMCPWorkdirsDir(),
+		clients:            map[string]*Client{},
+		errors:             map[string]string{},
+	}
 }
 
 func (r *Runtime) Start(ctx context.Context) error {
@@ -248,6 +258,13 @@ func (r *Runtime) startServer(ctx context.Context, name string, sc config.MCPSer
 	if sc.Transport != TransportStdio {
 		return fmt.Errorf("mcp server %q: unsupported transport %q", name, sc.Transport)
 	}
+	if strings.TrimSpace(sc.CWD) == "" {
+		workdir, err := r.defaultServerWorkdir(name)
+		if err != nil {
+			return fmt.Errorf("mcp server %q: prepare workdir: %w", name, err)
+		}
+		sc.CWD = workdir
+	}
 	client, err := NewClient(name, sc)
 	if err != nil {
 		return fmt.Errorf("mcp server %q: %w", name, err)
@@ -269,6 +286,40 @@ func (r *Runtime) startServer(ctx context.Context, name string, sc config.MCPSer
 		old.Close()
 	}
 	return nil
+}
+
+func (r *Runtime) defaultServerWorkdir(name string) (string, error) {
+	slug := safeServerSlug(name)
+	hash := sha256.Sum256([]byte(name))
+	dir := filepath.Join(r.defaultWorkdirsDir, fmt.Sprintf("%s-%x", slug, hash[:6]))
+	// 目录只在确实启动未配置 CWD 的 server 时创建，并限制为 owner-only。
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(dir, 0700); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func safeServerSlug(name string) string {
+	const maxBytes = 48
+	var b strings.Builder
+	for _, c := range name {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			b.WriteRune(c)
+		} else if b.Len() > 0 {
+			b.WriteByte('-')
+		}
+		if b.Len() >= maxBytes {
+			break
+		}
+	}
+	slug := strings.Trim(b.String(), "-")
+	if slug == "" {
+		return "server"
+	}
+	return slug
 }
 
 func (r *Runtime) setError(name string, err error) {
