@@ -202,6 +202,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case spinner.TickMsg:
 		if t.chat.Loading || t.chat.Compacting {
+			t.refreshRunRetryStatus(time.Now())
 			var cmd tea.Cmd
 			t.chat.Spinner, cmd = t.chat.Spinner.Update(msg)
 			// spinner 字符已用 spinnerPlaceholder 占位，viewChat() 最终输出时替换；

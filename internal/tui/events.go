@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -198,8 +199,9 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 	}
 	switch p.State {
 	case protocol.AgentRunRetrying:
-		t.chat.SetStatusLabel(t.formatRunRetryStatus(p), time.Now())
+		t.setRunRetryStatus(p, time.Now())
 	case protocol.AgentRunFailed, protocol.AgentRunCancelled:
+		t.clearRunRetryStatus()
 		t.currentRunCanControl = false
 		t.finishStreamingMessages()
 		if p.State == protocol.AgentRunCancelled {
@@ -210,11 +212,13 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 		t.chat.ResumeAvailable = p.ResumeAvailable
 		t.resetPhase()
 	case protocol.AgentRunDone:
+		t.clearRunRetryStatus()
 		t.currentRunCanControl = false
 		t.finishStreamingMessages()
 		t.chat.ResumeAvailable = false
 		t.resetPhase()
 	case protocol.AgentRunRunning:
+		t.clearRunRetryStatus()
 		if p.Phase == protocol.AgentRunPhaseModel {
 			t.startLLMWait()
 			t.chat.SetStatusLabel(t.tr("status.waiting_model"), time.Now())
@@ -222,10 +226,33 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 	}
 }
 
-func (t *TUI) formatRunRetryStatus(p protocol.AgentRunParams) string {
-	if p.Attempt > 0 && p.MaxAttempts > 0 && p.DelayMs > 0 {
-		seconds := max(1, int((p.DelayMs+999)/1000))
-		return t.i18n.Tf("status.model_retrying", seconds, p.Attempt, p.MaxAttempts)
+func (t *TUI) setRunRetryStatus(p protocol.AgentRunParams, now time.Time) {
+	t.retryAttempt = p.Attempt
+	t.retryMaxAttempts = p.MaxAttempts
+	if p.DelayMs > 0 {
+		t.retryDeadline = now.Add(time.Duration(p.DelayMs) * time.Millisecond)
+	} else {
+		t.retryDeadline = time.Time{}
+	}
+	t.chat.SetStatusLabel(t.formatRunRetryStatus(now), now)
+}
+
+func (t *TUI) clearRunRetryStatus() {
+	t.retryDeadline = time.Time{}
+	t.retryAttempt = 0
+	t.retryMaxAttempts = 0
+}
+
+func (t *TUI) refreshRunRetryStatus(now time.Time) {
+	if !t.retryDeadline.IsZero() {
+		t.chat.StatusLabel = t.formatRunRetryStatus(now)
+	}
+}
+
+func (t *TUI) formatRunRetryStatus(now time.Time) string {
+	if !t.retryDeadline.IsZero() && t.retryAttempt > 0 && t.retryMaxAttempts > 0 {
+		remaining := max(0, int(math.Ceil(t.retryDeadline.Sub(now).Seconds())))
+		return t.i18n.Tf("status.model_retrying", remaining, t.retryAttempt, t.retryMaxAttempts)
 	}
 	return t.tr("status.model_retrying_simple")
 }
