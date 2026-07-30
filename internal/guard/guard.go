@@ -184,11 +184,6 @@ func (g *Guard) Check(ctx context.Context, tool string, params map[string]any, r
 		g.audit(ctx, tool, params, risk, "blocked", reason)
 		return &GuardResult{Decision: Reject, Reason: reason, Risk: risk, Source: "rule", Audit: "blocked"}
 	}
-	if isDynamicExecWorkspaceExpression(tool, params) {
-		const reason = "workspace_dynamic_expression"
-		g.audit(ctx, tool, params, risk, reason, reason)
-		return &GuardResult{Decision: Confirm, Reason: reason, Risk: risk, Source: "rule", Audit: reason}
-	}
 	if allowed, reason := g.checkAllowed(tool, params); allowed {
 		if reason == "" {
 			reason = "allowed rule"

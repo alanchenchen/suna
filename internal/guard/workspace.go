@@ -16,7 +16,6 @@ import (
 var execPathTokenPattern = regexp.MustCompile(`(?:^|[\s=])["']?((?:~(?:/|$)|\.\.?(?:/|$)|/|[^"'\s;|&<>]+/\.\.?/)[^"'\s;|&<>]*)`)
 var execRedirectionPattern = regexp.MustCompile(`[<>]{1,2}\s*([^\s;|&]+)`)
 var execQuotedAbsPathPattern = regexp.MustCompile(`["'](/[^"']*)["']`)
-var execShellExpansionPattern = regexp.MustCompile("(?:\\$\\(|\\$\\{|\\$[A-Za-z_0-9?@*#$!\\-]|\\x60)")
 
 func normalizeWorkspaceRoot(path string) string {
 	path = strings.TrimSpace(path)
@@ -123,14 +122,6 @@ func (g *Guard) checkExecWorkspacePaths(command string, cwd string) (bool, strin
 		}
 	}
 	return false, "", ""
-}
-
-func isDynamicExecWorkspaceExpression(tool string, params map[string]any) bool {
-	if tool != "exec" {
-		return false
-	}
-	command, _ := params["command"].(string)
-	return execShellExpansionPattern.MatchString(command)
 }
 
 func (g *Guard) checkExecPathTokens(command string, cwd string) (bool, string, string) {

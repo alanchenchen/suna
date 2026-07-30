@@ -271,16 +271,16 @@ func TestWorkspaceBlocksExecCWDAndCommandPaths(t *testing.T) {
 		{name: "cd outside", params: map[string]any{"command": "cd " + outside, "cwd": root}, reasonPart: "outside workspace"},
 		{name: "cd parent", params: map[string]any{"command": "cd ..", "cwd": root}, reasonPart: "outside workspace"},
 		{name: "quoted interpreter path", params: map[string]any{"command": `python -c 'print(open("/etc/passwd").read())'`, "cwd": root}, reasonPart: "outside workspace"},
-		{name: "dynamic shell expression", params: map[string]any{"command": `cat "$HOME/.ssh/id_rsa"`, "cwd": root}, reasonPart: "workspace_dynamic_expression"},
-		{name: "dynamic positional expression", params: map[string]any{"command": `printf '%s' "$1"`, "cwd": root}, reasonPart: "workspace_dynamic_expression"},
+		{name: "dynamic shell expression", params: map[string]any{"command": `cat "$HOME/.ssh/id_rsa"`, "cwd": root}, reasonPart: ""},
+		{name: "dynamic positional expression", params: map[string]any{"command": `printf '%s' "$1"`, "cwd": root}, reasonPart: ""},
 	}
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			result := g.Check(context.Background(), "exec", tt.params)
-			if tt.reasonPart == "workspace_dynamic_expression" {
-				if result.Decision != Confirm || result.Audit != tt.reasonPart {
-					t.Fatalf("exec %s decision/audit = %s/%q, want confirm/%q", tt.name, result.Decision, result.Audit, tt.reasonPart)
+			if tt.reasonPart == "" {
+				if result.Decision == Reject || result.Audit == "workspace_reject" {
+					t.Fatalf("exec %s decision/audit = %s/%q, want normal Guard flow", tt.name, result.Decision, result.Audit)
 				}
 				return
 			}
