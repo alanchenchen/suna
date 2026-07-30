@@ -308,7 +308,7 @@ func subtaskParamLabel(te *toolEntry, key string) string {
 	if !ok {
 		return ""
 	}
-	return strings.TrimSpace(fmt.Sprintf("%v", value))
+	return strings.Join(strings.Fields(fmt.Sprintf("%v", value)), " ")
 }
 
 func (t *TUI) subtaskStatusCounts(ids []string) (done, running, failed int) {

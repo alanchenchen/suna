@@ -72,6 +72,20 @@ func TestSubtaskPanelKeyboardAndToolDetail(t *testing.T) {
 	}
 }
 
+func TestSubtaskTimelineKeepsMultilineIntentOnOneRow(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 28, mode: uipage.Chat}
+	tui.initChatComponents()
+	child := &toolEntry{Intent: "Exec python3 - <<'PY'\nimport glob\nfor path in glob.glob('*'):\n    print(path)", Status: toolRunning}
+
+	label := tui.subtaskToolTimelineLabel(child, 42)
+	if strings.Contains(label, "\n") {
+		t.Fatalf("subtaskToolTimelineLabel() = %q, want one line", label)
+	}
+	if !strings.Contains(label, "Exec python3") {
+		t.Fatalf("subtaskToolTimelineLabel() = %q, want intent prefix", label)
+	}
+}
+
 func TestSubtaskBlockUsesAvailableWidthForRowSummary(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 180, height: 30, mode: uipage.Chat}
 	tui.initChatComponents()

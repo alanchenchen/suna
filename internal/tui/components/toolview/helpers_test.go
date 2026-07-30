@@ -67,3 +67,15 @@ func TestSemanticSummaryReadFileStillCompactsPath(t *testing.T) {
 		t.Fatalf("SemanticSummary(readfile) = %q, want compact path suffix", got)
 	}
 }
+
+func TestPlainIntentLabelFlattensMultilineIntent(t *testing.T) {
+	entry := &Entry{Intent: "Exec python3 - <<'PY'\nimport glob\nfor path in glob.glob('*'):"}
+
+	got := PlainIntentLabel(entry)
+	if strings.Contains(got, "\n") {
+		t.Fatalf("PlainIntentLabel() = %q, want one line", got)
+	}
+	if got != "Exec python3 - <<'PY' import glob for path in glob.glob('*'):" {
+		t.Fatalf("PlainIntentLabel() = %q", got)
+	}
+}

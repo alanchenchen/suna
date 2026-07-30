@@ -259,13 +259,17 @@ func PlainIntentLabel(te *Entry) string {
 	if te == nil {
 		return ""
 	}
-	if intent := strings.TrimSpace(te.Intent); intent != "" {
+	if intent := compactLabelText(te.Intent); intent != "" {
 		return intent
 	}
-	if strings.TrimSpace(te.Summary) != "" {
-		return te.Name + " " + strings.TrimSpace(te.Summary)
+	if summary := compactLabelText(te.Summary); summary != "" {
+		return te.Name + " " + summary
 	}
 	return te.Name
+}
+
+func compactLabelText(value string) string {
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func ShortToolError(result string) string {
