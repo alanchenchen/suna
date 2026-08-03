@@ -99,7 +99,7 @@ func ReasoningOptions(family, protocol string) []ReasoningOption {
 	switch family {
 	case "gpt":
 		var out []ReasoningOption
-		for _, effort := range []string{"none", "minimal", "low", "medium", "high", "xhigh"} {
+		for _, effort := range []string{"none", "low", "medium", "high", "xhigh", "max"} {
 			label := strings.ToUpper(effort[:1]) + effort[1:]
 			out = append(out, ReasoningOption{Family: "GPT", Label: label, Reasoning: GPTReasoning(protocol, effort)})
 		}
