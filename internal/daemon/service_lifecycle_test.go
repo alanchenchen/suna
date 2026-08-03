@@ -51,6 +51,82 @@ func TestServiceClearsPendingInteractionsWhenRuntimeBecomesOrphaned(t *testing.T
 	}
 }
 
+func TestRunAgentEventsBroadcastsIdleSessionStateAfterRunCloses(t *testing.T) {
+	ctx := context.Background()
+	manager := newTestSessionManager(t)
+	snapshot, err := manager.create(ctx, "client-a", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+	if _, err := manager.attach(ctx, "client-b", snapshot.Session.ID, false); err != nil {
+		t.Fatalf("attach observer error = %v", err)
+	}
+	if _, _, err := manager.beginRun("client-a"); err != nil {
+		t.Fatalf("beginRun error = %v", err)
+	}
+
+	ownerSink := &captureEventSink{}
+	observerSink := &captureEventSink{}
+	d := &Daemon{sessions: manager, sinks: map[string]protocol.EventSink{"client-a": ownerSink, "client-b": observerSink}}
+	svc := newService(d)
+	events := make(chan agent.Event, 1)
+	events <- agent.Event{Type: agent.EventStatus, Status: agent.StatusDone}
+	close(events)
+
+	svc.runAgentEvents(ctx, "client-a", snapshot.Session.ID, manager.currentRunID(snapshot.Session.ID), "input", events, ownerSink)
+
+	for _, sink := range []*captureEventSink{ownerSink, observerSink} {
+		foundIdle := false
+		for _, event := range sink.events {
+			if event.Method != protocol.NotifySessionUpdated {
+				continue
+			}
+			params, ok := event.Params.(protocol.SessionStateParams)
+			if ok && params.Session.Status == protocol.SessionStatusIdle && params.Session.ClientCount == 2 {
+				foundIdle = true
+				break
+			}
+		}
+		if !foundIdle {
+			t.Fatalf("idle session.updated not broadcast to attached client: %#v", sink.events)
+		}
+	}
+}
+
+func TestHandleCompactBroadcastsIdleSessionState(t *testing.T) {
+	ctx := context.Background()
+	manager := newTestSessionManager(t)
+	snapshot, err := manager.create(ctx, "client-a", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+	if _, err := manager.attach(ctx, "client-b", snapshot.Session.ID, false); err != nil {
+		t.Fatalf("attach observer error = %v", err)
+	}
+
+	ownerSink := &captureEventSink{}
+	observerSink := &captureEventSink{}
+	d := &Daemon{sessions: manager, sinks: map[string]protocol.EventSink{"client-a": ownerSink, "client-b": observerSink}}
+	svc := newService(d)
+	if _, err := svc.handleCompact(ctx, protocol.Request{ConnID: "client-a"}, ownerSink); err != nil {
+		t.Fatalf("compact error = %v", err)
+	}
+
+	for name, sink := range map[string]*captureEventSink{"owner": ownerSink, "observer": observerSink} {
+		foundIdle := false
+		for _, event := range sink.events {
+			params, ok := event.Params.(protocol.SessionStateParams)
+			if event.Method == protocol.NotifySessionUpdated && ok && params.Session.Status == protocol.SessionStatusIdle && params.Session.ClientCount == 2 {
+				foundIdle = true
+				break
+			}
+		}
+		if !foundIdle {
+			t.Fatalf("%s client did not receive compact idle state: %#v", name, sink.events)
+		}
+	}
+}
+
 func TestRunAgentEventsKeepsSessionBusyUntilEventStreamCloses(t *testing.T) {
 	ctx := context.Background()
 	manager := newTestSessionManager(t)
@@ -67,7 +143,7 @@ func TestRunAgentEventsKeepsSessionBusyUntilEventStreamCloses(t *testing.T) {
 	events := make(chan agent.Event)
 	done := make(chan struct{})
 	go func() {
-		svc.runAgentEvents(ctx, "client-a", snapshot.Session.ID, "input", events, &captureEventSink{})
+		svc.runAgentEvents(ctx, "client-a", snapshot.Session.ID, "run-1", "input", events, &captureEventSink{})
 		close(done)
 	}()
 

@@ -33,6 +33,7 @@ type sessionRuntime struct {
 	status      sessionStatus
 	clients     map[string]bool
 	runOwner    string
+	runID       string
 	phase       protocol.AgentRunPhase
 	assistant   strings.Builder
 	reasoning   strings.Builder
@@ -554,6 +555,7 @@ func (m *sessionManager) beginRun(connID string) (*sessionRuntime, string, error
 		return nil, "", fmt.Errorf("session_busy")
 	}
 	rt.runOwner = connID
+	rt.runID = uuid.NewString()
 	m.invalidateRuntimeUnloadNoLock(id)
 	rt.phase = protocol.AgentRunPhaseModel
 	rt.status = sessionRunning
@@ -571,6 +573,15 @@ func (m *sessionManager) finishStateOp(sessionID string) {
 	}
 }
 
+func (m *sessionManager) currentRunID(sessionID string) string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if rt := m.runtime[sessionID]; rt != nil {
+		return rt.runID
+	}
+	return ""
+}
+
 func (m *sessionManager) setStatus(sessionID string, status sessionStatus) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -578,6 +589,7 @@ func (m *sessionManager) setStatus(sessionID string, status sessionStatus) {
 		rt.status = status
 		if status == sessionIdle {
 			rt.runOwner = ""
+			rt.runID = ""
 			rt.waitingType = ""
 			rt.phase = ""
 			rt.assistant.Reset()
@@ -662,7 +674,7 @@ func (m *sessionManager) snapshotForConn(connID string, meta memory.SessionMeta,
 	}
 	m.mu.RLock()
 	if rt != nil && rt.status != sessionIdle {
-		out.CurrentRun = &protocol.CurrentRunView{Status: protocol.SessionStatus(rt.status), Phase: rt.phase, AssistantBuffer: rt.assistant.String(), ReasoningBuffer: rt.reasoning.String(), WaitingType: rt.waitingType, CanControl: rt.runOwner != "" && rt.runOwner == connID}
+		out.CurrentRun = &protocol.CurrentRunView{RunID: rt.runID, Status: protocol.SessionStatus(rt.status), Phase: rt.phase, AssistantBuffer: rt.assistant.String(), ReasoningBuffer: rt.reasoning.String(), WaitingType: rt.waitingType, CanControl: rt.runOwner != "" && rt.runOwner == connID}
 	}
 	m.mu.RUnlock()
 	return out

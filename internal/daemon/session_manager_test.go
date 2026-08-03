@@ -81,6 +81,9 @@ func TestSessionManagerActiveAttachReturnsCurrentRunView(t *testing.T) {
 	if joined.CurrentRun == nil {
 		t.Fatal("CurrentRun = nil, want running view")
 	}
+	if joined.CurrentRun.RunID == "" {
+		t.Fatal("CurrentRun.RunID = empty, want active run identity")
+	}
 	if got, want := joined.CurrentRun.AssistantBuffer, "partial answer"; got != want {
 		t.Fatalf("AssistantBuffer = %q, want %q", got, want)
 	}

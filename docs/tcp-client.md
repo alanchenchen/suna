@@ -200,7 +200,7 @@ TCP client 连接后，必须先发送：
 {"session_id":"SESSION_ID","require_active":true}
 ```
 
-Attach response 中的 `current_run`、`assistant_buffer` 与 `reasoning_buffer` 用于恢复正在进行的展示。
+Attach response 中的 `current_run`、`run_id`、`assistant_buffer` 与 `reasoning_buffer` 用于恢复正在进行的展示；同一 `run_id` 已收到终态后，客户端不得被迟到快照重新切回运行态。
 
 ### 5.4 发送消息
 
@@ -219,7 +219,7 @@ Attach response 中的 `current_run`、`assistant_buffer` 与 `reasoning_buffer`
 | `agent.ask_user` | 展示提问，并由允许回复的 client 回答。 |
 | `agent.guard_confirm` | 展示安全确认，并由允许回复的 client 决策。 |
 | `agent.interaction_resolved` | 移除对应 AskUser / Guard UI。 |
-| `session.updated` | 更新 session 元数据与 active 状态。 |
+| `session.updated` | 更新 session 元数据与 active 状态；run 收束至 idle 后也会广播。 |
 
 ### 5.5 Detach
 

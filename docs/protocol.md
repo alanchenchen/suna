@@ -124,7 +124,7 @@ TCP 客户端的限制：
 | `agent.guard_confirm` | 高风险工具操作请求用户确认；带 `can_reply`。 |
 | `agent.interaction_resolved` | ask/guard 已处理，其他 UI 应关闭残留交互。 |
 | `session.user_message` | 同 session 其他客户端新增 user turn。 |
-| `session.updated` | session metadata/status/client_count 更新。 |
+| `session.updated` | session metadata/status/client_count 更新；run 收束至 idle 后也会广播，供所有 attached client 收敛运行态。 |
 | `session.compact_result` | compact running / done / error / result 状态。 |
 | `config.state` | 配置变更后的主动状态通知。 |
 | `memory.state` | memory 变更后的主动状态通知。 |
@@ -292,7 +292,7 @@ agent.run state=failed
 - `messages`：最近可见 user/assistant 文本消息。
 - `compacted`：较早上下文是否已压缩为 Session State。
 - `tool_summary`：上一轮有界工具摘要，仅供 UI 展示。
-- `current_run`：Join running session 时的轻量当前 run 视图。
+- `current_run`：Join running session 时的轻量当前 run 视图，含稳定 `run_id`；客户端应避免让同一 `run_id` 的迟到快照重新激活已终态运行。
 
 `session.attach.require_active=true` 只用于 Join Active 的陈旧 UI 防护；Resume 应传 false 或省略。
 

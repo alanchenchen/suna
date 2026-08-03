@@ -57,6 +57,8 @@ type TUI struct {
 	sessions             []protocol.SessionInfo
 	currentSession       protocol.SessionInfo
 	currentRunCanControl bool
+	// completedRunID 防止终态通知先到时，迟到的同一 run 快照重新激活 Loading。
+	completedRunID       string
 	handoffRole          string
 	resumeSessionID      string
 	welcomeActivePicker  bool

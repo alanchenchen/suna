@@ -212,6 +212,8 @@ const (
 )
 
 type CurrentRunView struct {
+	// RunID 标识当前活跃运行；客户端可用它避免迟到快照重新激活已终态的 run。
+	RunID           string         `json:"run_id,omitempty"`
 	Status          SessionStatus  `json:"status"`
 	Phase           AgentRunPhase  `json:"phase,omitempty"`
 	AssistantBuffer string         `json:"assistant_buffer,omitempty"`

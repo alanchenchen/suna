@@ -194,6 +194,9 @@ func userMessageContentFromParts(parts []protocol.MessagePart) (string, []attach
 }
 
 func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
+	if p.RunID != "" && p.RunID == t.completedRunID {
+		return
+	}
 	if p.State == protocol.AgentRunRunning {
 		t.currentRunCanControl = p.CanControl
 	}
@@ -201,6 +204,9 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 	case protocol.AgentRunRetrying:
 		t.setRunRetryStatus(p, time.Now())
 	case protocol.AgentRunFailed, protocol.AgentRunCancelled:
+		if p.RunID != "" {
+			t.completedRunID = p.RunID
+		}
 		t.clearRunRetryStatus()
 		t.currentRunCanControl = false
 		t.finishStreamingMessages()
@@ -212,6 +218,9 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 		t.chat.ResumeAvailable = p.ResumeAvailable
 		t.resetPhase()
 	case protocol.AgentRunDone:
+		if p.RunID != "" {
+			t.completedRunID = p.RunID
+		}
 		t.clearRunRetryStatus()
 		t.currentRunCanControl = false
 		t.finishStreamingMessages()
@@ -505,6 +514,11 @@ func (t *TUI) handleSessionStateNotification(p protocol.SessionStateParams) {
 	if p.Session.ID == t.currentSession.ID {
 		t.currentSession = p.Session
 		t.applyCurrentSessionModelConfig()
+		if p.Session.Status == protocol.SessionStatusIdle {
+			t.currentRunCanControl = false
+			t.clearRunRetryStatus()
+			t.resetPhase()
+		}
 	}
 	if t.mode == uipage.Welcome {
 		t.menu.SetItems(t.welcomeMenuItems(), t.width)
@@ -547,9 +561,16 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) {
 	if t.handoffRole == "" {
 		t.handoffRole = handoffRoleHost
 	}
+	if previousSessionID != p.Session.ID {
+		t.completedRunID = ""
+	}
 	t.currentSession = p.Session
 	t.applyCurrentSessionModelConfig()
-	t.currentRunCanControl = p.CurrentRun != nil && p.CurrentRun.CanControl
+	currentRun := p.CurrentRun
+	if currentRun != nil && t.completedRunID != "" && currentRun.RunID == t.completedRunID {
+		currentRun = nil
+	}
+	t.currentRunCanControl = currentRun != nil && currentRun.CanControl
 	t.chat.Messages = nil
 	t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}
 	for _, m := range p.Messages {
@@ -565,13 +586,13 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) {
 	if p.Compacted {
 		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.tr("session.restore_compacted")})
 	}
-	if p.CurrentRun != nil && p.CurrentRun.Status != protocol.SessionStatusIdle {
+	if currentRun != nil && currentRun.Status != protocol.SessionStatusIdle {
 		t.chat.StartLLMWait(time.Now())
-		if p.CurrentRun.ReasoningBuffer != "" {
-			t.appendStreamMessage("reasoning", p.CurrentRun.ReasoningBuffer)
+		if currentRun.ReasoningBuffer != "" {
+			t.appendStreamMessage("reasoning", currentRun.ReasoningBuffer)
 		}
-		if p.CurrentRun.AssistantBuffer != "" {
-			t.appendStreamMessage("assistant", p.CurrentRun.AssistantBuffer)
+		if currentRun.AssistantBuffer != "" {
+			t.appendStreamMessage("assistant", currentRun.AssistantBuffer)
 		}
 	}
 	t.trimDisplayHistoryIfNeeded()

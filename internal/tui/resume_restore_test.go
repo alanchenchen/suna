@@ -24,6 +24,46 @@ func TestSessionSwitchClearsNativeListState(t *testing.T) {
 	}
 }
 
+func TestSessionSnapshotDoesNotReactivateCompletedRun(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 80, height: 18}
+	tui.initChatComponents()
+	tui.currentSession = protocol.SessionInfo{ID: "session-1"}
+	tui.handleAgentRunNotification(protocol.AgentRunParams{RunID: "run-1", State: protocol.AgentRunDone})
+
+	tui.applySessionSnapshot(protocol.SessionSnapshot{
+		Session: protocol.SessionInfo{ID: "session-1", Status: protocol.SessionStatusRunning},
+		CurrentRun: &protocol.CurrentRunView{
+			RunID:  "run-1",
+			Status: protocol.SessionStatusRunning,
+		},
+	})
+
+	if tui.chat.Loading {
+		t.Fatal("Loading = true after stale completed run snapshot, want false")
+	}
+	if tui.currentRunCanControl {
+		t.Fatal("currentRunCanControl = true after stale completed run snapshot, want false")
+	}
+}
+
+func TestSessionSnapshotKeepsLegacyRunWithoutIdentity(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 80, height: 18}
+	tui.initChatComponents()
+	tui.currentSession = protocol.SessionInfo{ID: "session-1"}
+	tui.completedRunID = "run-1"
+
+	tui.applySessionSnapshot(protocol.SessionSnapshot{
+		Session: protocol.SessionInfo{ID: "session-1", Status: protocol.SessionStatusRunning},
+		CurrentRun: &protocol.CurrentRunView{
+			Status: protocol.SessionStatusRunning,
+		},
+	})
+
+	if !tui.chat.Loading {
+		t.Fatal("Loading = false for legacy run snapshot, want true")
+	}
+}
+
 func TestStreamErrorUsesStructuredResumeFlag(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 18}
 	tui.initChatComponents()
