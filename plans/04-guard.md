@@ -278,7 +278,7 @@ Guard task card 仅存于 session agent 内存：新的用户输入会创建新 
 - `confirm`: 可能合理但上下文不足、范围过宽、影响不可逆或模型不确定。
 - `modify`: 当前调用不应执行，但可以换成更安全/更窄的工具调用；suggestion 返回主 agent，让它重新规划。
 
-LLM review 使用当前 active model，`Temperature=0`，`MaxTokens=180`。prompt 不注入完整对话、混杂 recent context 或完整工具结果；参数、任务、用户输入、用户决定和 Agent 解释均有独立长度上限，降低 token 占用和误判概率。
+LLM review 使用当前 active model，`Temperature=0`，输出上限使用当前模型配置的 `max_output_tokens`。prompt 不注入完整对话、混杂 recent context 或完整工具结果；参数、任务、用户输入、用户决定和 Agent 解释均有独立长度上限，降低 token 占用和误判概率。
 
 Guard 不再保存全局 `recentCtx`。每次 tool call 会由 runner/agent 构造不可变 `ReviewContext` 并传入 `Guard.Check()`，因此并发工具调用不会串上下文。主 Agent 的 review 可读取当前 session agent 的 task card；subtask 使用自己的 runner working，不读取 main 的 task card。
 

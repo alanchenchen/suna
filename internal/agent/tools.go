@@ -599,8 +599,6 @@ func (a *Agent) availableSpawnTools() []string {
 	return filtered
 }
 
-const guardReviewMaxTokens = 180
-
 func (a *Agent) guardLLMReview(ctx context.Context, req guard.ReviewRequest) (string, error) {
 	params, paramsTruncated := truncateGuardReviewParams(req.ParamsJSON)
 	reviewPrompt, err := a.prompts.RenderGuardReview(prompt.GuardReviewData{
@@ -622,7 +620,7 @@ func (a *Agent) guardLLMReview(ctx context.Context, req guard.ReviewRequest) (st
 	if binding == nil {
 		return "", fmt.Errorf("guard review requires model binding")
 	}
-	request := &model.CompletionRequest{Model: binding.ModelID(), Invocation: model.Invocation{SessionScope: model.SessionScope(a.sessionID)}, Purpose: "guard_review", RequestID: uuid.New().String(), System: "Reply with JSON only.", Messages: []model.Message{model.NewTextMessage(model.RoleUser, reviewPrompt)}, MaxTokens: guardReviewMaxTokens, Temperature: model.Float64Ptr(0)}
+	request := &model.CompletionRequest{Model: binding.ModelID(), Invocation: model.Invocation{SessionScope: model.SessionScope(a.sessionID)}, Purpose: "guard_review", RequestID: uuid.New().String(), System: "Reply with JSON only.", Messages: []model.Message{model.NewTextMessage(model.RoleUser, reviewPrompt)}, Temperature: model.Float64Ptr(0)}
 	ch, err := binding.Complete(ctx, *request)
 	if err != nil {
 		return "", err
