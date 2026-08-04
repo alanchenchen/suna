@@ -71,12 +71,14 @@ func (l *Loader) RenderGuardReview(data GuardReviewData) (string, error) {
 	return l.Render("guard_review", map[string]any{
 		"ToolName":         data.ToolName,
 		"ToolParams":       data.ToolParams,
+		"ParamsTruncated":  data.ParamsTruncated,
 		"Target":           data.Target,
 		"Risk":             data.Risk,
-		"UserRequest":      data.UserRequest,
+		"Task":             data.Task,
+		"LatestUserInput":  data.LatestUserInput,
+		"UserDecisions":    data.UserDecisions,
 		"ToolIntent":       data.ToolIntent,
 		"AssistantContext": data.AssistantContext,
-		"RecentContext":    data.RecentContext,
 	})
 }
 
@@ -130,12 +132,14 @@ type SystemPromptData struct {
 type GuardReviewData struct {
 	ToolName         string
 	ToolParams       string
+	ParamsTruncated  bool
 	Target           string
 	Risk             string
-	UserRequest      string
+	Task             string
+	LatestUserInput  string
+	UserDecisions    string
 	ToolIntent       string
 	AssistantContext string
-	RecentContext    string
 }
 
 type SubtaskPromptData struct {

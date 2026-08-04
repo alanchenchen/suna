@@ -31,12 +31,13 @@ const (
 )
 
 // ReviewContext 是 smart mode 下 LLM review 的轻量意图上下文。
-// 它随单次 tool call 传入，避免全局 recent context 在并发工具调用时串线。
+// 它随单次 tool call 传入，避免并发工具调用串用任务或用户确认事实。
 type ReviewContext struct {
-	UserRequest      string
+	Task             string
+	LatestUserInput  string
+	UserDecisions    string
 	ToolIntent       string
 	AssistantContext string
-	RecentContext    string
 }
 
 type ReviewRequest struct {

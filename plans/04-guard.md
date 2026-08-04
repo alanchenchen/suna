@@ -16,7 +16,7 @@ Guard 已有最低安全闭环，支持 4 种 mode、workspace 硬边界、真�
   - `auto`: Low/Medium/High risk auto approve；只保留硬规则 reject，不弹窗。
   - `smart`: Low risk auto approve，Medium/High risk 调 LLM review；review 可直接 approve/reject/confirm/modify，失败/不确定转用户确认。
 - **Confirm 机制**: `EventGuardConfirm` 独立事件类型，daemon 通过 `Reply chan string` 阻塞等待 TUI 回传 approve/reject。不复用 AskUser 事件。
-- **LLM Review**: smart mode 的 review 会接收轻量结构化意图上下文（当前用户请求、tool intent、assistant context、最近消息摘要），不再依赖 Guard 内部全局 recent context；review 失败、JSON parse 失败、不确定或 confirm 都保守转用户确认。
+- **LLM Review**: smart mode 的 review 会接收轻量结构化意图上下文：当前用户任务、最新用户输入、本次未完成 main Agent run 内最近的最终用户 Guard approve/reject、tool intent 和 assistant context；不再注入混杂的最近消息/工具输出。用户决定仅作为意图证据，不会跳过后续 review；review 失败、JSON parse 失败、不确定或 confirm 都保守转用户确认。
 - **Modify 处理**: `modify` 不执行原 tool call，也不弹用户确认；Guard 将 reason/suggestion 作为 tool error 返回给主 agent，由主 agent 重新发起更安全/更窄的工具调用并再次经过 Guard。
 - **Sub-agent**: 通过 `newGuardForSession()` 继承主 Guard policy、blocked/allowed、audit DB 和 LLM reviewer。
 - **审计**: 当前记录 Guard 决策本身；tool 执行后的最终 result/error 暂未回写到 audit_log。审计参数会脱敏/摘要化，当前暂未提供读取 UI 或查询工具。
@@ -258,11 +258,12 @@ reason = "允许读取文档"
 
 核心输入：
 
-- `tool` / `risk` / `target` / 脱敏后的 `params`。
-- 当前用户请求 `UserRequest`。
-- 工具调用携带的 `ToolIntent`。
-- 工具调用前 assistant 输出的简短 `AssistantContext`。
-- 最近少量消息摘要 `RecentContext`。
+- 当前精确工具、风险、目标和脱敏参数；
+- 当前用户任务与最新用户输入；
+- 本次未完成 main Agent run 内最近的最终用户 Guard approve/reject；
+- 经过长度限制的 tool intent / assistant context，仅解释 Agent 的提议，不作为用户授权。
+
+Guard task card 仅存于 session agent 内存：新的用户输入会创建新 card，`ResumeRun` 会延续未完成 run 的 card；不持久化、不查询 audit、不跨 daemon 或重新 attach 恢复。子任务使用自己的 delegated task，不继承主任务 card。
 
 输出 JSON：
 
@@ -277,9 +278,9 @@ reason = "允许读取文档"
 - `confirm`: 可能合理但上下文不足、范围过宽、影响不可逆或模型不确定。
 - `modify`: 当前调用不应执行，但可以换成更安全/更窄的工具调用；suggestion 返回主 agent，让它重新规划。
 
-LLM review 使用当前 active model，`Temperature=0`，`MaxTokens=180`。prompt 不注入完整对话和完整工具结果，只传短意图上下文，降低 token 占用和误判概率。
+LLM review 使用当前 active model，`Temperature=0`，`MaxTokens=180`。prompt 不注入完整对话、混杂 recent context 或完整工具结果；参数、任务、用户输入、用户决定和 Agent 解释均有独立长度上限，降低 token 占用和误判概率。
 
-Guard 不再保存全局 `recentCtx`。每次 tool call 会由 runner/agent 构造不可变 `ReviewContext` 并传入 `Guard.Check()`，因此并发工具调用不会串上下文。`runner.ToolExecution` 会携带当前 runner 的 working messages 快照；main 使用 main working，subtask 使用自己的独立 working，让 smart review 判断当前执行单元的用户请求、tool intent、assistant context 和最近摘要。
+Guard 不再保存全局 `recentCtx`。每次 tool call 会由 runner/agent 构造不可变 `ReviewContext` 并传入 `Guard.Check()`，因此并发工具调用不会串上下文。主 Agent 的 review 可读取当前 session agent 的 task card；subtask 使用自己的 runner working，不读取 main 的 task card。
 
 ## 审计日志
 
@@ -316,7 +317,7 @@ Guard 不再保存全局 `recentCtx`。每次 tool call 会由 runner/agent 构�
 Subtask 的 Guard 和 main 共享同一套全局安全策略，但 review 上下文使用 subtask 自己的 runner working：
 
 - sub 继承同一套 mode、blocked/allowed、workspace、audit DB 和 LLM reviewer。
-- sub 的 Guard review 使用每次 tool call 的 `ReviewContext`，包括 subtask 自己的 delegated task、最近 subtask 消息摘要、tool intent 和 assistant context；不会串用 main working memory。
+- sub 的 Guard review 使用每次 tool call 的 `ReviewContext`，包括 subtask 自己的 delegated task、tool intent 和 assistant context；不会串用 main working memory 或主任务的用户确认事实。
 - subtask 的 `tool_call` / `tool_guard` / `guard_confirm` / `tool_result` 使用一致的 namespaced tool id：`spawn:<parentToolCallID>:<subToolCallID>`，因此 TUI 可以把 Guard 决策、风险、reason 和用户确认结果挂到对应子工具行。
 - 如果审查不确定，confirm 事件回到发起连接，由 TUI 展示给用户；用户回复通过 main 事件流恢复对应 subtask tool 执行。
 - `modify` 不执行原调用，reason/suggestion 作为 tool error 返回 subtask LLM，由 subtask 自己决定是否按建议重新发起更安全/更窄的工具调用。

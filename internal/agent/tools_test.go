@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/guard"
@@ -130,11 +131,14 @@ func TestBuildGuardReviewContextUsesToolExecutionWorkingMessages(t *testing.T) {
 			model.NewTextMessage(model.RoleAssistant, "I inspected the delegated scope."),
 		},
 	})
-	if ctx.UserRequest != "delegated subtask request" {
-		t.Fatalf("UserRequest = %q, want subtask request", ctx.UserRequest)
+	if ctx.Task != "delegated subtask request" {
+		t.Fatalf("Task = %q, want delegated subtask request", ctx.Task)
 	}
-	if ctx.RecentContext == "" || ctx.RecentContext == "[user] main user request" {
-		t.Fatalf("RecentContext = %q, want execution working context", ctx.RecentContext)
+	if ctx.LatestUserInput != "delegated subtask request" {
+		t.Fatalf("LatestUserInput = %q, want delegated subtask request", ctx.LatestUserInput)
+	}
+	if ctx.UserDecisions != "" {
+		t.Fatalf("UserDecisions = %q, want empty", ctx.UserDecisions)
 	}
 }
 
@@ -258,5 +262,83 @@ func TestExecuteSpawnToolRejectsModelHiddenBySubtaskFor(t *testing.T) {
 	}
 	if strings.Contains(result.Error, "anthropic/claude-sonnet-4") && strings.Contains(result.Error, "Choose one of: anthropic/claude-sonnet-4") {
 		t.Fatalf("ExecuteSpawnTool() error = %q, should not list hidden model as choice", result.Error)
+	}
+}
+
+func TestGuardTaskCardStartsNewTaskForEveryNewUserInput(t *testing.T) {
+	a := &Agent{}
+	a.beginGuardTask("Fix the Gateway reconnect flow and add regression tests.")
+	a.recordGuardTaskDecision("editfile", &guard.GuardResult{Risk: guard.RiskMedium, Reason: "fix the reconnect flow"}, true)
+
+	a.beginGuardTask("please continue with the regression test")
+	task, latest, decisions := a.guardTaskReviewContext()
+	if task != "please continue with the regression test" {
+		t.Fatalf("Task = %q, want new user input", task)
+	}
+	if latest != "please continue with the regression test" {
+		t.Fatalf("LatestUserInput = %q, want new user input", latest)
+	}
+	if decisions != "" {
+		t.Fatalf("UserDecisions = %q, want cleared decisions", decisions)
+	}
+}
+
+func TestGuardTaskCardReplacesDecisionsForNewTask(t *testing.T) {
+	a := &Agent{}
+	a.beginGuardTask("Fix the Gateway reconnect flow.")
+	a.recordGuardTaskDecision("editfile", &guard.GuardResult{Risk: guard.RiskMedium, Reason: "fix reconnect"}, true)
+
+	a.beginGuardTask("Diagnose the model provider error.")
+	task, latest, decisions := a.guardTaskReviewContext()
+	if task != "Diagnose the model provider error." {
+		t.Fatalf("Task = %q, want new task", task)
+	}
+	if latest != "Diagnose the model provider error." {
+		t.Fatalf("LatestUserInput = %q, want new input", latest)
+	}
+	if decisions != "" {
+		t.Fatalf("UserDecisions = %q, want cleared decisions", decisions)
+	}
+}
+
+func TestTrimForGuardMiddlePreservesUTF8(t *testing.T) {
+	got := trimForGuardMiddle(strings.Repeat("继续修复", 100), 31)
+	if !utf8.ValidString(got) {
+		t.Fatalf("trimForGuardMiddle() = %q, want valid UTF-8", got)
+	}
+}
+
+func TestBuildSubtaskGuardReviewContextDoesNotUseMainTaskCard(t *testing.T) {
+	a := &Agent{working: testWorkingMemory("main task")}
+	a.beginGuardTask("main task")
+	a.recordGuardTaskDecision("editfile", &guard.GuardResult{Risk: guard.RiskMedium, Reason: "main approval"}, true)
+
+	ctx := a.buildSubtaskGuardReviewContext(runner.ToolExecution{
+		WorkingMessages: []model.Message{model.NewTextMessage(model.RoleUser, "delegated task")},
+	})
+	if ctx.Task != "delegated task" || ctx.LatestUserInput != "delegated task" {
+		t.Fatalf("subtask task/input = %q/%q, want delegated task", ctx.Task, ctx.LatestUserInput)
+	}
+	if ctx.UserDecisions != "" {
+		t.Fatalf("subtask UserDecisions = %q, want empty", ctx.UserDecisions)
+	}
+}
+
+func TestTruncateGuardReviewParamsReportsVisibility(t *testing.T) {
+	complete, completeTruncated := truncateGuardReviewParams(`{"path":"report.md"}`)
+	if completeTruncated {
+		t.Fatal("complete params marked truncated")
+	}
+	if complete != `{"path":"report.md"}` {
+		t.Fatalf("complete params = %q, want unchanged", complete)
+	}
+
+	long := strings.Repeat("内容", guardReviewParamsLimit)
+	truncated, wasTruncated := truncateGuardReviewParams(long)
+	if !wasTruncated {
+		t.Fatal("long params marked complete")
+	}
+	if !utf8.ValidString(truncated) {
+		t.Fatalf("truncated params = %q, want valid UTF-8", truncated)
 	}
 }

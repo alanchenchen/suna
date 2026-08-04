@@ -51,6 +51,7 @@ type Agent struct {
 	cwd          string
 	modelRef     string
 	turnCount    int
+	guardTask    *guardTaskCard
 	sessionState string
 	toolSummary  memory.ToolSummary
 
@@ -201,6 +202,7 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 			return
 		}
 
+		a.beginGuardTask(inputText)
 		a.working.AddMessage(userMessage)
 		a.currentInputBlocks = cloneContentBlocks(userMessage.Content)
 		// 多模态 raw media 只允许参与当前 agent run；run 结束后立即替换为轻量 metadata，避免进入下一轮上下文或会话快照。
