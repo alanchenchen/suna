@@ -265,39 +265,105 @@ func TestExecuteSpawnToolRejectsModelHiddenBySubtaskFor(t *testing.T) {
 	}
 }
 
+func TestMainGuardGateMakesApprovedReceiptVisibleToNextReview(t *testing.T) {
+	mgr := tools.NewManager()
+	mgr.RegisterProvider(builtin.NewProvider())
+	if err := mgr.Reload(context.Background()); err != nil {
+		t.Fatalf("Reload tools: %v", err)
+	}
+	a := &Agent{guard: guard.NewGuardWithMode(nil, "test", guard.ModeSmart), tools: mgr}
+	a.beginGuardTask("Update two related files for the active fix.")
+
+	var reviewCount int
+	var secondContext guard.ReviewContext
+	a.guard.SetLLMReviewer(func(ctx context.Context, req guard.ReviewRequest) (string, error) {
+		reviewCount++
+		if reviewCount == 1 {
+			return `{"decision":"confirm","reason":"need user confirmation","suggestion":""}`, nil
+		}
+		secondContext = req.Context
+		return `{"decision":"approve","reason":"approved continuation","suggestion":""}`, nil
+	})
+
+	events := make(chan Event, 4)
+	call := func(id, path string) <-chan tools.Result {
+		result := make(chan tools.Result, 1)
+		go func() {
+			result <- a.executeTool(context.Background(), runner.ToolExecution{ID: id, Name: "writefile", Params: map[string]any{"path": path, "content": "updated"}, Intent: "apply the active related fix"}, events)
+		}()
+		return result
+	}
+	first := call("first", t.TempDir()+"/first.txt")
+	second := call("second", t.TempDir()+"/second.txt")
+
+	for {
+		select {
+		case event := <-events:
+			if event.Type != EventGuardConfirm {
+				continue
+			}
+			event.Reply <- "approve"
+			goto approved
+		case <-time.After(time.Second):
+			t.Fatal("first guard confirmation was not emitted")
+		}
+	}
+
+approved:
+	for _, result := range []<-chan tools.Result{first, second} {
+		select {
+		case got := <-result:
+			if got.IsError {
+				t.Fatalf("tool result = %#v, want success", got)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("tool execution did not complete")
+		}
+	}
+	if reviewCount != 2 {
+		t.Fatalf("review count = %d, want 2", reviewCount)
+	}
+	if !strings.Contains(secondContext.UserDecisions, "approved") || !strings.Contains(secondContext.UserDecisions, "writefile") {
+		t.Fatalf("second review decisions = %q, want approved receipt", secondContext.UserDecisions)
+	}
+}
+
 func TestGuardTaskCardStartsNewTaskForEveryNewUserInput(t *testing.T) {
 	a := &Agent{}
 	a.beginGuardTask("Fix the Gateway reconnect flow and add regression tests.")
-	a.recordGuardTaskDecision("editfile", &guard.GuardResult{Risk: guard.RiskMedium, Reason: "fix the reconnect flow"}, true)
+	a.recordGuardTaskReceipt(runner.ToolExecution{Name: "editfile", Params: map[string]any{"path": "gateway/bridge.go"}, Intent: "fix reconnect"}, &guard.GuardResult{Risk: guard.RiskMedium}, true)
 
 	a.beginGuardTask("please continue with the regression test")
-	task, latest, decisions := a.guardTaskReviewContext()
+	task, latest, receipts, prior := a.guardTaskReviewContext()
 	if task != "please continue with the regression test" {
 		t.Fatalf("Task = %q, want new user input", task)
 	}
 	if latest != "please continue with the regression test" {
 		t.Fatalf("LatestUserInput = %q, want new user input", latest)
 	}
-	if decisions != "" {
-		t.Fatalf("UserDecisions = %q, want cleared decisions", decisions)
+	if receipts != "" {
+		t.Fatalf("UserDecisions = %q, want cleared decisions", receipts)
+	}
+	if !strings.Contains(prior, "gateway/bridge.go") || !strings.Contains(prior, "approved") {
+		t.Fatalf("PreviousTask = %q, want prior approval receipt", prior)
 	}
 }
 
-func TestGuardTaskCardReplacesDecisionsForNewTask(t *testing.T) {
+func TestGuardTaskCardRecordsSafeOperationReceipt(t *testing.T) {
 	a := &Agent{}
 	a.beginGuardTask("Fix the Gateway reconnect flow.")
-	a.recordGuardTaskDecision("editfile", &guard.GuardResult{Risk: guard.RiskMedium, Reason: "fix reconnect"}, true)
+	a.recordGuardTaskReceipt(runner.ToolExecution{
+		Name:   "editfile",
+		Params: map[string]any{"path": "gateway/bridge.go", "edits": []any{map[string]any{"old_string": "secret-old", "new_string": "secret-new"}}},
+		Intent: "fix reconnect lifecycle",
+	}, &guard.GuardResult{Risk: guard.RiskMedium}, true)
 
-	a.beginGuardTask("Diagnose the model provider error.")
-	task, latest, decisions := a.guardTaskReviewContext()
-	if task != "Diagnose the model provider error." {
-		t.Fatalf("Task = %q, want new task", task)
+	_, _, receipts, _ := a.guardTaskReviewContext()
+	if !strings.Contains(receipts, "gateway/bridge.go") || !strings.Contains(receipts, "fix reconnect lifecycle") {
+		t.Fatalf("UserDecisions = %q, want target and rationale", receipts)
 	}
-	if latest != "Diagnose the model provider error." {
-		t.Fatalf("LatestUserInput = %q, want new input", latest)
-	}
-	if decisions != "" {
-		t.Fatalf("UserDecisions = %q, want cleared decisions", decisions)
+	if strings.Contains(receipts, "secret-old") || strings.Contains(receipts, "secret-new") {
+		t.Fatalf("UserDecisions = %q, must not expose edit contents", receipts)
 	}
 }
 
@@ -311,7 +377,7 @@ func TestTrimForGuardMiddlePreservesUTF8(t *testing.T) {
 func TestBuildSubtaskGuardReviewContextDoesNotUseMainTaskCard(t *testing.T) {
 	a := &Agent{working: testWorkingMemory("main task")}
 	a.beginGuardTask("main task")
-	a.recordGuardTaskDecision("editfile", &guard.GuardResult{Risk: guard.RiskMedium, Reason: "main approval"}, true)
+	a.recordGuardTaskReceipt(runner.ToolExecution{Name: "editfile", Params: map[string]any{"path": "main.go"}, Intent: "main approval"}, &guard.GuardResult{Risk: guard.RiskMedium}, true)
 
 	ctx := a.buildSubtaskGuardReviewContext(runner.ToolExecution{
 		WorkingMessages: []model.Message{model.NewTextMessage(model.RoleUser, "delegated task")},
@@ -324,21 +390,12 @@ func TestBuildSubtaskGuardReviewContextDoesNotUseMainTaskCard(t *testing.T) {
 	}
 }
 
-func TestTruncateGuardReviewParamsReportsVisibility(t *testing.T) {
+func TestTruncateGuardReviewParamsKeepsStructuredSummary(t *testing.T) {
 	complete, completeTruncated := truncateGuardReviewParams(`{"path":"report.md"}`)
 	if completeTruncated {
-		t.Fatal("complete params marked truncated")
+		t.Fatal("structured params marked truncated")
 	}
 	if complete != `{"path":"report.md"}` {
-		t.Fatalf("complete params = %q, want unchanged", complete)
-	}
-
-	long := strings.Repeat("内容", guardReviewParamsLimit)
-	truncated, wasTruncated := truncateGuardReviewParams(long)
-	if !wasTruncated {
-		t.Fatal("long params marked complete")
-	}
-	if !utf8.ValidString(truncated) {
-		t.Fatalf("truncated params = %q, want valid UTF-8", truncated)
+		t.Fatalf("structured params = %q, want unchanged", complete)
 	}
 }

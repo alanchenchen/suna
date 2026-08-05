@@ -36,16 +36,18 @@ type ReviewContext struct {
 	Task             string
 	LatestUserInput  string
 	UserDecisions    string
+	PreviousTask     string
 	ToolIntent       string
 	AssistantContext string
 }
 
 type ReviewRequest struct {
-	ToolName   string
-	ParamsJSON string
-	Target     string
-	Risk       string
-	Context    ReviewContext
+	ToolName        string
+	ParamsJSON      string
+	ParamsTruncated bool
+	Target          string
+	Risk            string
+	Context         ReviewContext
 }
 
 // LLMReviewer 用于 Guard Stage 3 LLM 审查。接收结构化操作上下文，返回 LLM 原始回复。
@@ -228,8 +230,8 @@ func (g *Guard) Check(ctx context.Context, tool string, params map[string]any, r
 // llmReview 调用 LLM 进行安全审查。LLM 可以 approve/reject/confirm/modify。
 func (g *Guard) llmReview(ctx context.Context, toolName string, params map[string]any, risk RiskLevel, reviewCtx ReviewContext) *GuardResult {
 	target := guardTarget(toolName, params)
-	paramsJSON, _ := marshalParams(params)
-	resp, err := g.llmReviewer(ctx, ReviewRequest{ToolName: toolName, ParamsJSON: paramsJSON, Target: target, Risk: RiskString(risk), Context: reviewCtx})
+	paramsJSON, paramsTruncated := marshalReviewParams(params)
+	resp, err := g.llmReviewer(ctx, ReviewRequest{ToolName: toolName, ParamsJSON: paramsJSON, ParamsTruncated: paramsTruncated, Target: target, Risk: RiskString(risk), Context: reviewCtx})
 	if err != nil {
 		code, msg := classifyReviewError(err)
 		return g.reviewFallback(ctx, toolName, params, risk, code, msg)
@@ -298,7 +300,7 @@ func extractJSON(s string) string {
 }
 
 func (g *Guard) checkBlocked(tool string, params map[string]any) (bool, string) {
-	target := guardTarget(tool, params)
+	target := ruleTarget(tool, params)
 	if target == "" {
 		return false, ""
 	}
@@ -316,7 +318,7 @@ func (g *Guard) checkBlocked(tool string, params map[string]any) (bool, string) 
 }
 
 func (g *Guard) checkAllowed(tool string, params map[string]any) (bool, string) {
-	target := guardTarget(tool, params)
+	target := ruleTarget(tool, params)
 	if target == "" {
 		return false, ""
 	}
@@ -331,7 +333,7 @@ func (g *Guard) checkAllowed(tool string, params map[string]any) (bool, string) 
 	return false, ""
 }
 
-func guardTarget(tool string, params map[string]any) string {
+func ruleTarget(tool string, params map[string]any) string {
 	switch tool {
 	case "exec":
 		target, _ := params["command"].(string)
@@ -342,9 +344,9 @@ func guardTarget(tool string, params map[string]any) string {
 	case "filesystem":
 		action, _ := params["action"].(string)
 		path, _ := params["path"].(string)
-		dst, _ := params["destination"].(string)
-		if dst != "" {
-			return fmt.Sprintf("%s %s -> %s", action, path, dst)
+		destination, _ := params["destination"].(string)
+		if destination != "" {
+			return fmt.Sprintf("%s %s -> %s", action, path, destination)
 		}
 		return fmt.Sprintf("%s %s", action, path)
 	case "http":
@@ -357,6 +359,10 @@ func guardTarget(tool string, params map[string]any) string {
 	default:
 		return ""
 	}
+}
+
+func guardTarget(tool string, params map[string]any) string {
+	return SafeTarget(tool, params)
 }
 
 func (g *Guard) audit(ctx context.Context, tool string, params map[string]any, risk RiskLevel, decision, reason string) {

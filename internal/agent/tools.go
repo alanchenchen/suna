@@ -45,18 +45,26 @@ func (a *Agent) executeTool(ctx context.Context, call runner.ToolExecution, even
 		}
 	}
 	if a.shouldGuardTool(name) {
+		// Guard 决策必须按顺序完成，确保用户刚刚作出的确认或拒绝先写入任务事实。
+		// gate 只覆盖 review/确认阶段；通过后立即释放，工具执行仍由 Runner 并发调度。
+		a.guardGate.Lock()
 		result := a.guard.Check(ctx, name, params, a.buildGuardReviewContext(call))
 		a.emitToolGuard(events, id, name, result)
+		allowed := true
 		if result.Decision == guard.Reject {
-			return tools.ErrorResult("blocked: " + result.Reason)
-		}
-		if result.Decision == guard.Modify {
+			allowed = false
+		} else if result.Decision == guard.Modify {
+			a.guardGate.Unlock()
 			return guardModifyResult(result)
+		} else if result.Decision == guard.Confirm {
+			allowed = a.confirmGuard(ctx, id, call, result, events, true)
 		}
-		if result.Decision == guard.Confirm {
-			if !a.confirmGuard(ctx, id, name, params, result, events, true) {
-				return tools.ErrorResult("blocked: user rejected guard confirmation")
+		a.guardGate.Unlock()
+		if !allowed {
+			if result.Decision == guard.Reject {
+				return tools.ErrorResult("blocked: " + result.Reason)
 			}
+			return tools.ErrorResult("blocked: user rejected guard confirmation")
 		}
 	}
 	if err := sensitiveReadError(name, params); err != "" {
@@ -104,7 +112,8 @@ func (a *Agent) emitToolGuard(events chan<- Event, id string, name string, resul
 	events <- Event{Type: EventToolGuard, GuardToolCallID: id, GuardTool: name, GuardRisk: guard.RiskString(result.Risk), GuardDecision: string(result.Decision), GuardSource: result.Source, GuardReason: result.Reason, GuardSuggestion: result.Suggestion, GuardReviewCode: result.ReviewCode, GuardReviewMsg: result.ReviewMessage}
 }
 
-func (a *Agent) confirmGuard(ctx context.Context, id string, name string, params map[string]any, result *guard.GuardResult, events chan<- Event, recordTaskDecision bool) bool {
+func (a *Agent) confirmGuard(ctx context.Context, id string, call runner.ToolExecution, result *guard.GuardResult, events chan<- Event, recordTaskDecision bool) bool {
+	name, params := call.Name, call.Params
 	if events == nil {
 		return false
 	}
@@ -122,7 +131,7 @@ func (a *Agent) confirmGuard(ctx context.Context, id string, name string, params
 			finalReason = result.Reason
 		}
 		if recordTaskDecision {
-			a.recordGuardTaskDecision(name, result, approved)
+			a.recordGuardTaskReceipt(call, result, approved)
 		}
 		// 用户确认会覆盖前置 LLM/兜底 Guard 行，让历史工具块记录最终批准来源。
 		events <- Event{Type: EventToolGuard, GuardToolCallID: id, GuardTool: name, GuardRisk: guard.RiskString(result.Risk), GuardDecision: string(finalDecision), GuardSource: "user", GuardReason: finalReason, GuardSuggestion: result.Suggestion}
@@ -288,19 +297,27 @@ func (e subtaskExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecut
 		return tools.ErrorResult(fmt.Sprintf("tool %q not allowed for subtask", name))
 	}
 	if e.agent.shouldGuardTool(name) {
-		result := e.agent.guard.Check(ctx, name, params, e.agent.buildSubtaskGuardReviewContext(call))
 		eventID := e.namespaced(call.ID)
+		// subtask 也通过同一会话的 Guard gate，避免与主任务在同一 TUI 上交错确认。
+		// 它不记录到主任务回执，保持 subtask 的意图上下文隔离。
+		e.agent.guardGate.Lock()
+		result := e.agent.guard.Check(ctx, name, params, e.agent.buildSubtaskGuardReviewContext(call))
 		e.agent.emitToolGuard(e.events, eventID, name, result)
+		allowed := true
 		if result.Decision == guard.Reject {
-			return tools.ErrorResult("blocked: " + result.Reason)
-		}
-		if result.Decision == guard.Modify {
+			allowed = false
+		} else if result.Decision == guard.Modify {
+			e.agent.guardGate.Unlock()
 			return guardModifyResult(result)
+		} else if result.Decision == guard.Confirm {
+			allowed = e.agent.confirmGuard(ctx, eventID, call, result, e.events, false)
 		}
-		if result.Decision == guard.Confirm {
-			if !e.agent.confirmGuard(ctx, eventID, name, params, result, e.events, false) {
-				return tools.ErrorResult("blocked: user rejected guard confirmation")
+		e.agent.guardGate.Unlock()
+		if !allowed {
+			if result.Decision == guard.Reject {
+				return tools.ErrorResult("blocked: " + result.Reason)
 			}
+			return tools.ErrorResult("blocked: user rejected guard confirmation")
 		}
 	}
 	if err := sensitiveReadError(name, params); err != "" {
@@ -324,14 +341,13 @@ func (a *Agent) buildGuardReviewContext(call runner.ToolExecution) guard.ReviewC
 	// smart guard 只传当前任务、用户最终决定和短工具意图，避免混杂历史工具输出。
 	// main 与 subtask 的 review 上下文必须隔离，避免子任务串用 main 对话上下文。
 	ctx := guard.ReviewContext{
-		ToolIntent:       trimForGuard(call.Intent, 350),
-		AssistantContext: trimForGuard(call.AssistantContext, 350),
+		ToolIntent: guardExecutionRationale(call),
 	}
 	messages := call.WorkingMessages
 	if len(messages) == 0 && a.working != nil {
 		messages = a.working.Messages()
 	}
-	ctx.Task, ctx.LatestUserInput, ctx.UserDecisions = a.guardTaskReviewContext()
+	ctx.Task, ctx.LatestUserInput, ctx.UserDecisions, ctx.PreviousTask = a.guardTaskReviewContext()
 	if ctx.Task == "" {
 		ctx.Task = trimForGuardMiddle(lastUserTextFromMessages(messages), guardReviewTaskLimit)
 	}
@@ -343,12 +359,23 @@ func (a *Agent) buildGuardReviewContext(call runner.ToolExecution) guard.ReviewC
 
 func (a *Agent) buildSubtaskGuardReviewContext(call runner.ToolExecution) guard.ReviewContext {
 	ctx := guard.ReviewContext{
-		ToolIntent:       trimForGuard(call.Intent, 350),
-		AssistantContext: trimForGuard(call.AssistantContext, 350),
+		ToolIntent: guardExecutionRationale(call),
 	}
 	ctx.LatestUserInput = trimForGuardMiddle(lastUserTextFromMessages(call.WorkingMessages), guardReviewLatestInputLimit)
 	ctx.Task = trimForGuardMiddle(lastUserTextFromMessages(call.WorkingMessages), guardReviewTaskLimit)
 	return ctx
+}
+
+func guardExecutionRationale(call runner.ToolExecution) string {
+	intent := strings.TrimSpace(call.Intent)
+	context := strings.TrimSpace(call.AssistantContext)
+	if intent == "" {
+		return trimForGuard(context, 520)
+	}
+	if context == "" || context == intent {
+		return trimForGuard(intent, 520)
+	}
+	return trimForGuard("Current step: "+intent+"\nAgent plan: "+context, 520)
 }
 
 func lastUserTextFromMessages(msgs []model.Message) string {
@@ -600,7 +627,8 @@ func (a *Agent) availableSpawnTools() []string {
 }
 
 func (a *Agent) guardLLMReview(ctx context.Context, req guard.ReviewRequest) (string, error) {
-	params, paramsTruncated := truncateGuardReviewParams(req.ParamsJSON)
+	params := req.ParamsJSON
+	paramsTruncated := req.ParamsTruncated
 	reviewPrompt, err := a.prompts.RenderGuardReview(prompt.GuardReviewData{
 		ToolName:         req.ToolName,
 		ToolParams:       params,
@@ -610,6 +638,7 @@ func (a *Agent) guardLLMReview(ctx context.Context, req guard.ReviewRequest) (st
 		Task:             req.Context.Task,
 		LatestUserInput:  req.Context.LatestUserInput,
 		UserDecisions:    req.Context.UserDecisions,
+		PreviousTask:     req.Context.PreviousTask,
 		ToolIntent:       req.Context.ToolIntent,
 		AssistantContext: req.Context.AssistantContext,
 	})
@@ -629,10 +658,7 @@ func (a *Agent) guardLLMReview(ctx context.Context, req guard.ReviewRequest) (st
 }
 
 func truncateGuardReviewParams(params string) (string, bool) {
-	if len([]rune(params)) <= guardReviewParamsLimit {
-		return params, false
-	}
-	return trimForGuardMiddle(params, guardReviewParamsLimit), true
+	return params, false
 }
 
 func readGuardReviewStream(ctx context.Context, ch <-chan model.Chunk, timeout time.Duration) (string, error) {

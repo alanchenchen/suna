@@ -291,6 +291,56 @@ func TestWorkspaceBlocksExecCWDAndCommandPaths(t *testing.T) {
 	}
 }
 
+func TestReviewParamsKeepNonSensitiveOperationSemantics(t *testing.T) {
+	params, truncated := marshalReviewParams(map[string]any{
+		"path":        "internal/agent/tools.go",
+		"recursive":   true,
+		"overwrite":   false,
+		"content":     "very-secret-file-content",
+		"edits":       []any{map[string]any{"old_string": "very-secret-old-content", "new_string": "very-secret-new-content", "target": "all"}},
+		"headers":     map[string]any{"Authorization": "Bearer test-api-key", "X-Scope": "workspace"},
+		"query_scope": "all",
+	})
+	if truncated {
+		t.Fatal("ordinary sanitized params unexpectedly truncated")
+	}
+	for _, secret := range []string{"very-secret-file-content", "very-secret-old-content", "very-secret-new-content", "Bearer test-api-key"} {
+		if strings.Contains(params, secret) {
+			t.Fatalf("review params = %q, must not contain %q", params, secret)
+		}
+	}
+	for _, fact := range []string{`"path":"internal/agent/tools.go"`, `"recursive":true`, `"overwrite":false`, `"target":"all"`, `"X-Scope":"workspace"`, `"query_scope":"all"`, `"Authorization":"***REDACTED_AUTHORIZATION`} {
+		if !strings.Contains(params, fact) {
+			t.Fatalf("review params = %q, want %q", params, fact)
+		}
+	}
+}
+
+func TestReviewParamsOversizedInputKeepsRiskCriticalFields(t *testing.T) {
+	params, truncated := marshalReviewParams(map[string]any{
+		"action":    "remove",
+		"path":      "build",
+		"recursive": true,
+		"overwrite": true,
+		"extra":     strings.Repeat("x", reviewParamsLimit),
+	})
+	if !truncated || !strings.Contains(params, `"summary_truncated":true`) {
+		t.Fatalf("review params = %q, truncated = %v; want explicit fallback", params, truncated)
+	}
+	for _, fact := range []string{`"action":"remove"`, `"path":"build"`, `"recursive":true`, `"overwrite":true`, `"omitted_keys":["extra"]`} {
+		if !strings.Contains(params, fact) {
+			t.Fatalf("review params = %q, want %q", params, fact)
+		}
+	}
+}
+
+func TestSafeTargetPreservesOperationScope(t *testing.T) {
+	target := SafeTarget("http", map[string]any{"method": "POST", "url": "https://api.example.com/upload?all=true&token=supersecrettoken"})
+	if !strings.Contains(target, "all=true") || !strings.Contains(target, "REDACTED") {
+		t.Fatalf("HTTP target = %q, want visible scope and masked token", target)
+	}
+}
+
 func TestSmartReviewReceivesIntentContext(t *testing.T) {
 	g := NewGuardWithMode(nil, "test", ModeSmart)
 	var got ReviewRequest

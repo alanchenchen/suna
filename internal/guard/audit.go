@@ -21,26 +21,51 @@ func scrubAuditParams(params map[string]any) map[string]any {
 		return map[string]any{}
 	}
 	clean := make(map[string]any, len(params))
-	for k, v := range params {
-		lowerKey := strings.ToLower(k)
-		switch val := v.(type) {
-		case string:
-			if isAuditContentField(lowerKey) {
-				clean[k] = auditRedactedSummary(lowerKey, val)
-			} else {
-				clean[k] = MaskSensitiveContent(val)
-			}
-		case map[string]any:
-			if lowerKey == "env" {
-				clean[k] = scrubAuditEnv(val)
-			} else {
-				clean[k] = scrubAuditParams(val)
-			}
-		default:
-			clean[k] = v
-		}
+	for key, value := range params {
+		clean[key] = scrubAuditValue(strings.ToLower(key), value)
 	}
 	return clean
+}
+
+// scrubAuditValue 递归处理嵌套参数，确保 editfile 等数组中的正文也不会进入审计或 Review。
+// 除正文、环境变量值和可识别凭据外，参数结构和值应尽量保留，供 LLM 判断真实影响范围。
+func scrubAuditValue(key string, value any) any {
+	switch typed := value.(type) {
+	case string:
+		if isAuditContentField(key) || isSensitiveAuditKey(key) {
+			return auditRedactedSummary(key, typed)
+		}
+		return MaskSensitiveContent(typed)
+	case map[string]any:
+		if key == "env" {
+			return scrubAuditEnv(typed)
+		}
+		return scrubAuditParams(typed)
+	case []any:
+		clean := make([]any, len(typed))
+		for index, item := range typed {
+			clean[index] = scrubAuditValue(key, item)
+		}
+		return clean
+	case []string:
+		clean := make([]string, len(typed))
+		for index, item := range typed {
+			value, _ := scrubAuditValue(key, item).(string)
+			clean[index] = value
+		}
+		return clean
+	default:
+		return value
+	}
+}
+
+func isSensitiveAuditKey(key string) bool {
+	for _, marker := range []string{"authorization", "cookie", "token", "secret", "password", "api_key", "apikey", "credential"} {
+		if strings.Contains(key, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func isAuditContentField(key string) bool {

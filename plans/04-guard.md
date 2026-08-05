@@ -16,7 +16,7 @@ Guard 已有最低安全闭环，支持 4 种 mode、workspace 硬边界、真�
   - `auto`: Low/Medium/High risk auto approve；只保留硬规则 reject，不弹窗。
   - `smart`: Low risk auto approve，Medium/High risk 调 LLM review；review 可直接 approve/reject/confirm/modify，失败/不确定转用户确认。
 - **Confirm 机制**: `EventGuardConfirm` 独立事件类型，daemon 通过 `Reply chan string` 阻塞等待 TUI 回传 approve/reject。不复用 AskUser 事件。
-- **LLM Review**: smart mode 的 review 会接收轻量结构化意图上下文：当前用户任务、最新用户输入、本次未完成 main Agent run 内最近的最终用户 Guard approve/reject、tool intent 和 assistant context；不再注入混杂的最近消息/工具输出。用户决定仅作为意图证据，不会跳过后续 review；review 失败、JSON parse 失败、不确定或 confirm 都保守转用户确认。
+- **LLM Review**: smart mode 的 review 会接收轻量结构化意图上下文：当前用户任务、最新用户输入、当前 main Agent run 内最近的最终用户 Guard approve/reject 回执（tool/risk/target/安全范围摘要/Agent rationale）、上一任务的只读背景、以及短 Agent execution rationale；工具参数按安全语义摘要，不再注入混杂的最近消息/工具输出或完整代码正文。用户决定仅作为意图证据，不会跳过后续 review；同一 main run 的 Guard review/confirm 按顺序完成，确保后一个 review 能看到刚完成的用户决定；通过 Guard 后工具执行仍保持 Runner 原有并发。review 失败、JSON parse 失败或实质不确定才转用户确认。
 - **Modify 处理**: `modify` 不执行原 tool call，也不弹用户确认；Guard 将 reason/suggestion 作为 tool error 返回给主 agent，由主 agent 重新发起更安全/更窄的工具调用并再次经过 Guard。
 - **Sub-agent**: 通过 `newGuardForSession()` 继承主 Guard policy、blocked/allowed、audit DB 和 LLM reviewer。
 - **审计**: 当前记录 Guard 决策本身；tool 执行后的最终 result/error 暂未回写到 audit_log。审计参数会脱敏/摘要化，当前暂未提供读取 UI 或查询工具。

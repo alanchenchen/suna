@@ -30,30 +30,33 @@ import (
 
 type Agent struct {
 	// runtime 指向共享全局运行时；nil 表示当前对象就是运行时根 Agent。
-	runtime      *Agent
-	cfg          *config.Config
-	router       *model.Router
-	tools        *tools.Manager
-	guard        *guard.Guard
-	working      *memory.WorkingMemory
-	usage        *memory.UsageStore
-	sessionStore *memory.SessionStore
-	stateStore   *memory.SessionStateStore
-	memories     *memory.MemoryStore
-	mediaStore   *media.Store
-	compressor   *memory.Compressor
-	calibrator   *model.TokenCalibrator
-	prompts      *prompt.Loader
-	store        *memory.Store
-	skills       *skill.Runtime
-	mcp          *mcp.Runtime
-	sessionID    string
-	cwd          string
-	modelRef     string
-	turnCount    int
-	guardTask    *guardTaskCard
-	sessionState string
-	toolSummary  memory.ToolSummary
+	runtime        *Agent
+	cfg            *config.Config
+	router         *model.Router
+	tools          *tools.Manager
+	guard          *guard.Guard
+	working        *memory.WorkingMemory
+	usage          *memory.UsageStore
+	sessionStore   *memory.SessionStore
+	stateStore     *memory.SessionStateStore
+	memories       *memory.MemoryStore
+	mediaStore     *media.Store
+	compressor     *memory.Compressor
+	calibrator     *model.TokenCalibrator
+	prompts        *prompt.Loader
+	store          *memory.Store
+	skills         *skill.Runtime
+	mcp            *mcp.Runtime
+	sessionID      string
+	cwd            string
+	modelRef       string
+	turnCount      int
+	guardTask      *guardTaskCard
+	priorGuardTask *guardTaskSnapshot
+	guardTaskMu    sync.Mutex
+	guardGate      sync.Mutex
+	sessionState   string
+	toolSummary    memory.ToolSummary
 
 	extractQueue  *memory.ExtractQueue
 	extractWorker *memory.Worker

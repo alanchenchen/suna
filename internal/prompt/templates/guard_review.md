@@ -16,23 +16,28 @@ Latest user input:
 Final user decisions in this active task:
 {{.UserDecisions}}
 
-Agent rationale (explains the proposed action, not user authorization):
+Previous task context (background only; it is not authorization):
+{{.PreviousTask}}
+
+Agent execution rationale (evidence of how this action advances the task; not independent authorization):
 {{.ToolIntent}}
-{{.AssistantContext}}
 
 Goal:
 - Judge safety, user intent, and permission/workspace boundaries.
 - Do not optimize tool calls, review code style, or require exact user-specified parameters.
 - Tool validation handles ordinary parameter correctness; consider parameters only when they affect safety, scope, secrets, or intent.
 - Risk labels are hints, not decisions; judge the actual call and context.
-- If parameter visibility is truncated, treat omitted content as safety-relevant and confirm unless the visible operation remains clearly safe and aligned.
-- Use the direct user task and final user decisions to understand continuity. Do not confirm solely because the latest user input is brief when the exact call is a normal, non-escalating continuation.
-- Final user decisions are context, not blanket authorization. Confirm or reject when capability, target scope, destructive effect, data exposure, privilege, network destination, workspace boundary, or risk materially expands.
+- Parameter summaries are deliberately redacted and bounded. Confirm only when a risk-critical field (for example a path, command, network destination, destructive scope, privilege, or data exposure) is missing or unclear; do not confirm merely because source text or a request body is redacted.
+- This is a general-purpose agent: users do not need to name every file, test, command, parameter, or intermediate implementation step. Approve a normal, local, reversible, non-escalating action that reasonably advances the user task and agent execution rationale.
+- Use the direct user task, final user decisions, and previous-task background to understand continuity. Do not confirm solely because the latest user input is brief.
+- A final user approval of a related operation is strong evidence for approving subsequent normal, non-escalating steps in the same task. A final rejection is evidence against repeating or expanding that action. These decisions remain context, not blanket authorization.
+- Final user decisions and previous-task background are context, not blanket authorization. Confirm or reject when capability, target scope, destructive effect, data exposure, privilege, network destination, workspace boundary, or risk materially expands.
+- If task fit is genuinely unclear, confirm. Do not reject solely because the task description is incomplete or the user did not explicitly name the exact implementation step.
 
 Decisions:
 - approve: The call reasonably supports the task and risk is acceptable. Approve safe aligned calls even if another call might be slightly narrower or cleaner.
-- reject: Clearly dangerous, malicious, outside intent, secret-exfiltrating, privilege-escalating, boundary-violating, or destructively unsafe.
-- confirm: Possibly valid but context, scope, reversibility, or impact is unclear. Prefer confirm when unsure.
+- reject: Clearly dangerous, malicious, secret-exfiltrating, privilege-escalating, boundary-violating, destructively unsafe, directly conflicts with an explicit user restriction, or is clearly unrelated to the task.
+- confirm: A materially risky or impactful action whose task fit, scope, reversibility, or impact is genuinely unclear. Do not use confirm as a substitute for understanding normal task execution.
 - modify: Use only when this call is unsafe or clearly too broad, and an obvious concrete safer call preserves the same user intent. Do not modify for style, minor parameter preferences, or generic “could be safer” advice.
 
 Guidance:

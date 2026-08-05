@@ -77,6 +77,7 @@ func (l *Loader) RenderGuardReview(data GuardReviewData) (string, error) {
 		"Task":             data.Task,
 		"LatestUserInput":  data.LatestUserInput,
 		"UserDecisions":    data.UserDecisions,
+		"PreviousTask":     data.PreviousTask,
 		"ToolIntent":       data.ToolIntent,
 		"AssistantContext": data.AssistantContext,
 	})
@@ -138,6 +139,7 @@ type GuardReviewData struct {
 	Task             string
 	LatestUserInput  string
 	UserDecisions    string
+	PreviousTask     string
 	ToolIntent       string
 	AssistantContext string
 }
