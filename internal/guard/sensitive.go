@@ -44,12 +44,13 @@ var sensitiveFilePatterns = []struct {
 // 返回 (是否敏感, 拦截原因)。
 func IsSensitivePath(path string) (bool, string) {
 	expanded := expandPathForCheck(path)
-	lower := strings.ToLower(expanded)
+	// 敏感路径规则统一使用斜杠，Windows 路径必须先规范化分隔符。
+	lower := strings.ToLower(filepath.ToSlash(expanded))
 
 	for _, rule := range sensitiveFilePatterns {
 		if strings.Contains(lower, strings.ToLower(rule.pattern)) {
 			// ~/.suna/config.toml 不是敏感文件，允许读取
-			if strings.HasPrefix(lower, strings.ToLower(config.DefaultDataDir())) {
+			if strings.HasPrefix(lower, strings.ToLower(filepath.ToSlash(config.DefaultDataDir()))) {
 				if strings.HasSuffix(lower, "config.toml") || strings.HasSuffix(lower, "memory.db") {
 					continue
 				}

@@ -13,9 +13,7 @@ import (
 	"github.com/alanchenchen/suna/internal/tools"
 )
 
-var execPathTokenPattern = regexp.MustCompile(`(?:^|[\s=])["']?((?:~(?:/|$)|\.\.?(?:/|$)|/|[^"'\s;|&<>]+/\.\.?/)[^"'\s;|&<>]*)`)
 var execRedirectionPattern = regexp.MustCompile(`[<>]{1,2}\s*([^\s;|&]+)`)
-var execQuotedAbsPathPattern = regexp.MustCompile(`["'](/[^"']*)["']`)
 
 func normalizeWorkspaceRoot(path string) string {
 	path = strings.TrimSpace(path)

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -39,8 +40,11 @@ func TestFormatResultSessionAttachmentIsolation(t *testing.T) {
 		if entries[0].Name() != filepath.Base(entries[0].Name()) {
 			t.Fatal("saved name escaped its session directory")
 		}
-		if mode, _ := entries[0].Info(); mode.Mode().Perm() != 0600 {
-			t.Fatalf("attachment mode = %o, want 0600", mode.Mode().Perm())
+		// Windows 的 FileMode.Perm 不表示 ACL；会话目录隔离与路径边界仍由本测试覆盖。
+		if runtime.GOOS != "windows" {
+			if mode, _ := entries[0].Info(); mode.Mode().Perm() != 0600 {
+				t.Fatalf("attachment mode = %o, want 0600", mode.Mode().Perm())
+			}
 		}
 	}
 }

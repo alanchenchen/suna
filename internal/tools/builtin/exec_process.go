@@ -87,11 +87,6 @@ func waitProcessWithin(wait <-chan error, limit time.Duration) (error, bool) {
 	}
 }
 
-func waitProcess(wait <-chan error, limit time.Duration) error {
-	err, _ := waitProcessWithin(wait, limit)
-	return err
-}
-
 func remainingExecTimeout(started time.Time, timeout time.Duration) time.Duration {
 	remaining := timeout - time.Since(started)
 	if remaining <= 0 {

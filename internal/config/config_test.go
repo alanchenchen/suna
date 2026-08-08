@@ -37,9 +37,12 @@ func TestConfigSaveKeepsGuardWorkspace(t *testing.T) {
 		t.Fatalf("Save() error = %v", err)
 	}
 	data := readFile(t, path)
-	want := `workspace = "` + cleanSymlinkPath(t, workspace) + `"`
-	if !strings.Contains(data, want) {
-		t.Fatalf("saved config = %q, want substring %q", data, want)
+	var saved Config
+	if err := LoadTOML(path, &saved); err != nil {
+		t.Fatalf("LoadTOML() error = %v", err)
+	}
+	if got, want := saved.Guard.Workspace, cleanSymlinkPath(t, workspace); got != want {
+		t.Fatalf("saved Guard.Workspace = %q, want %q; config = %q", got, want, data)
 	}
 }
 
@@ -185,7 +188,7 @@ func TestConfigSaveWritesSkillsAsFlatObjectMap(t *testing.T) {
 		t.Fatalf("saved config = %q, want inline reasons array", data)
 	}
 
-	loaded, err := Load(path)
+	loaded, err := LoadFromDataDir(path, cfg.DataDir)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -250,7 +253,7 @@ func TestConfigSaveWritesMCPLikeConfigurationDocs(t *testing.T) {
 		t.Fatalf("saved config = %q, should not contain wrapper mcp tables", data)
 	}
 
-	loaded, err := Load(path)
+	loaded, err := LoadFromDataDir(path, cfg.DataDir)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -273,7 +276,7 @@ func TestConfigSaveWritesHooksLikeConfigurationDocs(t *testing.T) {
 		}
 	}
 
-	loaded, err := Load(path)
+	loaded, err := LoadFromDataDir(path, cfg.DataDir)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
@@ -482,7 +485,7 @@ api_key = "test-api-key"
 		t.Fatal(err)
 	}
 
-	cfg, err := Load(filepath.Join(dir, "config.toml"))
+	cfg, err := LoadFromDataDir(filepath.Join(dir, "config.toml"), dir)
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}

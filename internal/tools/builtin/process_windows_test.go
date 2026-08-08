@@ -52,8 +52,9 @@ func TestWindowsTimeoutAndTerminateCleanPipeDescendant(t *testing.T) {
 		pid := waitPIDFile(t, marker, windowsBehaviorTestLimit)
 		started := time.Now()
 		run.tree.terminate(execTerminateGrace)
-		if err := waitProcess(run.wait, execWaitLimit); err != nil {
-			t.Fatalf("root did not exit after termination: %v", err)
+		exitErr, waitComplete := waitProcessWithin(run.wait, execWaitLimit)
+		if !waitComplete {
+			t.Fatalf("root did not exit after termination: %v", exitErr)
 		}
 		run.finishOutput(execOutputDrainLimit)
 		run.tree.close()

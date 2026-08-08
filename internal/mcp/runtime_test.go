@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -33,8 +34,11 @@ func TestDefaultServerWorkdirIsStableAndPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stat() error = %v", err)
 	}
-	if mode := info.Mode().Perm(); mode != 0700 {
-		t.Fatalf("workdir mode = %o, want 700", mode)
+	// Windows 的 FileMode.Perm 不表示 ACL，不能用 POSIX mode 数值判断目录私有性。
+	if runtime.GOOS != "windows" {
+		if mode := info.Mode().Perm(); mode != 0700 {
+			t.Fatalf("workdir mode = %o, want 700", mode)
+		}
 	}
 	other, err := r.defaultServerWorkdir("my server-prod")
 	if err != nil {

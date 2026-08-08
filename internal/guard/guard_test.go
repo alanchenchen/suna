@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -20,11 +21,11 @@ func TestGuardRiskLowOnlyForStrictReadOnlyExec(t *testing.T) {
 		decision Decision
 		risk     RiskLevel
 	}{
-		{name: "simple readonly", command: "ls -la", decision: Approve, risk: RiskLow},
-		{name: "readonly pipeline", command: "git status | grep modified", decision: Approve, risk: RiskLow},
+		{name: "simple readonly", command: platformSimpleReadOnlyCommand(), decision: Approve, risk: RiskLow},
+		{name: "readonly pipeline", command: platformReadOnlyPipelineCommand(), decision: Approve, risk: RiskLow},
 		{name: "bash compound write", command: "ls && rm -rf important", decision: Confirm, risk: RiskHigh},
 		{name: "cmd compound write", command: "dir & del /s /q C:\\Users\\me", shell: "cmd", decision: Confirm, risk: RiskHigh},
-		{name: "powershell compound write", command: "Get-ChildItem; Remove-Item -Recurse -Force C:\\Users\\me", shell: "powershell", decision: Confirm, risk: RiskHigh},
+		{name: "powershell compound write", command: "Get-ChildItem; Remove-Item -Recurse -Force C:\\Users\\me", shell: "powershell", decision: platformPowerShellWriteDecision(), risk: RiskHigh},
 		{name: "redirection is not readonly", command: "echo hi > file.txt", decision: Confirm, risk: RiskMedium},
 		{name: "find delete is not readonly", command: "find . -delete", decision: Confirm, risk: RiskMedium},
 		{name: "nested shell is not readonly", command: "bash -c 'ls'", decision: Confirm, risk: RiskMedium},
@@ -46,6 +47,28 @@ func TestGuardRiskLowOnlyForStrictReadOnlyExec(t *testing.T) {
 			}
 		})
 	}
+}
+
+func platformSimpleReadOnlyCommand() string {
+	if runtime.GOOS == "windows" {
+		return "dir"
+	}
+	return "ls -la"
+}
+
+func platformReadOnlyPipelineCommand() string {
+	if runtime.GOOS == "windows" {
+		return "git status | findstr modified"
+	}
+	return "git status | grep modified"
+}
+
+func platformPowerShellWriteDecision() Decision {
+	if runtime.GOOS == "windows" {
+		// Windows 内置 blocked rule 会直接拒绝破坏性 PowerShell 命令。
+		return Reject
+	}
+	return Confirm
 }
 
 func TestGuardNewStructuredToolRisks(t *testing.T) {
@@ -270,7 +293,7 @@ func TestWorkspaceBlocksExecCWDAndCommandPaths(t *testing.T) {
 		{name: "relative escape", params: map[string]any{"command": "cat ../outside.txt", "cwd": root}, reasonPart: "outside workspace"},
 		{name: "cd outside", params: map[string]any{"command": "cd " + outside, "cwd": root}, reasonPart: "outside workspace"},
 		{name: "cd parent", params: map[string]any{"command": "cd ..", "cwd": root}, reasonPart: "outside workspace"},
-		{name: "quoted interpreter path", params: map[string]any{"command": `python -c 'print(open("/etc/passwd").read())'`, "cwd": root}, reasonPart: "outside workspace"},
+		{name: "quoted interpreter path", params: map[string]any{"command": `python -c 'print(open("` + filepath.Join(outside, "secret.txt") + `").read())'`, "cwd": root}, reasonPart: "outside workspace"},
 		{name: "dynamic shell expression", params: map[string]any{"command": `cat "$HOME/.ssh/id_rsa"`, "cwd": root}, reasonPart: ""},
 		{name: "dynamic positional expression", params: map[string]any{"command": `printf '%s' "$1"`, "cwd": root}, reasonPart: ""},
 	}
