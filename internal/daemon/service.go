@@ -19,6 +19,7 @@ import (
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/protocol"
 	"github.com/alanchenchen/suna/internal/skill"
+	"github.com/alanchenchen/suna/internal/tools"
 	"github.com/alanchenchen/suna/internal/version"
 )
 
@@ -101,12 +102,21 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 	case protocol.MethodResumeRun:
 		return s.handleResumeRun(ctx, req, sink)
 	case protocol.MethodCancel:
-		rt, _, err := s.daemon.sessions.ensureRunOwner(req.ConnID)
+		var rt *sessionRuntime
+		newlyMarked, err := s.daemon.sessions.markCancelling(req.ConnID, func(current *sessionRuntime, sessionID, runID string, phase protocol.AgentRunPhase) {
+			rt = current
+			// cancelling 在状态通知锁内广播，确保极快终态也不能抢先到达客户端。
+			s.emitAgentRun(ctx, sessionID, req.ConnID, protocol.AgentRunParams{RunID: runID, State: protocol.AgentRunCancelling, Phase: phase})
+		})
 		if err != nil {
 			return nil, protocolError{code: -32602, message: err.Error(), data: protocol.ProtocolErrorData{Kind: err.Error()}}
 		}
+		if !newlyMarked {
+			// 同一 owner 重复取消是成功的幂等操作，不重复广播 cancelling 或调用 cancel。
+			return map[string]string{"status": "cancelling"}, nil
+		}
 		rt.agent.CancelCurrentRun()
-		return map[string]string{"status": "cancelled"}, nil
+		return map[string]string{"status": "cancelling"}, nil
 	case protocol.MethodAskReply:
 		return s.handleAskReply(req)
 	case protocol.MethodGuardReply:
@@ -188,36 +198,48 @@ func (s *service) handleSendMessage(ctx context.Context, req protocol.Request, s
 	if err := decodeParams(req.Params, &params); err != nil {
 		return nil, invalidParams(err.Error())
 	}
-	// 在 RPC 内预留 run，绑定本次请求的 session runtime 与附件根目录；连接随后切换 session 不得改变消息归属。
-	rt, sessionID, err := s.daemon.sessions.beginRun(req.ConnID)
+	// 先完成所有输入校验，再预留 run 和发布初始 running；同步拒绝不能产生伪 lifecycle。
+	rt, _, err := s.daemon.sessions.attachedSession(req.ConnID)
 	if err != nil {
 		return nil, protocolError{code: -32602, message: err.Error(), data: protocol.ProtocolErrorData{Kind: err.Error()}}
 	}
 	input, err := s.agentInputFromParams(ctx, rt.agent, params)
 	if err != nil {
-		s.daemon.sessions.setStatus(sessionID, sessionIdle)
 		return nil, invalidParams(err.Error())
 	}
 	inputText := input.Text()
 	if inputText == "" && len(input.Blocks) == 0 {
-		s.daemon.sessions.setStatus(sessionID, sessionIdle)
 		return nil, invalidParams("content is required")
 	}
-	runID := s.daemon.sessions.currentRunID(sessionID)
-	go s.runAgentEvents(ctx, req.ConnID, sessionID, runID, inputText, rt.agent.Run(ctx, input), sink)
+	// 在 RPC 内预留 run，绑定本次请求的 session runtime 与附件根目录；连接随后切换 session 不得改变消息归属。
+	var sessionID, runID string
+	rt, sessionID, runID, err = s.daemon.sessions.beginRunWithNotification(req.ConnID, func(_ *sessionRuntime, id, idRun string) {
+		// 初始 running 与 run 预留处于同一通知临界区，先于 Agent goroutine 及并发 cancel。
+		s.emitAgentRun(ctx, id, req.ConnID, protocol.AgentRunParams{RunID: idRun, State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
+	})
+	if err != nil {
+		return nil, protocolError{code: -32602, message: err.Error(), data: protocol.ProtocolErrorData{Kind: err.Error()}}
+	}
+	runCtx := tools.MergeExecutionContext(ctx, tools.ExecutionContext{SessionID: sessionID, RunID: runID, BoundaryID: "main"})
 	s.emitUserMessage(ctx, sessionID, req.ConnID, protocol.UserMessageParams{SessionID: sessionID, Parts: params.Parts})
-	s.emitAgentRun(ctx, sessionID, req.ConnID, protocol.AgentRunParams{RunID: runID, State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
+	events := rt.agent.Run(runCtx, input)
+	go s.runAgentEvents(ctx, req.ConnID, sessionID, runID, inputText, events, sink)
 	return map[string]string{"status": "processing"}, nil
 }
 
 func (s *service) handleResumeRun(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
-	rt, sessionID, err := s.daemon.sessions.beginRun(req.ConnID)
+	var rt *sessionRuntime
+	var sessionID, runID string
+	rt, sessionID, runID, err := s.daemon.sessions.beginRunWithNotification(req.ConnID, func(_ *sessionRuntime, id, idRun string) {
+		// Resume 同样先发布 lifecycle 起点，不能让立即失败的 Agent 事件抢先到达客户端。
+		s.emitAgentRun(ctx, id, req.ConnID, protocol.AgentRunParams{RunID: idRun, State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
+	})
 	if err != nil {
 		return nil, protocolError{code: -32602, message: err.Error(), data: protocol.ProtocolErrorData{Kind: err.Error()}}
 	}
-	runID := s.daemon.sessions.currentRunID(sessionID)
-	go s.runAgentEvents(ctx, req.ConnID, sessionID, runID, "resume", rt.agent.ResumeRun(ctx), sink)
-	s.emitAgentRun(ctx, sessionID, req.ConnID, protocol.AgentRunParams{RunID: runID, State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
+	runCtx := tools.MergeExecutionContext(ctx, tools.ExecutionContext{SessionID: sessionID, RunID: runID, BoundaryID: "main"})
+	events := rt.agent.ResumeRun(runCtx)
+	go s.runAgentEvents(ctx, req.ConnID, sessionID, runID, "resume", events, sink)
 	return map[string]string{"status": "processing"}, nil
 }
 
@@ -225,6 +247,11 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 	// Agent 只会在状态保存 defer 完成后关闭 events；因此只能在这里把会话转为 idle，
 	// 避免首轮 run 的 done 通知先到、客户端断开后被空会话清理。
 	defer func() {
+		// 某些取消路径可能只关闭 event stream；在切 idle 前补齐唯一 cancelled 终态。
+		s.daemon.sessions.finishCancelling(sessionID, runID, func() {
+			sink = multiSink(s.daemon.sessions.sinksForSession(s.daemon, sessionID))
+			emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{RunID: runID, State: protocol.AgentRunCancelled})
+		})
 		// run 可能在最后一个连接离开时被取消；无论结束原因如何，都不能让
 		// AskUser / GuardConfirm 的协议交互继续保留 session runtime 的引用。
 		s.cancelPendingInteractions(sessionID)
@@ -271,7 +298,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 			case agent.EventToolCall:
 				flush()
 				s.daemon.sessions.setPhase(sessionID, protocol.AgentRunPhaseTool)
-				logging.Info("agent", "tool_call", logging.Event{"conn_id": connID, "tool": evt.ToolName, "intent": evt.ToolIntent})
+				logging.Info("agent", "tool_call", logging.Event{"conn_id": connID, "tool": evt.ToolName})
 				emit(ctx, sink, protocol.NotifyToolStart, protocol.ToolStartParams{ID: evt.ToolCallID, Tool: evt.ToolName, Params: evt.ToolParams, Intent: evt.ToolIntent})
 			case agent.EventToolGuard:
 				flush()
@@ -279,7 +306,9 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 			case agent.EventToolResult:
 				flush()
 				display := limitToolResult(evt.ToolResult)
-				logging.Info("agent", "tool_result", logging.Event{"conn_id": connID, "tool": evt.ToolName, "tool_error": evt.ToolError, "result_chars": len(evt.ToolResult), "display_truncated": display.truncated})
+				fields := logging.Event{"conn_id": connID, "tool": evt.ToolName, "tool_error": evt.ToolError, "result_chars": len(evt.ToolResult), "display_truncated": display.truncated}
+				appendExecToolLogFields(fields, evt.ToolMetadata)
+				logging.Info("agent", "tool_result", fields)
 				emit(ctx, sink, protocol.NotifyToolEnd, protocol.ToolEndParams{ID: evt.ToolCallID, Tool: evt.ToolName, Result: display.text, Error: evt.ToolError, ResultTruncated: display.truncated, ResultBytes: display.bytes, Metadata: evt.ToolMetadata})
 			case agent.EventSkillLoad:
 				flush()
@@ -331,19 +360,28 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 					compactFailed = true
 					continue
 				case agent.StatusWaitingLLM:
-					s.daemon.sessions.setPhase(sessionID, protocol.AgentRunPhaseModel)
-					s.daemon.sessions.setStatus(sessionID, sessionRunning)
-					ownerID := s.daemon.sessions.runOwner(sessionID)
-					if ownerID == "" {
-						ownerID = connID
+					accepted := s.daemon.sessions.transitionRunState(sessionID, runID, protocol.AgentRunRunning, func(protocol.AgentRunState) {
+						s.daemon.sessions.setPhase(sessionID, protocol.AgentRunPhaseModel)
+						s.daemon.sessions.setStatus(sessionID, sessionRunning)
+						ownerID := s.daemon.sessions.runOwner(sessionID)
+						if ownerID == "" {
+							ownerID = connID
+						}
+						s.emitAgentRun(ctx, sessionID, ownerID, protocol.AgentRunParams{RunID: runID, State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
+					})
+					if !accepted {
+						continue
 					}
-					s.emitAgentRun(ctx, sessionID, ownerID, protocol.AgentRunParams{RunID: runID, State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
 				case agent.StatusLLMRetrying:
-					emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{RunID: runID, State: protocol.AgentRunRetrying, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Attempt: evt.Attempt, MaxAttempts: evt.MaxAttempts, DelayMs: evt.DelayMs, Error: protocolModelError(evt.ModelError)})
+					s.daemon.sessions.transitionRunState(sessionID, runID, protocol.AgentRunRetrying, func(state protocol.AgentRunState) {
+						emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{RunID: runID, State: state, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Attempt: evt.Attempt, MaxAttempts: evt.MaxAttempts, DelayMs: evt.DelayMs, Error: protocolModelError(evt.ModelError)})
+					})
 				case agent.StatusDone:
-					logging.Info("agent", "run_done", logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()})
-					emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{RunID: runID, State: protocol.AgentRunDone})
-					emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
+					s.daemon.sessions.transitionRunState(sessionID, runID, protocol.AgentRunDone, func(state protocol.AgentRunState) {
+						logging.Info("agent", "run_done", logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()})
+						emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{RunID: runID, State: state})
+						emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
+					})
 				default:
 					if evt.Error {
 						if compactFailed {
@@ -365,13 +403,27 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 						if evt.ModelError != nil && evt.ModelError.Kind == model.ModelErrorCancelled {
 							state = protocol.AgentRunCancelled
 						}
-						emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{RunID: runID, State: state, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Error: protocolModelError(evt.ModelError), RunError: protocolRunError(evt.RunError), ResumeAvailable: resumeAvailable})
-						emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
+						s.daemon.sessions.transitionRunState(sessionID, runID, state, func(finalState protocol.AgentRunState) {
+							emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{RunID: runID, State: finalState, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Error: protocolModelError(evt.ModelError), RunError: protocolRunError(evt.RunError), ResumeAvailable: resumeAvailable && finalState == protocol.AgentRunFailed})
+							emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
+						})
 					}
 				}
 			}
 		case <-ticker.C:
 			flush()
+		}
+	}
+}
+
+func appendExecToolLogFields(fields logging.Event, metadata map[string]any) {
+	if fields == nil || metadata["kind"] != "exec" {
+		return
+	}
+	// 只增强已有 tool_result 的安全结构化事实，不记录命令、路径、环境、输出或错误正文。
+	for _, key := range []string{"action", "exec_status", "job_id", "scope", "exit_code", "duration_ms", "timeout_seconds", "cleanup_status", "output_truncated"} {
+		if value, ok := metadata[key]; ok {
+			fields[key] = value
 		}
 	}
 }
@@ -383,7 +435,7 @@ func (s *service) broadcastSessionState(ctx context.Context, sessionID string) {
 func (s *service) emitAgentRun(ctx context.Context, sessionID, ownerID string, params protocol.AgentRunParams) {
 	for _, targetConnID := range s.daemon.sessions.connIDsForSession(sessionID) {
 		p := params
-		p.CanControl = targetConnID == ownerID
+		p.CanControl = targetConnID == ownerID && params.State != protocol.AgentRunCancelling
 		emit(ctx, s.daemon.sinkFor(targetConnID, nil), protocol.NotifyAgentRun, p)
 	}
 }
@@ -602,7 +654,7 @@ func toolSummaryPayload(summary memory.ToolSummary) *protocol.ToolSummaryPayload
 }
 
 func (s *service) handleCompact(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
-	rt, sessionID, err := s.daemon.sessions.beginRun(req.ConnID)
+	rt, sessionID, _, err := s.daemon.sessions.beginRun(req.ConnID)
 	if err != nil {
 		return nil, err
 	}

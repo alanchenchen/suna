@@ -67,9 +67,11 @@ var (
 type toolStatus = toolview.Status
 
 const (
-	toolRunning = toolview.StatusRunning
-	toolDone    = toolview.StatusDone
-	toolError   = toolview.StatusError
+	toolRunning    = toolview.StatusRunning
+	toolCancelling = toolview.StatusCancelling
+	toolCancelled  = toolview.StatusCancelled
+	toolDone       = toolview.StatusDone
+	toolError      = toolview.StatusError
 )
 
 type toolEntry = toolview.Entry

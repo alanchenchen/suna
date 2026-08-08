@@ -51,14 +51,14 @@ func TestSessionManagerBeginRunAllowsSingleWriter(t *testing.T) {
 	if _, err := m.attach(ctx, "client-b", snap.Session.ID, false); err != nil {
 		t.Fatalf("attach error = %v", err)
 	}
-	if _, _, err := m.beginRun("client-a"); err != nil {
+	if _, _, _, err := m.beginRun("client-a"); err != nil {
 		t.Fatalf("first beginRun error = %v", err)
 	}
-	if _, _, err := m.beginRun("client-b"); err == nil {
+	if _, _, _, err := m.beginRun("client-b"); err == nil {
 		t.Fatal("second beginRun error = nil, want busy")
 	}
 	m.setStatus(snap.Session.ID, sessionIdle)
-	if _, _, err := m.beginRun("client-b"); err != nil {
+	if _, _, _, err := m.beginRun("client-b"); err != nil {
 		t.Fatalf("beginRun after idle error = %v", err)
 	}
 }
@@ -70,7 +70,7 @@ func TestSessionManagerActiveAttachReturnsCurrentRunView(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create error = %v", err)
 	}
-	if _, _, err := m.beginRun("owner"); err != nil {
+	if _, _, _, err := m.beginRun("owner"); err != nil {
 		t.Fatalf("beginRun error = %v", err)
 	}
 	m.appendStream(snap.Session.ID, "partial answer")
@@ -99,7 +99,7 @@ func TestSessionManagerDeleteOnlyAllowsDetachedIdleNonCurrentSession(t *testing.
 	if err := m.delete(ctx, "client-a", current.Session.ID); err == nil {
 		t.Fatal("delete current idle session error = nil, want rejected")
 	}
-	if _, _, err := m.beginRun("client-a"); err != nil {
+	if _, _, _, err := m.beginRun("client-a"); err != nil {
 		t.Fatalf("beginRun error = %v", err)
 	}
 	if err := m.delete(ctx, "client-a", current.Session.ID); err == nil {
@@ -178,7 +178,7 @@ func TestSessionManagerUpdateRequiresAttachedIdleSession(t *testing.T) {
 	if err == nil {
 		t.Fatal("update by stranger error = nil, want session_required")
 	}
-	if _, _, err := m.beginRun("client-a"); err != nil {
+	if _, _, _, err := m.beginRun("client-a"); err != nil {
 		t.Fatalf("beginRun error = %v", err)
 	}
 	updated, err := m.update(ctx, "client-a", protocol.SessionUpdateParams{SessionID: snap.Session.ID, Title: &title})
@@ -623,7 +623,7 @@ func TestSessionManagerLegacySessionMaterializesDefaultModel(t *testing.T) {
 	if meta == nil || meta.ModelRef != "test/model" {
 		t.Fatalf("persisted legacy model_ref = %#v, want test/model", meta)
 	}
-	if _, _, err := m.beginRun("client-a"); err != nil {
+	if _, _, _, err := m.beginRun("client-a"); err != nil {
 		t.Fatalf("beginRun after default materialization error = %v", err)
 	}
 }
@@ -681,5 +681,84 @@ func TestSessionManagerRejectsUnknownModelRef(t *testing.T) {
 	}
 	if meta == nil || meta.ModelRef == modelRef {
 		t.Fatalf("persisted model_ref = %#v, must not accept unavailable model", meta)
+	}
+}
+
+func TestBeginRunWithNotificationDoesNotInvertLifecycleLocks(t *testing.T) {
+	ctx := context.Background()
+	m := newTestSessionManager(t)
+	snap, err := m.create(ctx, "client-a", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+
+	m.mu.RLock()
+	rt := m.runtime[snap.Session.ID]
+	m.mu.RUnlock()
+	rt.runNotifyMu.Lock()
+	reachedNotifyLock := make(chan struct{})
+	m.beforeBeginRunNotifyLock = func() { close(reachedNotifyLock) }
+	beginDone := make(chan error, 1)
+	go func() {
+		_, _, _, beginErr := m.beginRunWithNotification("client-a", func(*sessionRuntime, string, string) {})
+		beginDone <- beginErr
+	}()
+	<-reachedNotifyLock
+
+	// begin 此时只能等待 runNotifyMu，不能持有 manager 锁；旧的反序实现会让这里确定性阻塞。
+	managerLockAcquired := make(chan struct{})
+	go func() {
+		m.mu.Lock()
+		close(managerLockAcquired)
+		m.mu.Unlock()
+	}()
+	select {
+	case <-managerLockAcquired:
+	case <-time.After(time.Second):
+		rt.runNotifyMu.Unlock()
+		t.Fatal("manager lock blocked while begin waited for runNotifyMu: lifecycle lock order inverted")
+	}
+
+	rt.runNotifyMu.Unlock()
+	if err := <-beginDone; err != nil {
+		t.Fatalf("beginRunWithNotification error = %v", err)
+	}
+}
+
+func TestMarkCancellingRejectsTerminalRun(t *testing.T) {
+	for _, terminal := range []protocol.AgentRunState{
+		protocol.AgentRunDone,
+		protocol.AgentRunFailed,
+		protocol.AgentRunCancelled,
+	} {
+		t.Run(string(terminal), func(t *testing.T) {
+			ctx := context.Background()
+			m := newTestSessionManager(t)
+			snap, err := m.create(ctx, "client-a", t.TempDir(), "")
+			if err != nil {
+				t.Fatalf("create error = %v", err)
+			}
+			_, _, runID, err := m.beginRun("client-a")
+			if err != nil {
+				t.Fatalf("beginRun error = %v", err)
+			}
+			if !m.transitionRunState(snap.Session.ID, runID, terminal, nil) {
+				t.Fatalf("transition to %q was rejected", terminal)
+			}
+
+			published := false
+			newlyMarked, err := m.markCancelling("client-a", func(*sessionRuntime, string, string, protocol.AgentRunPhase) {
+				published = true
+			})
+			if err == nil || newlyMarked || published {
+				t.Fatalf("cancel after %q = newlyMarked %v, err %v, published %v", terminal, newlyMarked, err, published)
+			}
+			m.mu.RLock()
+			got := m.runtime[snap.Session.ID].runState
+			m.mu.RUnlock()
+			if got != terminal {
+				t.Fatalf("run state = %q, want terminal %q preserved", got, terminal)
+			}
+		})
 	}
 }

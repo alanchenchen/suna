@@ -7,6 +7,8 @@ type Status int
 
 const (
 	StatusRunning Status = iota
+	StatusCancelling
+	StatusCancelled
 	StatusDone
 	StatusError
 )

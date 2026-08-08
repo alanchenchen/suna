@@ -30,11 +30,47 @@ func (m *Model) CanAppendToCurrentToolBlock() bool {
 
 func (m *Model) HasRunningTools() bool {
 	for _, te := range m.ActiveTools {
-		if te.Status == toolview.StatusRunning {
+		if te.Status == toolview.StatusRunning || te.Status == toolview.StatusCancelling {
 			return true
 		}
 	}
 	return false
+}
+
+// MarkActiveToolsCancelling 将仍在执行的 transcript 条目标记为取消中，但保留 active map 等待最终 tool_end 或 run 终态。
+func (m *Model) MarkActiveToolsCancelling() {
+	for _, te := range m.ActiveTools {
+		if te != nil && te.Status == toolview.StatusRunning {
+			te.Status = toolview.StatusCancelling
+		}
+	}
+}
+
+// RevertActiveToolsCancelling 在取消请求发送失败时恢复本地展示，允许用户再次取消。
+func (m *Model) RevertActiveToolsCancelling() {
+	for _, te := range m.ActiveTools {
+		if te != nil && te.Status == toolview.StatusCancelling {
+			te.Status = toolview.StatusRunning
+		}
+	}
+}
+
+// FinishCancellingTools 在 run 取消终态收尾仍未收到 tool_end 的条目，停止其 spinner 并固定耗时。
+func (m *Model) FinishCancellingTools(now time.Time) {
+	for id, te := range m.ActiveTools {
+		if te == nil || (te.Status != toolview.StatusCancelling && te.Status != toolview.StatusRunning) {
+			continue
+		}
+		te.Status = toolview.StatusCancelled
+		te.EndedAt = now
+		if start, ok := m.ToolStartTimes[id]; ok {
+			te.Duration = now.Sub(start)
+		} else if !te.StartedAt.IsZero() {
+			te.Duration = now.Sub(te.StartedAt)
+		}
+		delete(m.ToolStartTimes, id)
+		delete(m.ActiveTools, id)
+	}
 }
 
 func (m *Model) MoveSelectedTool(delta int) {
@@ -133,7 +169,7 @@ func (m *Model) SelectedToolPosition() (int, int) {
 func (m *Model) RunningToolCount() int {
 	count := 0
 	for _, te := range m.ActiveTools {
-		if te.Status == toolview.StatusRunning {
+		if te.Status == toolview.StatusRunning || te.Status == toolview.StatusCancelling {
 			count++
 		}
 	}

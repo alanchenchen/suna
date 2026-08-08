@@ -47,6 +47,10 @@ func (g *Guard) checkWorkspace(ctx context.Context, tool string, params map[stri
 		}
 		return false, "", ""
 	case "exec":
+		// status/stop 仅操作受管任务标识，不解析 cwd 或空 command。
+		if action := execAction(params); action == "status" || action == "stop" {
+			return false, "", ""
+		}
 		requestedCWD, _ := params["cwd"].(string)
 		cwd, err := tools.EffectiveCWD(ctx, requestedCWD)
 		if err != nil {

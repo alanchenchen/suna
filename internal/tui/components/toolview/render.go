@@ -49,6 +49,22 @@ type RenderLabels struct {
 	SearchMatchesInFiles string
 	SearchScanned        string
 	SearchTruncated      string
+	Cancelling           string
+	Cancelled            string
+	ExecBadge            string
+	ExecRunning          string
+	ExecTimedOut         string
+	ExecCancelled        string
+	ExecExited           string
+	ExecStopped          string
+	ExecCleanup          string
+	ExecJobID            string
+	ExecScope            string
+	ExecRunCleanup       string
+	ExecSessionCleanup   string
+	ExecTimeout          string
+	ExecExitCode         string
+	ExecCleanupStatus    string
 }
 
 // RenderDeps 汇总工具块渲染所需依赖。
@@ -103,6 +119,8 @@ func toolBlockStatusIcon(entries []*Entry, deps RenderDeps) string {
 		return ""
 	}
 	running := 0
+	cancelling := 0
+	cancelled := 0
 	failed := 0
 	for _, te := range entries {
 		if te == nil {
@@ -111,11 +129,15 @@ func toolBlockStatusIcon(entries []*Entry, deps RenderDeps) string {
 		switch te.Status {
 		case StatusRunning:
 			running++
+		case StatusCancelling:
+			cancelling++
+		case StatusCancelled:
+			cancelled++
 		case StatusError:
 			failed++
 		}
 	}
-	if running > 0 {
+	if running > 0 || cancelling > 0 {
 		if strings.TrimSpace(deps.Spinner) != "" {
 			return deps.Spinner
 		}
@@ -123,6 +145,9 @@ func toolBlockStatusIcon(entries []*Entry, deps RenderDeps) string {
 	}
 	if failed > 0 {
 		return "✗"
+	}
+	if cancelled > 0 {
+		return "⊘"
 	}
 	return "✓"
 }
@@ -173,6 +198,8 @@ func RenderEntry(te *Entry, nested bool, deps RenderDeps) string {
 	switch te.Status {
 	case StatusDone:
 		statusIcon = s.OK.Render("✓")
+	case StatusCancelled:
+		statusIcon = s.ToolDim.Render("⊘")
 	case StatusError:
 		statusIcon = s.Err.Render("✗")
 	default:
@@ -195,12 +222,18 @@ func RenderEntry(te *Entry, nested bool, deps RenderDeps) string {
 			line += "\n" + prefix + "  " + detail
 		}
 	}
+	if te.Status == StatusCancelling {
+		line += "\n" + prefix + "  " + s.ToolDim.Render(defaultLabel(deps.Labels.Cancelling, "Cancelling"))
+	}
+	if te.Status == StatusCancelled {
+		line += "\n" + prefix + "  " + s.ToolDim.Render(defaultLabel(deps.Labels.Cancelled, "Cancelled"))
+	}
 	if te.Status == StatusError {
 		if err := ShortToolError(te.Result); err != "" {
 			line += "\n" + prefix + "  " + s.Err.Render(textutil.TruncateRunes(err, maxInt(24, deps.width()-12)))
 		}
 	}
-	if te.Status == StatusDone {
+	if te.Status == StatusDone || te.Status == StatusError {
 		if summary := renderMetadataSummary(te, prefix, deps); summary != "" {
 			line += "\n" + summary
 		}
@@ -350,6 +383,9 @@ func renderMetadataSummary(te *Entry, prefix string, deps RenderDeps) string {
 	}
 	if kind, _ := te.Metadata["kind"].(string); kind == "http_response" {
 		return RenderHTTPSummary(te.Metadata, prefix, deps)
+	}
+	if kind, _ := te.Metadata["kind"].(string); kind == "exec" {
+		return RenderExecSummary(te.Metadata, prefix, deps)
 	}
 	return ""
 }

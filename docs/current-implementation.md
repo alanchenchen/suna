@@ -103,7 +103,7 @@ Runner 对主循环中的 model request 做内置 recovery：在尚未产生 ass
 | `readfile` | 感知 | 按行范围、tail 或 base64 读取本地文件。 |
 | `listdir` | 感知 | 列目录，支持递归、分页、include/exclude 和隐藏文件开关；`max_depth` 上限 3。 |
 | `search` | 感知 | 通用本地搜索工具。`path` 可指向文件或目录；`mode=auto` 同时返回路径、轻量结构入口和正文分组，也可指定 `content` / `path` / `symbol`；`symbol` 表示文档标题、配置段/key、常见定义/声明等轻量结构入口，不限于代码。支持 `context`(默认 1，最大 5)、`limit`(默认 100，最大 1000)、`depth`(默认 8，最大 20)、include/exclude、`match=literal/regex/glob`、`case=smart/insensitive/sensitive`、`scope=workspace/deps/all` 和 `word`。默认排除常见依赖/构建/缓存/VCS 目录和凭据文件，并通过扫描文件数、文件大小、输出大小限制保持有界；空结果或截断时只在正文追加诊断提示，不改变 TUI 依赖的 metadata contract。 |
-| `exec` | 行动 | 执行 shell 命令；Guard 会把可证明只读的命令归为 low risk。 |
+| `exec` | 行动 | 单一状态化 shell 工具：默认前台同步执行（默认总运行寿命 60 秒），持续任务必须显式 `background=true`；后台任务通过 `job_id` 执行 `status` / `stop`，支持 `run` / `session` 生命周期范围、cursor 增量输出、timeout、配额和自动回收。Guard 会把可证明只读的 run 归为 low risk；status 为只读，stop 为 medium risk。 |
 | `writefile` | 行动 | 创建、覆盖或追加文件，支持 `create_dirs=true` 自动创建父目录和写前 SHA-256 校验；创建新文件场景应优先使用本工具而不是先 `filesystem mkdir` 再写。 |
 | `editfile` | 行动 | 对单个文件原子应用一个或多个精确文本替换；默认要求 `old_string` 唯一匹配，`target="all"` 替换全部，`target="2"` 按 1-based 序号替换第 2 个匹配。 |
 | `filesystem` | 行动 | `stat` / `mkdir` / `move` / `copy` / `remove` 文件系统路径；`stat` 为只读低风险调用。创建新文件优先使用 `writefile create_dirs=true`，避免无意义的预先 `mkdir`。 |
@@ -112,6 +112,8 @@ Runner 对主循环中的 model request 做内置 recovery：在尚未产生 ass
 | `spawn` | runtime | 委派独立 subtask。 |
 | `skill_load` | runtime | 加载某个 Skill 的完整说明。 |
 | `skill_start` | runtime | 导入或检查 Skill，并进入 review/enable 工作流。 |
+
+`exec` 后台任务由 Suna 托管而不是由模型自行记忆生命周期：run-scope 任务在对应主任务或 subtask 边界结束时回收，session-scope 任务受 timeout、session 删除和 daemon 关闭约束。Unix 使用进程组回收普通后代，主动 `setsid` / double-fork / daemonize 的逃逸进程不在承诺范围；Windows 使用 Job Object。第一版不提供 PTY、任意 PID、后台任务持久化、实时日志推送或后台任务面板。
 
 MCP tools 会以 `mcp__<server>__<tool>` 的形式注册到工具目录。
 

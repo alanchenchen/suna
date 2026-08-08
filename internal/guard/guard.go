@@ -336,8 +336,7 @@ func (g *Guard) checkAllowed(tool string, params map[string]any) (bool, string) 
 func ruleTarget(tool string, params map[string]any) string {
 	switch tool {
 	case "exec":
-		target, _ := params["command"].(string)
-		return target
+		return execTarget(params, false)
 	case "writefile", "editfile", "readfile", "listdir", "search":
 		target, _ := params["path"].(string)
 		return target
@@ -363,6 +362,30 @@ func ruleTarget(tool string, params map[string]any) string {
 
 func guardTarget(tool string, params map[string]any) string {
 	return SafeTarget(tool, params)
+}
+
+// execAction 与执行工具保持一致：未提供 action 时按 run 处理。
+func execAction(params map[string]any) string {
+	action, _ := params["action"].(string)
+	if action == "" {
+		return "run"
+	}
+	return action
+}
+
+// execTarget 让命令执行和受管任务操作使用各自准确的规则、审查目标。
+func execTarget(params map[string]any, safe bool) string {
+	switch action := execAction(params); action {
+	case "status", "stop":
+		jobID, _ := params["job_id"].(string)
+		return action + " " + MaskSensitiveContent(jobID)
+	default:
+		command, _ := params["command"].(string)
+		if safe {
+			return MaskSensitiveContent(command)
+		}
+		return command
+	}
 }
 
 func (g *Guard) audit(ctx context.Context, tool string, params map[string]any, risk RiskLevel, decision, reason string) {
@@ -408,9 +431,18 @@ func (g *Guard) builtinAllowedCommands() []string {
 func (g *Guard) assessRisk(tool string, params map[string]any) RiskLevel {
 	switch tool {
 	case "exec":
-		cmd, _ := params["command"].(string)
-		shell, _ := params["shell"].(string)
-		return analyzeExecCommand(cmd, shell, g.allowedCmds)
+		switch execAction(params) {
+		case "status":
+			// 受管任务状态查询只读取已有输出，不执行新命令。
+			return RiskLow
+		case "stop":
+			// 停止精确任务会改变进程状态，保留 medium 以进入正常的 Smart Review。
+			return RiskMedium
+		default:
+			cmd, _ := params["command"].(string)
+			shell, _ := params["shell"].(string)
+			return analyzeExecCommand(cmd, shell, g.allowedCmds)
+		}
 	case "writefile":
 		path, _ := params["path"].(string)
 		return assessFileWriteRisk(path)

@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -124,14 +125,47 @@ func (m *Manager) Execute(ctx context.Context, call Call) Result {
 	return result
 }
 
+// CleanupRun 回收指定 run 拥有的短生命周期工具资源。
+func (m *Manager) CleanupRun(ctx context.Context, execCtx ExecutionContext) error {
+	m.mu.RLock()
+	providers := append([]Provider(nil), m.providers...)
+	m.mu.RUnlock()
+	var errs []error
+	for _, provider := range providers {
+		if scoped, ok := provider.(ScopedLifecycleProvider); ok {
+			if err := scoped.CleanupRun(ctx, execCtx); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// CleanupSession 回收指定 session 的全部工具资源，不在普通 detach/runtime unload 时调用。
+func (m *Manager) CleanupSession(ctx context.Context, sessionID string) error {
+	m.mu.RLock()
+	providers := append([]Provider(nil), m.providers...)
+	m.mu.RUnlock()
+	var errs []error
+	for _, provider := range providers {
+		if scoped, ok := provider.(ScopedLifecycleProvider); ok {
+			if err := scoped.CleanupSession(ctx, sessionID); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func (m *Manager) Close(ctx context.Context) error {
 	m.mu.RLock()
 	providers := append([]Provider(nil), m.providers...)
 	m.mu.RUnlock()
+	var errs []error
 	for _, provider := range providers {
 		if err := provider.Close(ctx); err != nil {
-			return err
+			errs = append(errs, err)
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }

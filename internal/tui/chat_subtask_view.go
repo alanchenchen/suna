@@ -317,7 +317,7 @@ func (t *TUI) subtaskStatusCounts(ids []string) (done, running, failed int) {
 		case te == nil:
 		case te.Status == toolview.StatusDone:
 			done++
-		case te.Status == toolview.StatusError:
+		case te.Status == toolview.StatusError || te.Status == toolview.StatusCancelled:
 			failed++
 		default:
 			running++
@@ -349,6 +349,8 @@ func (t *TUI) subtaskStatusIcon(te *toolEntry) string {
 		return styleToolOk.Render("✓")
 	case toolview.StatusError:
 		return styleToolErr.Render("✗")
+	case toolview.StatusCancelled:
+		return styleDim.Render("⊘")
 	default:
 		return styleToolRun.Render(spinnerPlaceholder)
 	}
@@ -588,10 +590,10 @@ func (t *TUI) defaultSubtaskToolCursor() int {
 	}
 	lastDone := 0
 	for i, child := range children {
-		if child.Status == toolview.StatusRunning {
+		if child.Status == toolview.StatusRunning || child.Status == toolview.StatusCancelling {
 			return i
 		}
-		if child.Status == toolview.StatusDone || child.Status == toolview.StatusError {
+		if child.Status == toolview.StatusDone || child.Status == toolview.StatusError || child.Status == toolview.StatusCancelled {
 			lastDone = i
 		}
 	}

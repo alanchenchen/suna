@@ -131,6 +131,80 @@ func TestRenderBlockKeepsDurationVisibleForLongCommand(t *testing.T) {
 	}
 }
 
+func TestRenderExecBackgroundSummaryKeepsToolDone(t *testing.T) {
+	entry := &Entry{
+		ID:      "exec-1",
+		Name:    "Exec",
+		RawName: "exec",
+		Intent:  "启动后台服务",
+		Status:  StatusDone,
+		Metadata: map[string]any{
+			"kind":            "exec",
+			"action":          "background",
+			"exec_status":     "running",
+			"job_id":          "job-42",
+			"scope":           "run",
+			"timeout_seconds": 30,
+		},
+	}
+	deps := RenderDeps{Labels: RenderLabels{
+		ExecBadge:      "执行",
+		ExecRunning:    "后台运行中",
+		ExecJobID:      "任务",
+		ExecScope:      "范围",
+		ExecTimeout:    "超时",
+		ExecRunCleanup: "本轮结束时自动清理",
+	}}
+
+	rendered := RenderEntry(entry, false, deps)
+	for _, want := range []string{"✓", "后台运行中", "任务 job-42", "范围 run", "超时 30s", "本轮结束时自动清理"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("RenderEntry() missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestRenderExecTerminalSemanticSummaries(t *testing.T) {
+	tests := []struct {
+		status string
+		want   string
+	}{
+		{status: "timeout", want: "已超时"},
+		{status: "cancelled", want: "已取消"},
+		{status: "stopped", want: "已停止"},
+		{status: "exited", want: "已退出"},
+		{status: "cleanup", want: "已清理"},
+	}
+	labels := RenderLabels{ExecBadge: "执行", ExecTimedOut: "已超时", ExecCancelled: "已取消", ExecExited: "已退出", ExecStopped: "已停止", ExecCleanup: "已清理"}
+	for _, tt := range tests {
+		rendered := RenderEntry(&Entry{ID: tt.status, Name: "Exec", Status: StatusDone, Metadata: map[string]any{"kind": "exec", "exec_status": tt.status}}, false, RenderDeps{Labels: labels})
+		if !strings.Contains(rendered, tt.want) {
+			t.Fatalf("status %q missing %q: %s", tt.status, tt.want, rendered)
+		}
+	}
+}
+
+func TestRenderExecSessionCleanupBoundary(t *testing.T) {
+	entry := &Entry{Name: "Exec", Status: StatusDone, Metadata: map[string]any{"kind": "exec", "action": "background", "exec_status": "running", "scope": "session"}}
+	labels := RenderLabels{ExecRunning: "后台运行中", ExecRunCleanup: "本轮结束时自动清理", ExecSessionCleanup: "会话关闭时清理"}
+	rendered := RenderEntry(entry, false, RenderDeps{Labels: labels})
+	if !strings.Contains(rendered, "会话关闭时清理") || strings.Contains(rendered, "本轮结束时自动清理") {
+		t.Fatalf("session cleanup boundary = %q", rendered)
+	}
+}
+
+func TestRenderCancellingAndCancelledToolStatuses(t *testing.T) {
+	deps := RenderDeps{Spinner: "⣾", Labels: RenderLabels{Cancelling: "正在取消", Cancelled: "已取消"}}
+	cancelling := RenderEntry(&Entry{Name: "Exec", Status: StatusCancelling}, false, deps)
+	if !strings.Contains(cancelling, "⣾") || !strings.Contains(cancelling, "正在取消") {
+		t.Fatalf("cancelling render = %q", cancelling)
+	}
+	cancelled := RenderEntry(&Entry{Name: "Exec", Status: StatusCancelled}, false, deps)
+	if strings.Contains(cancelled, "⣾") || !strings.Contains(cancelled, "⊘") || !strings.Contains(cancelled, "已取消") {
+		t.Fatalf("cancelled render = %q", cancelled)
+	}
+}
+
 func mustDuration(t *testing.T, value string) time.Duration {
 	t.Helper()
 	d, err := time.ParseDuration(value)

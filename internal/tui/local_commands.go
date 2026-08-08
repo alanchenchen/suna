@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/alanchenchen/suna/internal/protocol"
+	transportjsonrpc "github.com/alanchenchen/suna/internal/transport/jsonrpc"
 	tuievents "github.com/alanchenchen/suna/internal/tui/events"
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 	tuitransport "github.com/alanchenchen/suna/internal/tui/transport"
@@ -143,13 +145,19 @@ func (t *TUI) resumeRunCmd() tea.Cmd {
 func (t *TUI) cancelCmd() tea.Cmd {
 	return func() tea.Msg {
 		if t.localCli == nil {
-			return nil
+			return cancelResultMsg{Err: fmt.Errorf("%s", t.tr("error.not_connected")), Rejected: true}
 		}
-		if err := t.localCli.Cancel(); err != nil {
-			return ipcErrorNotification(notifyConfigError, err)
-		}
-		return nil
+		err := t.localCli.Cancel()
+		return cancelResultMsg{Err: err, Rejected: isDefiniteRPCRejection(err)}
 	}
+}
+
+func isDefiniteRPCRejection(err error) bool {
+	if err == nil {
+		return false
+	}
+	var rpcErr *transportjsonrpc.Error
+	return errors.As(err, &rpcErr)
 }
 
 func (t *TUI) sessionListCmd() tea.Cmd {

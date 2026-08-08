@@ -57,6 +57,10 @@ type TUI struct {
 	sessions             []protocol.SessionInfo
 	currentSession       protocol.SessionInfo
 	currentRunCanControl bool
+	// cancelling 表示已发出取消请求或收到 daemon 的 cancelling 状态，终态前保持输入锁定。
+	cancelling bool
+	// cancelNoticeRunID 记录已经展示取消终态提示的 run，避免重复通知追加相同文案。
+	cancelNoticeRunID string
 	// completedRunID 防止终态通知先到时，迟到的同一 run 快照重新激活 Loading。
 	completedRunID       string
 	handoffRole          string

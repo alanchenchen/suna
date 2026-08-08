@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/alanchenchen/suna/internal/guard"
+	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/prompt"
 	"github.com/alanchenchen/suna/internal/runner"
@@ -230,9 +231,18 @@ func (a *Agent) ExecuteSpawnTool(ctx context.Context, id string, params map[stri
 		return tools.ErrorResult(fmt.Sprintf("invalid spawn model %q: %v", modelRef, err))
 	}
 	ctx = model.WithBinding(ctx, binding)
+	ctx = tools.MergeExecutionContext(ctx, tools.ExecutionContext{BoundaryID: "spawn:" + spawnID})
 	r := a.newSubtaskRunner(events, spawnID, allowedTools)
 	st := subtask.New(subtask.Request{ID: spawnID, Task: task, Input: inputBlocks, Binding: binding, Invocation: model.Invocation{SessionScope: model.SessionScope(a.sessionID)}, System: subtaskPrompt, ToolDefs: toolDefs})
 	res, err := st.Run(ctx, r)
+	if execCtx, ok := tools.ExecutionContextFrom(ctx); ok && a.tools != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if cleanupErr := a.tools.CleanupRun(cleanupCtx, execCtx); cleanupErr != nil {
+			// subtask 结果保持原语义，清理 partial 通过安全结构化日志暴露。
+			logging.Error("agent", "exec_subtask_cleanup_partial", nil, logging.Event{"session_id": execCtx.SessionID, "run_id": execCtx.RunID, "boundary_id": execCtx.BoundaryID})
+		}
+		cleanupCancel()
+	}
 	if err != nil && res.Status == "" {
 		res = subtask.Result{
 			Status: subtask.StatusFailed,
@@ -556,18 +566,6 @@ func (a *Agent) toolParamKeys(name string) map[string]bool {
 		return schemaPropertyKeys(spec.Parameters)
 	}
 	return nil
-}
-
-func schemaPropertyKeys(schema map[string]any) map[string]bool {
-	props, ok := schema["properties"].(map[string]any)
-	if !ok {
-		return nil
-	}
-	keys := make(map[string]bool, len(props))
-	for k := range props {
-		keys[k] = true
-	}
-	return keys
 }
 
 func consumeToolIntent(params map[string]any) string {

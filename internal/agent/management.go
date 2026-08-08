@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/alanchenchen/suna/internal/logging"
@@ -195,6 +196,14 @@ func (a *Agent) ClearAttachments() (root string, removedBytes int64, removedCoun
 	}
 	bytes, count, err = a.mediaStore.Usage()
 	return root, removedBytes, removedCount, bytes, count, err
+}
+
+func (a *Agent) CleanupToolSession(ctx context.Context, sessionID string) error {
+	root := a.root()
+	if root == nil || root.tools == nil || strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+	return root.tools.CleanupSession(ctx, sessionID)
 }
 
 func (a *Agent) Close() {

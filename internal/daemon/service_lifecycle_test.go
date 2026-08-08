@@ -28,7 +28,7 @@ func TestServiceClearsPendingInteractionsWhenRuntimeBecomesOrphaned(t *testing.T
 	if err != nil {
 		t.Fatalf("create error = %v", err)
 	}
-	if _, _, err := manager.beginRun("client-a"); err != nil {
+	if _, _, _, err := manager.beginRun("client-a"); err != nil {
 		t.Fatalf("beginRun error = %v", err)
 	}
 	svc.pendingAsks.Store("ask", pendingInteraction{sessionID: snapshot.Session.ID, reply: make(chan string, 1)})
@@ -61,7 +61,7 @@ func TestRunAgentEventsBroadcastsIdleSessionStateAfterRunCloses(t *testing.T) {
 	if _, err := manager.attach(ctx, "client-b", snapshot.Session.ID, false); err != nil {
 		t.Fatalf("attach observer error = %v", err)
 	}
-	if _, _, err := manager.beginRun("client-a"); err != nil {
+	if _, _, _, err := manager.beginRun("client-a"); err != nil {
 		t.Fatalf("beginRun error = %v", err)
 	}
 
@@ -134,7 +134,7 @@ func TestRunAgentEventsKeepsSessionBusyUntilEventStreamCloses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create error = %v", err)
 	}
-	if _, _, err := manager.beginRun("client-a"); err != nil {
+	if _, _, _, err := manager.beginRun("client-a"); err != nil {
 		t.Fatalf("beginRun error = %v", err)
 	}
 
@@ -148,13 +148,65 @@ func TestRunAgentEventsKeepsSessionBusyUntilEventStreamCloses(t *testing.T) {
 	}()
 
 	events <- agent.Event{Type: agent.EventStatus, Status: agent.StatusDone}
-	if _, _, err := manager.beginRun("client-a"); err == nil {
+	if _, _, _, err := manager.beginRun("client-a"); err == nil {
 		t.Fatal("beginRun before event stream close error = nil, want session_busy")
 	}
 
 	close(events)
 	<-done
-	if _, _, err := manager.beginRun("client-a"); err != nil {
+	if _, _, _, err := manager.beginRun("client-a"); err != nil {
 		t.Fatalf("beginRun after event stream close error = %v", err)
+	}
+}
+
+func TestCancellingSuppressesNonCancelledRunStates(t *testing.T) {
+	ctx := context.Background()
+	manager := newTestSessionManager(t)
+	snapshot, err := manager.create(ctx, "client-a", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+	if _, _, _, err := manager.beginRun("client-a"); err != nil {
+		t.Fatalf("beginRun error = %v", err)
+	}
+	runID := manager.currentRunID(snapshot.Session.ID)
+	sink := &captureEventSink{}
+	d := &Daemon{sessions: manager, sinks: map[string]protocol.EventSink{"client-a": sink}}
+	svc := newService(d)
+
+	var publishCalls int
+	newlyMarked, err := manager.markCancelling("client-a", func(_ *sessionRuntime, sessionID, gotRunID string, phase protocol.AgentRunPhase) {
+		publishCalls++
+		svc.emitAgentRun(ctx, sessionID, "client-a", protocol.AgentRunParams{RunID: gotRunID, State: protocol.AgentRunCancelling, Phase: phase})
+	})
+	if err != nil || !newlyMarked {
+		t.Fatalf("first cancel = %v, %v", newlyMarked, err)
+	}
+	newlyMarked, err = manager.markCancelling("client-a", func(*sessionRuntime, string, string, protocol.AgentRunPhase) { publishCalls++ })
+	if err != nil || newlyMarked || publishCalls != 1 {
+		t.Fatalf("duplicate cancel = %v, %v, calls=%d", newlyMarked, err, publishCalls)
+	}
+
+	events := make(chan agent.Event, 3)
+	events <- agent.Event{Type: agent.EventStatus, Status: agent.StatusWaitingLLM}
+	events <- agent.Event{Type: agent.EventStatus, Status: agent.StatusLLMRetrying}
+	events <- agent.Event{Type: agent.EventStatus, Status: agent.StatusDone}
+	close(events)
+	svc.runAgentEvents(ctx, "client-a", snapshot.Session.ID, runID, "input", events, sink)
+
+	var states []protocol.AgentRunState
+	for _, event := range sink.events {
+		if event.Method != protocol.NotifyAgentRun {
+			continue
+		}
+		params := event.Params.(protocol.AgentRunParams)
+		states = append(states, params.State)
+		if params.State == protocol.AgentRunCancelling && params.CanControl {
+			t.Fatal("cancelling CanControl = true")
+		}
+	}
+	want := []protocol.AgentRunState{protocol.AgentRunCancelling, protocol.AgentRunCancelled}
+	if len(states) != len(want) || states[0] != want[0] || states[1] != want[1] {
+		t.Fatalf("states = %#v, want %#v", states, want)
 	}
 }

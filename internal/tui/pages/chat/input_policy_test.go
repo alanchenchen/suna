@@ -14,6 +14,11 @@ func TestCurrentInputPolicy(t *testing.T) {
 			want:  InputPolicy{Locked: true, Placeholder: "⠋ compacting"},
 		},
 		{
+			name:  "cancelling keeps draft editable without another cancel",
+			state: InputPolicyState{Loading: true, Cancelling: true, SpinnerView: "⠋", CancellingLabel: "cancelling", RespondingLabel: "responding"},
+			want:  InputPolicy{},
+		},
+		{
 			name:  "loading uses status and cancel",
 			state: InputPolicyState{Loading: true, StatusLabel: "waiting", RespondingLabel: "responding"},
 			want:  InputPolicy{Locked: true, Placeholder: "waiting", AllowCancel: true},

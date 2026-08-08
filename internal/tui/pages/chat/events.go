@@ -83,6 +83,12 @@ func (m *Model) EndTool(p protocol.ToolEndParams, id string, now time.Time) {
 		// tool_end 回来时仍要回到历史 transcript 里的 tool entry，把 running 更新为 done/error。
 		te = m.FindTool(id)
 	}
+	if te != nil && te.Status == toolview.StatusCancelled {
+		// run 终态已经将未结束工具固定为 cancelled，迟到的 tool_end 不能再覆盖该终态。
+		delete(m.ActiveTools, id)
+		delete(m.ToolStartTimes, id)
+		return
+	}
 	if te != nil {
 		if start, ok := m.ToolStartTimes[id]; ok {
 			te.Duration = now.Sub(start)

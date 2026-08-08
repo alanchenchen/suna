@@ -85,6 +85,10 @@ func (m *sessionManager) delete(ctx context.Context, connID, sessionID string) e
 }
 
 func (m *sessionManager) deletePersistedSession(ctx context.Context, sessionID string) error {
+	// session 删除是 session-scope 后台任务的确定性生命周期边界；普通 detach/runtime unload 不会走这里。
+	if err := m.root.CleanupToolSession(ctx, sessionID); err != nil {
+		return fmt.Errorf("cleanup session tools: %w", err)
+	}
 	return m.store.DeleteWithState(ctx, sessionID)
 }
 

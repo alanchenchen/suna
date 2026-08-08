@@ -158,13 +158,14 @@ Agent 运行事件必须按语义拆分，避免 UI 从文本流里推导状态�
 
 表示 run 生命周期：
 
-- `running`：run 正在执行。
+- `running`：run 正在执行；这是新 run 的首条 Agent 生命周期通知，先于该 run 的 delta/tool/终态事件。
 - `retrying`：模型请求临时失败，Runner 将自动重试。
+- `cancelling`：daemon 已接受取消请求，run 仍在收尾；`can_control=false`，重复 cancel 幂等且不重复通知。
 - `done`：run 正常结束。
 - `failed`：run 失败。
 - `cancelled`：run 被取消。
 
-`retrying` 不是终态。客户端可以展示等待/重试状态，但不应插入最终错误消息。只有 `done`、`failed`、`cancelled` 表示当前 run 结束。
+`retrying` 和 `cancelling` 不是终态。进入 `cancelling` 后 daemon 不再发布该 run 的 `running`、`retrying` 或 `done`，context 取消及其他竞态终态统一收敛为唯一 `cancelled`。客户端可以在 cancelling 期间保留或编辑下一份本地草稿，但不得发送、排队消息或再次取消。只有 `done`、`failed`、`cancelled` 表示当前 run 结束。
 
 `resume_available=true` 只在失败后表示客户端可以提供“继续/恢复”按钮，并调用 `agent.resumeRun`。
 
@@ -292,7 +293,7 @@ agent.run state=failed
 - `messages`：最近可见 user/assistant 文本消息。
 - `compacted`：较早上下文是否已压缩为 Session State。
 - `tool_summary`：上一轮有界工具摘要，仅供 UI 展示。
-- `current_run`：Join running session 时的轻量当前 run 视图，含稳定 `run_id`；客户端应避免让同一 `run_id` 的迟到快照重新激活已终态运行。
+- `current_run`：Join running session 时的轻量当前 run 视图，含稳定 `run_id`、`state` 和实时 `can_control`；`state=cancelling` 时 `can_control=false`。客户端应避免让同一 `run_id` 的迟到快照重新激活已终态运行。
 
 `session.attach.require_active=true` 只用于 Join Active 的陈旧 UI 防护；Resume 应传 false 或省略。
 

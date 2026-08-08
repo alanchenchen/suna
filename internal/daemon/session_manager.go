@@ -32,8 +32,10 @@ type sessionRuntime struct {
 	agent       *agent.Agent
 	status      sessionStatus
 	clients     map[string]bool
+	runNotifyMu sync.Mutex
 	runOwner    string
 	runID       string
+	runState    protocol.AgentRunState
 	phase       protocol.AgentRunPhase
 	assistant   strings.Builder
 	reasoning   strings.Builder
@@ -60,6 +62,8 @@ type sessionManager struct {
 	runtimeUnloadVersion  map[string]uint64
 	runtimeUnloadDelay    time.Duration
 	beforeAttachStateLoad func()
+	// beforeBeginRunNotifyLock 仅供并发测试在获取 lifecycle 通知锁前建立确定性屏障。
+	beforeBeginRunNotifyLock func()
 	// onOrphan 在最后一个连接离开活动 runtime 后清理 daemon 侧的交互引用。
 	// 回调在 sessionManager 锁外执行，不能重入 sessionManager 锁。
 	onOrphan func(sessionID string)
@@ -362,6 +366,7 @@ func (m *sessionManager) attachedSession(connID string) (*sessionRuntime, string
 	return rt, id, nil
 }
 
+// markCancelling 原子记录并发布取消已被 daemon 接受；newlyMarked=false 表示同一 owner 的重复取消。
 func (m *sessionManager) sinksForSession(d *Daemon, sessionID string) []protocol.EventSink {
 	connIDs := m.connIDsForSession(sessionID)
 	sinks := make([]protocol.EventSink, 0, len(connIDs))
@@ -540,31 +545,6 @@ func (m *sessionManager) ensureRunOwner(connID string) (*sessionRuntime, string,
 	return rt, id, nil
 }
 
-func (m *sessionManager) beginRun(connID string) (*sessionRuntime, string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	id := m.attached[connID]
-	if id == "" {
-		return nil, "", fmt.Errorf("session_required")
-	}
-	rt := m.runtime[id]
-	if rt == nil {
-		return nil, "", fmt.Errorf("session not loaded")
-	}
-	if rt.status != sessionIdle || rt.stateOps > 0 {
-		return nil, "", fmt.Errorf("session_busy")
-	}
-	rt.runOwner = connID
-	rt.runID = uuid.NewString()
-	m.invalidateRuntimeUnloadNoLock(id)
-	rt.phase = protocol.AgentRunPhaseModel
-	rt.status = sessionRunning
-	rt.waitingType = ""
-	rt.assistant.Reset()
-	rt.reasoning.Reset()
-	return rt, id, nil
-}
-
 func (m *sessionManager) finishStateOp(sessionID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -590,6 +570,7 @@ func (m *sessionManager) setStatus(sessionID string, status sessionStatus) {
 		if status == sessionIdle {
 			rt.runOwner = ""
 			rt.runID = ""
+			rt.runState = ""
 			rt.waitingType = ""
 			rt.phase = ""
 			rt.assistant.Reset()
@@ -674,7 +655,7 @@ func (m *sessionManager) snapshotForConn(connID string, meta memory.SessionMeta,
 	}
 	m.mu.RLock()
 	if rt != nil && rt.status != sessionIdle {
-		out.CurrentRun = &protocol.CurrentRunView{RunID: rt.runID, Status: protocol.SessionStatus(rt.status), Phase: rt.phase, AssistantBuffer: rt.assistant.String(), ReasoningBuffer: rt.reasoning.String(), WaitingType: rt.waitingType, CanControl: rt.runOwner != "" && rt.runOwner == connID}
+		out.CurrentRun = &protocol.CurrentRunView{RunID: rt.runID, State: rt.runState, Status: protocol.SessionStatus(rt.status), Phase: rt.phase, AssistantBuffer: rt.assistant.String(), ReasoningBuffer: rt.reasoning.String(), WaitingType: rt.waitingType, CanControl: rt.runOwner != "" && rt.runOwner == connID && rt.runState != protocol.AgentRunCancelling}
 	}
 	m.mu.RUnlock()
 	return out

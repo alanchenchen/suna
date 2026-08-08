@@ -212,7 +212,7 @@ Attach response 中的 `current_run`、`run_id`、`assistant_buffer` 与 `reason
 
 | Notification | 客户端应做什么 |
 |---|---|
-| `agent.run` | 更新 running / retrying / done / failed / cancelled 状态。 |
+| `agent.run` | 更新 running / retrying / cancelling / done / failed / cancelled 状态；`cancelling` 不是终态，此时不要再次取消或发送下一条消息。 |
 | `agent.delta` | 追加 assistant 或 reasoning 流式文本。 |
 | `agent.usage` | 更新 token、context、耗时统计。 |
 | `agent.tool_start` / `agent.tool_guard` / `agent.tool_end` | 展示工具生命周期和结果。 |

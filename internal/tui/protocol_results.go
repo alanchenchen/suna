@@ -10,6 +10,20 @@ func (t *TUI) handleProtocolResultMsg(msg tea.Msg) tea.Cmd {
 	// method response 在这里转成 TUI 本地状态更新；daemon notification 仍走 notification pump，保持协议语义分层。
 	schedule := false
 	switch m := msg.(type) {
+	case cancelResultMsg:
+		if m.Err != nil && m.Rejected {
+			// daemon 明确拒绝取消时恢复运行展示，允许用户重试；真实 run 不在 TUI 中提前终止。
+			t.cancelling = false
+			t.currentRunCanControl = true
+			t.chat.RevertActiveToolsCancelling()
+			t.chat.ClearStatusLabel()
+			t.appendNonToolMessage(chatMsg{Role: "error", Content: m.Err.Error()})
+			schedule = true
+		} else if m.Err != nil {
+			// 取消请求写出后的传输错误属于结果不确定，继续等待 daemon lifecycle 收敛。
+			t.appendNonToolMessage(chatMsg{Role: "error", Content: m.Err.Error()})
+			schedule = true
+		}
 	case daemonStatusResultMsg:
 		t.handleDaemonFullStatusNotification(m.Params)
 	case configResultMsg:

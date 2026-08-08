@@ -42,6 +42,13 @@ type Error struct {
 	Data    any    `json:"data,omitempty"`
 }
 
+func (e *Error) Error() string {
+	if e == nil {
+		return ""
+	}
+	return e.Message
+}
+
 type ErrorData struct {
 	// Kind 是稳定错误分类，和 protocol.ProtocolErrorData 保持同一语义。
 	Kind string `json:"kind"`

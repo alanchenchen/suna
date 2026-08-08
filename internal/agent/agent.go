@@ -185,12 +185,13 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, runIdentity := a.ensureRunExecutionContext(runCtx)
 	a.cancelMu.Lock()
 	a.cancelFn = cancel
 	a.cancelMu.Unlock()
 
 	go func() {
-		defer a.finishRun(events, cancel)
+		defer a.finishRun(events, cancel, runIdentity)
 
 		if a.router == nil {
 			events <- Event{Type: EventStatus, Error: true, RunError: a.modelUnavailableRunError()}
@@ -233,12 +234,13 @@ func (a *Agent) ResumeRun(ctx context.Context) <-chan Event {
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
+	runCtx, runIdentity := a.ensureRunExecutionContext(runCtx)
 	a.cancelMu.Lock()
 	a.cancelFn = cancel
 	a.cancelMu.Unlock()
 
 	go func() {
-		defer a.finishRun(events, cancel)
+		defer a.finishRun(events, cancel, runIdentity)
 		defer a.saveConversationState(runCtx)
 
 		if a.router == nil {
@@ -256,11 +258,34 @@ func (a *Agent) ResumeRun(ctx context.Context) <-chan Event {
 	return events
 }
 
-func (a *Agent) finishRun(events chan Event, cancel context.CancelFunc) {
+func (a *Agent) ensureRunExecutionContext(ctx context.Context) (context.Context, tools.ExecutionContext) {
+	execCtx, _ := tools.ExecutionContextFrom(ctx)
+	if execCtx.SessionID == "" {
+		execCtx.SessionID = a.sessionID
+	}
+	if execCtx.RunID == "" {
+		execCtx.RunID = uuid.NewString()
+	}
+	if execCtx.BoundaryID == "" {
+		execCtx.BoundaryID = "main"
+	}
+	return tools.WithExecutionContext(ctx, execCtx), execCtx
+}
+
+func (a *Agent) finishRun(events chan Event, cancel context.CancelFunc, runIdentity tools.ExecutionContext) {
 	a.cancelMu.Lock()
 	a.cancelFn = nil
 	a.cancelMu.Unlock()
 	cancel()
+	if a.tools != nil && runIdentity.SessionID != "" && runIdentity.RunID != "" {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// run 结束前统一回收本轮主任务与子任务遗漏的短生命周期后台进程。
+		if err := a.tools.CleanupRun(cleanupCtx, tools.ExecutionContext{SessionID: runIdentity.SessionID, RunID: runIdentity.RunID}); err != nil {
+			// Agent run 已结束，清理错误不能重写模型终态；必须留下结构化诊断，避免 partial 静默。
+			logging.Error("agent", "exec_run_cleanup_partial", nil, logging.Event{"session_id": runIdentity.SessionID, "run_id": runIdentity.RunID})
+		}
+		cleanupCancel()
+	}
 	close(events)
 	a.runMu.Unlock()
 }
@@ -273,7 +298,7 @@ func (a *Agent) modelUnavailableRunError() *RunError {
 }
 
 func (a *Agent) runCurrentWorking(runCtx context.Context, inputText string, events chan<- Event) {
-	runCtx = tools.WithExecutionContext(runCtx, tools.ExecutionContext{SessionID: a.sessionID, CWD: a.cwd, AttachmentDir: a.attachmentRoot()})
+	runCtx = tools.MergeExecutionContext(runCtx, tools.ExecutionContext{SessionID: a.sessionID, CWD: a.cwd, AttachmentDir: a.attachmentRoot()})
 	modelRef := a.modelRef
 	if a.router == nil {
 		events <- Event{Type: EventStatus, Error: true, RunError: a.modelUnavailableRunError()}

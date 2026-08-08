@@ -15,6 +15,77 @@ import (
 	tuitransport "github.com/alanchenchen/suna/internal/tui/transport"
 )
 
+func TestCancellingAllowsDraftEditingButHandleSendIsNoop(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, cancelling: true}
+	tui.initChatComponents()
+	tui.chat.Loading = true
+	tui.chat.Textarea.SetValue("不应发送")
+
+	if cmd := tui.handleSend(); cmd != nil {
+		t.Fatal("handleSend returned a command while cancelling")
+	}
+	if tui.currentInputPolicy().Locked {
+		t.Fatal("composer is locked while cancelling")
+	}
+	if len(tui.chat.Messages) != 0 || tui.chat.Textarea.Value() != "不应发送" {
+		t.Fatal("handleSend mutated composer or transcript while cancelling")
+	}
+}
+
+func TestCancelTransportFailureKeepsCancellingState(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, cancelling: true}
+	tui.initChatComponents()
+	tui.chat.Loading = true
+
+	tui.handleProtocolResultMsg(cancelResultMsg{Err: fmt.Errorf("connection closed")})
+	if !tui.cancelling || !tui.chat.Loading || tui.currentRunCanControl {
+		t.Fatalf("cancelling/loading/control = %v/%v/%v", tui.cancelling, tui.chat.Loading, tui.currentRunCanControl)
+	}
+}
+
+func TestAgentCancellingWaitsForFinalNotification(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, currentRunCanControl: true}
+	tui.initChatComponents()
+	started := time.Now().Add(-time.Second)
+	entry := &toolview.Entry{ID: "exec-1", Name: "Exec", Status: toolview.StatusRunning, StartedAt: started}
+	tui.chat.ActiveTools = map[string]*toolview.Entry{"exec-1": entry}
+	tui.chat.ToolStartTimes = map[string]time.Time{"exec-1": started}
+	tui.chat.Loading = true
+
+	tui.handleAgentRunNotification(protocol.AgentRunParams{RunID: "run-1", State: protocol.AgentRunState("cancelling")})
+	if !tui.cancelling || !tui.chat.Loading || tui.currentRunCanControl {
+		t.Fatalf("cancelling/loading/control = %v/%v/%v", tui.cancelling, tui.chat.Loading, tui.currentRunCanControl)
+	}
+	if entry.Status != toolview.StatusCancelling || tui.currentInputPolicy().AllowCancel || tui.currentInputPolicy().Locked {
+		t.Fatalf("tool/policy = %v/%#v", entry.Status, tui.currentInputPolicy())
+	}
+
+	tui.handleAgentRunNotification(protocol.AgentRunParams{RunID: "run-1", State: protocol.AgentRunCancelled})
+	if tui.cancelling || tui.chat.Loading || entry.Status != toolview.StatusCancelled || tui.chatSpinnerTicking {
+		t.Fatalf("final cancelling/loading/tool/spinner = %v/%v/%v/%v", tui.cancelling, tui.chat.Loading, entry.Status, tui.chatSpinnerTicking)
+	}
+	messages := len(tui.chat.Messages)
+	tui.completedRunID = ""
+	tui.handleAgentRunNotification(protocol.AgentRunParams{RunID: "run-1", State: protocol.AgentRunCancelled})
+	if len(tui.chat.Messages) != messages {
+		t.Fatalf("duplicate cancelled notice appended: %d -> %d", messages, len(tui.chat.Messages))
+	}
+}
+
+func TestEscEntersCancellingWithoutPrematureNotice(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, currentRunCanControl: true}
+	tui.initChatComponents()
+	tui.chat.Loading = true
+
+	_, _ = tui.updateChatEsc()
+	if !tui.cancelling || !tui.chat.Loading {
+		t.Fatalf("cancelling/loading = %v/%v", tui.cancelling, tui.chat.Loading)
+	}
+	if len(tui.chat.Messages) != 0 {
+		t.Fatalf("premature cancellation notice count = %d", len(tui.chat.Messages))
+	}
+}
+
 func TestGuardVisibleInFinalChatViewAndLocksComposer(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 100, height: 30}
 	tui.initChatComponents()

@@ -53,11 +53,12 @@ type AgentDeltaParams struct {
 type AgentRunState string
 
 const (
-	AgentRunRunning   AgentRunState = "running"
-	AgentRunRetrying  AgentRunState = "retrying"
-	AgentRunDone      AgentRunState = "done"
-	AgentRunFailed    AgentRunState = "failed"
-	AgentRunCancelled AgentRunState = "cancelled"
+	AgentRunRunning    AgentRunState = "running"
+	AgentRunRetrying   AgentRunState = "retrying"
+	AgentRunCancelling AgentRunState = "cancelling"
+	AgentRunDone       AgentRunState = "done"
+	AgentRunFailed     AgentRunState = "failed"
+	AgentRunCancelled  AgentRunState = "cancelled"
 )
 
 type AgentRunPhase string
@@ -214,6 +215,7 @@ const (
 type CurrentRunView struct {
 	// RunID 标识当前活跃运行；客户端可用它避免迟到快照重新激活已终态的 run。
 	RunID           string         `json:"run_id,omitempty"`
+	State           AgentRunState  `json:"state,omitempty"`
 	Status          SessionStatus  `json:"status"`
 	Phase           AgentRunPhase  `json:"phase,omitempty"`
 	AssistantBuffer string         `json:"assistant_buffer,omitempty"`

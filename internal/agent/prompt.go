@@ -114,13 +114,27 @@ func (a *Agent) buildToolDefs() []model.ToolDef {
 }
 
 func withIntentParameter(params map[string]any) map[string]any {
-	props, ok := params["properties"].(map[string]any)
-	if !ok {
-		props = map[string]any{}
-		params["properties"] = props
-	}
-	props["intent"] = map[string]any{"type": "string", "description": "Natural-language reason for this tool call. Explain what you are trying to accomplish for the user. Do not put file contents, secrets, or raw parameters here."}
+	addIntentToObjectSchema(params)
 	return params
+}
+
+func addIntentToObjectSchema(schema map[string]any) {
+	if props, ok := schema["properties"].(map[string]any); ok {
+		props["intent"] = toolIntentSchema()
+	}
+	// 封闭的组合分支也必须声明 intent，否则模型按 schema 传入 intent 时没有合法分支。
+	for _, keyword := range []string{"oneOf", "anyOf"} {
+		branches, _ := schema[keyword].([]any)
+		for _, branch := range branches {
+			if child, ok := branch.(map[string]any); ok {
+				addIntentToObjectSchema(child)
+			}
+		}
+	}
+}
+
+func toolIntentSchema() map[string]any {
+	return map[string]any{"type": "string", "description": "Natural-language reason for this tool call. Explain what you are trying to accomplish for the user. Do not put file contents, secrets, or raw parameters here."}
 }
 
 func getEnvInfoForWorkDir(wd string) map[string]string {

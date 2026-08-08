@@ -199,6 +199,58 @@ func TestBuildSubtaskToolDefsIncludesOnlyAllowedTools(t *testing.T) {
 	}
 }
 
+func TestBuildToolDefsSupportsComposedExecSchemaAndCleaning(t *testing.T) {
+	mgr := tools.NewManager()
+	a := &Agent{tools: mgr}
+	mgr.RegisterProvider(builtin.NewProvider())
+	if err := mgr.Reload(context.Background()); err != nil {
+		t.Fatalf("Reload tools: %v", err)
+	}
+
+	defs := a.buildToolDefs()
+	var execDef *model.ToolDef
+	for index := range defs {
+		if defs[index].Name == "exec" {
+			execDef = &defs[index]
+			break
+		}
+	}
+	if execDef == nil {
+		t.Fatal("exec tool definition missing")
+	}
+	branches, ok := execDef.Parameters["oneOf"].([]any)
+	if !ok || len(branches) != 4 {
+		t.Fatalf("exec oneOf = %#v, want four branches", execDef.Parameters["oneOf"])
+	}
+	for index, branch := range branches {
+		object, ok := branch.(map[string]any)
+		if !ok {
+			t.Fatalf("exec branch %d = %#v", index, branch)
+		}
+		props, ok := object["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("exec branch %d properties missing", index)
+		}
+		if _, ok := props["intent"]; !ok {
+			t.Fatalf("exec branch %d intent missing", index)
+		}
+	}
+
+	for _, params := range []map[string]any{
+		{"action": "run", "command": "printf ok", "background": true, "scope": "run", "intent": "run a managed command", "unknown": true},
+		{"action": "status", "job_id": "job-1", "cursor": float64(10), "intent": "read output", "unknown": true},
+		{"action": "stop", "job_id": "job-1", "intent": "stop the job", "unknown": true},
+	} {
+		cleaned, intent := a.cleanToolParams("exec", params)
+		if intent == "" || cleaned["action"] == nil {
+			t.Fatalf("cleaned params/intent = %#v/%q", cleaned, intent)
+		}
+		if _, exists := cleaned["unknown"]; exists {
+			t.Fatalf("unknown field survived cleaning: %#v", cleaned)
+		}
+	}
+}
+
 func TestBuildToolDefsStableAndIncludesAgentTools(t *testing.T) {
 	mgr := tools.NewManager()
 	a := &Agent{tools: mgr}

@@ -224,7 +224,7 @@ Suna 不是纯 coding agent，但它适合处理本地资料、代码、文档�
 | 感知 | `readfile` | 按行范围、tail 或 base64 读取本地文件 |
 | 感知 | `listdir` | 列目录，支持递归、分页和 include/exclude 过滤 |
 | 感知 | `search` | 结构化本地搜索，支持路径、结构入口和正文搜索 |
-| 行动 | `exec` | 执行 shell 命令，用于诊断、测试、构建和系统操作 |
+| 行动 | `exec` | 执行或管理有界 shell 命令；持续任务可显式转为后台，并通过 job ID 查询或停止 |
 | 行动 | `writefile` | 创建、覆盖或追加文件 |
 | 行动 | `editfile` | 对单个文件原子应用精确文本替换 |
 | 行动 | `filesystem` | `stat` / `mkdir` / `move` / `copy` / `remove` 文件系统路径 |

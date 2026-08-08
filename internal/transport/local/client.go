@@ -3,7 +3,6 @@ package local
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -175,7 +174,8 @@ func (c *Client) handleMessage(raw []byte) {
 	}
 	res := clientResult{result: resp.Result}
 	if resp.Error != nil {
-		res.err = errors.New(resp.Error.Message)
+		// 保留 JSON-RPC code/data，让调用方区分 daemon 明确拒绝与传输结果不确定。
+		res.err = resp.Error
 	}
 	c.mu.Lock()
 	ch := c.pending[resp.ID]

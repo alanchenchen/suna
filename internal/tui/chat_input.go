@@ -45,6 +45,7 @@ func (t *TUI) currentInteractionPresentation() chatpage.InteractionPresentation 
 	return chatpage.CurrentInteractionPresentation(chatpage.InputPolicyState{
 		Compacting:      t.chat.Compacting,
 		Loading:         t.chat.Loading,
+		Cancelling:      t.cancelling,
 		ObservingRun:    t.observingRun(),
 		InteractionKind: t.chat.ActiveInteractionKind(),
 		AskAllowCustom:  activeAskAllowCustom(t.chat.ActiveAsk()),
@@ -53,6 +54,7 @@ func (t *TUI) currentInteractionPresentation() chatpage.InteractionPresentation 
 		CompactRunning:  t.compactRunningLabel(),
 		RespondingLabel: t.tr("status.responding"),
 		ObservingLabel:  t.tr("tui.chat.observe_input"),
+		CancellingLabel: t.tr("status.cancelling"),
 	}, t.selectionMode)
 }
 
@@ -103,6 +105,10 @@ func (t *TUI) updateDiscardDraftConfirm(ks string, msg tea.Msg) (tea.Model, tea.
 }
 
 func (t *TUI) handleSend() tea.Cmd {
+	if t.cancelling {
+		// 即使被非键盘路径调用，取消期间也不能绕过 InputPolicy 再发送请求。
+		return nil
+	}
 	input := strings.TrimSpace(t.chat.Textarea.Value())
 	attachments := append([]attachmentItem(nil), t.chat.Attachments...)
 	if input == "" && len(attachments) == 0 && t.chat.ResumeAvailable {
@@ -425,14 +431,15 @@ func (t *TUI) updateChatEsc() (tea.Model, tea.Cmd) {
 		return t, nil
 	}
 	if t.chat.Loading {
+		if t.cancelling {
+			return t, nil
+		}
 		if !t.currentRunCanControl {
 			return t, t.leaveCurrentSessionForWelcome()
 		}
-		t.currentRunCanControl = false
-		t.resetPhase()
-		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.i18n.T("status.cancelled")})
+		t.enterCancelling()
 		t.syncContent()
-		return t, tea.Batch(t.cancelCmd(), t.syncInputFocus())
+		return t, t.cancelCmd()
 	}
 	if !t.hasDraft() {
 		return t, t.leaveCurrentSessionForWelcome()

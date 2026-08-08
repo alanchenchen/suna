@@ -216,7 +216,7 @@ Action tools such as writing files, running commands, filesystem operations, and
 | Perception | `readfile` | Read files by line range, tail, or base64 |
 | Perception | `listdir` | List directories with recursion, pagination, include/exclude filters |
 | Perception | `search` | Structured local search across paths, headings/symbol-like entries, and content |
-| Action | `exec` | Run shell commands for diagnostics, tests, builds, and system operations |
+| Action | `exec` | Run or manage bounded shell commands; long-running work can be started explicitly in the background and queried or stopped by job ID |
 | Action | `writefile` | Create, overwrite, or append files |
 | Action | `editfile` | Atomically apply exact text replacements to a single file |
 | Action | `filesystem` | `stat`, `mkdir`, `move`, `copy`, or `remove` paths |

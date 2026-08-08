@@ -74,7 +74,7 @@ func TestSessionManagerDefersRuntimeUnloadUntilRunBecomesIdle(t *testing.T) {
 	if err := m.store.SetMessageCount(ctx, snap.Session.ID, 1); err != nil {
 		t.Fatalf("SetMessageCount error = %v", err)
 	}
-	if _, _, err := m.beginRun("client-a"); err != nil {
+	if _, _, _, err := m.beginRun("client-a"); err != nil {
 		t.Fatalf("beginRun error = %v", err)
 	}
 
@@ -100,7 +100,7 @@ func TestSessionManagerOrphansActiveRuntimeOnLastDetach(t *testing.T) {
 	if err := m.store.SetMessageCount(ctx, snap.Session.ID, 1); err != nil {
 		t.Fatalf("SetMessageCount error = %v", err)
 	}
-	if _, _, err := m.beginRun("client-a"); err != nil {
+	if _, _, _, err := m.beginRun("client-a"); err != nil {
 		t.Fatalf("beginRun error = %v", err)
 	}
 

@@ -75,8 +75,7 @@ func boundedReviewValue(value any, stringLimit int) any {
 func SafeTarget(tool string, params map[string]any) string {
 	switch tool {
 	case "exec":
-		target, _ := params["command"].(string)
-		return MaskSensitiveContent(target)
+		return execTarget(params, true)
 	case "writefile", "editfile", "readfile", "listdir", "search":
 		target, _ := params["path"].(string)
 		return MaskSensitiveContent(target)

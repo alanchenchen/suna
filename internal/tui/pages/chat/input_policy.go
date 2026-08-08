@@ -19,6 +19,7 @@ type InteractionPresentation struct {
 type InputPolicyState struct {
 	Compacting      bool
 	Loading         bool
+	Cancelling      bool
 	ObservingRun    bool
 	InteractionKind InteractionKind
 	AskAllowCustom  bool
@@ -27,9 +28,14 @@ type InputPolicyState struct {
 	CompactRunning  string
 	RespondingLabel string
 	ObservingLabel  string
+	CancellingLabel string
 }
 
 func CurrentInputPolicy(state InputPolicyState) InputPolicy {
+	if state.Cancelling {
+		// 取消期间仍允许用户准备下一份草稿；Loading 会继续阻止 Enter 发送，Esc 也不会再次取消。
+		return InputPolicy{}
+	}
 	if state.Compacting {
 		return InputPolicy{Locked: true, Placeholder: joinNonEmpty(state.SpinnerView, state.CompactRunning)}
 	}

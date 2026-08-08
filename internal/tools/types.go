@@ -108,3 +108,11 @@ type Provider interface {
 	Execute(ctx context.Context, call Call) (Result, bool)
 	Close(ctx context.Context) error
 }
+
+// ScopedLifecycleProvider 允许状态化工具按 run 或 session 回收受管资源。
+// Manager 只负责转发生命周期，具体所有权和清理语义仍由 Provider 实现。
+type ScopedLifecycleProvider interface {
+	Provider
+	CleanupRun(ctx context.Context, execCtx ExecutionContext) error
+	CleanupSession(ctx context.Context, sessionID string) error
+}

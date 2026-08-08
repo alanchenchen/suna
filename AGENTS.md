@@ -35,7 +35,7 @@ Suna 是本地终端 AI Agent：CLI 启动 TUI，TUI 通过 protocol/local trans
 ## 架构规则
 
 - TUI 不直接依赖 `agent`、`runner`、`tools`、`guard` 等业务包；交互必须走 protocol。
-- Agent protocol 语义保持分层：`agent.delta` 只承载 assistant/reasoning 内容增量，`agent.run` 承载 running/retrying/done/failed/cancelled 生命周期，`agent.usage` 承载 token/context/duration 统计。
+- Agent protocol 语义保持分层：`agent.delta` 只承载 assistant/reasoning 内容增量，`agent.run` 承载 running/retrying/cancelling/done/failed/cancelled 生命周期，`agent.usage` 承载 token/context/duration 统计。
 - Runner 负责模型请求自动恢复；Router/provider 只表示单次物理模型请求，retry 判断依赖结构化 `ModelError` 的 status code / kind，不靠错误字符串匹配。
 - 项目指令只从当前工作目录读取第一个非空文件，优先级为 `AGENTS.md`、`CLAUDE.md`、`GEMINI.md`、`.cursorrules`、`.windsurfrules`；不向父目录递归，不读取 `.suna/`。
 - 新模型可见工具优先以 `tools.Provider` 接入，不在 Agent/Runner 中手动拼 schema。
