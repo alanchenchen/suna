@@ -7,7 +7,7 @@ import (
 	"github.com/alanchenchen/suna/internal/protocol"
 )
 
-func TestSessionAttachBroadcastsSharedClientCount(t *testing.T) {
+func TestSessionCatalogBroadcastsClientCountToUnattachedObservers(t *testing.T) {
 	ctx := context.Background()
 	manager := newTestSessionManager(t)
 	snapshot, err := manager.create(ctx, "local-tui", t.TempDir(), "")
@@ -16,16 +16,18 @@ func TestSessionAttachBroadcastsSharedClientCount(t *testing.T) {
 	}
 
 	localSink := &captureEventSink{}
-	tcpSink := &captureEventSink{}
+	joinedSink := &captureEventSink{}
+	catalogSink := &captureEventSink{}
 	d := &Daemon{
 		sessions: manager,
 		sinks: map[string]protocol.EventSink{
-			"local-tui": localSink,
-			"tcp-app":   tcpSink,
+			"local-tui":        localSink,
+			"joined-client":    joinedSink,
+			"catalog-observer": catalogSink,
 		},
 	}
 	svc := newService(d)
-	result, err := svc.handleSessionAttach(ctx, protocol.Request{ConnID: "tcp-app", Params: protocol.SessionAttachParams{SessionID: snapshot.Session.ID}})
+	result, err := svc.handleSessionAttach(ctx, protocol.Request{ConnID: "joined-client", Params: protocol.SessionAttachParams{SessionID: snapshot.Session.ID}})
 	if err != nil {
 		t.Fatalf("attach error = %v", err)
 	}
@@ -37,18 +39,20 @@ func TestSessionAttachBroadcastsSharedClientCount(t *testing.T) {
 		t.Fatalf("attach client count = %d, want %d", got, want)
 	}
 
-	localShared := receivedSessionClientCount(localSink.events, snapshot.Session.ID, 2)
-	tcpShared := receivedSessionClientCount(tcpSink.events, snapshot.Session.ID, 2)
-	if !localShared {
-		t.Fatalf("local client did not receive shared session state: %#v", localSink.events)
-	}
-	if !tcpShared {
-		t.Fatalf("tcp client did not receive shared session state: %#v", tcpSink.events)
+	for name, sink := range map[string]*captureEventSink{"owner": localSink, "joined": joinedSink, "catalog": catalogSink} {
+		if !receivedSessionClientCount(sink.Events(), snapshot.Session.ID, 2) {
+			t.Fatalf("%s client did not receive shared session state: %#v", name, sink.Events())
+		}
 	}
 
-	d.removeConnection("tcp-app")
-	if !receivedSessionClientCount(localSink.events, snapshot.Session.ID, 1) {
-		t.Fatalf("local client did not receive detached session state: %#v", localSink.events)
+	d.removeConnection("joined-client")
+	for name, sink := range map[string]*captureEventSink{"owner": localSink, "catalog": catalogSink} {
+		if !receivedSessionClientCount(sink.Events(), snapshot.Session.ID, 1) {
+			t.Fatalf("%s client did not receive detached session state: %#v", name, sink.Events())
+		}
+	}
+	if receivedSessionClientCount(joinedSink.Events(), snapshot.Session.ID, 1) {
+		t.Fatalf("disconnected client received catalog update: %#v", joinedSink.Events())
 	}
 }
 

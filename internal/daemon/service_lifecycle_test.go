@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/alanchenchen/suna/internal/agent"
@@ -9,12 +10,21 @@ import (
 )
 
 type captureEventSink struct {
+	mu     sync.Mutex
 	events []protocol.Event
 }
 
 func (s *captureEventSink) Emit(_ context.Context, event protocol.Event) error {
+	s.mu.Lock()
 	s.events = append(s.events, event)
+	s.mu.Unlock()
 	return nil
+}
+
+func (s *captureEventSink) Events() []protocol.Event {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]protocol.Event(nil), s.events...)
 }
 
 func TestServiceClearsPendingInteractionsWhenRuntimeBecomesOrphaned(t *testing.T) {
@@ -51,80 +61,128 @@ func TestServiceClearsPendingInteractionsWhenRuntimeBecomesOrphaned(t *testing.T
 	}
 }
 
-func TestRunAgentEventsBroadcastsIdleSessionStateAfterRunCloses(t *testing.T) {
+func TestRunLifecycleBroadcastsCatalogStateWithoutLeakingDetailedEvents(t *testing.T) {
 	ctx := context.Background()
 	manager := newTestSessionManager(t)
-	snapshot, err := manager.create(ctx, "client-a", t.TempDir(), "")
+	_, err := manager.create(ctx, "client-a", t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("create error = %v", err)
-	}
-	if _, err := manager.attach(ctx, "client-b", snapshot.Session.ID, false); err != nil {
-		t.Fatalf("attach observer error = %v", err)
-	}
-	if _, _, _, err := manager.beginRun("client-a"); err != nil {
-		t.Fatalf("beginRun error = %v", err)
 	}
 
 	ownerSink := &captureEventSink{}
 	observerSink := &captureEventSink{}
-	d := &Daemon{sessions: manager, sinks: map[string]protocol.EventSink{"client-a": ownerSink, "client-b": observerSink}}
+	d := &Daemon{sessions: manager, sinks: map[string]protocol.EventSink{"client-a": ownerSink, "catalog-observer": observerSink}}
 	svc := newService(d)
-	events := make(chan agent.Event, 1)
+	_, sessionID, runID, err := svc.beginAgentRun(ctx, "client-a")
+	if err != nil {
+		t.Fatalf("beginAgentRun error = %v", err)
+	}
+	if !receivedSessionStatus(observerSink.Events(), sessionID, protocol.SessionStatusRunning, 1) {
+		t.Fatalf("unattached observer did not receive running catalog state: %#v", observerSink.Events())
+	}
+	if receivedMethod(observerSink.Events(), protocol.NotifyAgentRun) {
+		t.Fatalf("unattached observer received agent.run: %#v", observerSink.Events())
+	}
+
+	events := make(chan agent.Event, 6)
+	events <- agent.Event{Type: agent.EventStatus, Status: agent.StatusCompactRunning}
+	events <- agent.Event{Type: agent.EventStatus, Status: agent.StatusCompactDone}
+	events <- agent.Event{Type: agent.EventStatus, Status: agent.StatusWaitingLLM}
+	events <- agent.Event{Type: agent.EventStream, Content: "private output"}
+	events <- agent.Event{Type: agent.EventToolCall, ToolCallID: "tool-1", ToolName: "test-tool"}
 	events <- agent.Event{Type: agent.EventStatus, Status: agent.StatusDone}
 	close(events)
+	svc.runAgentEvents(ctx, "client-a", sessionID, runID, "input", events, ownerSink)
 
-	svc.runAgentEvents(ctx, "client-a", snapshot.Session.ID, manager.currentRunID(snapshot.Session.ID), "input", events, ownerSink)
-
-	for _, sink := range []*captureEventSink{ownerSink, observerSink} {
-		foundIdle := false
-		for _, event := range sink.events {
-			if event.Method != protocol.NotifySessionUpdated {
-				continue
-			}
-			params, ok := event.Params.(protocol.SessionStateParams)
-			if ok && params.Session.Status == protocol.SessionStatusIdle && params.Session.ClientCount == 2 {
-				foundIdle = true
-				break
-			}
+	if !receivedSessionStatus(observerSink.Events(), sessionID, protocol.SessionStatusCompacting, 1) {
+		t.Fatalf("unattached observer did not receive automatic compacting state: %#v", observerSink.Events())
+	}
+	if !receivedSessionStatus(observerSink.Events(), sessionID, protocol.SessionStatusIdle, 1) {
+		t.Fatalf("unattached observer did not receive idle catalog state: %#v", observerSink.Events())
+	}
+	for _, method := range []string{protocol.NotifyAgentRun, protocol.NotifyAgentDelta, protocol.NotifyToolStart, protocol.NotifyCompactResult} {
+		if receivedMethod(observerSink.Events(), method) {
+			t.Fatalf("unattached observer received detailed %s event: %#v", method, observerSink.Events())
 		}
-		if !foundIdle {
-			t.Fatalf("idle session.updated not broadcast to attached client: %#v", sink.events)
+	}
+	for _, method := range []string{protocol.NotifyAgentRun, protocol.NotifyAgentDelta, protocol.NotifyToolStart, protocol.NotifyCompactResult} {
+		if !receivedMethod(ownerSink.Events(), method) {
+			t.Fatalf("attached owner did not receive detailed %s event: %#v", method, ownerSink.Events())
 		}
 	}
 }
 
-func TestHandleCompactBroadcastsIdleSessionState(t *testing.T) {
+func TestResumeRunBroadcastsRunningCatalogStateToUnattachedObserver(t *testing.T) {
 	ctx := context.Background()
 	manager := newTestSessionManager(t)
 	snapshot, err := manager.create(ctx, "client-a", t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("create error = %v", err)
 	}
-	if _, err := manager.attach(ctx, "client-b", snapshot.Session.ID, false); err != nil {
-		t.Fatalf("attach observer error = %v", err)
+
+	ownerSink := &captureEventSink{}
+	observerSink := &captureEventSink{}
+	d := &Daemon{sessions: manager, sinks: map[string]protocol.EventSink{"client-a": ownerSink, "catalog-observer": observerSink}}
+	svc := newService(d)
+	if _, err := svc.handleResumeRun(ctx, protocol.Request{ConnID: "client-a"}, ownerSink); err != nil {
+		t.Fatalf("resume error = %v", err)
+	}
+
+	if !receivedSessionStatus(observerSink.Events(), snapshot.Session.ID, protocol.SessionStatusRunning, 1) {
+		t.Fatalf("unattached observer did not receive resume running state: %#v", observerSink.Events())
+	}
+	if receivedMethod(observerSink.Events(), protocol.NotifyAgentRun) {
+		t.Fatalf("unattached observer received resume agent.run: %#v", observerSink.Events())
+	}
+}
+
+func TestHandleCompactBroadcastsCatalogStateToUnattachedObserver(t *testing.T) {
+	ctx := context.Background()
+	manager := newTestSessionManager(t)
+	snapshot, err := manager.create(ctx, "client-a", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create error = %v", err)
 	}
 
 	ownerSink := &captureEventSink{}
 	observerSink := &captureEventSink{}
-	d := &Daemon{sessions: manager, sinks: map[string]protocol.EventSink{"client-a": ownerSink, "client-b": observerSink}}
+	d := &Daemon{sessions: manager, sinks: map[string]protocol.EventSink{"client-a": ownerSink, "catalog-observer": observerSink}}
 	svc := newService(d)
 	if _, err := svc.handleCompact(ctx, protocol.Request{ConnID: "client-a"}, ownerSink); err != nil {
 		t.Fatalf("compact error = %v", err)
 	}
 
-	for name, sink := range map[string]*captureEventSink{"owner": ownerSink, "observer": observerSink} {
-		foundIdle := false
-		for _, event := range sink.events {
-			params, ok := event.Params.(protocol.SessionStateParams)
-			if event.Method == protocol.NotifySessionUpdated && ok && params.Session.Status == protocol.SessionStatusIdle && params.Session.ClientCount == 2 {
-				foundIdle = true
-				break
-			}
-		}
-		if !foundIdle {
-			t.Fatalf("%s client did not receive compact idle state: %#v", name, sink.events)
+	if !receivedSessionStatus(observerSink.Events(), snapshot.Session.ID, protocol.SessionStatusCompacting, 1) {
+		t.Fatalf("unattached observer did not receive compacting catalog state: %#v", observerSink.Events())
+	}
+	if !receivedSessionStatus(observerSink.Events(), snapshot.Session.ID, protocol.SessionStatusIdle, 1) {
+		t.Fatalf("unattached observer did not receive compact idle state: %#v", observerSink.Events())
+	}
+	if receivedMethod(observerSink.Events(), protocol.NotifyCompactResult) {
+		t.Fatalf("unattached observer received compact details: %#v", observerSink.Events())
+	}
+	if !receivedMethod(ownerSink.Events(), protocol.NotifyCompactResult) {
+		t.Fatalf("attached owner did not receive compact result: %#v", ownerSink.Events())
+	}
+}
+
+func receivedSessionStatus(events []protocol.Event, sessionID string, want protocol.SessionStatus, clientCount int) bool {
+	for _, event := range events {
+		params, ok := event.Params.(protocol.SessionStateParams)
+		if event.Method == protocol.NotifySessionUpdated && ok && params.Session.ID == sessionID && params.Session.Status == want && params.Session.ClientCount == clientCount {
+			return true
 		}
 	}
+	return false
+}
+
+func receivedMethod(events []protocol.Event, method string) bool {
+	for _, event := range events {
+		if event.Method == method {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRunAgentEventsKeepsSessionBusyUntilEventStreamCloses(t *testing.T) {
@@ -195,7 +253,7 @@ func TestCancellingSuppressesNonCancelledRunStates(t *testing.T) {
 	svc.runAgentEvents(ctx, "client-a", snapshot.Session.ID, runID, "input", events, sink)
 
 	var states []protocol.AgentRunState
-	for _, event := range sink.events {
+	for _, event := range sink.Events() {
 		if event.Method != protocol.NotifyAgentRun {
 			continue
 		}

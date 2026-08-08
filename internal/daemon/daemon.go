@@ -146,12 +146,13 @@ func (d *Daemon) removeConnection(connID string) {
 	if d.sessions != nil {
 		detached = d.sessions.detach(connID)
 	}
-	if detached.sessionID != "" {
-		d.broadcastSessionState(context.Background(), detached.sessionID)
-	}
+	// 先移除已断开的 sink，避免全局 Catalog 广播继续向失效连接写入。
 	d.mu.Lock()
 	delete(d.sinks, connID)
 	d.mu.Unlock()
+	if detached.sessionID != "" {
+		d.broadcastSessionState(context.Background(), detached.sessionID)
+	}
 }
 
 func (d *Daemon) broadcastSessionState(ctx context.Context, sessionID string) {
@@ -162,9 +163,8 @@ func (d *Daemon) broadcastSessionState(ctx context.Context, sessionID string) {
 	if !ok {
 		return
 	}
-	for _, sink := range d.sessions.sinksForSession(d, sessionID) {
-		_ = sink.Emit(ctx, protocol.Event{Method: protocol.NotifySessionUpdated, Params: protocol.SessionStateParams{Session: info}})
-	}
+	// SessionInfo 属于全局轻量 Catalog；对话和 run 详细事件仍按 attached session 隔离。
+	d.BroadcastToAll(ctx, protocol.NotifySessionUpdated, protocol.SessionStateParams{Session: info})
 }
 
 func (d *Daemon) sinkFor(connID string, fallback protocol.EventSink) protocol.EventSink {

@@ -82,7 +82,7 @@ TCP 客户端的限制：
 | `agent.cancel` | 取消当前 run。 |
 | `agent.askReply` | 回复 `agent.ask_user`。 |
 | `agent.guardReply` | 回复 `agent.guard_confirm`。 |
-| `session.list` | 列出 sessions。 |
+| `session.list` | 获取全局轻量 Session Catalog 快照。 |
 | `session.create` | 创建 session；客户端必须传 cwd，返回 snapshot。 |
 | `session.attach` | attach 到已有 session；Resume 和 Join 都使用该方法，返回 snapshot。 |
 | `session.detach` | 当前连接离开当前 session。 |
@@ -124,7 +124,7 @@ TCP 客户端的限制：
 | `agent.guard_confirm` | 高风险工具操作请求用户确认；带 `can_reply`。 |
 | `agent.interaction_resolved` | ask/guard 已处理，其他 UI 应关闭残留交互。 |
 | `session.user_message` | 同 session 其他客户端新增 user turn。 |
-| `session.updated` | session metadata/status/client_count 更新；run 收束至 idle 后也会广播，供所有 attached client 收敛运行态。 |
+| `session.updated` | 全局轻量 Session Catalog 增量；session metadata/status/client_count 变化时向所有已连接且完成握手的客户端广播。 |
 | `session.compact_result` | compact running / done / error / result 状态。 |
 | `config.state` | 配置变更后的主动状态通知。 |
 | `memory.state` | memory 变更后的主动状态通知。 |
@@ -138,6 +138,8 @@ TCP 客户端的限制：
 | `daemon.full_status` | daemon 聚合快照，主要供 TUI 刷新状态面板。第三方 UI 可用于诊断，但不应依赖它完成聊天主流程。 |
 
 完整参数表和示例见 `docs/tcp-client.md`。
+
+`session.list` 与 `session.updated` 共同维护全局轻量 Session Catalog：连接建立后用 `session.list` 获取初始快照，之后用 `session.updated` 合并 metadata、`status` 与 `client_count` 变化。`session.updated` 不表示接收方已经 attach 目标 session，也不携带消息、输出或工具详情。`agent.run`、`agent.delta`、tool、AskUser、Guard 与 `session.user_message` 等详细事件仍只发送给已 attach 目标 session 的客户端。
 
 ---
 

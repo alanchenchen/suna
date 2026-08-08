@@ -178,6 +178,8 @@ TCP client 连接后，必须先发送：
 {"jsonrpc":"2.0","id":2,"method":"session.list","params":{"active_only":false}}
 ```
 
+`session.list` 是全局轻量 Session Catalog 的初始快照。客户端应缓存返回的 `SessionInfo`，并在整个连接生命周期内用 `session.updated` 增量更新 metadata、`status` 与 `client_count`；不要仅依赖首次 list 结果判断 active session。
+
 ### 5.2 创建 session
 
 `cwd` 必填，它决定 session 的默认工作区与相对路径边界：
@@ -202,6 +204,8 @@ TCP client 连接后，必须先发送：
 
 Attach response 中的 `current_run`、`run_id`、`assistant_buffer` 与 `reasoning_buffer` 用于恢复正在进行的展示；同一 `run_id` 已收到终态后，客户端不得被迟到快照重新切回运行态。
 
+未 attach 的客户端只通过 `session.updated` 观察轻量 Catalog 状态。只有 attach 到目标 session 后，才会收到该 session 的 `agent.run`、`agent.delta`、tool、AskUser、Guard、`session.user_message` 等详细事件。
+
 ### 5.4 发送消息
 
 ```json
@@ -219,7 +223,7 @@ Attach response 中的 `current_run`、`run_id`、`assistant_buffer` 与 `reason
 | `agent.ask_user` | 展示提问，并由允许回复的 client 回答。 |
 | `agent.guard_confirm` | 展示安全确认，并由允许回复的 client 决策。 |
 | `agent.interaction_resolved` | 移除对应 AskUser / Guard UI。 |
-| `session.updated` | 更新 session 元数据与 active 状态；run 收束至 idle 后也会广播。 |
+| `session.updated` | 合并全局 Session Catalog 中的 metadata、`status` 与 `client_count`；该通知会发送给所有已完成握手的客户端，包括未 attach 目标 session 的客户端。 |
 
 ### 5.5 Detach
 

@@ -213,10 +213,7 @@ func (s *service) handleSendMessage(ctx context.Context, req protocol.Request, s
 	}
 	// 在 RPC 内预留 run，绑定本次请求的 session runtime 与附件根目录；连接随后切换 session 不得改变消息归属。
 	var sessionID, runID string
-	rt, sessionID, runID, err = s.daemon.sessions.beginRunWithNotification(req.ConnID, func(_ *sessionRuntime, id, idRun string) {
-		// 初始 running 与 run 预留处于同一通知临界区，先于 Agent goroutine 及并发 cancel。
-		s.emitAgentRun(ctx, id, req.ConnID, protocol.AgentRunParams{RunID: idRun, State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
-	})
+	rt, sessionID, runID, err = s.beginAgentRun(ctx, req.ConnID)
 	if err != nil {
 		return nil, protocolError{code: -32602, message: err.Error(), data: protocol.ProtocolErrorData{Kind: err.Error()}}
 	}
@@ -228,12 +225,7 @@ func (s *service) handleSendMessage(ctx context.Context, req protocol.Request, s
 }
 
 func (s *service) handleResumeRun(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
-	var rt *sessionRuntime
-	var sessionID, runID string
-	rt, sessionID, runID, err := s.daemon.sessions.beginRunWithNotification(req.ConnID, func(_ *sessionRuntime, id, idRun string) {
-		// Resume 同样先发布 lifecycle 起点，不能让立即失败的 Agent 事件抢先到达客户端。
-		s.emitAgentRun(ctx, id, req.ConnID, protocol.AgentRunParams{RunID: idRun, State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
-	})
+	rt, sessionID, runID, err := s.beginAgentRun(ctx, req.ConnID)
 	if err != nil {
 		return nil, protocolError{code: -32602, message: err.Error(), data: protocol.ProtocolErrorData{Kind: err.Error()}}
 	}
@@ -241,6 +233,19 @@ func (s *service) handleResumeRun(ctx context.Context, req protocol.Request, sin
 	events := rt.agent.ResumeRun(runCtx)
 	go s.runAgentEvents(ctx, req.ConnID, sessionID, runID, "resume", events, sink)
 	return map[string]string{"status": "processing"}, nil
+}
+
+func (s *service) beginAgentRun(ctx context.Context, connID string) (*sessionRuntime, string, string, error) {
+	rt, sessionID, runID, err := s.daemon.sessions.beginRunWithNotification(connID, func(_ *sessionRuntime, id, idRun string) {
+		// 初始 lifecycle 必须留在通知临界区，确保并发 cancel 不能先于 running。
+		s.emitAgentRun(ctx, id, connID, protocol.AgentRunParams{RunID: idRun, State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
+	})
+	if err != nil {
+		return nil, "", "", err
+	}
+	// 全局 Catalog 广播不占用 lifecycle 通知锁，避免未 attach 的慢连接阻塞 cancel。
+	s.daemon.broadcastSessionState(ctx, sessionID)
+	return rt, sessionID, runID, nil
 }
 
 func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, inputLabel string, events <-chan agent.Event, sink protocol.EventSink) {
@@ -348,6 +353,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 				case agent.StatusCompactRunning:
 					s.daemon.sessions.setPhase(sessionID, protocol.AgentRunPhaseCompact)
 					s.daemon.sessions.setStatus(sessionID, sessionCompacting)
+					s.daemon.broadcastSessionState(ctx, sessionID)
 					running := true
 					emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running})
 				case agent.StatusCompactDone:
@@ -372,6 +378,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 					if !accepted {
 						continue
 					}
+					s.daemon.broadcastSessionState(ctx, sessionID)
 				case agent.StatusLLMRetrying:
 					s.daemon.sessions.transitionRunState(sessionID, runID, protocol.AgentRunRetrying, func(state protocol.AgentRunState) {
 						emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{RunID: runID, State: state, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Attempt: evt.Attempt, MaxAttempts: evt.MaxAttempts, DelayMs: evt.DelayMs, Error: protocolModelError(evt.ModelError)})
@@ -661,6 +668,7 @@ func (s *service) handleCompact(ctx context.Context, req protocol.Request, sink 
 	// compact 会重写当前 session 的 working state，必须像普通 run 一样独占 session，不能和 LLM/tool run 并发。
 	s.daemon.sessions.setPhase(sessionID, protocol.AgentRunPhaseCompact)
 	s.daemon.sessions.setStatus(sessionID, sessionCompacting)
+	s.daemon.broadcastSessionState(ctx, sessionID)
 	defer func() {
 		s.daemon.sessions.setStatus(sessionID, sessionIdle)
 		s.daemon.broadcastSessionState(ctx, sessionID)
