@@ -103,93 +103,254 @@ func TestRenderBlockWidthFollowsContentUpToMax(t *testing.T) {
 	}
 }
 
-func TestRenderBlockKeepsDurationVisibleForLongCommand(t *testing.T) {
-	block := &Block{}
-	block.Add(&Entry{
-		ID:       "tool-1",
+func TestRenderExecForegroundUsesTwoLineUserSummary(t *testing.T) {
+	entry := &Entry{
+		ID:       "exec-1",
 		Name:     "Exec",
 		RawName:  "exec",
-		Intent:   "格式化并运行 TUI 状态线相关测试",
 		Status:   StatusDone,
 		Duration: mustDuration(t, "5.1s"),
 		ParamsRaw: map[string]any{
-			"command": "gofmt -w internal/tui/chat.go internal/tui/chat_render.go internal/tui/i18n_keys.go internal/tui/pages/chat/transcript.go internal/tui/pages/chat/input_view.go && go test ./internal/tui ./internal/tui/pages/chat",
+			"command": "go test ./internal/tui/...",
 		},
-	})
-
-	rendered := RenderBlock(block, RenderDeps{
-		Width:  96,
-		Labels: RenderLabels{Tools: "工具", Actions: "个操作"},
-		Styles: RenderStyles{},
-	})
-
-	if !strings.Contains(rendered, "5.1s") {
-		t.Fatalf("duration should remain visible for long command, got:\n%s", rendered)
-	}
-	if strings.Contains(rendered, "\n│ scrip") || strings.Contains(rendered, "\n│ scri") {
-		t.Fatalf("long command should be truncated on the header line instead of wrapping awkwardly, got:\n%s", rendered)
-	}
-}
-
-func TestRenderExecBackgroundSummaryKeepsToolDone(t *testing.T) {
-	entry := &Entry{
-		ID:      "exec-1",
-		Name:    "Exec",
-		RawName: "exec",
-		Intent:  "启动后台服务",
-		Status:  StatusDone,
 		Metadata: map[string]any{
-			"kind":            "exec",
-			"action":          "background",
-			"exec_status":     "running",
-			"job_id":          "job-42",
-			"scope":           "run",
-			"timeout_seconds": 30,
+			"kind":        "exec",
+			"action":      "run",
+			"exec_status": "exited",
+			"exit_code":   0,
+			"duration_ms": 5100,
 		},
 	}
-	deps := RenderDeps{Labels: RenderLabels{
-		ExecBadge:      "执行",
-		ExecRunning:    "后台运行中",
-		ExecJobID:      "任务",
-		ExecScope:      "范围",
-		ExecTimeout:    "超时",
-		ExecRunCleanup: "本轮结束时自动清理",
-	}}
 
-	rendered := RenderEntry(entry, false, deps)
-	for _, want := range []string{"✓", "后台运行中", "任务 job-42", "范围 run", "超时 30s", "本轮结束时自动清理"} {
+	rendered := RenderEntry(entry, false, RenderDeps{Width: 96, Labels: execTestLabels()})
+	for _, want := range []string{"✓ 运行命令  go test ./internal/tui/...", "↳ 已完成", "共运行 5.1s"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("RenderEntry() missing %q:\n%s", want, rendered)
 		}
 	}
+	for _, unwanted := range []string{"已退出", "退出码 0", "范围 run", "清理 complete"} {
+		if strings.Contains(rendered, unwanted) {
+			t.Fatalf("RenderEntry() contains technical noise %q:\n%s", unwanted, rendered)
+		}
+	}
+	if got := len(strings.Split(strings.TrimSpace(rendered), "\n")); got != 2 {
+		t.Fatalf("Exec default summary has %d lines, want 2:\n%s", got, rendered)
+	}
 }
 
-func TestRenderExecTerminalSemanticSummaries(t *testing.T) {
-	tests := []struct {
-		status string
-		want   string
-	}{
-		{status: "timeout", want: "已超时"},
-		{status: "cancelled", want: "已取消"},
-		{status: "stopped", want: "已停止"},
-		{status: "exited", want: "已退出"},
-		{status: "cleanup", want: "已清理"},
+func TestRenderExecLongCommandStaysOnOneHeaderLine(t *testing.T) {
+	entry := &Entry{
+		Name:    "Exec",
+		RawName: "exec",
+		Status:  StatusDone,
+		ParamsRaw: map[string]any{
+			"command": "gofmt -w internal/tui/chat.go internal/tui/chat_render.go internal/tui/i18n_keys.go internal/tui/pages/chat/transcript.go && go test ./internal/tui ./internal/tui/pages/chat",
+		},
+		Metadata: map[string]any{"kind": "exec", "action": "run", "exec_status": "exited", "exit_code": 0, "duration_ms": 5100},
 	}
-	labels := RenderLabels{ExecBadge: "执行", ExecTimedOut: "已超时", ExecCancelled: "已取消", ExecExited: "已退出", ExecStopped: "已停止", ExecCleanup: "已清理"}
+
+	rendered := RenderEntry(entry, false, RenderDeps{Width: 56, Labels: execTestLabels()})
+	lines := strings.Split(strings.TrimSpace(rendered), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("long Exec summary has %d lines, want 2:\n%s", len(lines), rendered)
+	}
+	if !strings.Contains(lines[0], "运行命令") || !strings.Contains(lines[0], "…") || !strings.Contains(lines[1], "已完成") {
+		t.Fatalf("long Exec summary did not preserve operation/outcome:\n%s", rendered)
+	}
+}
+
+func TestRenderExecBackgroundActionsAreExplicit(t *testing.T) {
+	tests := []struct {
+		name     string
+		params   map[string]any
+		metadata map[string]any
+		wantMain string
+		wantSub  []string
+		notWant  []string
+	}{
+		{
+			name:     "start run scope",
+			params:   map[string]any{"action": "run", "background": true, "command": "npm run dev"},
+			metadata: map[string]any{"kind": "exec", "action": "run", "exec_status": "running", "job_id": "fc71654b-be2e-49c0-b9a8-5a2e5a6324d1", "scope": "run", "timeout_seconds": 30},
+			wantMain: "启动后台任务  npm run dev · #fc71654b",
+			wantSub:  []string{"运行中", "随本轮结束自动停止"},
+			notWant:  []string{"范围 run", "超时 30s", "fc71654b-be2e"},
+		},
+		{
+			name:     "check session scope",
+			params:   map[string]any{"action": "status", "job_id": "fc71654b-be2e-49c0-b9a8-5a2e5a6324d1"},
+			metadata: map[string]any{"kind": "exec", "action": "status", "exec_status": "running", "job_id": "fc71654b-be2e-49c0-b9a8-5a2e5a6324d1", "scope": "session", "duration_ms": 7100},
+			wantMain: "查看后台任务  #fc71654b",
+			wantSub:  []string{"运行中", "保持到会话关闭", "已运行 7.1s"},
+			notWant:  []string{"Exec", "范围 session", "fc71654b-be2e"},
+		},
+		{
+			name:     "stop",
+			params:   map[string]any{"action": "stop", "job_id": "fc71654b-be2e-49c0-b9a8-5a2e5a6324d1"},
+			metadata: map[string]any{"kind": "exec", "action": "stop", "exec_status": "stopped", "job_id": "fc71654b-be2e-49c0-b9a8-5a2e5a6324d1", "scope": "run", "duration_ms": 12000, "exit_code": -1, "cleanup_status": "complete"},
+			wantMain: "停止后台任务  #fc71654b",
+			wantSub:  []string{"已停止", "共运行 12s"},
+			notWant:  []string{"退出码 -1", "清理 complete", "随本轮结束"},
+		},
+	}
+
 	for _, tt := range tests {
-		rendered := RenderEntry(&Entry{ID: tt.status, Name: "Exec", Status: StatusDone, Metadata: map[string]any{"kind": "exec", "exec_status": tt.status}}, false, RenderDeps{Labels: labels})
-		if !strings.Contains(rendered, tt.want) {
-			t.Fatalf("status %q missing %q: %s", tt.status, tt.want, rendered)
+		t.Run(tt.name, func(t *testing.T) {
+			entry := &Entry{Name: "Exec", RawName: "exec", Status: StatusDone, ParamsRaw: tt.params, Metadata: tt.metadata}
+			rendered := RenderEntry(entry, false, RenderDeps{Width: 96, Labels: execTestLabels()})
+			if !strings.Contains(rendered, tt.wantMain) {
+				t.Fatalf("RenderEntry() missing main %q:\n%s", tt.wantMain, rendered)
+			}
+			for _, want := range tt.wantSub {
+				if !strings.Contains(rendered, want) {
+					t.Fatalf("RenderEntry() missing %q:\n%s", want, rendered)
+				}
+			}
+			for _, unwanted := range tt.notWant {
+				if strings.Contains(rendered, unwanted) {
+					t.Fatalf("RenderEntry() contains %q:\n%s", unwanted, rendered)
+				}
+			}
+			if got := len(strings.Split(strings.TrimSpace(rendered), "\n")); got != 2 {
+				t.Fatalf("Exec default summary has %d lines, want 2:\n%s", got, rendered)
+			}
+		})
+	}
+}
+
+func TestRenderExecTerminalOutcomesUseUserSemantics(t *testing.T) {
+	tests := []struct {
+		name    string
+		action  string
+		status  string
+		code    int
+		hasCode bool
+		cleanup string
+		want    string
+		notWant string
+	}{
+		{name: "completed", action: "run", status: "exited", code: 0, hasCode: true, want: "已完成", notWant: "退出码 0"},
+		{name: "failed", action: "run", status: "exited", code: 7, hasCode: true, want: "执行失败", notWant: "已退出"},
+		{name: "timed out", action: "run", status: "timed_out", code: -1, hasCode: true, want: "已超时", notWant: "退出码 -1"},
+		{name: "cancelled", action: "run", status: "cancelled", code: -1, hasCode: true, want: "已取消", notWant: "退出码 -1"},
+		{name: "stopped", action: "stop", status: "stopped", code: -1, hasCode: true, want: "已停止", notWant: "退出码 -1"},
+		{name: "already completed", action: "stop", status: "exited", code: 0, hasCode: true, want: "任务已完成，无需停止", notWant: "已退出"},
+		{name: "start failed", action: "run", status: "start_failed", want: "启动失败"},
+		{name: "not found", action: "status", status: "not_found", want: "任务不存在或已过期"},
+		{name: "access denied", action: "status", status: "access_denied", want: "无权访问任务"},
+		{name: "partial cleanup", action: "stop", status: "running", cleanup: "partial", want: "未能完全停止"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			metadata := map[string]any{"kind": "exec", "action": tt.action, "exec_status": tt.status}
+			if tt.hasCode {
+				metadata["exit_code"] = tt.code
+			}
+			if tt.cleanup != "" {
+				metadata["cleanup_status"] = tt.cleanup
+			}
+			status := StatusDone
+			if tt.status == "start_failed" || tt.status == "not_found" || tt.status == "access_denied" || tt.cleanup == "partial" || (tt.status == "exited" && tt.code != 0) {
+				status = StatusError
+			}
+			entry := &Entry{Name: "Exec", RawName: "exec", Status: status, ParamsRaw: map[string]any{"action": tt.action}, Metadata: metadata, Result: "raw exec protocol error"}
+			rendered := RenderEntry(entry, false, RenderDeps{Labels: execTestLabels()})
+			if !strings.Contains(rendered, tt.want) {
+				t.Fatalf("RenderEntry() missing %q:\n%s", tt.want, rendered)
+			}
+			if tt.notWant != "" && strings.Contains(rendered, tt.notWant) {
+				t.Fatalf("RenderEntry() contains %q:\n%s", tt.notWant, rendered)
+			}
+			if tt.cleanup == "partial" && !strings.Contains(rendered, "请查看详情") {
+				t.Fatalf("RenderEntry() missing partial cleanup detail hint:\n%s", rendered)
+			}
+			if strings.Contains(rendered, "raw exec protocol error") {
+				t.Fatalf("Exec card repeated raw detail error:\n%s", rendered)
+			}
+		})
+	}
+}
+
+func TestRenderExecUnstructuredErrorKeepsErrorLine(t *testing.T) {
+	entry := &Entry{RawName: "exec", Name: "Exec", Status: StatusError, Result: "tool validation failed", ParamsRaw: map[string]any{"action": "run"}}
+	rendered := RenderEntry(entry, false, RenderDeps{Labels: execTestLabels()})
+	if !strings.Contains(rendered, "运行命令") || !strings.Contains(rendered, "tool validation failed") {
+		t.Fatalf("unstructured Exec error lost its fallback detail:\n%s", rendered)
+	}
+}
+
+func TestExecMainLabelPreservesShortJobIDWhenObjectIsLong(t *testing.T) {
+	entry := &Entry{
+		RawName: "exec",
+		Intent:  "启动一个名称非常长而且会占满终端宽度的后台开发服务",
+		ParamsRaw: map[string]any{
+			"action":     "run",
+			"background": true,
+		},
+		Metadata: map[string]any{"job_id": "fc71654b-be2e-49c0-b9a8-5a2e5a6324d1"},
+	}
+	label := ExecMainLabel(entry, 38, execTestLabels())
+	if !strings.Contains(label, "启动后台任务") || !strings.Contains(label, "#fc71654b") || !strings.Contains(label, "…") {
+		t.Fatalf("ExecMainLabel() = %q, want operation, truncated object, and short job ID", label)
+	}
+	entry.Status = StatusDone
+	entry.Metadata["kind"] = "exec"
+	entry.Metadata["action"] = "run"
+	entry.Metadata["exec_status"] = "running"
+	entry.Metadata["scope"] = "run"
+	rendered := RenderEntry(entry, false, RenderDeps{Width: 52, Labels: execTestLabels()})
+	if !strings.Contains(rendered, "启动后台任务") || !strings.Contains(rendered, "#fc71654b") || !strings.Contains(rendered, "运行中") {
+		t.Fatalf("narrow RenderEntry() lost operation, job ID, or outcome:\n%s", rendered)
+	}
+}
+
+func TestExecDetailKeepsFullParamsAndResult(t *testing.T) {
+	fullID := "fc71654b-be2e-49c0-b9a8-5a2e5a6324d1"
+	entry := &Entry{
+		RawName: "exec",
+		Params:  `{"action":"status","job_id":"` + fullID + `"}`,
+		Result:  "Exec job " + fullID + " is running. Scope: session. Timeout: 30 seconds.",
+	}
+	deps := DetailDeps{Labels: DetailLabels{DetailTitle: "工具详情", Tool: "工具", Params: "参数", Result: "结果"}}
+	lines := make([]string, DetailLineSource(entry, deps).Len())
+	for i := range lines {
+		lines[i] = DetailLineSource(entry, deps).Line(i)
+	}
+	text := strings.Join(lines, "\n")
+	compactDetail := strings.ReplaceAll(text, "\n", "")
+	for _, want := range []string{fullID, "Scope: session", "Timeout: 30 seconds"} {
+		if !strings.Contains(compactDetail, want) {
+			t.Fatalf("detail missing %q:\n%s", want, text)
 		}
 	}
 }
 
-func TestRenderExecSessionCleanupBoundary(t *testing.T) {
-	entry := &Entry{Name: "Exec", Status: StatusDone, Metadata: map[string]any{"kind": "exec", "action": "background", "exec_status": "running", "scope": "session"}}
-	labels := RenderLabels{ExecRunning: "后台运行中", ExecRunCleanup: "本轮结束时自动清理", ExecSessionCleanup: "会话关闭时清理"}
-	rendered := RenderEntry(entry, false, RenderDeps{Labels: labels})
-	if !strings.Contains(rendered, "会话关闭时清理") || strings.Contains(rendered, "本轮结束时自动清理") {
-		t.Fatalf("session cleanup boundary = %q", rendered)
+func execTestLabels() RenderLabels {
+	return RenderLabels{
+		ExecRunCommand:       "运行命令",
+		ExecStartTask:        "启动后台任务",
+		ExecCheckTask:        "查看后台任务",
+		ExecStopTask:         "停止后台任务",
+		ExecRunning:          "运行中",
+		ExecCompleted:        "已完成",
+		ExecFailed:           "执行失败",
+		ExecTimedOut:         "已超时",
+		ExecCancelled:        "已取消",
+		ExecStopped:          "已停止",
+		ExecStartFailed:      "启动失败",
+		ExecNotFound:         "任务不存在或已过期",
+		ExecAccessDenied:     "无权访问任务",
+		ExecAlreadyCompleted: "任务已完成，无需停止",
+		ExecAlreadyFailed:    "任务已经失败，无需停止",
+		ExecRunLifetime:      "随本轮结束自动停止",
+		ExecSessionLifetime:  "保持到会话关闭",
+		ExecElapsed:          "已运行 {}",
+		ExecTotal:            "共运行 {}",
+		ExecExitCode:         "退出码",
+		ExecCleanupPartial:   "进程清理未完成",
+		ExecStopIncomplete:   "未能完全停止",
+		ExecSeeDetails:       "请查看详情",
 	}
 }
 

@@ -51,20 +51,29 @@ type RenderLabels struct {
 	SearchTruncated      string
 	Cancelling           string
 	Cancelled            string
-	ExecBadge            string
+	ExecRunCommand       string
+	ExecStartTask        string
+	ExecCheckTask        string
+	ExecStopTask         string
 	ExecRunning          string
+	ExecCompleted        string
+	ExecFailed           string
 	ExecTimedOut         string
 	ExecCancelled        string
-	ExecExited           string
 	ExecStopped          string
-	ExecCleanup          string
-	ExecJobID            string
-	ExecScope            string
-	ExecRunCleanup       string
-	ExecSessionCleanup   string
-	ExecTimeout          string
+	ExecStartFailed      string
+	ExecNotFound         string
+	ExecAccessDenied     string
+	ExecAlreadyCompleted string
+	ExecAlreadyFailed    string
+	ExecRunLifetime      string
+	ExecSessionLifetime  string
+	ExecElapsed          string
+	ExecTotal            string
 	ExecExitCode         string
-	ExecCleanupStatus    string
+	ExecCleanupPartial   string
+	ExecStopIncomplete   string
+	ExecSeeDetails       string
 }
 
 // RenderDeps 汇总工具块渲染所需依赖。
@@ -191,7 +200,7 @@ func RenderEntry(te *Entry, nested bool, deps RenderDeps) string {
 	}
 	var statusIcon string
 	var dur string
-	if te.Duration > 0 {
+	if te.Duration > 0 && !IsExec(te) {
 		dur = fmt.Sprintf(" %.1fs", te.Duration.Seconds())
 	}
 	s := deps.Styles
@@ -210,11 +219,11 @@ func RenderEntry(te *Entry, nested bool, deps RenderDeps) string {
 		prefix = "      " + s.Dim.Render("└─ ")
 	}
 	maxWidth := maxInt(20, deps.width()-lipgloss.Width(stripANSI(prefix))-8)
-	mainLabel, detailLabel := entryLabels(te, maxWidth, deps)
 	// 首行必须为耗时预留空间，避免长命令或长路径把右侧 duration 挤出可视区域。
 	durWidth := lipgloss.Width(dur)
 	statusWidth := lipgloss.Width(statusIcon)
 	headerBudget := maxInt(8, maxWidth-statusWidth-durWidth-2)
+	mainLabel, detailLabel := entryLabels(te, headerBudget, deps)
 	mainLabel = ansi.Truncate(mainLabel, headerBudget, "…")
 	line := fmt.Sprintf("%s%s %s%s", prefix, statusIcon, s.HL.Render(mainLabel), s.Dim.Render(dur))
 	if detailLabel != "" {
@@ -228,7 +237,7 @@ func RenderEntry(te *Entry, nested bool, deps RenderDeps) string {
 	if te.Status == StatusCancelled {
 		line += "\n" + prefix + "  " + s.ToolDim.Render(defaultLabel(deps.Labels.Cancelled, "Cancelled"))
 	}
-	if te.Status == StatusError {
+	if te.Status == StatusError && !HasExecSummary(te) {
 		if err := ShortToolError(te.Result); err != "" {
 			line += "\n" + prefix + "  " + s.Err.Render(textutil.TruncateRunes(err, maxInt(24, deps.width()-12)))
 		}
@@ -245,6 +254,9 @@ func RenderEntry(te *Entry, nested bool, deps RenderDeps) string {
 }
 
 func entryLabels(te *Entry, maxWidth int, deps RenderDeps) (string, string) {
+	if IsExec(te) {
+		return ExecMainLabel(te, maxWidth, deps.Labels), ""
+	}
 	label := DisplayIntentLabel(te, deps.Labels.Subtask)
 	if HasFileChange(te) {
 		if path, _ := te.Metadata["path"].(string); path != "" {
@@ -385,7 +397,7 @@ func renderMetadataSummary(te *Entry, prefix string, deps RenderDeps) string {
 		return RenderHTTPSummary(te.Metadata, prefix, deps)
 	}
 	if kind, _ := te.Metadata["kind"].(string); kind == "exec" {
-		return RenderExecSummary(te.Metadata, prefix, deps)
+		return RenderExecSummary(te, prefix, deps)
 	}
 	return ""
 }
