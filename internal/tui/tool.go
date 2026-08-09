@@ -49,6 +49,7 @@ func (t *TUI) toolRenderDeps() toolview.RenderDeps {
 			SearchTruncated:      t.tr("tui.tool.search.truncated"),
 			Cancelling:           t.tr("tui.tool.cancelling"),
 			Cancelled:            t.tr("tui.tool.cancelled"),
+			ExecBadge:            t.tr("tui.tool.exec.badge"),
 			ExecRunCommand:       t.tr("tui.tool.exec.run_command"),
 			ExecStartTask:        t.tr("tui.tool.exec.start_task"),
 			ExecCheckTask:        t.tr("tui.tool.exec.check_task"),

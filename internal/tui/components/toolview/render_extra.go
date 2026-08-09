@@ -179,7 +179,7 @@ func RenderExecSummary(te *Entry, prefix string, deps RenderDeps) string {
 	if outcome == "" {
 		return ""
 	}
-	parts := []string{renderExecOutcome(outcome, status, code, hasCode, cleanup, deps.Styles)}
+	parts := []string{deps.Styles.Dim.Render(defaultLabel(labels.ExecBadge, "Exec")), renderExecOutcome(outcome, status, code, hasCode, cleanup, deps.Styles)}
 
 	// scope 只有在任务仍运行、仍会影响未来生命周期时才对用户有意义。
 	if status == "running" {
@@ -259,7 +259,7 @@ func execDurationLabel(action, status string, metadata map[string]any, labels Re
 	if !ok || milliseconds < 0 || (action == "run" && status == "running") {
 		return ""
 	}
-	duration := formatExecDuration(milliseconds)
+	duration := formatCompactDuration(time.Duration(milliseconds) * time.Millisecond)
 	if duration == "" {
 		return ""
 	}
@@ -270,15 +270,17 @@ func execDurationLabel(action, status string, metadata map[string]any, labels Re
 	return strings.Replace(format, "{}", duration, 1)
 }
 
-func formatExecDuration(milliseconds int) string {
-	if milliseconds < 1000 {
-		return fmt.Sprintf("%dms", milliseconds)
+func formatCompactDuration(duration time.Duration) string {
+	if duration < time.Millisecond {
+		return "<1ms"
 	}
-	seconds := float64(milliseconds) / 1000
-	if seconds < 10 {
-		return fmt.Sprintf("%.1fs", seconds)
+	if duration < time.Second {
+		return fmt.Sprintf("%dms", duration/time.Millisecond)
 	}
-	return (time.Duration(milliseconds) * time.Millisecond).Round(time.Second).String()
+	if duration < 10*time.Second {
+		return fmt.Sprintf("%.1fs", duration.Seconds())
+	}
+	return duration.Round(time.Second).String()
 }
 
 func execEntryValue(te *Entry, key string) string {

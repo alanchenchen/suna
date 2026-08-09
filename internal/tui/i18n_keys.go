@@ -144,6 +144,7 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"tui.tool.search.truncated":                {LocaleEN: "truncated", LocaleZH: "已截断"},
 		"tui.tool.cancelling":                      {LocaleEN: "Cancelling", LocaleZH: "正在取消"},
 		"tui.tool.cancelled":                       {LocaleEN: "Cancelled", LocaleZH: "已取消"},
+		"tui.tool.exec.badge":                      {LocaleEN: "Exec", LocaleZH: "命令"},
 		"tui.tool.exec.run_command":                {LocaleEN: "Run command", LocaleZH: "运行命令"},
 		"tui.tool.exec.start_task":                 {LocaleEN: "Start background task", LocaleZH: "启动后台任务"},
 		"tui.tool.exec.check_task":                 {LocaleEN: "Check background task", LocaleZH: "查看后台任务"},

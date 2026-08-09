@@ -51,6 +51,7 @@ type RenderLabels struct {
 	SearchTruncated      string
 	Cancelling           string
 	Cancelled            string
+	ExecBadge            string
 	ExecRunCommand       string
 	ExecStartTask        string
 	ExecCheckTask        string
@@ -201,7 +202,7 @@ func RenderEntry(te *Entry, nested bool, deps RenderDeps) string {
 	var statusIcon string
 	var dur string
 	if te.Duration > 0 && !IsExec(te) {
-		dur = fmt.Sprintf(" %.1fs", te.Duration.Seconds())
+		dur = " " + formatCompactDuration(te.Duration)
 	}
 	s := deps.Styles
 	switch te.Status {

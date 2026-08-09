@@ -103,6 +103,36 @@ func TestRenderBlockWidthFollowsContentUpToMax(t *testing.T) {
 	}
 }
 
+func TestFormatCompactDurationUsesReadableUnits(t *testing.T) {
+	tests := []struct {
+		name     string
+		duration time.Duration
+		want     string
+	}{
+		{name: "sub millisecond", duration: 500 * time.Microsecond, want: "<1ms"},
+		{name: "milliseconds", duration: 428 * time.Millisecond, want: "428ms"},
+		{name: "fractional seconds", duration: 3200 * time.Millisecond, want: "3.2s"},
+		{name: "whole seconds", duration: 12 * time.Second, want: "12s"},
+		{name: "minutes", duration: 72 * time.Second, want: "1m12s"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := formatCompactDuration(tt.duration); got != tt.want {
+				t.Fatalf("formatCompactDuration() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRenderOrdinaryToolUsesCompactDuration(t *testing.T) {
+	entry := &Entry{Name: "Readfile", RawName: "readfile", Intent: "读取配置", Status: StatusDone, Duration: 428 * time.Millisecond}
+	rendered := RenderEntry(entry, false, RenderDeps{Width: 96})
+	if !strings.Contains(rendered, "428ms") || strings.Contains(rendered, "0.4s") {
+		t.Fatalf("RenderEntry() duration = %q, want compact milliseconds", rendered)
+	}
+}
+
 func TestRenderExecForegroundUsesTwoLineUserSummary(t *testing.T) {
 	entry := &Entry{
 		ID:       "exec-1",
@@ -123,7 +153,7 @@ func TestRenderExecForegroundUsesTwoLineUserSummary(t *testing.T) {
 	}
 
 	rendered := RenderEntry(entry, false, RenderDeps{Width: 96, Labels: execTestLabels()})
-	for _, want := range []string{"✓ 运行命令  go test ./internal/tui/...", "↳ 已完成", "共运行 5.1s"} {
+	for _, want := range []string{"✓ 运行命令  go test ./internal/tui/...", "↳ 命令  已完成", "共运行 5.1s"} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("RenderEntry() missing %q:\n%s", want, rendered)
 		}
@@ -189,7 +219,7 @@ func TestRenderExecBackgroundActionsAreExplicit(t *testing.T) {
 			params:   map[string]any{"action": "stop", "job_id": "fc71654b-be2e-49c0-b9a8-5a2e5a6324d1"},
 			metadata: map[string]any{"kind": "exec", "action": "stop", "exec_status": "stopped", "job_id": "fc71654b-be2e-49c0-b9a8-5a2e5a6324d1", "scope": "run", "duration_ms": 12000, "exit_code": -1, "cleanup_status": "complete"},
 			wantMain: "停止后台任务  #fc71654b",
-			wantSub:  []string{"已停止", "共运行 12s"},
+			wantSub:  []string{"命令", "已停止", "共运行 12s"},
 			notWant:  []string{"退出码 -1", "清理 complete", "随本轮结束"},
 		},
 	}
@@ -200,6 +230,9 @@ func TestRenderExecBackgroundActionsAreExplicit(t *testing.T) {
 			rendered := RenderEntry(entry, false, RenderDeps{Width: 96, Labels: execTestLabels()})
 			if !strings.Contains(rendered, tt.wantMain) {
 				t.Fatalf("RenderEntry() missing main %q:\n%s", tt.wantMain, rendered)
+			}
+			if !strings.Contains(rendered, "命令") {
+				t.Fatalf("RenderEntry() missing Exec badge:\n%s", rendered)
 			}
 			for _, want := range tt.wantSub {
 				if !strings.Contains(rendered, want) {
@@ -328,6 +361,7 @@ func TestExecDetailKeepsFullParamsAndResult(t *testing.T) {
 
 func execTestLabels() RenderLabels {
 	return RenderLabels{
+		ExecBadge:            "命令",
 		ExecRunCommand:       "运行命令",
 		ExecStartTask:        "启动后台任务",
 		ExecCheckTask:        "查看后台任务",
