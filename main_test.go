@@ -146,6 +146,30 @@ func TestSameTCPEndpoint(t *testing.T) {
 	}
 }
 
+func TestParseCLIVersionForms(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		args []string
+	}{
+		{name: "command", args: []string{"version"}},
+		{name: "long flag", args: []string{"--version"}},
+		{name: "short flag", args: []string{"-V"}},
+	} {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseCLI(tt.args); got != "version" {
+				t.Fatalf("parseCLI(%v) = %q, want version", tt.args, got)
+			}
+		})
+	}
+}
+
+func TestParseCLIDoesNotReserveLowercaseVForVersion(t *testing.T) {
+	if got := parseCLI([]string{"-v"}); got == "version" {
+		t.Fatalf("parseCLI(-v) = %q, should not select version", got)
+	}
+}
+
 func TestParseCLIServe(t *testing.T) {
 	if got := parseCLI([]string{"serve", "--json"}); got != "serve" {
 		t.Fatalf("parseCLI(serve) = %q, want serve", got)

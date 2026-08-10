@@ -13,16 +13,22 @@ import (
 	transporttcp "github.com/alanchenchen/suna/internal/transport/tcp"
 	"github.com/alanchenchen/suna/internal/tui"
 	tuitransport "github.com/alanchenchen/suna/internal/tui/transport"
+	"github.com/alanchenchen/suna/internal/version"
 )
 
 func main() {
 	configPath := config.DefaultConfigPath()
+	cmd := parseCLI(os.Args[1:])
+	// 版本查询必须无副作用；即使从 daemon 启动的工具环境继承内部标记，也不能误入 daemon 模式。
+	if cmd == "version" {
+		printVersion()
+		return
+	}
 	if os.Getenv("SUNA_RUN_DAEMON") == "1" {
 		runDaemon(configPath)
 		return
 	}
 
-	cmd := parseCLI(os.Args[1:])
 	switch cmd {
 	case "tui":
 		runTUI()
@@ -50,8 +56,13 @@ func parseCLI(args []string) string {
 	fs.SetOutput(os.Stderr)
 	help := fs.Bool("help", false, "show help")
 	helpShort := fs.Bool("h", false, "show help")
+	showVersion := fs.Bool("version", false, "show version")
+	showVersionShort := fs.Bool("V", false, "show version")
 	if err := fs.Parse(args); err != nil {
 		return "help"
+	}
+	if *showVersion || *showVersionShort {
+		return "version"
 	}
 	if *help || *helpShort {
 		return "help"
@@ -60,6 +71,8 @@ func parseCLI(args []string) string {
 		return "tui"
 	}
 	switch fs.Arg(0) {
+	case "version":
+		return "version"
 	case "help":
 		return "help"
 	case "stop":
@@ -77,11 +90,18 @@ func parseCLI(args []string) string {
 	}
 }
 
+func printVersion() {
+	fmt.Printf("suna %s\n", version.Current())
+}
+
 func printHelp() {
 	fmt.Print(`Suna CLI
 
 Usage:
   suna                 Open the TUI. Starts the daemon if needed.
+  suna version         Show the CLI version.
+  suna --version       Show the CLI version.
+  suna -V              Show the CLI version.
   suna stop            Stop the running daemon.
   suna status          Show daemon status.
   suna update          Check for updates, show release notes, and ask before installing.
