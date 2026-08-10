@@ -190,7 +190,7 @@ func (t *TUI) renderSelectedSubtaskTools(innerWidth int) []string {
 		if child.Status == toolview.StatusRunning && !child.StartedAt.IsZero() {
 			dur = liveElapsedPlaceholder(child.StartedAt)
 		} else if fixed := fixedToolDuration(child); fixed > 0 {
-			dur = fmt.Sprintf("%.1fs", fixed.Seconds())
+			dur = toolview.FormatCompactDuration(fixed)
 		}
 		durWidth := 0
 		if dur != "" {
@@ -430,7 +430,7 @@ func (t *TUI) subtaskDuration(te *toolEntry) string {
 		return liveElapsedPlaceholder(te.StartedAt)
 	}
 	if fixed := fixedToolDuration(te); fixed > 0 {
-		return fmt.Sprintf("%.1fs", fixed.Seconds())
+		return toolview.FormatCompactDuration(fixed)
 	}
 	return ""
 }

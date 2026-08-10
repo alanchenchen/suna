@@ -217,7 +217,7 @@ func TestSubtaskToolCursorMovesWithArrowKeys(t *testing.T) {
 	}
 }
 
-func TestSubtaskBlockShowsWaitingForNextTool(t *testing.T) {
+func TestSubtaskBlockShowsGenericProgressBetweenTools(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 28, mode: uipage.Chat}
 	tui.initChatComponents()
 	block := tui.ensureToolBlock()
@@ -225,8 +225,11 @@ func TestSubtaskBlockShowsWaitingForNextTool(t *testing.T) {
 	block.Add(&toolEntry{ID: "spawn:spawn-1:tool-1", ParentID: "spawn-1", Name: "Search", RawName: "search", Intent: "搜索", Status: toolDone})
 
 	plain := stripANSIForTest(tui.renderSubtaskBlock(block))
-	if !strings.Contains(plain, "等待下一个工具调用") {
-		t.Fatalf("renderSubtaskBlock() = %q, want waiting next tool row", plain)
+	if !strings.Contains(plain, "子任务处理中") {
+		t.Fatalf("renderSubtaskBlock() = %q, want generic subtask progress row", plain)
+	}
+	if strings.Contains(plain, "等待下一个工具调用") {
+		t.Fatalf("renderSubtaskBlock() = %q, should not imply another tool call", plain)
 	}
 }
 
@@ -606,13 +609,41 @@ func TestLiveElapsedFormatKeepsFixedWidth(t *testing.T) {
 	}
 }
 
-func TestSubtaskDurationFallsBackToEndedAt(t *testing.T) {
+func TestSubtaskDurationUsesCompactUnits(t *testing.T) {
 	tui := &TUI{}
 	started := time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC)
-	entry := &toolEntry{Status: toolDone, StartedAt: started, EndedAt: started.Add(1500 * time.Millisecond)}
+	for _, tt := range []struct {
+		name     string
+		duration time.Duration
+		want     string
+	}{
+		{name: "milliseconds", duration: 428 * time.Millisecond, want: "428ms"},
+		{name: "fractional seconds", duration: 1500 * time.Millisecond, want: "1.5s"},
+		{name: "whole seconds", duration: 12 * time.Second, want: "12s"},
+		{name: "minutes", duration: 72 * time.Second, want: "1m12s"},
+	} {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			entry := &toolEntry{Status: toolDone, StartedAt: started, EndedAt: started.Add(tt.duration)}
+			if got := tui.subtaskDuration(entry); got != tt.want {
+				t.Fatalf("subtaskDuration() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
 
-	if got := tui.subtaskDuration(entry); got != "1.5s" {
-		t.Fatalf("subtaskDuration() = %q, want 1.5s", got)
+func TestSubtaskToolTimelineUsesCompactDuration(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 30}
+	tui.initChatComponents()
+	started := time.Date(2026, 6, 30, 10, 0, 0, 0, time.UTC)
+	block := tui.ensureToolBlock()
+	block.Add(&toolEntry{ID: "spawn-1", Name: "Spawn", RawName: "spawn", Intent: "检查耗时", Status: toolRunning})
+	block.Add(&toolEntry{ID: "spawn:spawn-1:read-1", ParentID: "spawn-1", Name: "Readfile", RawName: "readfile", Intent: "读取文件", Status: toolDone, StartedAt: started, EndedAt: started.Add(428 * time.Millisecond)})
+	tui.chat.CurrentToolBlock = block
+
+	plain := stripANSIForTest(tui.renderSubtaskBlock(block))
+	if !strings.Contains(plain, "428ms") || strings.Contains(plain, "0.4s") {
+		t.Fatalf("renderSubtaskBlock() = %q, want compact child duration", plain)
 	}
 }
 

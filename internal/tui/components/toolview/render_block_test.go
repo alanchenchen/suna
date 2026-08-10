@@ -118,8 +118,8 @@ func TestFormatCompactDurationUsesReadableUnits(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := formatCompactDuration(tt.duration); got != tt.want {
-				t.Fatalf("formatCompactDuration() = %q, want %q", got, tt.want)
+			if got := FormatCompactDuration(tt.duration); got != tt.want {
+				t.Fatalf("FormatCompactDuration() = %q, want %q", got, tt.want)
 			}
 		})
 	}

@@ -202,7 +202,7 @@ func RenderEntry(te *Entry, nested bool, deps RenderDeps) string {
 	var statusIcon string
 	var dur string
 	if te.Duration > 0 && !IsExec(te) {
-		dur = " " + formatCompactDuration(te.Duration)
+		dur = " " + FormatCompactDuration(te.Duration)
 	}
 	s := deps.Styles
 	switch te.Status {

@@ -188,7 +188,7 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"tui.subtask_panel.help_expanded":          {LocaleEN: "Tab switch subtask · ↑/↓ switch tool · Enter collapse detail · PgUp/PgDn/wheel scroll · Esc close detail", LocaleZH: "Tab 切换子任务 · ↑/↓ 切换工具 · Enter 收起详情 · PgUp/PgDn/滚轮滚动"},
 		"tui.subtask_panel.waiting":                {LocaleEN: "waiting", LocaleZH: "等待调度"},
 		"tui.subtask_panel.error":                  {LocaleEN: "error", LocaleZH: "错误"},
-		"tui.subtask_panel.waiting_tool":           {LocaleEN: "waiting for the next tool call...", LocaleZH: "等待下一个工具调用..."},
+		"tui.subtask_panel.waiting_tool":           {LocaleEN: "Subtask in progress...", LocaleZH: "子任务处理中..."},
 		"tui.subtask_panel.done":                   {LocaleEN: "completed", LocaleZH: "已完成"},
 		"tui.subtask_panel.no_tools":               {LocaleEN: "No tool calls yet; waiting for the subtask...", LocaleZH: "暂无工具调用，等待子任务开始执行..."},
 		"tui.subtask_panel.no_detail":              {LocaleEN: "No detail available.", LocaleZH: "暂无详情。"},

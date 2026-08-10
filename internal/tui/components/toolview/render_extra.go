@@ -259,7 +259,7 @@ func execDurationLabel(action, status string, metadata map[string]any, labels Re
 	if !ok || milliseconds < 0 || (action == "run" && status == "running") {
 		return ""
 	}
-	duration := formatCompactDuration(time.Duration(milliseconds) * time.Millisecond)
+	duration := FormatCompactDuration(time.Duration(milliseconds) * time.Millisecond)
 	if duration == "" {
 		return ""
 	}
@@ -270,7 +270,8 @@ func execDurationLabel(action, status string, metadata map[string]any, labels Re
 	return strings.Replace(format, "{}", duration, 1)
 }
 
-func formatCompactDuration(duration time.Duration) string {
+// FormatCompactDuration 以适合紧凑工具卡片的单位展示耗时。
+func FormatCompactDuration(duration time.Duration) string {
 	if duration < time.Millisecond {
 		return "<1ms"
 	}
