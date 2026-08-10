@@ -23,6 +23,7 @@ func DataDirLogPath(dataDir string) string         { return filepath.Join(DataDi
 func DataDirSkillsDir(dataDir string) string       { return filepath.Join(dataDir, "skills") }
 func DataDirDBPath(dataDir string) string          { return filepath.Join(dataDir, "memory.db") }
 func DataDirPIDPath(dataDir string) string         { return filepath.Join(dataDir, "sunad.pid") }
+func DataDirLockPath(dataDir string) string        { return filepath.Join(dataDir, "sunad.lock") }
 func DataDirSocketPath(dataDir string) string      { return filepath.Join(dataDir, "sunad.sock") }
 func DataDirAttachmentsDir(dataDir string) string  { return filepath.Join(dataDir, "attachments") }
 func DataDirMCPWorkdirsDir(dataDir string) string  { return filepath.Join(dataDir, "mcp-workdirs") }
@@ -36,6 +37,7 @@ func DefaultLogPath() string         { return DataDirLogPath(DefaultDataDir()) }
 func DefaultSkillsDir() string       { return DataDirSkillsDir(DefaultDataDir()) }
 func DefaultDBPath() string          { return DataDirDBPath(DefaultDataDir()) }
 func DefaultPIDPath() string         { return DataDirPIDPath(DefaultDataDir()) }
+func DefaultLockPath() string        { return DataDirLockPath(DefaultDataDir()) }
 func DefaultSocketPath() string      { return DataDirSocketPath(DefaultDataDir()) }
 func DefaultAttachmentsDir() string  { return DataDirAttachmentsDir(DefaultDataDir()) }
 func DefaultMCPWorkdirsDir() string  { return DataDirMCPWorkdirsDir(DefaultDataDir()) }
@@ -48,5 +50,6 @@ func (c *Config) LogsDir() string         { return DataDirLogsDir(c.DataDir) }
 func (c *Config) LogPath() string         { return DataDirLogPath(c.DataDir) }
 func (c *Config) SkillsDir() string       { return DataDirSkillsDir(c.DataDir) }
 func (c *Config) PIDPath() string         { return DataDirPIDPath(c.DataDir) }
+func (c *Config) LockPath() string        { return DataDirLockPath(c.DataDir) }
 func (c *Config) SocketPath() string      { return DataDirSocketPath(c.DataDir) }
 func (c *Config) AttachmentsDir() string  { return DataDirAttachmentsDir(c.DataDir) }

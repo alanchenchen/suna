@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -52,6 +53,123 @@ func (s *testService) Handle(ctx context.Context, req protocol.Request, sink pro
 		s.seen.Add(1)
 	}
 	return map[string]string{"method": req.Method}, nil
+}
+
+func unixTestSocketPath(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(os.TempDir(), fmt.Sprintf("suna-local-%d-%d.sock", os.Getpid(), time.Now().UnixNano()))
+	_ = os.Remove(path)
+	t.Cleanup(func() { _ = os.Remove(path) })
+	return path
+}
+
+func TestStaleUnixSocketErrorOnlyAcceptsMissingOrRefused(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "refused", err: &net.OpError{Err: syscall.ECONNREFUSED}, want: true},
+		{name: "missing", err: &net.OpError{Err: syscall.ENOENT}, want: true},
+		{name: "timeout", err: &net.OpError{Err: os.ErrDeadlineExceeded}, want: false},
+		{name: "permission", err: &net.OpError{Err: syscall.EACCES}, want: false},
+	} {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isStaleUnixSocketError(tt.err); got != tt.want {
+				t.Fatalf("isStaleUnixSocketError() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUnixTransportRejectsActiveSocketWithoutReplacingIt(t *testing.T) {
+	socketPath := unixTestSocketPath(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	first := NewPlatformTransport(socketPath)
+	defer first.Close(context.Background())
+	if err := first.Mount(ctx, &testService{}); err != nil {
+		t.Fatalf("first Mount() error = %v", err)
+	}
+	before, err := os.Lstat(socketPath)
+	if err != nil {
+		t.Fatalf("Lstat() error = %v", err)
+	}
+
+	second := NewPlatformTransport(socketPath)
+	if err := second.Mount(ctx, &testService{}); err == nil {
+		_ = second.Close(context.Background())
+		t.Fatal("second Mount() error = nil, want active socket conflict")
+	}
+	after, err := os.Lstat(socketPath)
+	if err != nil {
+		t.Fatalf("Lstat() after conflict error = %v", err)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("active socket was replaced by second Mount()")
+	}
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("Dial() after conflict error = %v", err)
+	}
+	_ = conn.Close()
+}
+
+func TestUnixTransportReplacesStaleSocket(t *testing.T) {
+	socketPath := unixTestSocketPath(t)
+	stale, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("Listen() stale socket error = %v", err)
+	}
+	unixStale, ok := stale.(*net.UnixListener)
+	if !ok {
+		t.Fatal("stale listener is not a UnixListener")
+	}
+	unixStale.SetUnlinkOnClose(false)
+	if err := stale.Close(); err != nil {
+		t.Fatalf("Close() stale listener error = %v", err)
+	}
+	if _, err := os.Lstat(socketPath); err != nil {
+		t.Fatalf("stale socket missing: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr := NewPlatformTransport(socketPath)
+	defer tr.Close(context.Background())
+	if err := tr.Mount(ctx, &testService{}); err != nil {
+		t.Fatalf("Mount() error = %v", err)
+	}
+	conn, err := net.DialTimeout("unix", socketPath, time.Second)
+	if err != nil {
+		t.Fatalf("Dial() replacement error = %v", err)
+	}
+	_ = conn.Close()
+}
+
+func TestUnixTransportCloseDoesNotRemoveReplacementSocket(t *testing.T) {
+	socketPath := unixTestSocketPath(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tr := NewPlatformTransport(socketPath)
+	if err := tr.Mount(ctx, &testService{}); err != nil {
+		t.Fatalf("Mount() error = %v", err)
+	}
+	if err := os.Remove(socketPath); err != nil {
+		t.Fatalf("Remove() owned socket error = %v", err)
+	}
+	replacement, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatalf("Listen() replacement error = %v", err)
+	}
+	defer replacement.Close()
+	if err := tr.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if _, err := os.Lstat(socketPath); err != nil {
+		t.Fatalf("replacement socket was removed: %v", err)
+	}
 }
 
 func TestUnixTransportAcceptsSecondConnectionWhileFirstIsServing(t *testing.T) {

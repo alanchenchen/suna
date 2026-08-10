@@ -59,8 +59,9 @@ TUI 仍依赖 Bubble Tea/Bubbles 负责 terminal renderer、alt screen、mouse/k
 
 ## 本地通信
 
-- macOS/Linux local transport 使用 Unix socket。
-- Windows local transport 使用 Named Pipe。
+- macOS/Linux local transport 使用 Unix socket，并通过当前用户数据目录中的进程锁保证单实例；只有无法连接的 stale socket 才会被清理。
+- Windows local transport 使用当前用户隔离的 Named Pipe，并依赖首实例排他语义防止重复 daemon。
+- local 单实例入口先于 TCP 挂载；只有全部 transport 就绪后才发布 PID 和处理 protocol request。
 - 第三方客户端使用 loopback TCP transport，通过 `suna serve --json` 获取实际 endpoint。
 - local / TCP 都使用统一 protocol 和 JSON-RPC 2.0 风格 request / response / notification；framing 是 NDJSON。
 - method request 必须返回明确 result 或结构化 error；daemon 主动事件通过 notification 下发。

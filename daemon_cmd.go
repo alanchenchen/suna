@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -72,6 +73,10 @@ func ensureDaemonRunning() {
 	if err == nil {
 		return
 	}
+	if !isDaemonDialFailure(err) {
+		fmt.Fprintf(os.Stderr, "Error: daemon is reachable but status is unavailable: %s\n", err)
+		os.Exit(1)
+	}
 	if err := startDaemon(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: failed to start daemon: %s\n", err)
 		os.Exit(1)
@@ -98,6 +103,11 @@ func (e daemonProbeError) Unwrap() error {
 		return e.InvokeErr
 	}
 	return e.DialErr
+}
+
+func isDaemonDialFailure(err error) bool {
+	var probe daemonProbeError
+	return errors.As(err, &probe) && probe.DialErr != nil && probe.InvokeErr == nil
 }
 
 func startDaemon() error {

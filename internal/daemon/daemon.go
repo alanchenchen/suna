@@ -26,9 +26,9 @@ Daemon 是 Suna runtime / 后台 daemon 的核心结构。
   - 只挂载 protocol.Transport，不关心 local/TCP/WebSocket 等具体通信实现
 
 生命周期：
- 1. 启动 → 注册 PID → 挂载 transports
+ 1. 启动 → 取得单实例所有权 → 挂载 transports → 发布 PID
  2. 运行 → protocol.Service 处理请求 → 驱动 Agent Loop
- 3. 退出 → transport lifecycle / stop 请求 / 系统信号 → 关闭 Agent 与 transports
+ 3. 退出 → transport lifecycle / stop 请求 / 系统信号 → 关闭 Agent 与 transports → 清理 PID 和单实例所有权
 */
 type Daemon struct {
 	cfg      *config.Config
@@ -39,6 +39,8 @@ type Daemon struct {
 	transports []protocol.Transport
 
 	startTime time.Time
+	ready     chan struct{}
+	readyOnce sync.Once
 	mu        sync.Mutex
 	sinks     map[string]protocol.EventSink
 	cancelFn  context.CancelFunc
@@ -57,6 +59,7 @@ func New(cfg *config.Config, transports []protocol.Transport) (*Daemon, error) {
 		sessions:   newSessionManager(agent, agent.SessionStore()),
 		transports: transports,
 		sinks:      make(map[string]protocol.EventSink),
+		ready:      make(chan struct{}),
 	}
 	d.sessions.onOrphan = func(sessionID string) {
 		if d.service != nil {
@@ -81,20 +84,37 @@ func (d *Daemon) run(label string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	d.cancelFn = cancel
 	defer cancel()
+	defer d.agent.Close()
 
-	if err := d.writePID(); err != nil {
-		return fmt.Errorf("write pid: %w", err)
-	}
-	defer d.removePID()
+	pidWritten := false
+	mounted := make([]protocol.Transport, 0, len(d.transports))
+	// 第一个 transport 是 local 单实例入口，必须最后关闭；这样 PID 清理期间不会有新实例取得所有权。
+	defer func() {
+		for i := len(mounted) - 1; i >= 0; i-- {
+			if i == 0 && pidWritten {
+				d.removePID()
+				pidWritten = false
+			}
+			_ = mounted[i].Close(ctx)
+		}
+		if pidWritten {
+			d.removePID()
+		}
+	}()
 
 	d.service = newService(d)
 	for _, tr := range d.transports {
-		// Mount 会启动具体监听逻辑，并把收到的请求统一转发给 protocol.Service。
+		// transport 按依赖顺序挂载并逆序关闭；入口层必须把 local 单实例 transport 放在首位。
 		if err := tr.Mount(ctx, d.service); err != nil {
 			return fmt.Errorf("mount transport %s: %w", tr.Name(), err)
 		}
-		defer tr.Close(ctx)
+		mounted = append(mounted, tr)
 	}
+	if err := d.writePID(); err != nil {
+		return fmt.Errorf("write pid: %w", err)
+	}
+	pidWritten = true
+	d.markReady()
 
 	if d.sessions != nil {
 		go d.sessions.pruneInactive(ctx, 30*24*time.Hour)
@@ -125,6 +145,24 @@ func (d *Daemon) run(label string) error {
 	d.agent.CancelCurrentRun()
 	d.agent.Close()
 	return nil
+}
+
+func (d *Daemon) markReady() {
+	if d.ready != nil {
+		d.readyOnce.Do(func() { close(d.ready) })
+	}
+}
+
+func (d *Daemon) waitUntilReady(ctx context.Context) error {
+	if d.ready == nil {
+		return nil
+	}
+	select {
+	case <-d.ready:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Stop 停止 daemon

@@ -59,9 +59,9 @@ suna serve --json
 | 成功判断 | `exit code == 0`，且 stdout 可解析为 JSON。 |
 | endpoint | 使用返回的 `tcp_endpoint`，**不要硬编码** `127.0.0.1:7632`。 |
 | stderr | 仅用于人类诊断，客户端不要解析 stderr 协议。 |
-| 默认端口冲突 | Suna 可回退到随机 loopback 端口，返回的 endpoint 才是权威地址。 |
+| 默认端口冲突 | 唯一 Suna daemon 可回退到随机 loopback 端口，返回的 endpoint 才是权威地址；端口回退不会创建第二个 daemon。 |
 | `--listen` | 可首次启动时传入 loopback 地址，例如 `suna serve --listen 127.0.0.1:9000 --json`。 |
-| 已有 daemon | `suna serve --json` 返回已有 daemon 的实际 endpoint，不会重启 session 或 run。 |
+| 已有 daemon | `suna serve --json` 返回已有 daemon 的实际 PID 和 endpoint，不会重启 session、run 或创建第二个 daemon。 |
 | reconnect | daemon 在所有 local/TCP client 离开**约 2 秒**后会按 idle-exit 自动退出；连接失败时再次执行 `suna serve --json`。 |
 
 `serve` 不代表永久常驻 server，也不需要第三方 UI 持有一个额外的 Suna 子进程。它只保证 daemon 当前可连接。

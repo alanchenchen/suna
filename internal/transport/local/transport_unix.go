@@ -5,12 +5,14 @@ package local
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,6 +25,7 @@ import (
 type UnixSocketTransport struct {
 	socketPath string
 	listener   net.Listener
+	socketInfo os.FileInfo
 	svc        protocol.Service
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -62,25 +65,56 @@ func (t *UnixSocketTransport) Info() protocol.TransportInfo {
 func (t *UnixSocketTransport) Mount(ctx context.Context, svc protocol.Service) error {
 	t.svc = svc
 	t.ctx, t.cancel = context.WithCancel(ctx)
-	// 启动前清理残留 socket；如果残留 socket 仍可连接，说明已有 daemon 在运行。
-	if err := os.Remove(t.socketPath); err != nil && !os.IsNotExist(err) {
-		conn, err := net.DialTimeout("unix", t.socketPath, 2*time.Second)
-		if err == nil {
-			conn.Close()
-			return fmt.Errorf("daemon already running (socket %s is active)", t.socketPath)
-		}
-		os.Remove(t.socketPath)
-	}
 	if err := os.MkdirAll(filepath.Dir(t.socketPath), 0755); err != nil {
 		return fmt.Errorf("create socket dir: %w", err)
+	}
+	// Unix 允许 unlink 正在监听的 socket，因此必须先探测活跃端点；只清理仍是同一文件的 stale socket。
+	if info, err := os.Lstat(t.socketPath); err == nil {
+		if info.Mode()&os.ModeSocket == 0 {
+			return fmt.Errorf("local endpoint %s exists and is not a socket", t.socketPath)
+		}
+		conn, dialErr := net.DialTimeout("unix", t.socketPath, 2*time.Second)
+		if dialErr == nil {
+			_ = conn.Close()
+			return fmt.Errorf("daemon already running (socket %s is active)", t.socketPath)
+		}
+		if !isStaleUnixSocketError(dialErr) {
+			return fmt.Errorf("probe unix socket %s: %w", t.socketPath, dialErr)
+		}
+		current, statErr := os.Lstat(t.socketPath)
+		if statErr == nil && os.SameFile(info, current) {
+			if err := os.Remove(t.socketPath); err != nil {
+				return fmt.Errorf("remove stale unix socket: %w", err)
+			}
+		} else if statErr == nil {
+			return fmt.Errorf("local endpoint %s changed while checking stale socket", t.socketPath)
+		} else if !os.IsNotExist(statErr) {
+			return fmt.Errorf("stat unix socket: %w", statErr)
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat unix socket: %w", err)
 	}
 	listener, err := net.Listen("unix", t.socketPath)
 	if err != nil {
 		return fmt.Errorf("listen unix socket: %w", err)
 	}
+	if unixListener, ok := listener.(*net.UnixListener); ok {
+		// 标准库默认在 Close 时按路径 unlink；关闭隐式清理，避免旧 listener 删除后来替换的 socket。
+		unixListener.SetUnlinkOnClose(false)
+	}
+	info, err := os.Lstat(t.socketPath)
+	if err != nil {
+		_ = listener.Close()
+		return fmt.Errorf("stat mounted unix socket: %w", err)
+	}
 	// socket 权限限制为当前用户可读写，避免其他本机用户连接 daemon。
-	os.Chmod(t.socketPath, 0600)
+	if err := os.Chmod(t.socketPath, 0600); err != nil {
+		_ = listener.Close()
+		removeSocketIfSame(t.socketPath, info)
+		return fmt.Errorf("chmod unix socket: %w", err)
+	}
 	t.listener = listener
+	t.socketInfo = info
 	go t.acceptLoop()
 	return nil
 }
@@ -127,9 +161,24 @@ func (t *UnixSocketTransport) Close(ctx context.Context) error {
 	if t.listener != nil {
 		t.listener.Close()
 	}
-	os.Remove(t.socketPath)
+	removeSocketIfSame(t.socketPath, t.socketInfo)
+	t.socketInfo = nil
 	_ = ctx
 	return nil
+}
+
+func isStaleUnixSocketError(err error) bool {
+	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ENOENT)
+}
+
+func removeSocketIfSame(path string, owned os.FileInfo) {
+	if owned == nil {
+		return
+	}
+	current, err := os.Lstat(path)
+	if err == nil && os.SameFile(owned, current) {
+		_ = os.Remove(path)
+	}
 }
 
 func (t *UnixSocketTransport) ConnectionCount() int {

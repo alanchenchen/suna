@@ -105,6 +105,13 @@ func runDaemon(configPath string) {
 		os.Exit(1)
 	}
 
+	lease, err := acquireDaemonLease(cfg.LockPath())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sunad: %s\n", err)
+		return
+	}
+	defer lease.Close()
+
 	initLogging(cfg.DataDir)
 
 	listen := os.Getenv(tcpListenEnv)
@@ -115,8 +122,8 @@ func runDaemon(configPath string) {
 		tcpTransport = transporttcp.New(listen)
 	}
 	transports := []protocol.Transport{
+		local.NewPlatformTransport(cfg.SocketPath()),
 		tcpTransport,
-		local.NewPlatformTransport(local.DefaultEndpoint()),
 	}
 	d, err := daemon.New(cfg, transports)
 	if err != nil {

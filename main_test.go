@@ -18,7 +18,7 @@ func TestServeStartsDaemonOnFirstUse(t *testing.T) {
 		queryStatus: func(context.Context) (protocol.DaemonStatusParams, error) {
 			calls++
 			if !started {
-				return protocol.DaemonStatusParams{}, errors.New("not running")
+				return protocol.DaemonStatusParams{}, daemonProbeError{DialErr: errors.New("not running")}
 			}
 			return protocol.DaemonStatusParams{PID: 42, TCPEndpoint: transporttcp.DefaultEndpoint}, nil
 		},
@@ -91,7 +91,7 @@ func TestServeFailsWhenStartedDaemonRemainsUnreachable(t *testing.T) {
 	starts := 0
 	_, err := serve([]string{"--json"}, serveDeps{
 		queryStatus: func(context.Context) (protocol.DaemonStatusParams, error) {
-			return protocol.DaemonStatusParams{}, errors.New("not running")
+			return protocol.DaemonStatusParams{}, daemonProbeError{DialErr: errors.New("not running")}
 		},
 		start: func(string, bool) error {
 			starts++
@@ -103,6 +103,25 @@ func TestServeFailsWhenStartedDaemonRemainsUnreachable(t *testing.T) {
 	}
 	if starts != 1 {
 		t.Fatalf("start calls = %d, want 1", starts)
+	}
+}
+
+func TestServeDoesNotStartWhenDaemonStatusInvocationFails(t *testing.T) {
+	starts := 0
+	_, err := serve([]string{"--json"}, serveDeps{
+		queryStatus: func(context.Context) (protocol.DaemonStatusParams, error) {
+			return protocol.DaemonStatusParams{}, daemonProbeError{InvokeErr: context.DeadlineExceeded}
+		},
+		start: func(string, bool) error {
+			starts++
+			return nil
+		},
+	})
+	if err == nil {
+		t.Fatal("serve error = nil, want unavailable status error")
+	}
+	if starts != 0 {
+		t.Fatalf("start calls = %d, want 0", starts)
 	}
 }
 

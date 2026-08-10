@@ -75,6 +75,9 @@ func serve(args []string, deps serveDeps) (serveResult, error) {
 	status, err := deps.queryStatus(ctx)
 	cancel()
 	if err != nil {
+		if !isDaemonDialFailure(err) {
+			return serveResult{}, fmt.Errorf("daemon is reachable but status is unavailable: %w", err)
+		}
 		if err := deps.start(endpoint, endpoint == transporttcp.DefaultEndpoint); err != nil {
 			return serveResult{}, err
 		}
