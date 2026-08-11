@@ -18,7 +18,7 @@ import (
 func (t *TUI) handleCommand(input string) tea.Cmd {
 	if t.localCli == nil {
 		t.appendNonToolMessage(chatMsg{Role: "error", Content: t.i18n.T("error.not_connected")})
-		t.scrollToBottomOnNextSync()
+		t.forceScrollToBottomOnNextSync()
 		return nil
 	}
 
@@ -27,7 +27,7 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 		return nil
 	}
 	cmd := parts[0]
-	t.scrollToBottomOnNextSync()
+	t.forceScrollToBottomOnNextSync()
 
 	switch cmd {
 	case "/new":

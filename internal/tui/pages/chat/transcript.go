@@ -62,7 +62,7 @@ type transcriptWindowSignature struct {
 }
 
 func (m *Model) SyncTranscript(deps TranscriptDeps) {
-	followBottom := m.ForceBottom || m.FollowBottom || m.TranscriptAtBottom()
+	followBottom := !m.ManualScrollPaused && (m.ForceBottom || m.FollowBottom || m.TranscriptAtBottom())
 	if m.ForceBottom {
 		m.ForceBottom = false
 	}
@@ -73,6 +73,7 @@ func (m *Model) SyncTranscript(deps TranscriptDeps) {
 	if followBottom {
 		m.SetTranscriptYOffset(m.TranscriptMaxYOffset())
 		m.FollowBottom = true
+		m.ManualScrollPaused = false
 	} else {
 		m.SetTranscriptYOffset(m.TranscriptYOffset)
 		m.FollowBottom = m.TranscriptAtBottom()
@@ -439,6 +440,7 @@ func (m *Model) JumpToBottom() {
 	m.SetTranscriptYOffset(m.TranscriptMaxYOffset())
 	m.FollowBottom = true
 	m.ForceBottom = false
+	m.ManualScrollPaused = false
 	m.ResponseNavJumped = false
 	m.ResponseNavDismissed = true
 }

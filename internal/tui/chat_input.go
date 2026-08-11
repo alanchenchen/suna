@@ -13,7 +13,10 @@ import (
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 )
 
-const inputCursorBlinkInterval = 530 * time.Millisecond
+const (
+	inputCursorBlinkInterval    = 530 * time.Millisecond
+	transcriptScrollResumeDelay = 3 * time.Second
+)
 
 func (t *TUI) inputCursorBlinkCmd() tea.Cmd {
 	return tea.Tick(inputCursorBlinkInterval, func(time.Time) tea.Msg {
@@ -113,6 +116,7 @@ func (t *TUI) handleSend() tea.Cmd {
 	attachments := append([]attachmentItem(nil), t.chat.Attachments...)
 	if input == "" && len(attachments) == 0 && t.chat.ResumeAvailable {
 		t.chat.Textarea.Reset()
+		t.forceScrollToBottomOnNextSync()
 		return t.resumeAgent()
 	}
 	t.chat.Textarea.Reset()
@@ -132,7 +136,7 @@ func (t *TUI) handleSend() tea.Cmd {
 	}
 
 	t.appendNonToolMessage(chatMsg{Role: "user", Content: userMessageContent{Text: input, Attachments: attachments}})
-	t.scrollToBottomOnNextSync()
+	t.forceScrollToBottomOnNextSync()
 	t.chat.Attachments = nil
 	t.chat.AttachmentMode = false
 	t.chat.AttachmentDelete = false
@@ -176,6 +180,41 @@ func (t *TUI) resetPhase() {
 func (t *TUI) scrollToBottomOnNextSync() {
 	t.chat.FollowBottom = true
 	t.chat.ForceBottom = true
+}
+
+func (t *TUI) forceScrollToBottomOnNextSync() {
+	t.cancelTranscriptManualScroll()
+	t.scrollToBottomOnNextSync()
+}
+
+// pauseTranscriptAutoFollow 记录用户正在阅读历史；高频滚动只延后同一条 Tick 链的截止时间。
+func (t *TUI) pauseTranscriptAutoFollow() tea.Cmd {
+	if t.chat.TranscriptAtBottom() {
+		t.cancelTranscriptManualScroll()
+		return nil
+	}
+	t.chat.ManualScrollPaused = true
+	t.chat.FollowBottom = false
+	t.transcriptScrollDeadline = time.Now().Add(transcriptScrollResumeDelay)
+	if t.transcriptScrollTimerScheduled {
+		return nil
+	}
+	t.transcriptScrollGeneration++
+	t.transcriptScrollTimerScheduled = true
+	return t.transcriptScrollResumeCmd(transcriptScrollResumeDelay, t.transcriptScrollGeneration, t.currentSession.ID)
+}
+
+func (t *TUI) transcriptScrollResumeCmd(delay time.Duration, generation uint64, sessionID string) tea.Cmd {
+	return tea.Tick(delay, func(time.Time) tea.Msg {
+		return transcriptScrollResumeMsg{Generation: generation, SessionID: sessionID}
+	})
+}
+
+func (t *TUI) cancelTranscriptManualScroll() {
+	t.transcriptScrollGeneration++
+	t.transcriptScrollDeadline = time.Time{}
+	t.transcriptScrollTimerScheduled = false
+	t.chat.ManualScrollPaused = false
 }
 func (t *TUI) setInputValue(input string) {
 	if t.chat.SetInputValue(input, t.mode == uipage.Chat) {
@@ -310,7 +349,7 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, nil
 	case ks == "ctrl+up":
 		t.jumpToLastAssistantStart()
-		return t, nil
+		return t, t.pauseTranscriptAutoFollow()
 	case ks == "ctrl+down":
 		t.jumpToBottom()
 		return t, nil
@@ -321,7 +360,7 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, nil
 		}
 		t.scrollChatPage(-1)
-		return t, nil
+		return t, t.pauseTranscriptAutoFollow()
 	case ks == "pgdown":
 		if t.chat.SubtaskToolDetailExpanded && t.hasActiveSubtaskPanel() {
 			t.scrollSubtaskToolDetail(max(1, t.subtaskToolDetailHeight()-1))
@@ -329,7 +368,7 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, nil
 		}
 		t.scrollChatPage(1)
-		return t, nil
+		return t, t.pauseTranscriptAutoFollow()
 	case ks == "up":
 		if t.hasActiveSubtaskPanel() {
 			t.moveSubtaskToolCursor(-1)
@@ -379,7 +418,7 @@ func (t *TUI) updateChatEnter() (tea.Model, tea.Cmd) {
 			askID := ask.ID
 			t.chat.CompleteInteraction()
 			t.appendNonToolMessage(chatMsg{Role: "user", Content: answer})
-			t.scrollToBottomOnNextSync()
+			t.forceScrollToBottomOnNextSync()
 			t.currentRunCanControl = true
 			t.startLLMWait()
 			t.syncContent()
@@ -395,6 +434,7 @@ func (t *TUI) updateChatEnter() (tea.Model, tea.Cmd) {
 func (t *TUI) leaveCurrentSessionForWelcome() tea.Cmd {
 	// Welcome 不保留当前 Chat session 的展示 runtime；daemon 仍保留持久化 session。
 	t.chat.ResetRuntime()
+	t.cancelTranscriptManualScroll()
 	t.resetConversationStats()
 	t.transcriptSyncDirty = false
 	t.transcriptSyncScheduled = false
@@ -457,6 +497,7 @@ func (t *TUI) jumpToLastAssistantStart() {
 }
 
 func (t *TUI) jumpToBottom() {
+	t.cancelTranscriptManualScroll()
 	t.chat.JumpToBottom()
 	t.syncContent()
 	t.layoutChat()

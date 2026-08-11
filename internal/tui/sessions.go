@@ -99,6 +99,10 @@ func canonicalTUICWD(cwd string) string {
 }
 
 func (t *TUI) currentTUICWD() string {
+	return currentProcessCWD()
+}
+
+func currentProcessCWD() string {
 	cwd, _ := os.Getwd()
 	return canonicalTUICWD(cwd)
 }

@@ -118,6 +118,7 @@ func (m *Model) ResetRuntime() {
 	m.StreamStart = time.Time{}
 	m.FollowBottom = false
 	m.ForceBottom = false
+	m.ManualScrollPaused = false
 	m.LastAssistantStartLine = 0
 	m.LastAssistantLineCount = 0
 	m.LastAssistantMsgIndex = 0

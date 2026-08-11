@@ -40,6 +40,8 @@ type TUI struct {
 
 	// 终端背景色由 Bubble Tea 查询，仅用于 auto 主题选择。
 	terminalDark bool
+	// launchCWD 在 TUI 创建时缓存，避免每次 View 更新终端标题都查询文件系统。
+	launchCWD string
 	// 全局配置与 daemon 快照。真实持久化状态由 daemon 持有，TUI 只缓存用于显示。
 	theme            string
 	providerName     string
@@ -116,6 +118,10 @@ type TUI struct {
 	// transcript 同步由 daemon 通知触发时按帧合并，避免流式输出和工具事件风暴反复完整重渲染。
 	transcriptSyncDirty     bool
 	transcriptSyncScheduled bool
+	// transcriptScrollGeneration 使不可取消的旧 Tick 在用户切换会话或重新开始计时后自动失效。
+	transcriptScrollGeneration     uint64
+	transcriptScrollDeadline       time.Time
+	transcriptScrollTimerScheduled bool
 
 	// chatSpinnerTicking 保证 loading/compacting 的 spinner 只有一条 tick 链；Join running session 时也会按需启动。
 	chatSpinnerTicking bool

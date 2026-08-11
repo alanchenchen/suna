@@ -123,6 +123,7 @@ type Model struct {
 	StreamStart        time.Time
 	FollowBottom       bool
 	ForceBottom        bool
+	ManualScrollPaused bool
 
 	LastAssistantStartLine int
 	LastAssistantLineCount int

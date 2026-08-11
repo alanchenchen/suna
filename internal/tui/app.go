@@ -9,9 +9,10 @@ import (
 
 func New(locale LocaleID) *TUI {
 	t := &TUI{
-		i18n:  newTranslator(locale),
-		mode:  uipage.Welcome,
-		theme: ThemeAuto,
+		i18n:      newTranslator(locale),
+		mode:      uipage.Welcome,
+		theme:     ThemeAuto,
+		launchCWD: currentProcessCWD(),
 	}
 	t.setTheme(ThemeAuto)
 	return t

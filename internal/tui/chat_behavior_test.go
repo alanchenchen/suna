@@ -785,3 +785,102 @@ func TestInputPlaceholderHidesForWhitespaceDraft(t *testing.T) {
 		t.Fatalf("renderInputArea() = %q, should hide placeholder for whitespace draft", view)
 	}
 }
+
+func TestManualScrollPauseKeepsHistoryPositionDuringAppend(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, width: 80, height: 18, currentSession: protocol.SessionInfo{ID: "session-1"}}
+	tui.initChatComponents()
+	for i := 0; i < 60; i++ {
+		tui.appendNonToolMessage(chatMsg{Role: "system", Content: fmt.Sprintf("历史消息-%02d", i)})
+	}
+	tui.layoutChat()
+	tui.syncContent()
+	tui.chat.SetTranscriptYOffset(10)
+	if cmd := tui.pauseTranscriptAutoFollow(); cmd == nil {
+		t.Fatal("pauseTranscriptAutoFollow() command = nil, want resume timer")
+	}
+	before := tui.chat.TranscriptYOffset
+
+	tui.appendNonToolMessage(chatMsg{Role: "assistant", Content: "新增内容"})
+	tui.scrollToBottomOnNextSync()
+	tui.syncContent()
+
+	if got := tui.chat.TranscriptYOffset; got != before {
+		t.Fatalf("TranscriptYOffset = %d after append, want preserved %d", got, before)
+	}
+	if !tui.chat.ManualScrollPaused {
+		t.Fatal("ManualScrollPaused = false after append")
+	}
+}
+
+func TestManualScrollUsesSingleTimerChainAndExtendsDeadline(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, width: 80, height: 18, currentSession: protocol.SessionInfo{ID: "session-1"}}
+	tui.initChatComponents()
+	for i := 0; i < 60; i++ {
+		tui.appendNonToolMessage(chatMsg{Role: "system", Content: fmt.Sprintf("历史消息-%02d", i)})
+	}
+	tui.layoutChat()
+	tui.syncContent()
+	tui.chat.SetTranscriptYOffset(10)
+	if cmd := tui.pauseTranscriptAutoFollow(); cmd == nil {
+		t.Fatal("first pause command = nil, want one timer")
+	}
+	generation := tui.transcriptScrollGeneration
+	firstDeadline := tui.transcriptScrollDeadline
+	time.Sleep(time.Millisecond)
+	if cmd := tui.pauseTranscriptAutoFollow(); cmd != nil {
+		t.Fatal("second pause command != nil, want existing timer chain")
+	}
+	if tui.transcriptScrollGeneration != generation {
+		t.Fatalf("generation = %d after repeated scroll, want %d", tui.transcriptScrollGeneration, generation)
+	}
+	if !tui.transcriptScrollDeadline.After(firstDeadline) {
+		t.Fatalf("deadline = %v, want after %v", tui.transcriptScrollDeadline, firstDeadline)
+	}
+}
+
+func TestManualScrollResumeIgnoresStaleGeneration(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, width: 80, height: 18, currentSession: protocol.SessionInfo{ID: "session-1"}}
+	tui.initChatComponents()
+	for i := 0; i < 60; i++ {
+		tui.appendNonToolMessage(chatMsg{Role: "system", Content: fmt.Sprintf("历史消息-%02d", i)})
+	}
+	tui.layoutChat()
+	tui.syncContent()
+	tui.chat.SetTranscriptYOffset(10)
+	_ = tui.pauseTranscriptAutoFollow()
+	staleGeneration := tui.transcriptScrollGeneration
+	tui.cancelTranscriptManualScroll()
+	_ = tui.pauseTranscriptAutoFollow()
+	tui.transcriptScrollDeadline = time.Now().Add(-time.Millisecond)
+	before := tui.chat.TranscriptYOffset
+
+	_, _ = tui.updateChat(transcriptScrollResumeMsg{Generation: staleGeneration, SessionID: "session-1"})
+	if got := tui.chat.TranscriptYOffset; got != before {
+		t.Fatalf("stale resume changed offset = %d, want %d", got, before)
+	}
+
+	_, _ = tui.updateChat(transcriptScrollResumeMsg{Generation: tui.transcriptScrollGeneration, SessionID: "session-1"})
+	if !tui.chat.TranscriptAtBottom() || tui.chat.ManualScrollPaused {
+		t.Fatalf("resume result atBottom/paused = %v/%v, want true/false", tui.chat.TranscriptAtBottom(), tui.chat.ManualScrollPaused)
+	}
+}
+
+func TestManualScrollReturningToBottomCancelsPause(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, width: 80, height: 18, currentSession: protocol.SessionInfo{ID: "session-1"}}
+	tui.initChatComponents()
+	for i := 0; i < 60; i++ {
+		tui.appendNonToolMessage(chatMsg{Role: "system", Content: fmt.Sprintf("历史消息-%02d", i)})
+	}
+	tui.layoutChat()
+	tui.syncContent()
+	tui.chat.SetTranscriptYOffset(10)
+	_ = tui.pauseTranscriptAutoFollow()
+
+	tui.chat.JumpToBottom()
+	if cmd := tui.pauseTranscriptAutoFollow(); cmd != nil {
+		t.Fatal("pauseTranscriptAutoFollow() at bottom returned a timer")
+	}
+	if tui.chat.ManualScrollPaused || !tui.chat.FollowBottom || tui.transcriptScrollTimerScheduled {
+		t.Fatalf("paused/followBottom/timer = %v/%v/%v, want false/true/false", tui.chat.ManualScrollPaused, tui.chat.FollowBottom, tui.transcriptScrollTimerScheduled)
+	}
+}
