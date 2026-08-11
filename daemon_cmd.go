@@ -68,13 +68,27 @@ func stopDaemonCommand() {
 
 func ensureDaemonRunning() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	_, err := queryDaemonStatus(ctx)
+	status, err := queryDaemonStatus(ctx)
 	cancel()
-	if err == nil {
+	if err == nil && status.State == protocol.DaemonRuntimeReady {
 		return
+	}
+	if err == nil {
+		if waitUntilDaemonAvailable(10 * time.Second) {
+			return
+		}
+		fmt.Fprintf(os.Stderr, "Error: daemon remained %s for 10 seconds\n", status.State)
+		os.Exit(1)
 	}
 	if !isDaemonDialFailure(err) {
 		fmt.Fprintf(os.Stderr, "Error: daemon is reachable but status is unavailable: %s\n", err)
+		os.Exit(1)
+	}
+	if held, probeErr := daemonLeaseHeld(config.DefaultLockPath()); probeErr == nil && held {
+		if waitUntilDaemonAvailable(10 * time.Second) {
+			return
+		}
+		fmt.Fprintln(os.Stderr, "Error: daemon is starting but did not become ready within 10 seconds")
 		os.Exit(1)
 	}
 	if err := startDaemon(); err != nil {
@@ -115,6 +129,14 @@ func startDaemon() error {
 }
 
 func startDaemonWithTCP(listen string, defaultListen bool) error {
+	if held, err := daemonLeaseHeld(config.DefaultLockPath()); err != nil {
+		return fmt.Errorf("probe daemon startup: %w", err)
+	} else if held {
+		if waitUntilDaemonAvailable(10 * time.Second) {
+			return nil
+		}
+		return fmt.Errorf("daemon is starting but did not become ready within 10 seconds")
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("cannot determine executable path: %w", err)
@@ -130,15 +152,64 @@ func startDaemonWithTCP(listen string, defaultListen bool) error {
 	}
 	cmd.Stdin = nil
 	cmd.Stdout = nil
-	cmd.Stderr = os.Stderr
+	stderrFile, err := openDaemonStderr()
+	if err != nil {
+		return fmt.Errorf("open daemon log: %w", err)
+	}
+	cmd.Stderr = stderrFile
 
 	if err := startBackground(cmd); err != nil {
+		_ = stderrFile.Close()
 		return fmt.Errorf("start background daemon: %w", err)
 	}
-	if waitUntilDaemonAvailable(10 * time.Second) {
-		return nil
+	_ = stderrFile.Close()
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	if err := waitUntilDaemonAvailableOrExit(10*time.Second, exited); err != nil {
+		return err
 	}
-	return fmt.Errorf("daemon failed to start within 10 seconds (check logs at %s)", config.DefaultLogPath())
+	return nil
+}
+
+func openDaemonStderr() (*os.File, error) {
+	if err := os.MkdirAll(config.DefaultLogsDir(), 0755); err != nil {
+		return nil, fmt.Errorf("create daemon log directory: %w", err)
+	}
+	return os.OpenFile(config.DefaultLogPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+}
+
+func waitUntilDaemonAvailableOrExit(timeout time.Duration, exited <-chan error) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	var childErr error
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		status, err := queryDaemonStatus(ctx)
+		cancel()
+		if err == nil && status.State == protocol.DaemonRuntimeReady {
+			return nil
+		}
+		select {
+		case err := <-exited:
+			childErr = err
+			exited = nil
+			held, probeErr := daemonLeaseHeld(config.DefaultLockPath())
+			if probeErr == nil && !held {
+				if childErr == nil {
+					return fmt.Errorf("daemon exited before becoming ready")
+				}
+				return fmt.Errorf("daemon exited before becoming ready: %w (check logs at %s)", childErr, config.DefaultLogPath())
+			}
+		case <-deadline.C:
+			if childErr != nil {
+				return fmt.Errorf("daemon exited before another instance became ready: %w", childErr)
+			}
+			return fmt.Errorf("daemon failed to start within %s (check logs at %s)", timeout, config.DefaultLogPath())
+		case <-ticker.C:
+		}
+	}
 }
 
 func waitUntilDaemonAvailable(timeout time.Duration) bool {
@@ -146,9 +217,9 @@ func waitUntilDaemonAvailable(timeout time.Duration) bool {
 	var lastErr error
 	for time.Now().Before(deadline) {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		_, err := queryDaemonStatus(ctx)
+		status, err := queryDaemonStatus(ctx)
 		cancel()
-		if err == nil {
+		if err == nil && status.State == protocol.DaemonRuntimeReady {
 			return true
 		}
 		lastErr = err
@@ -176,7 +247,7 @@ func waitUntilDaemonUnavailable(timeout time.Duration) bool {
 
 func queryDaemonStatus(ctx context.Context) (protocol.DaemonStatusParams, error) {
 	var status protocol.DaemonStatusParams
-	raw, err := invokeLocal(ctx, protocol.MethodDaemonStatus, nil)
+	raw, err := invokeLocal(ctx, protocol.MethodDaemonStatus, protocol.DaemonStatusRequest{Detail: false})
 	if err != nil {
 		return status, err
 	}

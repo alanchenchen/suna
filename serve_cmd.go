@@ -88,6 +88,9 @@ func serve(args []string, deps serveDeps) (serveResult, error) {
 			return serveResult{}, fmt.Errorf("daemon started but is not reachable: %w", err)
 		}
 	}
+	if status.State != protocol.DaemonRuntimeReady {
+		return serveResult{}, fmt.Errorf("daemon is %s", status.State)
+	}
 	if status.TCPEndpoint == "" {
 		return serveResult{}, fmt.Errorf("the running daemon has no TCP endpoint; stop it before starting the current server")
 	}

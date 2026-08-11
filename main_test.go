@@ -20,7 +20,7 @@ func TestServeStartsDaemonOnFirstUse(t *testing.T) {
 			if !started {
 				return protocol.DaemonStatusParams{}, daemonProbeError{DialErr: errors.New("not running")}
 			}
-			return protocol.DaemonStatusParams{PID: 42, TCPEndpoint: transporttcp.DefaultEndpoint}, nil
+			return protocol.DaemonStatusParams{State: protocol.DaemonRuntimeReady, PID: 42, TCPEndpoint: transporttcp.DefaultEndpoint}, nil
 		},
 		start: func(listen string, defaultListen bool) error {
 			started = true
@@ -50,7 +50,7 @@ func TestServeReusesExistingDaemon(t *testing.T) {
 	starts := 0
 	result, err := serve([]string{"--json"}, serveDeps{
 		queryStatus: func(context.Context) (protocol.DaemonStatusParams, error) {
-			return protocol.DaemonStatusParams{PID: 43, TCPEndpoint: "127.0.0.1:49123"}, nil
+			return protocol.DaemonStatusParams{State: protocol.DaemonRuntimeReady, PID: 43, TCPEndpoint: "127.0.0.1:49123"}, nil
 		},
 		start: func(string, bool) error {
 			starts++
@@ -72,7 +72,7 @@ func TestServeRejectsDifferentExplicitListenerForExistingDaemon(t *testing.T) {
 	starts := 0
 	_, err := serve([]string{"--listen", "127.0.0.1:49124"}, serveDeps{
 		queryStatus: func(context.Context) (protocol.DaemonStatusParams, error) {
-			return protocol.DaemonStatusParams{TCPEndpoint: "127.0.0.1:49123"}, nil
+			return protocol.DaemonStatusParams{State: protocol.DaemonRuntimeReady, TCPEndpoint: "127.0.0.1:49123"}, nil
 		},
 		start: func(string, bool) error {
 			starts++
@@ -185,5 +185,24 @@ func TestParseCLIDebug(t *testing.T) {
 func TestParseCLIRuntimeIsUnknownCommand(t *testing.T) {
 	if got := parseCLI([]string{"runtime"}); got != "runtime" {
 		t.Fatalf("parseCLI(runtime) = %q, want runtime", got)
+	}
+}
+
+func TestServeRejectsStartingDaemonAsReady(t *testing.T) {
+	starts := 0
+	_, err := serve([]string{"--json"}, serveDeps{
+		queryStatus: func(context.Context) (protocol.DaemonStatusParams, error) {
+			return protocol.DaemonStatusParams{State: protocol.DaemonRuntimeStarting, PID: 42}, nil
+		},
+		start: func(string, bool) error {
+			starts++
+			return nil
+		},
+	})
+	if err == nil {
+		t.Fatal("serve error = nil, want starting error")
+	}
+	if starts != 0 {
+		t.Fatalf("start calls = %d, want 0", starts)
 	}
 }
