@@ -192,7 +192,7 @@ func (t *TUI) forceScrollToBottomOnNextSync() {
 	t.scrollToBottomOnNextSync()
 }
 
-// pauseTranscriptAutoFollow 记录用户正在阅读历史；高频滚动只延后同一条 Tick 链的截止时间。
+// pauseTranscriptAutoFollow 记录用户正在阅读历史；只有活动 run 的新内容累计超过一屏后才会启动恢复计时。
 func (t *TUI) pauseTranscriptAutoFollow() tea.Cmd {
 	if t.chat.TranscriptAtBottom() {
 		t.cancelTranscriptManualScroll()
@@ -201,12 +201,32 @@ func (t *TUI) pauseTranscriptAutoFollow() tea.Cmd {
 	t.chat.ManualScrollPaused = true
 	t.chat.FollowBottom = false
 	t.transcriptScrollDeadline = time.Now().Add(transcriptScrollResumeDelay)
-	if t.transcriptScrollTimerScheduled {
+	t.transcriptScrollNewLines = 0
+	return nil
+}
+
+func (t *TUI) transcriptAutoResumeReady() bool {
+	if !t.chat.ManualScrollPaused || t.cancelling || t.completedRunID != "" {
+		return false
+	}
+	if !t.currentRunCanControl && !t.activeSessionRun() {
+		return false
+	}
+	return t.transcriptScrollNewLines >= max(1, t.chat.Viewport.Height())
+}
+
+// scheduleTranscriptAutoResumeIfReady 保证 idle 或没有足量新增内容时不创建后台 Tick。
+func (t *TUI) scheduleTranscriptAutoResumeIfReady() tea.Cmd {
+	if !t.transcriptAutoResumeReady() || t.transcriptScrollTimerScheduled {
 		return nil
 	}
 	t.transcriptScrollGeneration++
 	t.transcriptScrollTimerScheduled = true
-	return t.transcriptScrollResumeCmd(transcriptScrollResumeDelay, t.transcriptScrollGeneration, t.currentSession.ID)
+	delay := time.Until(t.transcriptScrollDeadline)
+	if delay < 0 {
+		delay = 0
+	}
+	return t.transcriptScrollResumeCmd(delay, t.transcriptScrollGeneration, t.currentSession.ID)
 }
 
 func (t *TUI) transcriptScrollResumeCmd(delay time.Duration, generation uint64, sessionID string) tea.Cmd {
@@ -215,10 +235,20 @@ func (t *TUI) transcriptScrollResumeCmd(delay time.Duration, generation uint64, 
 	})
 }
 
-func (t *TUI) cancelTranscriptManualScroll() {
+func (t *TUI) resetTranscriptAutoResumeCycle() {
+	t.cancelTranscriptScrollTimer()
+	t.transcriptScrollNewLines = 0
+}
+
+func (t *TUI) cancelTranscriptScrollTimer() {
 	t.transcriptScrollGeneration++
-	t.transcriptScrollDeadline = time.Time{}
 	t.transcriptScrollTimerScheduled = false
+}
+
+func (t *TUI) cancelTranscriptManualScroll() {
+	t.cancelTranscriptScrollTimer()
+	t.transcriptScrollDeadline = time.Time{}
+	t.transcriptScrollNewLines = 0
 	t.chat.ManualScrollPaused = false
 }
 func (t *TUI) setInputValue(input string) {

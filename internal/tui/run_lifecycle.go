@@ -14,6 +14,9 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 		return
 	}
 	if p.State == protocol.AgentRunRunning && p.RunID != "" {
+		if t.completedRunID != "" {
+			t.resetTranscriptAutoResumeCycle()
+		}
 		t.completedRunID = ""
 	}
 	if p.State == protocol.AgentRunRunning && !t.cancelling {
@@ -25,6 +28,7 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 	case protocol.AgentRunRetrying:
 		t.setRunRetryStatus(p, time.Now())
 	case protocol.AgentRunFailed, protocol.AgentRunCancelled:
+		t.resetTranscriptAutoResumeCycle()
 		if p.RunID != "" {
 			t.completedRunID = p.RunID
 		}
@@ -50,6 +54,7 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 		t.chat.ResumeAvailable = p.ResumeAvailable
 		t.resetPhase()
 	case protocol.AgentRunDone:
+		t.resetTranscriptAutoResumeCycle()
 		if p.RunID != "" {
 			t.completedRunID = p.RunID
 		}

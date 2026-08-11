@@ -154,13 +154,18 @@ func (t *TUI) scheduleTranscriptSync() tea.Cmd {
 	})
 }
 
-func (t *TUI) flushScheduledTranscriptSync() {
+func (t *TUI) flushScheduledTranscriptSync() tea.Cmd {
 	t.transcriptSyncScheduled = false
 	if !t.transcriptSyncDirty || t.mode != uipage.Chat {
-		return
+		return nil
 	}
 	t.trimDisplayHistoryIfNeeded()
+	beforeLines := t.chat.TranscriptTotalLines
 	t.syncContent()
+	if t.chat.ManualScrollPaused && t.chat.TranscriptTotalLines > beforeLines {
+		t.transcriptScrollNewLines += t.chat.TranscriptTotalLines - beforeLines
+	}
+	return t.scheduleTranscriptAutoResumeIfReady()
 }
 
 func (t *TUI) trimDisplayHistoryIfNeeded() bool {
@@ -172,11 +177,18 @@ const textStreamSpinnerSuppressWindow = 120 * time.Millisecond
 func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m := msg.(type) {
 	case transcriptSyncMsg:
-		t.flushScheduledTranscriptSync()
-		return t, nil
+		return t, t.flushScheduledTranscriptSync()
 
 	case transcriptScrollResumeMsg:
+		if t.mode != uipage.Chat {
+			t.cancelTranscriptScrollTimer()
+			return t, nil
+		}
 		if m.Generation != t.transcriptScrollGeneration || m.SessionID != t.currentSession.ID || !t.chat.ManualScrollPaused {
+			return t, nil
+		}
+		if !t.transcriptAutoResumeReady() {
+			t.transcriptScrollTimerScheduled = false
 			return t, nil
 		}
 		remaining := time.Until(t.transcriptScrollDeadline)
@@ -190,6 +202,14 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, nil
 
 	case tea.WindowSizeMsg:
+		if t.transcriptSyncDirty {
+			// 先按旧布局结算 daemon 新增内容；resize 是新的用户查看行为，随后重新开始累计。
+			_ = t.flushScheduledTranscriptSync()
+		}
+		if t.chat.ManualScrollPaused {
+			t.resetTranscriptAutoResumeCycle()
+			t.transcriptScrollDeadline = time.Now().Add(transcriptScrollResumeDelay)
+		}
 		t.width = m.Width
 		t.height = m.Height
 		t.ready = true

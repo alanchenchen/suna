@@ -41,6 +41,11 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.chatSpinnerTicking = false
 		return t, nil
 	}
+	if _, ok := msg.(transcriptScrollResumeMsg); ok && t.mode != uipage.Chat {
+		// 离开 Chat 后到达的恢复 Tick 只能作废，不能跨页面或跨 run 保留 scheduled 状态。
+		t.cancelTranscriptScrollTimer()
+		return t, nil
+	}
 
 	if !t.ready {
 		if ws, ok := msg.(tea.WindowSizeMsg); ok {

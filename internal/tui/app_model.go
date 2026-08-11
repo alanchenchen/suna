@@ -121,6 +121,7 @@ type TUI struct {
 	// transcriptScrollGeneration 使不可取消的旧 Tick 在用户切换会话或重新开始计时后自动失效。
 	transcriptScrollGeneration     uint64
 	transcriptScrollDeadline       time.Time
+	transcriptScrollNewLines       int
 	transcriptScrollTimerScheduled bool
 
 	// chatSpinnerTicking 保证 loading/compacting 的 spinner 只有一条 tick 链；Join running session 时也会按需启动。
