@@ -149,9 +149,11 @@ MVP 目标平台:
 ```
 suna/
 ├── main.go                      # 入口: CLI 分发、daemon runtime 组装、TUI 启动
-├── daemon_cmd.go                # CLI daemon 管理: start/status/stop，优先走 protocol
-├── daemon_process_unix.go       # 本机进程 fallback (macOS/Linux)
-├── daemon_process_windows.go    # 本机进程 fallback (Windows)
+├── daemon_cmd.go                # CLI daemon 命令与用户输出
+├── daemon_client.go             # CLI 到 daemon 的本地 protocol 调用
+├── daemon_start.go              # daemon 启动协调与 ready 等待
+├── daemon_platform_unix.go      # Unix lease、探测与后台进程管理
+├── daemon_platform_windows.go   # Windows 排他与后台进程管理
 ├── go.mod
 ├── go.sum
 ├── internal/
