@@ -77,8 +77,9 @@ TUI 重构或 UI 交互调整不应改变 daemon 的业务语义。
 
 ## Daemon 生命周期
 
-当前版本是单 daemon、多 session 形态：daemon 可以持有多个持久化 session；每个 session 同一时间最多一个 active run，并按需建立自己的 session runtime。不提供 trigger/cowork/perception 等长期后台任务。daemon 生命周期由 transport 声明的 retention policy 和当前连接数共同决定：
+当前版本是单 daemon、多 session 形态：daemon 可以持有多个持久化 session；每个 session 同一时间最多一个 active run，并按需建立自己的 session runtime。不提供 trigger/cowork/perception 等长期后台任务。daemon 启动分为核心就绪与后台资源两个边界：配置、SQLite、Router、Prompt、Skill Catalog、内置工具和 transport/PID 必须同步完成；MCP、memory worker 与维护任务在核心 ready 后由 daemon context 管理并异步启动。
 
+- daemon core ready 不等待 MCP 子进程或网络握手；单个 MCP 以 `disabled / starting / active / error` 独立演进，失败不阻塞 Session、内置工具和 Agent 主流程。
 - local 与 TCP transport 都使用 `idle_exit`：打开 TUI、执行 `suna serve` 或第三方 client 接入时，若 daemon 未运行会自动后台启动；最后一个客户端断开后，daemon 进入短暂宽限期，如果没有新连接，会取消当前 agent run 并退出。
 - `suna stop`、`SIGTERM`、`SIGINT` 也会进入同一类关闭流程。
 
@@ -91,7 +92,7 @@ TUI 重构或 UI 交互调整不应改变 daemon 的业务语义。
 - `internal/model.Router` 维护全局模型 provider/config registry，按 model ref 创建 binding，不拥有“当前模型”；`ModelBinding` 是一次显式模型选择的不可变快照，统一承载 provider、模型配置、限流、reasoning 注入、日志和调用校验。Guard、Skill、compact 等辅助调用复用同一 binding，禁止隐式回退到 `active_model`。
 - `internal/tools` 是统一工具目录和执行路由，所有模型可见工具都应通过 Provider 注册到 `tools.Manager`。
 - `internal/tools/builtin` 提供本地内置工具，`internal/tools/skilltools` 适配 Skill Runtime，`internal/tools/agenttools` 适配 `askuser` / `spawn` 这类 Agent runtime 工具，`internal/tools/mcptools` 将已连接的 MCP tools 适配为模型可见工具。
-- `internal/mcp` 管理 MCP server 生命周期、stdio transport、JSON-RPC、tools/list 和 tools/call；当前只承诺 tools-only 的基础 MCP，不支持 resources、prompts、sampling、OAuth 或 sandbox。
+- `internal/mcp` 管理 MCP server 的异步并行启动、generation/cancel、stdio transport、JSON-RPC、tools/list 和 tools/call；Agent 集成层对短时间内完成的 MCP 做约 200ms Tool Catalog 合并刷新，目录原子发布后才对外通知 `active`。当前只承诺 tools-only 的基础 MCP，不支持 resources、prompts、sampling、OAuth 或 sandbox。
 - Guard 对写文件、执行命令、HTTP 写请求等行动类操作做风险控制；工具是否跳过 Guard 由工具 `Spec` 的 Guard policy 声明，默认应走 Guard。
 
 `tools.Manager` 只维护工具目录、稳定 schema 和执行路由，不应做安全决策；Guard 仍由 Agent 持有当前会话上下文后统一处理。工具 schema 应保持稳定顺序，避免影响模型前缀缓存命中。
@@ -109,7 +110,7 @@ TUI 重构或 UI 交互调整不应改变 daemon 的业务语义。
 - `attachments/`：附件缓存。
 - `logs/app.log`：日志。
 
-MCP server 配置位于 `config.toml` 的 `[mcp.servers.<name>]`。daemon 启动时会尝试启动 enabled 的 stdio server；单个 server 启动失败不会阻塞 Suna，错误通过 MCP 状态接口和 TUI `/mcp` 面板展示。MCP 工具公共名使用 `mcp__<server>__<tool>`，二进制结果会保存到附件目录并以文本引用返回。
+MCP server 配置位于 `config.toml` 的 `[mcp.servers.<name>]`。daemon core ready 后会并行启动 enabled 的 stdio server；单个 server 启动失败不会阻塞 Suna，状态通过 `mcp.list` 初始快照、`mcp.updated` 增量和 TUI `/mcp` 面板展示。MCP 工具公共名使用 `mcp__<server>__<tool>`，二进制结果会保存到附件目录并以文本引用返回。
 
 TUI 通过 protocol 获取 attachment root，用于保存用户粘贴的 data URI / 剪贴板图片；这属于 UI 输入落盘，最终仍以普通 attachment ref 发送给 daemon。daemon 不读取系统剪贴板。
 

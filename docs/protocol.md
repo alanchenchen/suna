@@ -96,13 +96,15 @@ TCP 客户端的限制：
 | `skill.list` / `skill.set` | 查询、启用或禁用 Skill。 |
 | `mcp.list` / `mcp.toggle` / `mcp.reload` | 查询、启用/禁用或重载 MCP server。 |
 
-不主推给第三方 runtime v0.3 依赖的 method：
+不主推给第三方 runtime v0.4 依赖的 method：
 
 | Method | 说明 |
 |---|---|
-| `daemon.status` | 可用于 smoke test 或诊断面板，但不是聊天主流程必需能力。 |
+| `daemon.status` | 可用于 smoke test 或诊断面板；`detail=false` 只返回 lifecycle/PID/endpoint 等轻量状态，`detail=true` 才聚合模型、Memory、Session 与 Usage 统计。 |
 | `daemon.stop` | 本地 daemon 管理语义；第三方客户端通常无需调用。 |
 | `attachment.status` / `attachment.clear` | 官方 TUI 附件缓存管理；第三方 UI 应自行管理上传和缓存，并向 `agent.sendMessage` 传 image path/url。 |
+
+daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 runtime 可服务，不表示所有 MCP 已 active；非 `ready` 时，除 `runtime.hello / daemon.status / daemon.stop` 外的请求返回 `runtime_unavailable`，并通过 `reason` 与 `retryable` 表达恢复语义。
 
 完整参数表和示例见 `docs/tcp-client.md`。
 
@@ -128,6 +130,7 @@ TCP 客户端的限制：
 | `session.compact_result` | compact running / done / error / result 状态。 |
 | `config.state` | 配置变更后的主动状态通知。 |
 | `memory.state` | memory 变更后的主动状态通知。 |
+| `mcp.updated` | 单个 MCP server 的完整状态增量；按 `server.id` 覆盖本地快照。 |
 | `skill.load` | Skill load 生命周期通知。 |
 | `skill.review` | Skill review 生命周期通知。 |
 
@@ -138,6 +141,8 @@ TCP 客户端的限制：
 | `daemon.full_status` | daemon 聚合快照，主要供 TUI 刷新状态面板。第三方 UI 可用于诊断，但不应依赖它完成聊天主流程。 |
 
 完整参数表和示例见 `docs/tcp-client.md`。
+
+`mcp.list` 与 `mcp.updated` 采用相同的 snapshot + delta 语义。MCP server 的 `state` 只能是 `disabled / starting / active / error`；daemon core ready 不等待 MCP，只有 `active` server 的工具进入模型 Tool Catalog。多个 server 短时间完成时，Agent 会合并刷新目录，并在目录发布完成后再发送 `active` 增量。
 
 `session.list` 与 `session.updated` 共同维护全局轻量 Session Catalog：连接建立后用 `session.list` 获取初始快照，之后用 `session.updated` 合并 metadata、`status` 与 `client_count` 变化。`session.updated` 不表示接收方已经 attach 目标 session，也不携带消息、输出或工具详情。`agent.run`、`agent.delta`、tool、AskUser、Guard 与 `session.user_message` 等详细事件仍只发送给已 attach 目标 session 的客户端。
 
@@ -329,7 +334,7 @@ TUI 的“本会话 / 已加入 / 观察中”是 UI 根据 attach 方式、clie
 
 ## 11. Public / internal 边界
 
-public runtime v0.3 主推：
+public runtime v0.4 主推：
 
 - runtime handshake。
 - agent 消息和事件。
@@ -361,9 +366,9 @@ public runtime v0.3 主推：
 - 不让 transport 改变业务语义。
 - 结构化错误新增 kind 时，应保持旧 kind 的含义稳定。
 - `agent.delta`、`agent.run`、`agent.usage` 的职责边界不能混淆。
-- v0.3 将 usage 缓存字段升级为 `cache_read_tokens` 与 `cache_creation_tokens`，不兼容旧 `cached_tokens`。
-- public runtime v0.3 暂不承诺 string id 或客户端 notification；如果未来支持，应在 JSON-RPC 层保持 id 原样 round-trip，避免污染 daemon 业务层。
-- protocol 0.3 不兼容旧 `session.new` / `session.restore` 主流程；旧客户端需要迁移到 `session.create` / `session.attach`。
+- v0.4 将 usage 缓存字段升级为 `cache_read_tokens` 与 `cache_creation_tokens`，不兼容旧 `cached_tokens`。
+- public runtime v0.4 暂不承诺 string id 或客户端 notification；如果未来支持，应在 JSON-RPC 层保持 id 原样 round-trip，避免污染 daemon 业务层。
+- protocol 0.4 不兼容旧 `session.new` / `session.restore` 主流程；旧客户端需要迁移到 `session.create` / `session.attach`。
 
 ---
 

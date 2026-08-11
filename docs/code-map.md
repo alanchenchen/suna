@@ -109,13 +109,17 @@ Adapter 不应解析 TUI preset 的业务含义，例如“Adaptive XHigh”、�
 ```text
 用户执行 suna
   ↓
-CLI 检查 daemon 是否可连接
+CLI 查询轻量 daemon.status；Unix owner 正在初始化时等待，不重复拉起
   ↓
-不可连接则后台拉起 daemon
+无 owner 则后台拉起 daemon
   ↓
-TUI 通过 local transport 连接 daemon
+配置 / SQLite / Router / Prompt / Skill / 内置工具完成核心初始化
   ↓
-TUI 主动拉取 daemon.status / config.get 等初始状态
+挂载 local/TCP、发布 PID，daemon state=ready
+  ↓
+TUI 连接并拉取 daemon.status(detail=true) / config.get / session.list / mcp.list
+  ↓
+MCP、Memory Worker 与维护任务在后台启动；mcp.updated 增量刷新状态
   ↓
 展示 Welcome 或进入 Chat
 ```

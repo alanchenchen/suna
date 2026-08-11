@@ -64,7 +64,7 @@ suna serve --json
 | 已有 daemon | `suna serve --json` 返回已有 daemon 的实际 PID 和 endpoint，不会重启 session、run 或创建第二个 daemon。 |
 | reconnect | daemon 在所有 local/TCP client 离开**约 2 秒**后会按 idle-exit 自动退出；连接失败时再次执行 `suna serve --json`。 |
 
-`serve` 不代表永久常驻 server，也不需要第三方 UI 持有一个额外的 Suna 子进程。它只保证 daemon 当前可连接。
+`serve` 不代表永久常驻 server，也不需要第三方 UI 持有一个额外的 Suna 子进程。它只在 daemon 核心 runtime 进入 `ready` 后返回；此时 Session、配置、内置工具和 Agent 已可用，但 MCP server 可能仍在后台处于 `starting`。
 
 ---
 
@@ -141,14 +141,14 @@ TCP 是一条长期连接，framing 为 **NDJSON**：
 TCP client 连接后，必须先发送：
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.3","client":{"name":"my-ui","version":"1.0.0","type":"desktop"}}}
+{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.4","client":{"name":"my-ui","version":"1.0.0","type":"desktop"}}}
 ```
 
 建议字段：
 
 | 字段 | 是否必填 | 说明 |
 |---|---:|---|
-| `protocol_version` | 否 | 当前公开版本为 `"0.3"`；推荐始终传入。 |
+| `protocol_version` | 否 | 当前公开版本为 `"0.4"`；推荐始终传入。 |
 | `client.name` | 否 | 客户端名称，用于诊断。 |
 | `client.version` | 否 | 客户端版本。 |
 | `client.type` | 否 | 例如 `desktop`、`ide`、`web_gateway`、`script`。 |
@@ -157,10 +157,10 @@ TCP client 连接后，必须先发送：
 
 ```json
 {
-  "protocol_version":"0.3",
+  "protocol_version":"0.4",
   "runtime_version":"v0.x.x",
   "transport":"tcp",
-  "capabilities":{"agent":true,"session":true,"handoff":true},
+  "capabilities":{"agent":true,"session":true,"handoff":true,"mcp_status_updates":true},
   "content_sources":{"text":true,"image_path":true,"image_url":true},
   "limits":{"max_tool_result_bytes":16384}
 }
@@ -172,7 +172,17 @@ TCP client 连接后，必须先发送：
 
 ## 5. 最小会话流程
 
-### 5.1 列出 session
+### 5.1 MCP 状态快照与增量
+
+调用 `mcp.list` 获取初始快照。每个 server 的 `state` 为：
+
+```text
+disabled / starting / active / error
+```
+
+后台 MCP 状态变化通过 `mcp.updated` 单项增量发送；客户端按 `server.id` 覆盖本地记录。daemon core ready 不等待 MCP，只有 `active` server 的工具进入模型 Tool Catalog；服务启动完成且目录原子刷新后，daemon 才会广播对应 `active`。
+
+### 5.2 列出 session
 
 ```json
 {"jsonrpc":"2.0","id":2,"method":"session.list","params":{"active_only":false}}
@@ -180,7 +190,7 @@ TCP client 连接后，必须先发送：
 
 `session.list` 是全局轻量 Session Catalog 的初始快照。客户端应缓存返回的 `SessionInfo`，并在整个连接生命周期内用 `session.updated` 增量更新 metadata、`status` 与 `client_count`；不要仅依赖首次 list 结果判断 active session。
 
-### 5.2 创建 session
+### 5.3 创建 session
 
 `cwd` 必填，它决定 session 的默认工作区与相对路径边界：
 
@@ -190,7 +200,7 @@ TCP client 连接后，必须先发送：
 
 创建成功后，当前 TCP connection 会自动 attach 到新 session，并返回 `SessionSnapshot`。
 
-### 5.3 Attach 已有 session
+### 5.4 Attach 已有 session
 
 ```json
 {"jsonrpc":"2.0","id":4,"method":"session.attach","params":{"session_id":"SESSION_ID","require_active":false}}
@@ -206,7 +216,7 @@ Attach response 中的 `current_run`、`run_id`、`assistant_buffer` 与 `reason
 
 未 attach 的客户端只通过 `session.updated` 观察轻量 Catalog 状态。只有 attach 到目标 session 后，才会收到该 session 的 `agent.run`、`agent.delta`、tool、AskUser、Guard、`session.user_message` 等详细事件。
 
-### 5.4 发送消息
+### 5.5 发送消息
 
 ```json
 {"jsonrpc":"2.0","id":5,"method":"agent.sendMessage","params":{"parts":[{"type":"text","text":"Inspect this repository and explain the architecture."}]}}
@@ -225,7 +235,7 @@ Attach response 中的 `current_run`、`run_id`、`assistant_buffer` 与 `reason
 | `agent.interaction_resolved` | 移除对应 AskUser / Guard UI。 |
 | `session.updated` | 合并全局 Session Catalog 中的 metadata、`status` 与 `client_count`；该通知会发送给所有已完成握手的客户端，包括未 attach 目标 session 的客户端。 |
 
-### 5.5 Detach
+### 5.6 Detach
 
 不再使用当前 session 时：
 
@@ -299,7 +309,7 @@ export class SunaClient {
 
     const client = new SunaClient(socket);
     await client.request("runtime.hello", {
-      protocol_version: "0.3",
+      protocol_version: "0.4",
       client: { name: "example-ui", version: "1.0.0", type: "node" },
     });
     return client;
@@ -421,7 +431,7 @@ try {
 实现一个 Suna TCP JSON-RPC client：
 1. 执行 `suna serve --json`，解析 stdout 的 tcp_endpoint；
 2. 使用长期 TCP connection 和 NDJSON，一行一条 JSON；
-3. 第一条 request 必须是 runtime.hello，protocol_version 为 0.3；
+3. 第一条 request 必须是 runtime.hello，protocol_version 为 0.4；
 4. 用整数 request ID 和 pending map 匹配 response；
 5. 独立分发无 ID 的 daemon notification；
 6. 先 session.list，再 session.create 或 session.attach；
