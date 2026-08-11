@@ -220,8 +220,30 @@ func (t *TUI) handleUsageNotification(p protocol.UsageParams) {
 	t.applyContextStats(contextTokens, p.ContextWindow)
 }
 
+func (t *TUI) activeSessionRun() bool {
+	switch t.currentSession.Status {
+	case protocol.SessionStatusRunning, protocol.SessionStatusWaiting, protocol.SessionStatusCompacting:
+		return true
+	default:
+		return false
+	}
+}
+
+// canAcceptRunInteraction 只接收仍有活动 run 的交互。completedRunID 是终态栅栏，
+// active session 则允许 Handoff observer 接管 daemon 明确授权的 CanReply 交互。
+func (t *TUI) canAcceptRunInteraction() bool {
+	return !t.cancelling && t.completedRunID == "" && (t.currentRunCanControl || t.activeSessionRun())
+}
+
+func (t *TUI) canResumeRunAfterInteraction() bool {
+	return !t.cancelling && t.completedRunID == "" && (t.currentRunCanControl || t.activeSessionRun())
+}
+
 func (t *TUI) handleAskUserNotification(p protocol.AskUserParams) {
 	if p.SessionID != "" && t.currentSession.ID != "" && p.SessionID != t.currentSession.ID {
+		return
+	}
+	if !t.canAcceptRunInteraction() {
 		return
 	}
 	if p.CanReply {
@@ -244,6 +266,10 @@ func (t *TUI) handleAskUserNotification(p protocol.AskUserParams) {
 
 func (t *TUI) handleGuardConfirmNotification(p protocol.GuardConfirmParams) {
 	if p.SessionID != "" && t.currentSession.ID != "" && p.SessionID != t.currentSession.ID {
+		return
+	}
+	if !t.canAcceptRunInteraction() {
+		// cancel/终态之后到达的 Guard 已不属于可继续的 run，不能重新激活或污染本地状态。
 		return
 	}
 	if p.CanReply {
@@ -382,6 +408,7 @@ func (t *TUI) handleSessionStateNotification(p protocol.SessionStateParams) {
 		if p.Session.Status == protocol.SessionStatusIdle {
 			t.currentRunCanControl = false
 			t.clearRunRetryStatus()
+			t.chat.ClearRunInteractions()
 			// 取消中必须等待 agent_run cancelled 收尾工具和一次性提示，不能被较早的 session idle 快照清空。
 			if !t.cancelling {
 				t.resetPhase()
@@ -440,6 +467,8 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) {
 	currentRun := p.CurrentRun
 	if currentRun != nil && t.completedRunID != "" && currentRun.RunID == t.completedRunID {
 		currentRun = nil
+	} else if currentRun != nil && currentRun.RunID != "" {
+		t.completedRunID = ""
 	}
 	t.currentRunCanControl = currentRun != nil && currentRun.CanControl
 	t.cancelling = false

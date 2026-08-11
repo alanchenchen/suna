@@ -140,6 +140,22 @@ func (m *Model) RemoveInteraction(id string) bool {
 	return removed
 }
 
+func (m *Model) ClearRunInteractions() {
+	all := make([]Interaction, 0, len(m.InteractionQueue)+1)
+	if m.ActiveInteraction != nil {
+		all = append(all, *m.ActiveInteraction)
+	}
+	all = append(all, m.InteractionQueue...)
+	m.ActiveInteraction = nil
+	m.InteractionQueue = nil
+	for _, interaction := range all {
+		if interaction.Kind == InteractionGuardConfirm || interaction.Kind == InteractionAskUser {
+			continue
+		}
+		m.EnqueueInteraction(interaction)
+	}
+}
+
 func (m *Model) RequestDiscardDraft() {
 	m.EnqueueInteraction(Interaction{Kind: InteractionDiscardDraft, ID: "discard_draft"})
 }

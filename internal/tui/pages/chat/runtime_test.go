@@ -1,6 +1,10 @@
 package chat
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/alanchenchen/suna/internal/protocol"
+)
 
 func TestResetToolStateClearsSubtaskManualSelection(t *testing.T) {
 	var m Model
@@ -45,5 +49,21 @@ func TestAppendMessageClearsSubtaskManualSelection(t *testing.T) {
 	}
 	if m.SubtaskToolDetailExpanded || m.SubtaskToolDetailScroll != 0 {
 		t.Fatalf("detail expanded/scroll = %v/%d, want false/0", m.SubtaskToolDetailExpanded, m.SubtaskToolDetailScroll)
+	}
+}
+
+func TestClearRunInteractionsPreservesLocalInteraction(t *testing.T) {
+	var m Model
+	m.EnqueueGuardConfirm(&GuardConfirmView{ID: "guard-1"})
+	m.EnqueueInteraction(Interaction{Kind: InteractionDiscardDraft, ID: "discard_draft"})
+	m.EnqueueAskUser(protocol.AskUserParams{ID: "ask-1", Question: "continue?"})
+
+	m.ClearRunInteractions()
+
+	if got := m.ActiveInteractionKind(); got != InteractionDiscardDraft {
+		t.Fatalf("ActiveInteractionKind() = %v, want discard draft", got)
+	}
+	if len(m.InteractionQueue) != 0 {
+		t.Fatalf("InteractionQueue length = %d, want 0", len(m.InteractionQueue))
 	}
 }

@@ -13,6 +13,9 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 	if p.RunID != "" && p.RunID == t.completedRunID {
 		return
 	}
+	if p.State == protocol.AgentRunRunning && p.RunID != "" {
+		t.completedRunID = ""
+	}
 	if p.State == protocol.AgentRunRunning && !t.cancelling {
 		t.currentRunCanControl = p.CanControl
 	}
@@ -27,6 +30,7 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 		}
 		t.clearRunRetryStatus()
 		t.currentRunCanControl = false
+		t.chat.ClearRunInteractions()
 		t.finishStreamingMessages()
 		if p.State == protocol.AgentRunCancelled {
 			t.chat.FinishCancellingTools(time.Now())
@@ -55,6 +59,7 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 		}
 		t.clearRunRetryStatus()
 		t.currentRunCanControl = false
+		t.chat.ClearRunInteractions()
 		t.cancelling = false
 		t.finishStreamingMessages()
 		t.chat.ResumeAvailable = false

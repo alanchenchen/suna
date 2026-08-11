@@ -152,10 +152,15 @@ func (t *TUI) handleSend() tea.Cmd {
 				answer = options[idx]
 			}
 		}
+		canResume := t.canResumeRunAfterInteraction()
 		t.chat.CompleteInteraction()
-		t.currentRunCanControl = true
-		t.startLLMWait()
-		return tea.Batch(t.askReplyCmd(askID, answer), t.startChatSpinner())
+		if canResume {
+			t.currentRunCanControl = true
+			t.startLLMWait()
+			return tea.Batch(t.askReplyCmd(askID, answer), t.startChatSpinner())
+		}
+		t.resetPhase()
+		return t.askReplyCmd(askID, answer)
 	}
 
 	return t.runAgent(input, attachments)
@@ -416,13 +421,20 @@ func (t *TUI) updateChatEnter() (tea.Model, tea.Cmd) {
 		if idx >= 0 && idx < len(ask.Options) {
 			answer := ask.Options[idx]
 			askID := ask.ID
+			canResume := t.canResumeRunAfterInteraction()
 			t.chat.CompleteInteraction()
 			t.appendNonToolMessage(chatMsg{Role: "user", Content: answer})
 			t.forceScrollToBottomOnNextSync()
-			t.currentRunCanControl = true
-			t.startLLMWait()
+			if canResume {
+				t.currentRunCanControl = true
+				t.startLLMWait()
+			}
 			t.syncContent()
-			return t, tea.Batch(t.askReplyCmd(askID, answer), t.startChatSpinner())
+			if canResume {
+				return t, tea.Batch(t.askReplyCmd(askID, answer), t.startChatSpinner())
+			}
+			t.resetPhase()
+			return t, t.askReplyCmd(askID, answer)
 		}
 	}
 	if !t.chat.Loading {

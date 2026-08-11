@@ -47,6 +47,7 @@ func (t *TUI) refreshDaemonStatusCmd() tea.Cmd {
 }
 
 func (t *TUI) runAgent(input string, attachments []attachmentItem) tea.Cmd {
+	t.completedRunID = ""
 	t.currentRunCanControl = true
 	t.startLLMWait()
 	t.chat.ResumeAvailable = false
@@ -74,6 +75,7 @@ func (t *TUI) maybeAutoTitleSessionCmd(input string) tea.Cmd {
 }
 
 func (t *TUI) resumeAgent() tea.Cmd {
+	t.completedRunID = ""
 	t.currentRunCanControl = true
 	t.startLLMWait()
 	t.chat.ResumeAvailable = false

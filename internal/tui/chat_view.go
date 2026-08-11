@@ -618,11 +618,14 @@ func (t *TUI) submitGuardDecision(decision string) tea.Cmd {
 	}
 	t.advanceGuardQueue()
 	restartSpinner := false
-	if !t.chat.HasBlockingInteraction() {
+	if !t.chat.HasBlockingInteraction() && t.canResumeRunAfterInteraction() {
 		t.currentRunCanControl = true
 		t.chat.Textarea.Blur()
 		t.chat.ResumeToolPhase(time.Now())
 		restartSpinner = true
+	} else if !t.chat.HasBlockingInteraction() {
+		t.chat.ResetPhase()
+		_ = t.syncInputFocus()
 	} else {
 		// 队列可能已推进到允许自定义输入的 AskUser；焦点必须跟随新的交互呈现恢复。
 		_ = t.syncInputFocus()

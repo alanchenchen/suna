@@ -80,11 +80,11 @@ func TestGuardLocksComposerAndBlocksTerminalSelection(t *testing.T) {
 }
 
 func TestGuardNotificationExitsTerminalSelection(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24}
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24, currentRunCanControl: true, currentSession: protocol.SessionInfo{ID: "session-1", Status: protocol.SessionStatusRunning}}
 	tui.initChatComponents()
 	tui.selectionMode = true
 
-	tui.handleGuardConfirmNotification(protocol.GuardConfirmParams{ID: "guard-1", Tool: "writefile", CanReply: true})
+	tui.handleGuardConfirmNotification(protocol.GuardConfirmParams{ID: "guard-1", Tool: "writefile", SessionID: "session-1", CanReply: true})
 	if tui.selectionMode {
 		t.Fatal("selectionMode = true after guard notification")
 	}
@@ -129,11 +129,11 @@ func TestInteractionResolvedRestoresFocusForQueuedCustomAsk(t *testing.T) {
 }
 
 func TestChoiceOnlyAskUserNotificationExitsTerminalSelection(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24}
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24, currentSession: protocol.SessionInfo{ID: "session-1", Status: protocol.SessionStatusWaiting}}
 	tui.initChatComponents()
 	tui.selectionMode = true
 
-	tui.handleAskUserNotification(protocol.AskUserParams{ID: "ask-1", Question: "continue?", Options: []string{"yes", "no"}, CanReply: true})
+	tui.handleAskUserNotification(protocol.AskUserParams{ID: "ask-1", SessionID: "session-1", Question: "continue?", Options: []string{"yes", "no"}, CanReply: true})
 	if tui.selectionMode {
 		t.Fatal("selectionMode = true after AskUser notification")
 	}
@@ -146,11 +146,11 @@ func TestChoiceOnlyAskUserNotificationExitsTerminalSelection(t *testing.T) {
 }
 
 func TestCustomAskUserNotificationRestoresComposerFocus(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24}
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24, currentSession: protocol.SessionInfo{ID: "session-1", Status: protocol.SessionStatusWaiting}}
 	tui.initChatComponents()
 	tui.selectionMode = true
 
-	tui.handleAskUserNotification(protocol.AskUserParams{ID: "ask-1", Question: "continue?", AllowCustom: true, CanReply: true})
+	tui.handleAskUserNotification(protocol.AskUserParams{ID: "ask-1", SessionID: "session-1", Question: "continue?", AllowCustom: true, CanReply: true})
 	if tui.selectionMode {
 		t.Fatal("selectionMode = true after custom AskUser notification")
 	}
@@ -204,5 +204,113 @@ func TestSelectionModeIgnoresWheelAsHistoryKeys(t *testing.T) {
 	_, _ = tui.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
 	if tui.selectionMode {
 		t.Fatal("selectionMode = true after Esc, want false")
+	}
+}
+
+func TestLateGuardAfterCancelledRunDoesNotRestoreLoading(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24, currentSession: protocol.SessionInfo{ID: "session-1", Status: protocol.SessionStatusRunning}, currentRunCanControl: true}
+	tui.initChatComponents()
+	tui.chat.Loading = true
+
+	tui.handleAgentRunNotification(protocol.AgentRunParams{RunID: "run-1", State: protocol.AgentRunCancelled})
+	tui.currentSession.Status = protocol.SessionStatusIdle
+	tui.handleGuardConfirmNotification(protocol.GuardConfirmParams{ID: "guard-late", SessionID: "session-1", Tool: "writefile", CanReply: true})
+
+	if tui.chat.ActiveGuard() != nil {
+		t.Fatal("late Guard was shown after cancelled run")
+	}
+	if tui.chat.Loading || tui.currentRunCanControl || tui.cancelling {
+		t.Fatalf("loading/control/cancelling = %v/%v/%v, want false/false/false", tui.chat.Loading, tui.currentRunCanControl, tui.cancelling)
+	}
+}
+
+func TestCancelledRunClearsVisibleGuard(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24, currentSession: protocol.SessionInfo{ID: "session-1", Status: protocol.SessionStatusRunning}, currentRunCanControl: true}
+	tui.initChatComponents()
+	tui.chat.EnqueueGuardConfirm(&chatpage.GuardConfirmView{ID: "guard-1", Tool: "writefile"})
+
+	tui.handleAgentRunNotification(protocol.AgentRunParams{RunID: "run-1", State: protocol.AgentRunCancelled})
+
+	if tui.chat.ActiveGuard() != nil || tui.chat.HasBlockingInteraction() {
+		t.Fatal("cancelled run retained Guard interaction")
+	}
+	if tui.chat.Loading || tui.currentRunCanControl {
+		t.Fatalf("loading/control = %v/%v, want false/false", tui.chat.Loading, tui.currentRunCanControl)
+	}
+}
+
+func TestRejectingStaleGuardCannotReviveCompletedRun(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24, currentSession: protocol.SessionInfo{ID: "session-1", Status: protocol.SessionStatusIdle}, completedRunID: "run-1"}
+	tui.initChatComponents()
+	// 模拟终态与 Guard notification 已经交错入队，确保提交动作本身也有最终兜底。
+	tui.chat.EnqueueGuardConfirm(&chatpage.GuardConfirmView{ID: "guard-stale", Tool: "writefile"})
+
+	_ = tui.submitGuardDecision("reject")
+
+	if tui.chat.Loading || tui.currentRunCanControl || tui.chat.Phase != chatpage.PhaseIdle {
+		t.Fatalf("loading/control/phase = %v/%v/%v, want false/false/idle", tui.chat.Loading, tui.currentRunCanControl, tui.chat.Phase)
+	}
+	if tui.chat.ActiveGuard() != nil {
+		t.Fatal("stale Guard remained after rejection")
+	}
+}
+
+func TestHandoffObserverAcceptsReplyableGuardForActiveSession(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24, currentSession: protocol.SessionInfo{ID: "session-1", Status: protocol.SessionStatusWaiting}, currentRunCanControl: false}
+	tui.initChatComponents()
+
+	tui.handleGuardConfirmNotification(protocol.GuardConfirmParams{ID: "guard-handoff", SessionID: "session-1", Tool: "writefile", CanReply: true})
+
+	if tui.chat.ActiveGuard() == nil {
+		t.Fatal("replyable handoff Guard was rejected for active session")
+	}
+}
+
+func TestLateAskAfterCancelledRunDoesNotRestoreLoading(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24, currentSession: protocol.SessionInfo{ID: "session-1", Status: protocol.SessionStatusWaiting}, completedRunID: "run-1"}
+	tui.initChatComponents()
+
+	tui.handleAskUserNotification(protocol.AskUserParams{ID: "ask-late", SessionID: "session-1", Question: "continue?", CanReply: true})
+
+	if tui.chat.ActiveAsk() != nil {
+		t.Fatal("late AskUser was shown after cancelled run")
+	}
+	if tui.chat.Loading || tui.currentRunCanControl {
+		t.Fatalf("loading/control = %v/%v, want false/false", tui.chat.Loading, tui.currentRunCanControl)
+	}
+}
+
+func TestCancelThenLateGuardRejectLeavesChatIdle(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24, currentSession: protocol.SessionInfo{ID: "session-1", Status: protocol.SessionStatusRunning}, currentRunCanControl: true}
+	tui.initChatComponents()
+	tui.chat.Loading = true
+
+	tui.enterCancelling()
+	tui.handleAgentRunNotification(protocol.AgentRunParams{RunID: "run-1", State: protocol.AgentRunCancelled})
+	tui.handleGuardConfirmNotification(protocol.GuardConfirmParams{ID: "guard-late", SessionID: "session-1", Tool: "writefile", CanReply: true})
+	if tui.chat.ActiveGuard() != nil {
+		_ = tui.submitGuardDecision("reject")
+	}
+
+	if tui.chat.Loading || tui.cancelling || tui.currentRunCanControl || tui.chat.Phase != chatpage.PhaseIdle {
+		t.Fatalf("loading/cancelling/control/phase = %v/%v/%v/%v, want false/false/false/idle", tui.chat.Loading, tui.cancelling, tui.currentRunCanControl, tui.chat.Phase)
+	}
+	if tui.chat.HasBlockingInteraction() {
+		t.Fatal("cancelled run retained a blocking interaction")
+	}
+}
+
+func TestLateObserverInteractionsAfterCancelledRunAreIgnored(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24, currentSession: protocol.SessionInfo{ID: "session-1", Status: protocol.SessionStatusWaiting}, completedRunID: "run-1"}
+	tui.initChatComponents()
+
+	tui.handleAskUserNotification(protocol.AskUserParams{ID: "ask-late", SessionID: "session-1", Question: "continue?", CanReply: false})
+	tui.handleGuardConfirmNotification(protocol.GuardConfirmParams{ID: "guard-late", SessionID: "session-1", Tool: "writefile", CanReply: false})
+
+	if len(tui.chat.Messages) != 0 {
+		t.Fatalf("late observer interactions appended %d messages, want 0", len(tui.chat.Messages))
+	}
+	if tui.chat.HasBlockingInteraction() || tui.chat.Loading {
+		t.Fatalf("blocking/loading = %v/%v, want false/false", tui.chat.HasBlockingInteraction(), tui.chat.Loading)
 	}
 }
