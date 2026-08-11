@@ -11,6 +11,7 @@ import (
 
 	"github.com/alanchenchen/suna/internal/agent"
 	"github.com/alanchenchen/suna/internal/config"
+	"github.com/alanchenchen/suna/internal/mcp"
 	"github.com/alanchenchen/suna/internal/protocol"
 )
 
@@ -39,11 +40,14 @@ type Daemon struct {
 	transports []protocol.Transport
 
 	startTime time.Time
-	ready     chan struct{}
-	readyOnce sync.Once
+	stateMu   sync.RWMutex
+	state     protocol.DaemonRuntimeState
 	mu        sync.Mutex
 	sinks     map[string]protocol.EventSink
 	cancelFn  context.CancelFunc
+	mcpMu     sync.Mutex
+	mcpQueue  []protocol.MCPUpdatedParams
+	mcpWakeup chan struct{}
 }
 
 // New 创建 Daemon 实例。具体 transport 由入口层注入，daemon 只认识 protocol.Transport。
@@ -59,7 +63,8 @@ func New(cfg *config.Config, transports []protocol.Transport) (*Daemon, error) {
 		sessions:   newSessionManager(agent, agent.SessionStore()),
 		transports: transports,
 		sinks:      make(map[string]protocol.EventSink),
-		ready:      make(chan struct{}),
+		state:      protocol.DaemonRuntimeStarting,
+		mcpWakeup:  make(chan struct{}, 1),
 	}
 	d.sessions.onOrphan = func(sessionID string) {
 		if d.service != nil {
@@ -115,6 +120,8 @@ func (d *Daemon) run(label string) error {
 	}
 	pidWritten = true
 	d.markReady()
+	go d.publishMCPUpdates(ctx)
+	d.agent.StartBackgroundResources(ctx, d.onMCPChange)
 
 	if d.sessions != nil {
 		go d.sessions.pruneInactive(ctx, 30*24*time.Hour)
@@ -148,25 +155,28 @@ func (d *Daemon) run(label string) error {
 }
 
 func (d *Daemon) markReady() {
-	if d.ready != nil {
-		d.readyOnce.Do(func() { close(d.ready) })
-	}
+	d.setRuntimeState(protocol.DaemonRuntimeReady)
 }
 
-func (d *Daemon) waitUntilReady(ctx context.Context) error {
-	if d.ready == nil {
-		return nil
+func (d *Daemon) setRuntimeState(state protocol.DaemonRuntimeState) {
+	d.stateMu.Lock()
+	d.state = state
+	d.stateMu.Unlock()
+}
+
+func (d *Daemon) RuntimeState() protocol.DaemonRuntimeState {
+	d.stateMu.RLock()
+	state := d.state
+	d.stateMu.RUnlock()
+	if state == "" {
+		return protocol.DaemonRuntimeStarting
 	}
-	select {
-	case <-d.ready:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return state
 }
 
 // Stop 停止 daemon
 func (d *Daemon) Stop() {
+	d.setRuntimeState(protocol.DaemonRuntimeStopping)
 	if d.cancelFn != nil {
 		d.cancelFn()
 	}
@@ -190,6 +200,41 @@ func (d *Daemon) removeConnection(connID string) {
 	d.mu.Unlock()
 	if detached.sessionID != "" {
 		d.broadcastSessionState(context.Background(), detached.sessionID)
+	}
+}
+
+func (d *Daemon) onMCPChange(info mcp.ServerInfo) {
+	if d == nil || d.service == nil {
+		return
+	}
+	server := protocol.MCPServerInfo{ID: info.ID, Name: info.ID, Transport: info.Transport, Command: info.Command, State: protocol.MCPServerState(info.State), ToolCount: info.ToolCount, Error: info.Error}
+	d.mcpMu.Lock()
+	d.mcpQueue = append(d.mcpQueue, protocol.MCPUpdatedParams{Server: server})
+	d.mcpMu.Unlock()
+	select {
+	case d.mcpWakeup <- struct{}{}:
+	default:
+	}
+}
+
+func (d *Daemon) publishMCPUpdates(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-d.mcpWakeup:
+			for {
+				d.mcpMu.Lock()
+				if len(d.mcpQueue) == 0 {
+					d.mcpMu.Unlock()
+					break
+				}
+				update := d.mcpQueue[0]
+				d.mcpQueue = d.mcpQueue[1:]
+				d.mcpMu.Unlock()
+				d.BroadcastToAll(ctx, protocol.NotifyMCPUpdated, update)
+			}
+		}
 	}
 }
 

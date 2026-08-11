@@ -32,6 +32,7 @@ type daemonFullStatusMsg = tuievents.DaemonFullStatusMsg
 type configStateMsg = tuievents.ConfigStateMsg
 type skillListMsg = tuievents.SkillListMsg
 type mcpListMsg = tuievents.MCPListMsg
+type mcpUpdatedMsg = tuievents.MCPUpdatedMsg
 type skillLoadMsg = tuievents.SkillLoadMsg
 type skillReviewMsg = tuievents.SkillReviewMsg
 type attachmentStatusMsg = tuievents.AttachmentStatusMsg
@@ -128,6 +129,8 @@ func (t *TUI) handleNotificationMsg(msg notificationMsg) {
 		t.handleSkillListNotification(m.Params)
 	case mcpListMsg:
 		t.handleMCPListNotification(m.Params)
+	case mcpUpdatedMsg:
+		t.handleMCPUpdatedNotification(m.Params)
 	case skillLoadMsg:
 		t.handleSkillLoadNotification(m.Params)
 	case skillReviewMsg:
@@ -559,6 +562,10 @@ func (t *TUI) handleSkillListNotification(p protocol.SkillListResult) {
 
 func (t *TUI) handleMCPListNotification(p protocol.MCPListResult) {
 	t.chat.SetMCPServers(p.Servers)
+}
+
+func (t *TUI) handleMCPUpdatedNotification(p protocol.MCPUpdatedParams) {
+	t.chat.UpdateMCPServer(p.Server)
 }
 
 func (t *TUI) handleSkillLoadNotification(p protocol.SkillLoadParams) {

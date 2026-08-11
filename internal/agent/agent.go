@@ -58,13 +58,19 @@ type Agent struct {
 	sessionState   string
 	toolSummary    memory.ToolSummary
 
-	extractQueue  *memory.ExtractQueue
-	extractWorker *memory.Worker
-	closeOnce     sync.Once
-	closed        bool
-	configMu      sync.RWMutex
-	configModTime time.Time
-	runMu         sync.Mutex
+	extractQueue   *memory.ExtractQueue
+	extractWorker  *memory.Worker
+	backgroundOnce sync.Once
+	lifecycleMu    sync.Mutex
+	workerStarted  bool
+	catalogMu      sync.Mutex
+	catalogTimer   *time.Timer
+	catalogWaiters []chan error
+	closeOnce      sync.Once
+	closed         bool
+	configMu       sync.RWMutex
+	configModTime  time.Time
+	runMu          sync.Mutex
 	// currentInputBlocks 只在单次 Agent.Run 内保存当前用户消息的轻量媒体引用，供 spawn.input_images 显式转交给 subtask。
 	// 这里不能保存到跨轮状态；Run 结束必须清空，避免附件引用被误当作历史上下文继续使用。
 	currentInputBlocks []model.ContentBlock
@@ -89,6 +95,12 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("init memory store: %w", err)
 	}
+	initialized := false
+	defer func() {
+		if !initialized {
+			store.Close()
+		}
+	}()
 
 	sessionID := uuid.New().String()
 	skillRuntime := skill.NewRuntime(cfg.SkillsDir(), cfg)
@@ -100,9 +112,6 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 	toolManager.RegisterProvider(builtin.NewProvider())
 	toolManager.RegisterProvider(skilltools.NewProvider(skillRuntime))
 	mcpRuntime := mcp.NewRuntime(cfg.MCP)
-	if err := mcpRuntime.Start(context.Background()); err != nil {
-		return nil, fmt.Errorf("init mcp: %w", err)
-	}
 	toolManager.RegisterProvider(mcptools.NewProvider(mcpRuntime))
 	prompts, err := prompt.New()
 	if err != nil {
@@ -145,6 +154,7 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 		extractWorker: extractWorker,
 	}
 	toolManager.RegisterProvider(agenttools.NewProvider(agent))
+	mcpRuntime.SetCatalogSync(agent.syncMCPToolCatalog)
 	if err := toolManager.Reload(context.Background()); err != nil {
 		return nil, fmt.Errorf("init agent tools: %w", err)
 	}
@@ -155,9 +165,7 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 	agent.compressor.SetPrompts(prompts)
 	agent.extractWorker.SetPrompts(prompts)
 	agent.materializeLegacyPendingMemoryQueueModelRef(cfg, router)
-
-	go extractWorker.Run()
-	extractQueue.RecoverUnextracted(context.Background())
+	initialized = true
 	return agent, nil
 }
 
@@ -405,6 +413,73 @@ func (a *Agent) newRunner(events chan<- Event) *runner.Runner {
 
 func (a *Agent) Skills() *skill.Runtime { return a.skills }
 func (a *Agent) MCP() *mcp.Runtime      { return a.mcp }
+
+const mcpCatalogDebounce = 200 * time.Millisecond
+
+// StartBackgroundResources 在核心 runtime ready 后启动外部与维护资源；调用幂等。
+func (a *Agent) StartBackgroundResources(ctx context.Context, onMCPChange func(mcp.ServerInfo)) {
+	if a == nil {
+		return
+	}
+	root := a.root()
+	root.backgroundOnce.Do(func() {
+		root.lifecycleMu.Lock()
+		defer root.lifecycleMu.Unlock()
+		if root.closed {
+			return
+		}
+		if root.mcp != nil {
+			root.mcp.SetOnChange(onMCPChange)
+			_ = root.mcp.Start(ctx)
+		}
+		if root.extractWorker != nil {
+			root.workerStarted = true
+			go root.extractWorker.Run(ctx)
+			go func() { _, _ = root.extractQueue.RecoverUnextracted(ctx) }()
+		}
+	})
+}
+
+// syncMCPToolCatalog 合并短时间内的 MCP 状态变化，并以一次 Manager.Reload 原子发布目录。
+func (a *Agent) syncMCPToolCatalog(ctx context.Context) error {
+	if a == nil {
+		return nil
+	}
+	root := a.root()
+	waiter := make(chan error, 1)
+	root.catalogMu.Lock()
+	root.lifecycleMu.Lock()
+	closed := root.closed
+	root.lifecycleMu.Unlock()
+	if closed {
+		root.catalogMu.Unlock()
+		return context.Canceled
+	}
+	root.catalogWaiters = append(root.catalogWaiters, waiter)
+	if root.catalogTimer != nil {
+		root.catalogTimer.Stop()
+	}
+	root.catalogTimer = time.AfterFunc(mcpCatalogDebounce, root.flushMCPToolCatalog)
+	root.catalogMu.Unlock()
+	select {
+	case err := <-waiter:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (a *Agent) flushMCPToolCatalog() {
+	a.catalogMu.Lock()
+	waiters := a.catalogWaiters
+	a.catalogWaiters = nil
+	a.catalogTimer = nil
+	a.catalogMu.Unlock()
+	err := a.ReloadTools(context.Background())
+	for _, waiter := range waiters {
+		waiter <- err
+	}
+}
 
 // ReloadTools 刷新 agent 暴露给模型的工具目录；MCP 运行态启停/重载后必须调用，
 // 否则下一轮请求仍可能使用旧的 tool schema。

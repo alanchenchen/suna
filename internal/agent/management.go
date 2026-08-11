@@ -208,15 +208,31 @@ func (a *Agent) CleanupToolSession(ctx context.Context, sessionID string) error 
 
 func (a *Agent) Close() {
 	a.closeOnce.Do(func() {
+		a.lifecycleMu.Lock()
 		a.closed = true
+		workerStarted := a.workerStarted
+		a.lifecycleMu.Unlock()
+		a.catalogMu.Lock()
+		if a.catalogTimer != nil {
+			a.catalogTimer.Stop()
+			a.catalogTimer = nil
+		}
+		waiters := a.catalogWaiters
+		a.catalogWaiters = nil
+		a.catalogMu.Unlock()
+		for _, waiter := range waiters {
+			waiter <- context.Canceled
+		}
 		if a.extractQueue != nil {
 			a.extractQueue.Close()
 		}
-		if a.extractWorker != nil {
+		if a.extractWorker != nil && workerStarted {
 			a.extractWorker.Wait()
 		}
 		if a.tools != nil {
-			_ = a.tools.Close(context.Background())
+			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = a.tools.Close(closeCtx)
+			cancel()
 		}
 		if a.store != nil {
 			a.store.Close()

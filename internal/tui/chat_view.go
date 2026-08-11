@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/alanchenchen/suna/internal/protocol"
 	"github.com/alanchenchen/suna/internal/tui/components/overlay"
 	textutil "github.com/alanchenchen/suna/internal/tui/components/text"
 	chatpage "github.com/alanchenchen/suna/internal/tui/pages/chat"
@@ -154,7 +155,7 @@ func (t *TUI) chatConnectionDot(state petState) string {
 func (t *TUI) mcpBadge() string {
 	active := 0
 	for _, server := range t.chat.MCPServers {
-		if server.Active {
+		if server.State == protocol.MCPServerActive {
 			active++
 		}
 	}

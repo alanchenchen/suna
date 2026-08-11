@@ -3,7 +3,7 @@ package protocol
 import "time"
 
 type RuntimeHelloParams struct {
-	// ProtocolVersion 是客户端期望的协议版本；为空时按当前默认 0.3 处理。
+	// ProtocolVersion 是客户端期望的协议版本；为空时按当前默认 0.4 处理。
 	ProtocolVersion string `json:"protocol_version,omitempty"`
 	// Transport 由 JSON-RPC transport 层注入并覆盖客户端输入，用于 runtime.hello 返回真实承载方式。
 	Transport string `json:"transport,omitempty"`
@@ -339,20 +339,33 @@ type DaemonStateParams struct {
 	ModelName    string `json:"model_name,omitempty"`
 }
 
+type DaemonRuntimeState string
+
+const (
+	DaemonRuntimeStarting DaemonRuntimeState = "starting"
+	DaemonRuntimeReady    DaemonRuntimeState = "ready"
+	DaemonRuntimeStopping DaemonRuntimeState = "stopping"
+)
+
+type DaemonStatusRequest struct {
+	Detail bool `json:"detail"`
+}
+
 type DaemonStatusParams struct {
-	PID           int           `json:"pid"`
-	Uptime        string        `json:"uptime"`
-	Connections   int           `json:"connections"`
-	TCPEndpoint   string        `json:"tcp_endpoint,omitempty"`
-	Triggers      int           `json:"triggers"`
-	AgentStatus   string        `json:"agent_status"`
-	Provider      string        `json:"provider,omitempty"`
-	Model         string        `json:"model,omitempty"`
-	ContextTokens int           `json:"context_tokens,omitempty"`
-	ContextWindow int           `json:"context_window,omitempty"`
-	Memory        *MemoryStats  `json:"memory,omitempty"`
-	Sessions      *SessionStats `json:"sessions,omitempty"`
-	UsageToday    *UsagePeriod  `json:"usage_today,omitempty"`
+	State         DaemonRuntimeState `json:"state"`
+	PID           int                `json:"pid"`
+	Uptime        string             `json:"uptime"`
+	Connections   int                `json:"connections"`
+	TCPEndpoint   string             `json:"tcp_endpoint,omitempty"`
+	Triggers      int                `json:"triggers"`
+	AgentStatus   string             `json:"agent_status"`
+	Provider      string             `json:"provider,omitempty"`
+	Model         string             `json:"model,omitempty"`
+	ContextTokens int                `json:"context_tokens,omitempty"`
+	ContextWindow int                `json:"context_window,omitempty"`
+	Memory        *MemoryStats       `json:"memory,omitempty"`
+	Sessions      *SessionStats      `json:"sessions,omitempty"`
+	UsageToday    *UsagePeriod       `json:"usage_today,omitempty"`
 }
 
 type ConfigParams struct {
@@ -490,15 +503,27 @@ type AskUserReply struct {
 	Answer string `json:"answer"`
 }
 
+type MCPServerState string
+
+const (
+	MCPServerDisabled MCPServerState = "disabled"
+	MCPServerStarting MCPServerState = "starting"
+	MCPServerActive   MCPServerState = "active"
+	MCPServerError    MCPServerState = "error"
+)
+
 type MCPServerInfo struct {
-	ID         string `json:"id,omitempty"`
-	Name       string `json:"name"`
-	Transport  string `json:"transport,omitempty"`
-	Command    string `json:"command,omitempty"`
-	Active     bool   `json:"active"`
-	Configured bool   `json:"configured"`
-	ToolCount  int    `json:"tool_count"`
-	Error      string `json:"error,omitempty"`
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	Transport string         `json:"transport,omitempty"`
+	Command   string         `json:"command,omitempty"`
+	State     MCPServerState `json:"state"`
+	ToolCount int            `json:"tool_count"`
+	Error     string         `json:"error,omitempty"`
+}
+
+type MCPUpdatedParams struct {
+	Server MCPServerInfo `json:"server"`
 }
 
 type MCPListResult struct {

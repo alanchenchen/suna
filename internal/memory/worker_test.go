@@ -151,7 +151,7 @@ func TestWorkerStopPreservesPendingQueue(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		worker.Run()
+		worker.Run(context.Background())
 		close(done)
 	}()
 

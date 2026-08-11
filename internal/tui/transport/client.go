@@ -218,7 +218,7 @@ func (c *Client) DaemonStatus() (protocol.DaemonStatusParams, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout(protocol.MethodDaemonStatus))
 	defer cancel()
 	var result protocol.DaemonStatusParams
-	return result, c.Invoke(ctx, protocol.MethodDaemonStatus, nil, &result)
+	return result, c.Invoke(ctx, protocol.MethodDaemonStatus, protocol.DaemonStatusRequest{Detail: true}, &result)
 }
 
 func (c *Client) ConfigGet() (protocol.ConfigParams, error) {

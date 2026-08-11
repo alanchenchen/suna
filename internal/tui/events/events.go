@@ -47,6 +47,7 @@ type DaemonFullStatusMsg struct{ Params protocol.DaemonStatusParams }
 type ConfigStateMsg struct{ Params protocol.ConfigParams }
 type SkillListMsg struct{ Params protocol.SkillListResult }
 type MCPListMsg struct{ Params protocol.MCPListResult }
+type MCPUpdatedMsg struct{ Params protocol.MCPUpdatedParams }
 type SkillLoadMsg struct{ Params protocol.SkillLoadParams }
 type SkillReviewMsg struct{ Params protocol.SkillReviewParams }
 type AttachmentStatusMsg struct {
@@ -76,6 +77,7 @@ func (DaemonFullStatusMsg) isNotificationMsg()    {}
 func (ConfigStateMsg) isNotificationMsg()         {}
 func (SkillListMsg) isNotificationMsg()           {}
 func (MCPListMsg) isNotificationMsg()             {}
+func (MCPUpdatedMsg) isNotificationMsg()          {}
 func (SkillLoadMsg) isNotificationMsg()           {}
 func (SkillReviewMsg) isNotificationMsg()         {}
 func (AttachmentStatusMsg) isNotificationMsg()    {}
@@ -116,6 +118,8 @@ func Decode(notif Notification) tea.Msg {
 		}
 		_ = json.Unmarshal(notif.Params, &p)
 		return RequestErrorMsg{Scope: notif.Method, Message: p.Message}
+	case protocol.NotifyMCPUpdated:
+		return decodeParams[protocol.MCPUpdatedParams](notif, func(p protocol.MCPUpdatedParams) tea.Msg { return MCPUpdatedMsg{Params: p} })
 	case protocol.NotifyMemoryState:
 		return decodeParams[protocol.MemoryListResult](notif, func(p protocol.MemoryListResult) tea.Msg { return MemoryListMsg{Params: p} })
 	case protocol.NotifyDaemonFullStatus:

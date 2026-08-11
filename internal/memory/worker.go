@@ -25,6 +25,7 @@ type Worker struct {
 	resolver   BindingResolver
 	resolverMu sync.RWMutex
 	prompts    *prompt.Loader
+	ctx        context.Context
 	closed     chan struct{}
 }
 
@@ -55,12 +56,15 @@ func (w *Worker) resolve(modelRef string) (*model.ModelBinding, error) {
 	return resolver(modelRef)
 }
 
-func (w *Worker) Run() {
+func (w *Worker) Run(ctx context.Context) {
+	w.ctx = ctx
 	defer close(w.closed)
 	timer := time.NewTimer(batchTimeout)
 	defer timer.Stop()
 	for {
 		select {
+		case <-ctx.Done():
+			return
 		case _, ok := <-w.queue.Ch():
 			if !ok {
 				// 关闭 worker 只负责停止后台循环，不启动新的记忆整理；pending queue 已持久化在 SQLite，等待下次启动恢复。
@@ -103,7 +107,11 @@ func (w *Worker) processPending() {
 	if w == nil || w.db == nil || w.memories == nil {
 		return
 	}
-	loadCtx, loadCancel := context.WithTimeout(context.Background(), model.LLMMemoryCompactTimeout)
+	base := w.ctx
+	if base == nil {
+		base = context.Background()
+	}
+	loadCtx, loadCancel := context.WithTimeout(base, model.LLMMemoryCompactTimeout)
 	items, err := LoadDueQueue(loadCtx, w.db, DefaultUserID, 50)
 	loadCancel()
 	if err != nil {
@@ -124,7 +132,9 @@ func (w *Worker) processPending() {
 		}
 		groups[ref] = append(groups[ref], item)
 	}
-	w.processModelGroups(refs, groups, newMemoryCompactContext)
+	w.processModelGroups(refs, groups, func() (context.Context, context.CancelFunc) {
+		return context.WithTimeout(base, model.LLMMemoryCompactTimeout)
+	})
 }
 
 func newMemoryCompactContext() (context.Context, context.CancelFunc) {

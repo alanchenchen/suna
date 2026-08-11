@@ -139,9 +139,11 @@ func (d nativeDelegate) renderItem(width int, selected bool, item overlaylist.It
 		switch {
 		case d.loading != nil && d.loading(row.server.Name):
 			mark, markStyle = "◌", d.styles.Run
-		case row.server.Error != "":
+		case row.server.State == protocol.MCPServerStarting:
+			mark, markStyle = "◌", d.styles.Run
+		case row.server.State == protocol.MCPServerError || row.server.Error != "":
 			mark, markStyle = "!", d.styles.Error
-		case row.server.Active:
+		case row.server.State == protocol.MCPServerActive:
 			mark, markStyle = "✓", d.styles.OK
 		}
 	case modelItem:

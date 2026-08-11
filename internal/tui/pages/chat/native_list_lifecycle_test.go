@@ -23,7 +23,7 @@ func TestSetSkillsBeforeNativeListInitializationPreservesData(t *testing.T) {
 
 func TestSetMCPServersBeforeNativeListInitializationPreservesData(t *testing.T) {
 	m := Model{}
-	servers := []protocol.MCPServerInfo{{Name: "example-server", Configured: true}}
+	servers := []protocol.MCPServerInfo{{Name: "example-server", State: protocol.MCPServerActive}}
 
 	m.SetMCPServers(servers)
 
@@ -47,7 +47,7 @@ func TestResetRuntimeClearsInitializedNativeLists(t *testing.T) {
 	m := Model{}
 	m.InitComponents(ComponentDeps{})
 	m.SetSkills([]protocol.SkillInfo{{Name: "previous-skill", Valid: true}})
-	m.SetMCPServers([]protocol.MCPServerInfo{{Name: "previous-server", Configured: true}})
+	m.SetMCPServers([]protocol.MCPServerInfo{{Name: "previous-server", State: protocol.MCPServerActive}})
 	m.InitNativeLists(false, ListStyles{}, testListText())
 	m.ModelList.SetItems(modelItems([]ModelPickerRow{{Ref: "provider-a/model-a"}}))
 
@@ -76,7 +76,7 @@ func TestResetRuntimeClearsInitializedNativeLists(t *testing.T) {
 func TestNativeListInitializationUsesPreviouslyReceivedData(t *testing.T) {
 	m := Model{}
 	m.SetSkills([]protocol.SkillInfo{{Name: "example-skill", Valid: true}})
-	m.SetMCPServers([]protocol.MCPServerInfo{{Name: "example-server", Configured: true}})
+	m.SetMCPServers([]protocol.MCPServerInfo{{Name: "example-server", State: protocol.MCPServerActive}})
 
 	m.InitNativeLists(false, ListStyles{}, testListText())
 

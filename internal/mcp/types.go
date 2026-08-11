@@ -11,6 +11,15 @@ const (
 	DefaultTimeout = 30 * time.Second
 )
 
+type ServerState string
+
+const (
+	ServerStateDisabled ServerState = "disabled"
+	ServerStateStarting ServerState = "starting"
+	ServerStateActive   ServerState = "active"
+	ServerStateError    ServerState = "error"
+)
+
 type Tool struct {
 	Server      string
 	Name        string
@@ -32,14 +41,12 @@ type Content struct {
 }
 
 type ServerInfo struct {
-	ID         string
-	Transport  string
-	Command    string
-	Enabled    bool
-	Active     bool
-	Configured bool
-	ToolCount  int
-	Error      string
+	ID        string
+	Transport string
+	Command   string
+	State     ServerState
+	ToolCount int
+	Error     string
 }
 
 func serverTimeout(sc config.MCPServerConfig) time.Duration {

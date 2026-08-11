@@ -1,6 +1,10 @@
 package chat
 
-import "github.com/alanchenchen/suna/internal/protocol"
+import (
+	"sort"
+
+	"github.com/alanchenchen/suna/internal/protocol"
+)
 
 type MCPAction struct {
 	Name   string
@@ -30,7 +34,7 @@ func (m *Model) SelectMCPForToggle() (MCPAction, bool) {
 	if !ok {
 		return MCPAction{}, false
 	}
-	return MCPAction{Name: row.server.Name, Active: !row.server.Active}, true
+	return MCPAction{Name: row.server.Name, Active: row.server.State != protocol.MCPServerActive && row.server.State != protocol.MCPServerStarting}, true
 }
 
 func (m *Model) SelectMCPForReload() (string, bool) {
@@ -52,6 +56,24 @@ func (m *Model) SetMCPServers(servers []protocol.MCPServerInfo) {
 	// 初始通知可能在 Chat 列表组件创建前抵达；原始数据已保存，初始化后会统一构建列表。
 	if m.MCPList.Initialized() {
 		m.MCPList.SetItems(mcpItems(servers))
+	}
+}
+
+func (m *Model) UpdateMCPServer(server protocol.MCPServerInfo) {
+	updated := false
+	for index := range m.MCPServers {
+		if m.MCPServers[index].ID == server.ID {
+			m.MCPServers[index] = server
+			updated = true
+			break
+		}
+	}
+	if !updated {
+		m.MCPServers = append(m.MCPServers, server)
+	}
+	sort.Slice(m.MCPServers, func(i, j int) bool { return m.MCPServers[i].Name < m.MCPServers[j].Name })
+	if m.MCPList.Initialized() {
+		m.MCPList.SetItems(mcpItems(m.MCPServers))
 	}
 }
 

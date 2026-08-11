@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -19,7 +20,17 @@ type Runtime struct {
 	defaultWorkdirsDir string
 	mu                 sync.RWMutex
 	clients            map[string]*Client
+	states             map[string]ServerState
 	errors             map[string]string
+	generations        map[string]uint64
+	startCancels       map[string]context.CancelFunc
+	backgroundCtx      context.Context
+	onChange           func(ServerInfo)
+	onCatalogSync      func(context.Context) error
+	openServerFn       func(context.Context, string, config.MCPServerConfig) (*Client, error)
+	startWG            sync.WaitGroup
+	closeOnce          sync.Once
+	closed             bool
 }
 
 func NewRuntime(cfg config.MCPConfig) *Runtime {
@@ -27,50 +38,130 @@ func NewRuntime(cfg config.MCPConfig) *Runtime {
 		cfg:                cfg,
 		defaultWorkdirsDir: config.DefaultMCPWorkdirsDir(),
 		clients:            map[string]*Client{},
+		states:             initialServerStates(cfg),
 		errors:             map[string]string{},
+		generations:        map[string]uint64{},
+		startCancels:       map[string]context.CancelFunc{},
 	}
 }
 
 func (r *Runtime) Start(ctx context.Context) error {
-	if r == nil || len(r.cfg.Servers) == 0 {
+	if r == nil {
 		return nil
 	}
-	names := make([]string, 0, len(r.cfg.Servers))
-	for name := range r.cfg.Servers {
-		names = append(names, name)
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return fmt.Errorf("mcp runtime is closed")
 	}
-	sort.Strings(names)
-	for _, name := range names {
-		sc := r.cfg.Servers[name]
-		if !sc.Enabled {
-			continue
-		}
-		// 单个 MCP server 失败不能阻塞 Suna 启动；错误保留到 /mcp 面板展示，用户可修复后 reload/activate。
-		if err := r.startServer(ctx, name, sc); err != nil {
-			r.setError(name, err)
+	r.backgroundCtx = ctx
+	r.mu.Unlock()
+	for name, sc := range r.Config().Servers {
+		if sc.Enabled {
+			r.startAsync(ctx, name, sc)
 		}
 	}
 	return nil
+}
+
+func initialServerStates(cfg config.MCPConfig) map[string]ServerState {
+	states := make(map[string]ServerState, len(cfg.Servers))
+	for name, sc := range cfg.Servers {
+		if sc.Enabled {
+			states[name] = ServerStateStarting
+		} else {
+			states[name] = ServerStateDisabled
+		}
+	}
+	return states
+}
+
+func (r *Runtime) SetOnChange(fn func(ServerInfo)) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.onChange = fn
+	r.mu.Unlock()
+}
+
+func (r *Runtime) SetCatalogSync(fn func(context.Context) error) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.onCatalogSync = fn
+	r.mu.Unlock()
+}
+
+func (r *Runtime) syncCatalog(ctx context.Context) error {
+	r.mu.RLock()
+	fn := r.onCatalogSync
+	r.mu.RUnlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(ctx)
 }
 
 func (r *Runtime) SetConfig(cfg config.MCPConfig) {
 	if r == nil {
 		return
 	}
+	var oldClients []*Client
+	var changes []ServerInfo
+	var starts []struct {
+		name string
+		sc   config.MCPServerConfig
+	}
 	r.mu.Lock()
-	oldClients := map[string]*Client{}
+	for name, cancel := range r.startCancels {
+		cancel()
+		delete(r.startCancels, name)
+		r.generations[name]++
+	}
 	for name, client := range r.clients {
-		sc, ok := cfg.Servers[name]
-		if !ok || !sc.Enabled {
-			oldClients[name] = client
+		oldConfig, oldConfigured := r.cfg.Servers[name]
+		newConfig, newConfigured := cfg.Servers[name]
+		if !newConfigured || !newConfig.Enabled || !oldConfigured || !reflect.DeepEqual(oldConfig, newConfig) {
+			oldClients = append(oldClients, client)
 			delete(r.clients, name)
-			delete(r.errors, name)
 		}
 	}
 	r.cfg = cfg
+	for name, sc := range cfg.Servers {
+		if !sc.Enabled {
+			r.states[name] = ServerStateDisabled
+			delete(r.errors, name)
+		} else if r.clients[name] != nil {
+			r.states[name] = ServerStateActive
+		} else {
+			r.states[name] = ServerStateStarting
+			if r.backgroundCtx != nil {
+				starts = append(starts, struct {
+					name string
+					sc   config.MCPServerConfig
+				}{name: name, sc: sc})
+			}
+		}
+		changes = append(changes, r.serverInfoLocked(name))
+	}
+	for name := range r.states {
+		if _, ok := cfg.Servers[name]; !ok {
+			delete(r.states, name)
+			delete(r.errors, name)
+			delete(r.generations, name)
+		}
+	}
 	r.mu.Unlock()
 	for _, client := range oldClients {
 		client.Close()
+	}
+	for _, info := range changes {
+		r.notify(info)
+	}
+	for _, start := range starts {
+		r.startAsync(r.backgroundCtx, start.name, start.sc)
 	}
 }
 
@@ -79,9 +170,14 @@ func (r *Runtime) Config() config.MCPConfig {
 		return config.MCPConfig{}
 	}
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-	servers := make(map[string]config.MCPServerConfig, len(r.cfg.Servers))
-	for name, sc := range r.cfg.Servers {
+	cfg := cloneConfig(r.cfg)
+	r.mu.RUnlock()
+	return cfg
+}
+
+func cloneConfig(cfg config.MCPConfig) config.MCPConfig {
+	servers := make(map[string]config.MCPServerConfig, len(cfg.Servers))
+	for name, sc := range cfg.Servers {
 		sc.Args = append([]string(nil), sc.Args...)
 		sc.Env = cloneStringMap(sc.Env)
 		sc.Headers = cloneStringMap(sc.Headers)
@@ -138,7 +234,11 @@ func (r *Runtime) Status(ctx context.Context) []ServerInfo {
 		return nil
 	}
 	r.mu.RLock()
-	cfg := r.cfg
+	cfg := cloneConfig(r.cfg)
+	states := make(map[string]ServerState, len(r.states))
+	for name, state := range r.states {
+		states[name] = state
+	}
 	clients := make(map[string]*Client, len(r.clients))
 	for name, client := range r.clients {
 		clients[name] = client
@@ -162,13 +262,19 @@ func (r *Runtime) Status(ctx context.Context) []ServerInfo {
 		if transport == "" {
 			transport = TransportStdio
 		}
-		item := ServerInfo{ID: name, Transport: transport, Command: commandSummary(sc), Enabled: sc.Enabled, Configured: true, Error: errors[name]}
+		item := ServerInfo{ID: name, Transport: transport, Command: commandSummary(sc), State: states[name], Error: errors[name]}
+		if item.State == "" {
+			if sc.Enabled {
+				item.State = ServerStateStarting
+			} else {
+				item.State = ServerStateDisabled
+			}
+		}
 		client := clients[name]
 		if client != nil {
-			item.Active = true
 			tools, err := client.ListTools(ctx)
 			if err != nil {
-				item.Active = false
+				item.State = ServerStateError
 				item.Error = err.Error()
 			} else {
 				item.ToolCount = len(tools)
@@ -184,47 +290,63 @@ func (r *Runtime) SetActive(ctx context.Context, name string, active bool) error
 		return fmt.Errorf("mcp runtime is not initialized")
 	}
 	name = strings.TrimSpace(name)
-	r.mu.RLock()
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return fmt.Errorf("mcp runtime is closed")
+	}
 	sc, ok := r.cfg.Servers[name]
-	r.mu.RUnlock()
 	if !ok {
+		r.mu.Unlock()
 		return fmt.Errorf("mcp server %q not configured", name)
 	}
-	if active {
-		if err := r.startServer(ctx, name, sc); err != nil {
-			r.setError(name, err)
-			return err
-		}
-		r.setEnabled(name, true)
-		return nil
-	}
-	r.mu.Lock()
-	client := r.clients[name]
-	delete(r.clients, name)
-	delete(r.errors, name)
-	if r.cfg.Servers != nil {
+	generation := r.nextGenerationLocked(name)
+	if !active {
+		previousConfig := sc
+		client := r.clients[name]
+		previousState := r.states[name]
+		previousError := r.errors[name]
+		delete(r.clients, name)
+		delete(r.errors, name)
+		r.states[name] = ServerStateDisabled
 		sc.Enabled = false
 		r.cfg.Servers[name] = sc
+		r.mu.Unlock()
+		if err := r.syncCatalog(ctx); err != nil {
+			r.mu.Lock()
+			current, configured := r.cfg.Servers[name]
+			if configured && r.generations[name] == generation && !current.Enabled {
+				r.cfg.Servers[name] = previousConfig
+				if client != nil {
+					r.clients[name] = client
+				}
+				r.states[name] = previousState
+				if previousError != "" {
+					r.errors[name] = previousError
+				}
+			}
+			r.mu.Unlock()
+			return err
+		}
+		if client != nil {
+			client.Close()
+		}
+		r.mu.RLock()
+		info := r.serverInfoLocked(name)
+		r.mu.RUnlock()
+		r.notify(info)
+		return nil
 	}
-	r.mu.Unlock()
-	if client != nil {
-		client.Close()
-	}
-	return nil
-}
-
-func (r *Runtime) setEnabled(name string, enabled bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.cfg.Servers == nil {
-		return
-	}
-	sc, ok := r.cfg.Servers[name]
-	if !ok {
-		return
-	}
-	sc.Enabled = enabled
+	sc.Enabled = true
 	r.cfg.Servers[name] = sc
+	r.states[name] = ServerStateStarting
+	delete(r.errors, name)
+	info := r.serverInfoLocked(name)
+	r.startWG.Add(1)
+	r.mu.Unlock()
+	r.notify(info)
+	defer r.startWG.Done()
+	return r.startGeneration(ctx, name, sc, generation)
 }
 
 func (r *Runtime) ReloadServer(ctx context.Context, name string) error {
@@ -232,60 +354,180 @@ func (r *Runtime) ReloadServer(ctx context.Context, name string) error {
 		return fmt.Errorf("mcp runtime is not initialized")
 	}
 	name = strings.TrimSpace(name)
-	r.mu.RLock()
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return fmt.Errorf("mcp runtime is closed")
+	}
 	sc, ok := r.cfg.Servers[name]
 	active := r.clients[name] != nil
-	r.mu.RUnlock()
 	if !ok {
+		r.mu.Unlock()
 		return fmt.Errorf("mcp server %q not configured", name)
 	}
 	if !active {
+		r.mu.Unlock()
 		return fmt.Errorf("mcp server %q is not active; activate it first", name)
 	}
-	// reload 只刷新运行态连接，不改写配置；先启动并完成 tools/list，再替换旧 client，
-	// 避免新进程启动失败时把原本可用的 MCP server 断开。
-	if err := r.startServer(ctx, name, sc); err != nil {
-		r.setError(name, err)
+	generation := r.nextGenerationLocked(name)
+	r.states[name] = ServerStateStarting
+	delete(r.errors, name)
+	info := r.serverInfoLocked(name)
+	r.startWG.Add(1)
+	r.mu.Unlock()
+	r.notify(info)
+	defer r.startWG.Done()
+	// reload 先完成新连接和 tools/list，再按 generation 替换；失败时旧 client 仍可继续执行。
+	return r.startGeneration(ctx, name, sc, generation)
+}
+
+func (r *Runtime) startAsync(parent context.Context, name string, sc config.MCPServerConfig) {
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return
+	}
+	generation := r.nextGenerationLocked(name)
+	r.states[name] = ServerStateStarting
+	delete(r.errors, name)
+	info := r.serverInfoLocked(name)
+	r.startWG.Add(1)
+	r.mu.Unlock()
+	r.notify(info)
+	go func() {
+		defer r.startWG.Done()
+		_ = r.startGeneration(parent, name, sc, generation)
+	}()
+}
+
+func (r *Runtime) nextGenerationLocked(name string) uint64 {
+	if cancel := r.startCancels[name]; cancel != nil {
+		cancel()
+	}
+	delete(r.startCancels, name)
+	r.generations[name]++
+	return r.generations[name]
+}
+
+func (r *Runtime) startGeneration(parent context.Context, name string, sc config.MCPServerConfig, generation uint64) error {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	r.mu.Lock()
+	if r.closed || r.generations[name] != generation {
+		r.mu.Unlock()
+		cancel()
+		return context.Canceled
+	}
+	r.startCancels[name] = cancel
+	r.mu.Unlock()
+
+	client, err := r.connectServer(ctx, name, sc)
+
+	var old *Client
+	r.mu.Lock()
+	if r.generations[name] == generation {
+		delete(r.startCancels, name)
+	}
+	current, configured := r.cfg.Servers[name]
+	valid := !r.closed && configured && current.Enabled && r.generations[name] == generation
+	if !valid {
+		r.mu.Unlock()
+		if client != nil {
+			client.Close()
+		}
+		return context.Canceled
+	}
+	if err != nil {
+		if r.clients[name] != nil {
+			r.states[name] = ServerStateActive
+		} else {
+			r.states[name] = ServerStateError
+		}
+		r.errors[name] = err.Error()
+		info := r.serverInfoLocked(name)
+		r.mu.Unlock()
+		r.notify(info)
 		return err
 	}
+	old = r.clients[name]
+	r.clients[name] = client
+	// active 只在 Tool Catalog 原子刷新完成后发布；刷新期间保持 starting。
+	r.states[name] = ServerStateStarting
+	delete(r.errors, name)
+	r.mu.Unlock()
+	if err := r.syncCatalog(ctx); err != nil {
+		r.mu.Lock()
+		if r.generations[name] == generation && r.clients[name] == client {
+			if old != nil {
+				r.clients[name] = old
+				r.states[name] = ServerStateActive
+			} else {
+				delete(r.clients, name)
+				r.states[name] = ServerStateError
+			}
+			r.errors[name] = err.Error()
+		}
+		info := r.serverInfoLocked(name)
+		r.mu.Unlock()
+		client.Close()
+		r.notify(info)
+		return err
+	}
+	r.mu.Lock()
+	current, configured = r.cfg.Servers[name]
+	valid = !r.closed && configured && current.Enabled && r.generations[name] == generation && r.clients[name] == client
+	if !valid {
+		r.mu.Unlock()
+		client.Close()
+		return context.Canceled
+	}
+	r.states[name] = ServerStateActive
+	info := r.serverInfoLocked(name)
+	r.mu.Unlock()
+	if old != nil && old != client {
+		old.Close()
+	}
+	r.notify(info)
 	return nil
 }
 
-func (r *Runtime) startServer(ctx context.Context, name string, sc config.MCPServerConfig) error {
+func (r *Runtime) connectServer(ctx context.Context, name string, sc config.MCPServerConfig) (*Client, error) {
+	r.mu.RLock()
+	fn := r.openServerFn
+	r.mu.RUnlock()
+	if fn != nil {
+		return fn(ctx, name, sc)
+	}
+	return r.openServer(ctx, name, sc)
+}
+
+func (r *Runtime) openServer(ctx context.Context, name string, sc config.MCPServerConfig) (*Client, error) {
 	if sc.Transport == "" {
 		sc.Transport = TransportStdio
 	}
 	if sc.Transport != TransportStdio {
-		return fmt.Errorf("mcp server %q: unsupported transport %q", name, sc.Transport)
+		return nil, fmt.Errorf("mcp server %q: unsupported transport %q", name, sc.Transport)
 	}
 	if strings.TrimSpace(sc.CWD) == "" {
 		workdir, err := r.defaultServerWorkdir(name)
 		if err != nil {
-			return fmt.Errorf("mcp server %q: prepare workdir: %w", name, err)
+			return nil, fmt.Errorf("mcp server %q: prepare workdir: %w", name, err)
 		}
 		sc.CWD = workdir
 	}
 	client, err := NewClient(name, sc)
 	if err != nil {
-		return fmt.Errorf("mcp server %q: %w", name, err)
+		return nil, fmt.Errorf("mcp server %q: %w", name, err)
 	}
 	if err := client.Start(ctx); err != nil {
 		client.Close()
-		return fmt.Errorf("mcp server %q: %w", name, err)
+		return nil, fmt.Errorf("mcp server %q: %w", name, err)
 	}
 	if _, err := client.ListTools(ctx); err != nil {
 		client.Close()
-		return fmt.Errorf("mcp server %q: %w", name, err)
+		return nil, fmt.Errorf("mcp server %q: %w", name, err)
 	}
-	r.mu.Lock()
-	old := r.clients[name]
-	r.clients[name] = client
-	delete(r.errors, name)
-	r.mu.Unlock()
-	if old != nil {
-		old.Close()
-	}
-	return nil
+	return client, nil
 }
 
 func (r *Runtime) defaultServerWorkdir(name string) (string, error) {
@@ -342,91 +584,71 @@ func commandSummary(sc config.MCPServerConfig) string {
 	return strings.TrimSpace(sc.URL)
 }
 
+func (r *Runtime) serverInfoLocked(name string) ServerInfo {
+	sc, ok := r.cfg.Servers[name]
+	if !ok {
+		return ServerInfo{ID: name}
+	}
+	transport := sc.Transport
+	if transport == "" {
+		transport = TransportStdio
+	}
+	info := ServerInfo{ID: name, Transport: transport, Command: commandSummary(sc), State: r.states[name], Error: r.errors[name]}
+	if info.State == "" {
+		if sc.Enabled {
+			info.State = ServerStateStarting
+		} else {
+			info.State = ServerStateDisabled
+		}
+	}
+	if client := r.clients[name]; client != nil {
+		client.toolsMu.Lock()
+		info.ToolCount = len(client.tools)
+		client.toolsMu.Unlock()
+	}
+	return info
+}
+
+func (r *Runtime) notify(info ServerInfo) {
+	r.mu.RLock()
+	fn := r.onChange
+	r.mu.RUnlock()
+	if fn != nil && info.ID != "" {
+		fn(info)
+	}
+}
+
 func (r *Runtime) Close(ctx context.Context) error {
 	if r == nil {
 		return nil
 	}
-	r.mu.RLock()
-	clients := make([]*Client, 0, len(r.clients))
-	for _, c := range r.clients {
-		clients = append(clients, c)
-	}
-	r.mu.RUnlock()
-	for _, c := range clients {
-		c.Close()
-	}
-	return nil
-}
-
-type Client struct {
-	id      string
-	cfg     config.MCPServerConfig
-	rpc     *rpcClient
-	toolsMu sync.Mutex
-	tools   []Tool
-}
-
-func NewClient(id string, cfg config.MCPServerConfig) (*Client, error) {
-	return &Client{id: id, cfg: cfg}, nil
-}
-
-func (c *Client) Start(ctx context.Context) error {
-	transport, err := startStdio(c.cfg.Command, c.cfg.Args, c.cfg.CWD, c.cfg.Env)
-	if err != nil {
-		return err
-	}
-	c.rpc = newRPCClient(transport)
-	ctx, cancel := context.WithTimeout(ctx, serverTimeout(c.cfg))
-	defer cancel()
-	var init initializeResult
-	params := map[string]any{
-		"protocolVersion": "2024-11-05",
-		"capabilities":    map[string]any{},
-		"clientInfo":      map[string]any{"name": "suna", "version": "0.1.0"},
-	}
-	if err := c.rpc.call(ctx, "initialize", params, &init); err != nil {
-		return err
-	}
-	return c.rpc.notify("notifications/initialized", nil)
-}
-
-func (c *Client) ListTools(ctx context.Context) ([]Tool, error) {
-	c.toolsMu.Lock()
-	defer c.toolsMu.Unlock()
-	if len(c.tools) > 0 {
-		return append([]Tool(nil), c.tools...), nil
-	}
-	ctx, cancel := context.WithTimeout(ctx, serverTimeout(c.cfg))
-	defer cancel()
-	var res listToolsResult
-	if err := c.rpc.call(ctx, "tools/list", nil, &res); err != nil {
-		return nil, err
-	}
-	items := make([]Tool, 0, len(res.Tools))
-	for _, t := range res.Tools {
-		items = append(items, Tool{Server: c.id, Name: t.Name, Description: t.Description, InputSchema: t.InputSchema})
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].Name < items[j].Name })
-	c.tools = items
-	return append([]Tool(nil), items...), nil
-}
-
-func (c *Client) CallTool(ctx context.Context, name string, args map[string]any) (CallResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, serverTimeout(c.cfg))
-	defer cancel()
-	var res callToolResult
-	if err := c.rpc.call(ctx, "tools/call", map[string]any{"name": name, "arguments": args}, &res); err != nil {
-		return CallResult{}, err
-	}
-	out := CallResult{IsError: res.IsError, Content: make([]Content, 0, len(res.Content))}
-	for _, item := range res.Content {
-		out.Content = append(out.Content, Content{Type: item.Type, Text: item.Text, Data: item.Data, MimeType: item.MimeType, Name: item.Name})
-	}
-	return out, nil
-}
-
-func (c *Client) Close() {
-	if c != nil && c.rpc != nil {
-		_ = c.rpc.close()
+	r.closeOnce.Do(func() {
+		r.mu.Lock()
+		r.closed = true
+		for name, cancel := range r.startCancels {
+			cancel()
+			delete(r.startCancels, name)
+			r.generations[name]++
+		}
+		clients := make([]*Client, 0, len(r.clients))
+		for name, client := range r.clients {
+			clients = append(clients, client)
+			delete(r.clients, name)
+		}
+		r.mu.Unlock()
+		for _, client := range clients {
+			client.Close()
+		}
+	})
+	done := make(chan struct{})
+	go func() {
+		r.startWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }

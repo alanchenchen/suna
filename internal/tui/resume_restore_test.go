@@ -12,7 +12,7 @@ func TestSessionSwitchClearsNativeListState(t *testing.T) {
 	tui.initChatComponents()
 	tui.currentSession = protocol.SessionInfo{ID: "session-a"}
 	tui.chat.SetSkills([]protocol.SkillInfo{{Name: "previous-skill", Valid: true}})
-	tui.chat.SetMCPServers([]protocol.MCPServerInfo{{Name: "previous-server", Configured: true}})
+	tui.chat.SetMCPServers([]protocol.MCPServerInfo{{Name: "previous-server", State: protocol.MCPServerActive}})
 	tui.chat.InitNativeLists(false, tui.nativeListStyles(), tui.nativeListText())
 	tui.chat.SkillsList.List().SetFilterText("previous")
 	tui.chat.MCPList.List().SetFilterText("previous")

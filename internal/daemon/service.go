@@ -55,8 +55,9 @@ func (s *service) OnDisconnect(ctx context.Context, connID string) {
 }
 
 func (s *service) Handle(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
-	if err := s.daemon.waitUntilReady(ctx); err != nil {
-		return nil, err
+	state := s.daemon.RuntimeState()
+	if state != protocol.DaemonRuntimeReady && req.Method != protocol.MethodRuntimeHello && req.Method != protocol.MethodDaemonStatus && req.Method != protocol.MethodDaemonStop {
+		return nil, protocolError{code: -32603, message: "runtime is " + string(state), data: protocol.ProtocolErrorData{Kind: "runtime_unavailable", Reason: string(state), Retryable: state == protocol.DaemonRuntimeStarting}}
 	}
 	logging.Info("ipc", "request", logging.Event{"conn_id": req.ConnID, "method": req.Method, "request_id": req.ID})
 	sink = s.daemon.sinkFor(req.ConnID, sink)
@@ -85,13 +86,6 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 			}
 			cfg.MCP = s.daemon.agent.MCP().Config()
 			if err := cfg.Save(cfg.ConfigPath()); err != nil {
-				return nil, protocolError{code: -32603, message: err.Error()}
-			}
-		}
-		// MCP toggle/reload 会改变运行态可用工具集合；协议处理成功后刷新 tools manager，
-		// 让下一轮模型请求看到最新 tool schema。mcp.list 只读，不触发刷新。
-		if req.Method == protocol.MethodMCPToggle || req.Method == protocol.MethodMCPReload {
-			if err := s.daemon.agent.ReloadTools(ctx); err != nil {
 				return nil, protocolError{code: -32603, message: err.Error()}
 			}
 		}
@@ -151,9 +145,13 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 	case protocol.MethodAttachmentClear:
 		return s.handleAttachmentClear(req)
 	case protocol.MethodDaemonStatus:
-		// daemon.status 是 CLI 启动探测和 TUI 初始拉取的快路径：只返回 response，
-		// 不在这里同步 Emit full_status，避免慢 pipe/短连接阻塞响应。
-		return s.buildDaemonStatus(ctx), nil
+		var params protocol.DaemonStatusRequest
+		if req.Params != nil {
+			if err := decodeParams(req.Params, &params); err != nil {
+				return nil, invalidParams(err.Error())
+			}
+		}
+		return s.buildDaemonStatus(ctx, params.Detail), nil
 	case protocol.MethodConfigGet:
 		return configToParams(s.daemon.agent.Config()), nil
 	case protocol.MethodConfigSet:
@@ -176,7 +174,7 @@ func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHell
 		return protocol.RuntimeHelloResult{}, invalidParams(err.Error())
 	}
 	requestedVersion := strings.TrimSpace(params.ProtocolVersion)
-	if requestedVersion != "" && requestedVersion != "0.3" {
+	if requestedVersion != "" && requestedVersion != "0.4" {
 		return protocol.RuntimeHelloResult{}, protocolError{code: -32602, message: "unsupported protocol version", data: protocol.ProtocolErrorData{Kind: "unsupported_capability", Reason: "protocol_version"}}
 	}
 	transport := strings.TrimSpace(params.Transport)
@@ -184,12 +182,12 @@ func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHell
 		transport = "unknown"
 	}
 	return protocol.RuntimeHelloResult{
-		ProtocolVersion: "0.3",
+		ProtocolVersion: "0.4",
 		RuntimeVersion:  version.Current(),
 		Transport:       transport,
 		Capabilities: map[string]bool{
 			"agent": true, "streaming": true, "tools": true, "guard": true, "ask_user": true,
-			"session": true, "multi_session": true, "handoff": true, "config": true, "memory": true, "skills": true, "mcp": true,
+			"session": true, "multi_session": true, "handoff": true, "config": true, "memory": true, "skills": true, "mcp": true, "mcp_status_updates": true,
 		},
 		ContentSources: map[string]bool{"text": true, "image_path": true, "image_url": true},
 		Limits:         map[string]int{"max_tool_result_bytes": maxToolResultBytes},
@@ -265,7 +263,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 		s.cancelPendingInteractions(sessionID)
 		s.daemon.sessions.setStatus(sessionID, sessionIdle)
 		s.daemon.broadcastSessionState(ctx, sessionID)
-		emit(ctx, multiSink(s.daemon.sessions.sinksForSession(s.daemon, sessionID)), protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
+		emit(ctx, multiSink(s.daemon.sessions.sinksForSession(s.daemon, sessionID)), protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx, true))
 	}()
 	started := time.Now()
 	compactFailed := false
@@ -390,7 +388,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 					s.daemon.sessions.transitionRunState(sessionID, runID, protocol.AgentRunDone, func(state protocol.AgentRunState) {
 						logging.Info("agent", "run_done", logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()})
 						emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{RunID: runID, State: state})
-						emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
+						emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx, true))
 					})
 				default:
 					if evt.Error {
@@ -415,7 +413,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 						}
 						s.daemon.sessions.transitionRunState(sessionID, runID, state, func(finalState protocol.AgentRunState) {
 							emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{RunID: runID, State: finalState, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Error: protocolModelError(evt.ModelError), RunError: protocolRunError(evt.RunError), ResumeAvailable: resumeAvailable && finalState == protocol.AgentRunFailed})
-							emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
+							emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx, true))
 						})
 					}
 				}
@@ -740,19 +738,22 @@ func (s *service) handleConfigSet(ctx context.Context, req protocol.Request, sin
 	logging.Info("config", "update_success", logging.Event{"action": params.Action, "model_ref": params.ModelRef, "active_model": params.ActiveModel})
 	result := configToParams(updated)
 	s.daemon.BroadcastToAll(ctx, protocol.NotifyConfigState, result)
-	s.daemon.BroadcastToAll(ctx, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx))
+	s.daemon.BroadcastToAll(ctx, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx, true))
 	return result, nil
 }
 
-func (s *service) buildDaemonStatus(ctx context.Context) protocol.DaemonStatusParams {
-	s.ensureConfigLoaded()
-	params := protocol.DaemonStatusParams{PID: os.Getpid(), AgentStatus: "idle", Uptime: s.daemon.Uptime().Truncate(time.Second).String(), Connections: s.daemon.ConnectionCount()}
+func (s *service) buildDaemonStatus(ctx context.Context, detail bool) protocol.DaemonStatusParams {
+	params := protocol.DaemonStatusParams{State: s.daemon.RuntimeState(), PID: os.Getpid(), AgentStatus: "idle", Uptime: s.daemon.Uptime().Truncate(time.Second).String(), Connections: s.daemon.ConnectionCount()}
 	for _, tr := range s.daemon.transports {
 		if tcpTransport, ok := tr.(interface{ Endpoint() string }); ok && tr.Name() == "tcp" {
 			params.TCPEndpoint = tcpTransport.Endpoint()
 			break
 		}
 	}
+	if !detail || params.State != protocol.DaemonRuntimeReady {
+		return params
+	}
+	s.ensureConfigLoaded()
 	if s.daemon.agent != nil {
 		activeMem, coreMem, queuedMem := s.daemon.agent.MemoryStats(ctx)
 		params.Memory = &protocol.MemoryStats{Active: activeMem, Core: coreMem, Queued: queuedMem}

@@ -56,7 +56,7 @@ func (r *Runtime) protocolList(ctx context.Context) (protocol.MCPListResult, err
 	items := r.Status(ctx)
 	out := make([]protocol.MCPServerInfo, 0, len(items))
 	for _, item := range items {
-		out = append(out, protocol.MCPServerInfo{ID: item.ID, Name: item.ID, Transport: item.Transport, Command: item.Command, Active: item.Active, Configured: item.Configured, ToolCount: item.ToolCount, Error: item.Error})
+		out = append(out, protocol.MCPServerInfo{ID: item.ID, Name: item.ID, Transport: item.Transport, Command: item.Command, State: protocol.MCPServerState(item.State), ToolCount: item.ToolCount, Error: item.Error})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return protocol.MCPListResult{Servers: out}, nil
