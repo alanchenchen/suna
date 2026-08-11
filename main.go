@@ -142,7 +142,7 @@ func runDaemon(configPath string) {
 		tcpTransport = transporttcp.New(listen)
 	}
 	transports := []protocol.Transport{
-		local.NewPlatformTransport(cfg.SocketPath()),
+		local.NewPlatformTransport(local.DefaultEndpoint()),
 		tcpTransport,
 	}
 	d, err := daemon.New(cfg, transports)

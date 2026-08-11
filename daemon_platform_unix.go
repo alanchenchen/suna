@@ -12,6 +12,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// Unix lease 可被启动协调器探测；child 退出且 lease 已释放时，可以立即确认没有并发 winner。
+const daemonLeaseProbeSupported = true
+
 // daemonLease 在 Unix 上持有当前用户 daemon 的进程级独占锁。
 // 锁文件本身不能删除；进程退出或文件关闭后，内核会自动释放锁。
 type daemonLease struct {

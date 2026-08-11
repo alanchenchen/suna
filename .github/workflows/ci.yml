@@ -28,3 +28,6 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+      - name: Windows daemon lifecycle smoke
+        run: go test -tags=integration -run TestWindowsDaemonLifecycleSmoke -count=1 .

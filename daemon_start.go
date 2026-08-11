@@ -81,12 +81,16 @@ func waitUntilDaemonAvailableOrExit(timeout time.Duration, exited <-chan error) 
 		case err := <-exited:
 			childErr = err
 			exited = nil
-			held, probeErr := daemonLeaseHeld(config.DefaultLockPath())
-			if probeErr == nil && !held {
-				if childErr == nil {
-					return fmt.Errorf("daemon exited before becoming ready")
+			// Unix 可借助 flock 区分“没有 winner”与“输给并发 winner”；Windows
+			// 只依赖 Named Pipe 首实例排斥，loser 退出后必须继续探测到 deadline。
+			if daemonLeaseProbeSupported {
+				held, probeErr := daemonLeaseHeld(config.DefaultLockPath())
+				if probeErr == nil && !held {
+					if childErr == nil {
+						return fmt.Errorf("daemon exited before becoming ready")
+					}
+					return fmt.Errorf("daemon exited before becoming ready: %w (check logs at %s)", childErr, config.DefaultLogPath())
 				}
-				return fmt.Errorf("daemon exited before becoming ready: %w (check logs at %s)", childErr, config.DefaultLogPath())
 			}
 		case <-deadline.C:
 			if childErr != nil {

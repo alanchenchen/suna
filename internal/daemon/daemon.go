@@ -133,7 +133,8 @@ func (d *Daemon) run(label string) error {
 	go func() {
 		sig := <-sigCh
 		fmt.Fprintf(os.Stderr, "%s: received signal %s, shutting down...\n", label, sig)
-		cancel()
+		// 所有退出入口统一先发布 stopping，再取消 runtime，避免关闭期间继续接收业务请求。
+		d.Stop()
 	}()
 
 	// 启动生命周期监控
