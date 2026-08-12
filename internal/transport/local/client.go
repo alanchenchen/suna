@@ -38,7 +38,9 @@ func Dial(endpoint string, timeout time.Duration) (*Client, error) {
 		return nil, err
 	}
 	c := &Client{conn: conn, pending: make(map[int]chan clientResult)}
-	go c.receiveLoop()
+	// receive loop 持有创建时的不可变连接引用；Close 可安全清空 c.conn 并关闭该连接，
+	// 不能让读取 goroutine 在下一轮解引用已经置 nil 的共享字段。
+	go c.receiveLoop(conn)
 	return c, nil
 }
 
@@ -112,11 +114,11 @@ func (c *Client) Close() error {
 const maxRetainedClientLineBuffer = 256 * 1024
 
 // receiveLoop 按 NDJSON 分帧读取 daemon 输出；超大行处理后释放 buffer，避免长期保留异常大容量。
-func (c *Client) receiveLoop() {
+func (c *Client) receiveLoop(conn net.Conn) {
 	var buf [4096]byte
 	var lineBuf []byte
 	for {
-		n, err := c.conn.Read(buf[:])
+		n, err := conn.Read(buf[:])
 		if err != nil {
 			c.mu.Lock()
 			c.closed = true
