@@ -6,26 +6,58 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  actions: read
+  contents: read
 
 jobs:
-  windows-smoke:
-    runs-on: windows-latest
+  verify-ci:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Verify CI passed for this commit
+        uses: actions/github-script@v7
         with:
-          go-version-file: go.mod
-          cache: true
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const headSha = context.sha;
+            const deadline = Date.now() + 5 * 60 * 1000;
 
-      - name: Test Windows daemon lifecycle
-        run: go test -tags=integration -run TestWindowsDaemonLifecycleSmoke -count=1 .
+            while (Date.now() < deadline) {
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                owner,
+                repo,
+                workflow_id: "ci.yml",
+                branch: "main",
+                event: "push",
+                head_sha: headSha,
+                per_page: 100,
+              });
+              const runs = data.workflow_runs;
+              const passed = runs.find((run) =>
+                run.status === "completed" && run.conclusion === "success"
+              );
+              if (passed) {
+                core.info(`CI passed for ${headSha}: ${passed.html_url}`);
+                return;
+              }
+
+              const active = runs.some((run) => run.status !== "completed");
+              if (runs.length > 0 && !active) {
+                const results = runs.map((run) => `${run.id}:${run.conclusion}`).join(", ");
+                core.setFailed(`CI did not pass for ${headSha}: ${results}`);
+                return;
+              }
+
+              core.info(`Waiting for CI on ${headSha}...`);
+              await new Promise((resolve) => setTimeout(resolve, 10_000));
+            }
+
+            core.setFailed(`Timed out waiting for successful CI on ${headSha}`);
 
   release:
-    needs: windows-smoke
+    needs: verify-ci
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
