@@ -39,7 +39,6 @@ Subtask 通过 Agent runtime 工具 `spawn` 暴露给主 Agent。
 | `context` | 可选。主 Agent 选择性传入的额外上下文。不会自动包含主对话历史。 |
 | `tools` | 必填。允许子任务使用的工具名列表。`[]` 表示纯模型任务。 |
 | `input_images` | 可选。当前用户消息中图片附件的索引列表，例如 `[0]`。不传则子任务看不到图片。 |
-| `system` | 可选。备用 system prompt；正常情况下 Suna 会使用内置 Subtask prompt 模板。 |
 
 设计上要求 `model` 和 `tools` 必须显式提供，是为了让模型选择和工具权限成为主 Agent 的有意识决策，而不是默认继承。
 

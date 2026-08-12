@@ -214,12 +214,7 @@ func (a *Agent) ExecuteSpawnTool(ctx context.Context, id string, params map[stri
 	}
 	subtaskPrompt, err := a.prompts.RenderSubtaskSystem(prompt.SubtaskPromptData{Task: task, Tools: toolsSummary, Context: extraCtx, OS: env["OS"], Arch: env["Arch"], WorkDir: env["WorkDir"]})
 	if err != nil || subtaskPrompt == "" {
-		if sys, ok := params["system"].(string); ok && sys != "" {
-			subtaskPrompt = sys
-		}
-	}
-	if subtaskPrompt == "" {
-		subtaskPrompt = fmt.Sprintf("You are an isolated Suna subtask runner. Complete this task and return a concise result.\n\nTask:\n%s\n\nTools:\n%s", task, toolsSummary)
+		subtaskPrompt = fmt.Sprintf("You are a Suna subtask. Complete the assigned task and return a concise result.\n\nTask:\n%s\n\nAvailable tools: %s", task, toolsSummary)
 	}
 
 	spawnID := id

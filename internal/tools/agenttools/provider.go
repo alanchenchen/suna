@@ -104,7 +104,6 @@ func spawnSpec(toolNames []string) tools.Spec {
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{
 			"task":         map[string]any{"type": "string", "description": "Self-contained task for the subtask"},
 			"model":        map[string]any{"type": "string", "description": "Exact model ref from Available subtask models"},
-			"system":       map[string]any{"type": "string", "description": "Optional subtask system prompt"},
 			"tools":        map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": toolNames}, "description": "Allowed tools for the isolated subtask; use [] for model-only tasks"},
 			"input_images": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "Indexes of images attached to the current user message only, e.g. [0]. Not prior-turn/restored image summaries; spawn does not inherit images unless listed."},
 			"context":      map[string]any{"type": "string", "description": "Extra context"},

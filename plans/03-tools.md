@@ -304,7 +304,6 @@ allow_custom 参数:
   tools: [string],           // 必填: subtask 可用工具列表；[] 表示纯模型任务
   input_images?: [int],      // 当前用户消息图片索引，例如 [0]
   context?: string,          // 传给 subtask 的额外上下文
-  system?: string            // 可选 fallback；正常由 subtask_system.md 模板生成
 }
 返回: JSON 文本 { result: string, success: bool, status: string }
 
