@@ -121,6 +121,15 @@ func TestReadGuardReviewStreamResetsTimeoutOnChunk(t *testing.T) {
 	}
 }
 
+func TestToolIntentSchemaUsesCurrentUserLanguage(t *testing.T) {
+	description, _ := toolIntentSchema()["description"].(string)
+	for _, want := range []string{"user-facing", "language of the user's current request", "Do not include file contents, secrets, or raw parameters"} {
+		if !strings.Contains(description, want) {
+			t.Fatalf("intent description missing %q: %q", want, description)
+		}
+	}
+}
+
 func TestBuildGuardReviewContextUsesToolExecutionWorkingMessages(t *testing.T) {
 	a := &Agent{working: testWorkingMemory("main user request")}
 	ctx := a.buildGuardReviewContext(runner.ToolExecution{

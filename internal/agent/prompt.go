@@ -26,7 +26,7 @@ func (a *Agent) buildSystemPrompt(ctx context.Context) (string, error) {
 		skills = a.skills.Summary()
 	}
 	return a.prompts.RenderSystem(prompt.SystemPromptData{
-		OS: env["OS"], Arch: env["Arch"], WorkDir: wd, ActiveModel: a.activeModelSummary(),
+		OS: env["OS"], Arch: env["Arch"], WorkDir: wd, Workspace: a.cfg.Guard.Workspace, DataDir: a.cfg.DataDir, ActiveModel: a.activeModelSummary(),
 		ModelRouting: a.modelRoutingSummary(), ProjectConfig: projectConfig.Content, ProjectConfigSource: projectConfig.Source, Skills: skills, SkillsDir: a.cfg.SkillsDir(),
 	})
 }
@@ -134,7 +134,7 @@ func addIntentToObjectSchema(schema map[string]any) {
 }
 
 func toolIntentSchema() map[string]any {
-	return map[string]any{"type": "string", "description": "Natural-language reason for this tool call. Explain what you are trying to accomplish for the user. Do not put file contents, secrets, or raw parameters here."}
+	return map[string]any{"type": "string", "description": "Brief user-facing reason for this tool call. Use the language of the user's current request. Do not include file contents, secrets, or raw parameters."}
 }
 
 func getEnvInfoForWorkDir(wd string) map[string]string {

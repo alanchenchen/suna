@@ -4,7 +4,8 @@ Task:
 {{.Task}}
 
 Environment: {{.OS}}/{{.Arch}}, cwd `{{.WorkDir}}`.
-Available tools: {{.Tools}}.
+{{if .Workspace}}Workspace boundary: `{{.Workspace}}`. File operations, command paths, working directories, and redirection targets must stay inside it.
+{{end}}Available tools: {{.Tools}}.
 
 {{if .Context}}Context:
 {{.Context}}

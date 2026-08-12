@@ -51,6 +51,8 @@ func (l *Loader) RenderSystem(data SystemPromptData) (string, error) {
 		"OS":                  data.OS,
 		"Arch":                data.Arch,
 		"WorkDir":             data.WorkDir,
+		"Workspace":           data.Workspace,
+		"DataDir":             data.DataDir,
 		"ActiveModel":         data.ActiveModel,
 		"ModelRouting":        data.ModelRouting,
 		"ProjectConfig":       data.ProjectConfig,
@@ -109,12 +111,13 @@ func (l *Loader) RenderMemoryCompact(data map[string]any) (string, error) {
 
 func (l *Loader) RenderSubtaskSystem(data SubtaskPromptData) (string, error) {
 	return l.Render("subtask_system", map[string]any{
-		"Task":    data.Task,
-		"Tools":   data.Tools,
-		"Context": data.Context,
-		"OS":      data.OS,
-		"Arch":    data.Arch,
-		"WorkDir": data.WorkDir,
+		"Task":      data.Task,
+		"Tools":     data.Tools,
+		"Context":   data.Context,
+		"OS":        data.OS,
+		"Arch":      data.Arch,
+		"WorkDir":   data.WorkDir,
+		"Workspace": data.Workspace,
 	})
 }
 
@@ -122,6 +125,8 @@ type SystemPromptData struct {
 	OS                  string
 	Arch                string
 	WorkDir             string
+	Workspace           string
+	DataDir             string
 	ActiveModel         string
 	ModelRouting        string
 	ProjectConfig       string
@@ -145,12 +150,13 @@ type GuardReviewData struct {
 }
 
 type SubtaskPromptData struct {
-	Task    string
-	Tools   string
-	Context string
-	OS      string
-	Arch    string
-	WorkDir string
+	Task      string
+	Tools     string
+	Context   string
+	OS        string
+	Arch      string
+	WorkDir   string
+	Workspace string
 }
 
 type SkillReviewData struct {

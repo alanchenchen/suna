@@ -212,7 +212,7 @@ func (a *Agent) ExecuteSpawnTool(ctx context.Context, id string, params map[stri
 	if toolsSummary == "" {
 		toolsSummary = "none"
 	}
-	subtaskPrompt, err := a.prompts.RenderSubtaskSystem(prompt.SubtaskPromptData{Task: task, Tools: toolsSummary, Context: extraCtx, OS: env["OS"], Arch: env["Arch"], WorkDir: env["WorkDir"]})
+	subtaskPrompt, err := a.prompts.RenderSubtaskSystem(prompt.SubtaskPromptData{Task: task, Tools: toolsSummary, Context: extraCtx, OS: env["OS"], Arch: env["Arch"], WorkDir: env["WorkDir"], Workspace: a.cfg.Guard.Workspace})
 	if err != nil || subtaskPrompt == "" {
 		subtaskPrompt = fmt.Sprintf("You are a Suna subtask. Complete the assigned task and return a concise result.\n\nTask:\n%s\n\nAvailable tools: %s", task, toolsSummary)
 	}
