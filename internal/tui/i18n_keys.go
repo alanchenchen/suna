@@ -87,6 +87,7 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"tui.welcome.setup_hint":          {LocaleEN: "No model configured. Go to Config to add one first.", LocaleZH: "尚未配置模型，请先进入 Config 添加。"},
 
 		"tui.chat.suna":                            {LocaleEN: "Suna", LocaleZH: "Suna"},
+		"tui.chat.worked_for":                      {LocaleEN: "Worked for", LocaleZH: "已工作"},
 		"tui.chat.thinking":                        {LocaleEN: "Thinking", LocaleZH: "思考"},
 		"tui.chat.thinking_detail_hint":            {LocaleEN: "Ctrl+R details", LocaleZH: "Ctrl+R 详情"},
 		"tui.chat.thought_done":                    {LocaleEN: "Thought completed", LocaleZH: "思考完成"},

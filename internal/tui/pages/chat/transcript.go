@@ -32,6 +32,7 @@ type TranscriptDeps struct {
 	RenderDisplayDiscard func(DisplayDiscardSummary) string
 	RenderUserMessage    func(any, int) string
 	RenderAssistant      func(*Msg) string
+	RenderRunDuration    func(string) string
 	RenderReasoning      func(*Msg) string
 	RenderToolBlock      func(*toolview.Block) string
 	RenderSubtaskBlock   func(*toolview.Block) string
@@ -186,6 +187,10 @@ func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptB
 			}
 			endLine := lineCount
 			nav = ResponseNavInfo{StartLine: startLine, LineCount: maxInt(0, endLine-startLine), MsgIndex: i, Streaming: msg.Streaming}
+		case "run_duration":
+			if content, ok := msg.Content.(string); ok && deps.RenderRunDuration != nil {
+				addBlock(i, false, deps.RenderRunDuration(content)+"\n")
+			}
 		case "reasoning":
 			renderSunaHeader()
 			startLine := lineCount

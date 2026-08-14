@@ -64,7 +64,11 @@ type TUI struct {
 	// cancelNoticeRunID 记录已经展示取消终态提示的 run，避免重复通知追加相同文案。
 	cancelNoticeRunID string
 	// completedRunID 防止终态通知先到时，迟到的同一 run 快照重新激活 Loading。
-	completedRunID       string
+	completedRunID string
+	// runStartedAt、activeRunID 与 runHadToolCall 只服务于当前 TUI 的本轮耗时展示，不参与协议或持久化。
+	runStartedAt         time.Time
+	activeRunID          string
+	runHadToolCall       bool
 	handoffRole          string
 	resumeSessionID      string
 	welcomeActivePicker  bool

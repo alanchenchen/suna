@@ -434,8 +434,15 @@ func (t *TUI) renderInputArea() string {
 	// HasDraft() 会 trim 空白用于发送/退出判断；如果用户刚输入空格或换行，
 	// 这里仍应立刻隐藏 placeholder，避免 Bubble textarea 与外层占位文案不同步。
 	emptyInput := !presentation.Locked && t.chat.Textarea.Value() == "" && len(t.chat.Attachments) == 0
+	inlineRunHelp := false
 	if presentation.Locked && !t.hasDraft() {
-		text = styleDim.Render(t.lockedInputPlaceholder())
+		status := t.lockedInputPlaceholder()
+		if presentation.InputPolicy.AllowCancel {
+			text = renderInlineRunStatus(width, status, t.tr("tui.chat.input_help_running"))
+			inlineRunHelp = true
+		} else {
+			text = styleDim.Render(status)
+		}
 	}
 	if presentation.GuardActive {
 		text = styleError.Render(t.tr("tui.guard.input_waiting"))
@@ -450,13 +457,24 @@ func (t *TUI) renderInputArea() string {
 		parts = append(parts, textutil.IndentLines(panel, "  "))
 	}
 	parts = append(parts, textutil.IndentLines(bar, "  "))
-	if help := t.inputHelp(); help != "" {
+	if help := t.inputHelp(); help != "" && !inlineRunHelp {
 		parts = append(parts, "  "+styleDim.Render(help))
 	}
 	if confirm != "" {
 		parts = append(parts, "  "+confirm)
 	}
 	return strings.Join(parts, "\n")
+}
+
+func renderInlineRunStatus(width int, status, help string) string {
+	contentWidth := max(8, width-4)
+	statusWidth := lipgloss.Width(status)
+	helpWidth := lipgloss.Width(help)
+	if statusWidth+helpWidth+1 <= contentWidth {
+		gap := strings.Repeat(" ", contentWidth-statusWidth-helpWidth)
+		return styleDim.Render(status) + gap + styleDim.Render(help)
+	}
+	return styleDim.Render(status + " · " + help)
 }
 
 func renderInputComposerBar(width int, lines []string, emptyInput bool, cursorVisible bool) string {

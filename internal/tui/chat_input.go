@@ -54,9 +54,9 @@ func (t *TUI) currentInteractionPresentation() chatpage.InteractionPresentation 
 		AskAllowCustom:  activeAskAllowCustom(t.chat.ActiveAsk()),
 		StatusLabel:     t.currentInputStatusLabel(),
 		SpinnerView:     t.chat.Spinner.View(),
-		CompactRunning:  t.compactRunningLabel(),
-		RespondingLabel: t.tr("status.responding"),
-		ObservingLabel:  t.tr("tui.chat.observe_input"),
+		CompactRunning:  t.withRunElapsed(t.compactRunningLabel()),
+		RespondingLabel: t.withRunElapsed(t.tr("status.responding")),
+		ObservingLabel:  t.withRunElapsed(t.tr("tui.chat.observe_input")),
 		CancellingLabel: t.tr("status.cancelling"),
 	}, t.selectionMode)
 }
@@ -266,6 +266,9 @@ func (t *TUI) resetConversationStats() {
 	t.lastDuration = 0
 	t.lastTokensPerSec = 0
 	t.hasUsage = false
+	t.runStartedAt = time.Time{}
+	t.activeRunID = ""
+	t.runHadToolCall = false
 	t.contextTokens = 0
 	if t.daemonStatus.ContextTokens != 0 {
 		t.daemonStatus.ContextTokens = 0

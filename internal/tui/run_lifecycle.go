@@ -7,11 +7,15 @@ import (
 	"time"
 
 	"github.com/alanchenchen/suna/internal/protocol"
+	"github.com/alanchenchen/suna/internal/tui/components/toolview"
 )
 
 func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 	if p.RunID != "" && p.RunID == t.completedRunID {
 		return
+	}
+	if p.State == protocol.AgentRunRunning {
+		t.startRunElapsed(p.RunID, time.Now())
 	}
 	if p.State == protocol.AgentRunRunning && p.RunID != "" {
 		if t.completedRunID != "" {
@@ -52,6 +56,7 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 			t.appendNonToolMessage(chatMsg{Role: "error", Content: t.formatModelError(p)})
 		}
 		t.chat.ResumeAvailable = p.ResumeAvailable
+		t.appendRunElapsed(p.RunID)
 		t.resetPhase()
 	case protocol.AgentRunDone:
 		t.resetTranscriptAutoResumeCycle()
@@ -68,6 +73,7 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 		t.cancelling = false
 		t.finishStreamingMessages()
 		t.chat.ResumeAvailable = false
+		t.appendRunElapsed(p.RunID)
 		t.resetPhase()
 	case protocol.AgentRunRunning:
 		if t.cancelling {
@@ -79,6 +85,42 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 			t.chat.SetStatusLabel(t.tr("status.waiting_model"), time.Now())
 		}
 	}
+}
+
+func (t *TUI) startRunElapsed(runID string, now time.Time) {
+	if runID != "" && t.activeRunID != "" && runID != t.activeRunID {
+		t.runStartedAt = now
+		t.runHadToolCall = false
+	}
+	if t.runStartedAt.IsZero() {
+		t.runStartedAt = now
+	}
+	if runID != "" {
+		t.activeRunID = runID
+	}
+}
+
+func (t *TUI) appendRunElapsed(runID string) {
+	if t.runStartedAt.IsZero() {
+		return
+	}
+	if runID != "" && t.activeRunID != "" && runID != t.activeRunID {
+		return
+	}
+	duration := time.Since(t.runStartedAt)
+	if t.runHadToolCall {
+		t.appendNonToolMessage(chatMsg{Role: "run_duration", Content: toolview.FormatCompactDuration(duration)})
+	}
+	t.runStartedAt = time.Time{}
+	t.activeRunID = ""
+	t.runHadToolCall = false
+}
+
+func (t *TUI) runElapsedLabel() string {
+	if t.runStartedAt.IsZero() {
+		return ""
+	}
+	return toolview.FormatCompactDuration(time.Since(t.runStartedAt))
 }
 
 func (t *TUI) setRunRetryStatus(p protocol.AgentRunParams, now time.Time) {

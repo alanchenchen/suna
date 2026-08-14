@@ -153,11 +153,19 @@ func (t *TUI) compactRunningLabel() string {
 func (t *TUI) currentInputStatusLabel() string {
 	if t.chat.Loading && !t.chat.Compacting {
 		if label := t.currentStatusLabel(); label != "" {
-			return label
+			return t.withRunElapsed(label)
 		}
-		return t.tr("status.responding")
+		return t.withRunElapsed(t.tr("status.responding"))
 	}
 	return t.currentStatusLabel()
+}
+
+func (t *TUI) withRunElapsed(label string) string {
+	elapsed := t.runElapsedLabel()
+	if label == "" || elapsed == "" {
+		return label
+	}
+	return label + " · " + elapsed
 }
 func (t *TUI) currentStatusLabel() string {
 	if t.chat.Compacting {
@@ -166,8 +174,8 @@ func (t *TUI) currentStatusLabel() string {
 	if t.chat.StatusLabel != "" {
 		return t.chat.StatusLabel
 	}
-	if n := t.runningToolCount(); n > 0 {
-		return fmt.Sprintf("%s · %d running", t.tr("status.exec_tool"), n)
+	if t.runningToolCount() > 0 {
+		return t.tr("status.exec_tool")
 	}
 	if t.chat.ActiveInteractionKind() == chatpage.InteractionAskUser {
 		return t.tr("tui.ask.waiting")
@@ -371,6 +379,10 @@ func (t *TUI) renderAssistantMessage(msg *chatMsg) string {
 		return textutil.IndentLines(t.cachedStreamingText(msg, content, width), "  ")
 	}
 	return textutil.IndentLines(t.cachedMarkdown(msg, content, width), "  ")
+}
+
+func (t *TUI) renderRunDuration(duration string) string {
+	return "  " + styleBrand.Render("✦") + " " + styleDim.Render(t.tr("tui.chat.worked_for")) + " " + styleBrand.Render(duration)
 }
 
 func (t *TUI) cachedMarkdown(msg *chatMsg, content string, width int) string {

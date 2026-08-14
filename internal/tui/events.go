@@ -297,6 +297,7 @@ func (t *TUI) handleInteractionResolvedNotification(p protocol.InteractionResolv
 }
 
 func (t *TUI) handleToolStartNotification(p protocol.ToolStartParams) {
+	t.runHadToolCall = true
 	t.finishStreamingMessages()
 	t.chat.Compacting = false
 	t.compactAuto = false
@@ -461,6 +462,9 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) {
 		t.completedRunID = ""
 		t.cancelNoticeRunID = ""
 		t.cancelling = false
+		t.runStartedAt = time.Time{}
+		t.activeRunID = ""
+		t.runHadToolCall = false
 	}
 	t.currentSession = p.Session
 	t.applyCurrentSessionModelConfig()
@@ -488,6 +492,7 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) {
 		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.tr("session.restore_compacted")})
 	}
 	if currentRun != nil && currentRun.Status != protocol.SessionStatusIdle {
+		t.startRunElapsed(currentRun.RunID, time.Now())
 		if currentRun.State == protocol.AgentRunCancelling {
 			t.enterCancelling()
 		} else {

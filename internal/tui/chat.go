@@ -121,6 +121,7 @@ func (t *TUI) syncContent() {
 		RenderDisplayDiscard: t.renderDisplayDiscardSummary,
 		RenderUserMessage:    t.renderUserMessage,
 		RenderAssistant:      t.renderAssistantMessage,
+		RenderRunDuration:    t.renderRunDuration,
 		RenderReasoning:      t.renderReasoningMessage,
 		RenderToolBlock:      t.renderToolBlock,
 		RenderSubtaskBlock:   t.renderSubtaskBlock,
