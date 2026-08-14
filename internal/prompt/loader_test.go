@@ -22,7 +22,6 @@ func TestRenderSystemKeepsCapabilitiesWithoutPrescriptiveDelegation(t *testing.T
 		ProjectConfigSource: "AGENTS.md",
 		ProjectConfig:       "Keep changes focused.",
 		Skills:              "- demo: Example skill.",
-		SkillsDir:           "/skills",
 	})
 	if err != nil {
 		t.Fatalf("RenderSystem() error = %v", err)
@@ -58,7 +57,7 @@ func TestRenderSystemOmitsWorkspaceBoundaryWhenNotConfigured(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	got, err := loader.RenderSystem(SystemPromptData{OS: "linux", Arch: "amd64", WorkDir: "/workspace", ActiveModel: "provider-a/model-a", SkillsDir: "/skills"})
+	got, err := loader.RenderSystem(SystemPromptData{OS: "linux", Arch: "amd64", WorkDir: "/workspace", ActiveModel: "provider-a/model-a"})
 	if err != nil {
 		t.Fatalf("RenderSystem() error = %v", err)
 	}

@@ -58,7 +58,6 @@ func (l *Loader) RenderSystem(data SystemPromptData) (string, error) {
 		"ProjectConfig":       data.ProjectConfig,
 		"ProjectConfigSource": data.ProjectConfigSource,
 		"Skills":              data.Skills,
-		"SkillsDir":           data.SkillsDir,
 	})
 }
 
@@ -132,7 +131,6 @@ type SystemPromptData struct {
 	ProjectConfig       string
 	ProjectConfigSource string
 	Skills              string
-	SkillsDir           string
 }
 
 type GuardReviewData struct {

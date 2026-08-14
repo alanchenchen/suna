@@ -48,20 +48,25 @@ func (t *TUI) nativeListHeader(model overlaylist.Model) string {
 
 // nativeListFooter 显示与当前状态严格一致的少量操作。键位判断和筛选状态机
 // 仍由 Bubbles list.Model 负责，这里只提供 Suna 的紧凑可发现性文案。
-func (t *TUI) nativeListFooter(model overlaylist.Model, action string) string {
+func (t *TUI) nativeListFooter(model overlaylist.Model, action string, actionable ...bool) string {
 	text := t.nativeListText()
+	canAct := len(actionable) == 0 || actionable[0]
 	parts := []string{styleCursor.Render("↑↓") + " " + styleDim.Render(t.tr("tui.list.key.move"))}
 	if model.Filtering() {
-		parts = append(parts,
-			styleCursor.Render("Enter")+" "+styleDim.Render(action),
-			styleCursor.Render("Esc")+" "+styleDim.Render(text.ClearFilter),
-		)
+		if canAct {
+			parts = append(parts, styleCursor.Render("Enter")+" "+styleDim.Render(action))
+		} else if strings.TrimSpace(action) != "" {
+			parts = append(parts, styleDim.Render(action))
+		}
+		parts = append(parts, styleCursor.Render("Esc")+" "+styleDim.Render(text.ClearFilter))
 	} else {
-		parts = append(parts,
-			styleCursor.Render("/")+" "+styleDim.Render(text.FilterHelp),
-			styleCursor.Render(actionKey(action))+" "+styleDim.Render(action),
-			styleCursor.Render("Esc")+" "+styleDim.Render(text.Close),
-		)
+		parts = append(parts, styleCursor.Render("/")+" "+styleDim.Render(text.FilterHelp))
+		if canAct {
+			parts = append(parts, styleCursor.Render(actionKey(action))+" "+styleDim.Render(action))
+		} else if strings.TrimSpace(action) != "" {
+			parts = append(parts, styleDim.Render(action))
+		}
+		parts = append(parts, styleCursor.Render("Esc")+" "+styleDim.Render(text.Close))
 	}
 	return strings.Join(parts, styleDim.Render("  ·  "))
 }
@@ -75,7 +80,7 @@ func actionKey(action string) string {
 
 // renderNativeListOverlay 仅接管视觉骨架：紧凑标题、筛选栏、当前分页行和 footer。
 // Bubbles list.Model 继续作为筛选、游标、自动滚动与分页的唯一状态来源。
-func (t *TUI) renderNativeListOverlay(owner string, model *overlaylist.Model, width int, action, emptyKey, loading, backendError string) string {
+func (t *TUI) renderNativeListOverlay(owner string, model *overlaylist.Model, width int, action, emptyKey, loading, backendError string, actionable ...bool) string {
 	panelWidth := nativeListWidth(width, 82)
 	// boxStyle 的 Width 包含边框与 Padding；list 的实际内容宽度必须扣除这些
 	// 空间，否则标题/筛选行会被 box 再次折行，造成截图中标题与数量分离。
@@ -121,7 +126,7 @@ func (t *TUI) renderNativeListOverlay(owner string, model *overlaylist.Model, wi
 	}
 	// 操作提示不能紧贴最后一项，留出稳定的两行呼吸空间，让内容区和
 	// 可执行操作形成清晰层级；同时预留高度避免大列表挤出浮层。
-	lines = append(lines, "", "", t.nativeListFooter(*model, action))
+	lines = append(lines, "", "", t.nativeListFooter(*model, action, actionable...))
 	return boxStyle.Width(panelWidth).Padding(1, 2).Render(strings.Join(lines, "\n"))
 }
 

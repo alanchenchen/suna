@@ -13,6 +13,7 @@ import (
 	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/protocol"
+	"github.com/alanchenchen/suna/internal/skill"
 )
 
 type sessionStatus string
@@ -192,7 +193,20 @@ func (m *sessionManager) attach(ctx context.Context, connID, sessionID string, r
 		return protocol.SessionSnapshot{}, fmt.Errorf("session is no longer active")
 	}
 	if rt == nil {
-		rt = m.ensureRuntimeNoLock(meta)
+		m.mu.Unlock()
+		projectSkills := skill.DiscoverProject(meta.CWD)
+		candidate := newSessionRuntime(m.root.NewSessionAgentWithProjectSkills(meta.ID, meta.CWD, meta.ModelRef, projectSkills))
+		m.mu.Lock()
+		if m.deleting[sessionID] || m.deleteVersion[sessionID] != deleteVersion {
+			m.mu.Unlock()
+			return protocol.SessionSnapshot{}, fmt.Errorf("session not found")
+		}
+		if existing := m.runtime[sessionID]; existing != nil {
+			rt = existing
+		} else {
+			m.runtime[sessionID] = candidate
+			rt = candidate
+		}
 	}
 	if rt == nil {
 		m.mu.Unlock()
@@ -616,15 +630,8 @@ func (m *sessionManager) appendReasoning(sessionID, content string) {
 	}
 }
 
-func (m *sessionManager) ensureRuntimeNoLock(meta *memory.SessionMeta) *sessionRuntime {
-	if rt := m.runtime[meta.ID]; rt != nil {
-		return rt
-	}
-	// 旧会话可能因 schema 升级保留空 model_ref；不得在 attach 时回退到全局默认模型，
-	// 否则修改新会话默认值会静默改变历史会话。用户需显式选择模型后再运行。
-	rt := &sessionRuntime{stateMu: &sync.Mutex{}, agent: m.root.NewSessionAgent(meta.ID, meta.CWD, meta.ModelRef), status: sessionIdle, clients: map[string]bool{}}
-	m.runtime[meta.ID] = rt
-	return rt
+func newSessionRuntime(a *agent.Agent) *sessionRuntime {
+	return &sessionRuntime{stateMu: &sync.Mutex{}, agent: a, status: sessionIdle, clients: map[string]bool{}}
 }
 
 func (m *sessionManager) infoFor(meta memory.SessionMeta) protocol.SessionInfo {

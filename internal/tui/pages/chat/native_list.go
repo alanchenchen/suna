@@ -40,32 +40,36 @@ type ListStyles struct {
 
 // ListText 由 root 注入本地化文案，避免通用列表组件依赖 TUI 的翻译器。
 type ListText struct {
-	SkillsTitle string
-	MCPTitle    string
-	ModelsTitle string
-	CountSuffix string
-	Filter      string
-	Skill       string
-	Skills      string
-	Server      string
-	Servers     string
-	Model       string
-	Models      string
-	Toggle      string
-	Reload      string
-	Select      string
-	Close       string
-	Tools       string
-	Up          string
-	Down        string
-	FilterHelp  string
-	ClearFilter string
-	Cancel      string
+	SkillsTitle  string
+	MCPTitle     string
+	ModelsTitle  string
+	CountSuffix  string
+	Filter       string
+	Skill        string
+	Skills       string
+	Server       string
+	Servers      string
+	Model        string
+	Models       string
+	Toggle       string
+	Reload       string
+	GlobalScope  string
+	ProjectScope string
+	Select       string
+	Close        string
+	Tools        string
+	Up           string
+	Down         string
+	FilterHelp   string
+	ClearFilter  string
+	Cancel       string
 }
 
 type skillItem struct{ skill protocol.SkillInfo }
 
-func (i skillItem) Key() string { return i.skill.Name }
+func (i skillItem) Key() string {
+	return strings.Join([]string{strings.TrimSpace(i.skill.Scope), i.skill.Path, i.skill.Name}, "\x00")
+}
 func (i skillItem) FilterValue() string {
 	// Skill 名称和说明是用户可理解的检索入口；校验原因、路径和错误只用于展示，不能污染结果。
 	return strings.TrimSpace(i.skill.Name + " " + i.skill.Description)
@@ -114,11 +118,26 @@ func (d nativeDelegate) renderItem(width int, selected bool, item overlaylist.It
 	}
 
 	mark, markStyle := "○", d.styles.Dim
-	name, detail := "", ""
+	name, detail, badge := "", "", ""
 	switch row := item.(type) {
 	case skillItem:
 		name = row.skill.Name
+		scope := d.text.GlobalScope
+		if SkillIsProject(row.skill) {
+			scope = d.text.ProjectScope
+		}
+		if strings.TrimSpace(scope) != "" {
+			badge = d.styles.Dim.Render("[" + strings.TrimSpace(scope) + "]")
+		}
 		detail = strings.TrimSpace(row.skill.Description)
+		if SkillIsProject(row.skill) && strings.TrimSpace(row.skill.Path) != "" {
+			path := strings.TrimSpace(row.skill.Path)
+			if detail == "" {
+				detail = path
+			} else {
+				detail = path + " · " + detail
+			}
+		}
 		if detail == "" && SkillHasIssue(row.skill) {
 			detail = strings.Join(append(row.skill.Reasons, row.skill.Error), " · ")
 		}
@@ -157,15 +176,22 @@ func (d nativeDelegate) renderItem(width int, selected bool, item overlaylist.It
 		}
 	}
 
-	return d.renderLine(width, rail, mark, markStyle, name, nameStyle, detail)
+	return d.renderLineWithBadge(width, rail, mark, markStyle, badge, name, nameStyle, detail)
 }
 
 // renderLine 为名称优先保留空间，摘要仅在有余量时展示；状态标记与名称同行表达，不额外附加文字。
 func (d nativeDelegate) renderLine(width int, rail, mark string, markStyle lipgloss.Style, name string, nameStyle lipgloss.Style, detail string) string {
+	return d.renderLineWithBadge(width, rail, mark, markStyle, "", name, nameStyle, detail)
+}
+
+func (d nativeDelegate) renderLineWithBadge(width int, rail, mark string, markStyle lipgloss.Style, badge, name string, nameStyle lipgloss.Style, detail string) string {
 	prefix := rail + markStyle.Render(mark) + "  "
+	if badge != "" {
+		prefix += badge + " "
+	}
 	available := width - lipgloss.Width(prefix)
 	if available < 1 {
-		return truncateNative(rail+markStyle.Render(mark)+" "+name, width)
+		return truncateNative(prefix+name, width)
 	}
 
 	nameLimit := available

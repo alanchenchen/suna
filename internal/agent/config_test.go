@@ -12,7 +12,31 @@ import (
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/protocol"
+	"github.com/alanchenchen/suna/internal/skill"
 )
+
+func TestAgentSkillStoreSaveUpdatesConfigSnapshotAndModTime(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini")}, "openai/gpt-4o-mini")
+	cfg.Skills = map[string]skill.Record{"writer": {Enabled: false}}
+	if err := cfg.Save(cfg.ConfigPath()); err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{cfg: cfg}
+	if info, err := os.Stat(cfg.ConfigPath()); err == nil {
+		a.configModTime = info.ModTime()
+	}
+	store := agentSkillStore{agent: a}
+	if err := store.SaveSkillRecords(map[string]skill.Record{"writer": {Enabled: true}}); err != nil {
+		t.Fatalf("SaveSkillRecords() error = %v", err)
+	}
+	if !a.Config().Skills["writer"].Enabled {
+		t.Fatal("Agent config Skill enabled = false, want true")
+	}
+	if _, changed, err := a.reloadConfigFromDiskIfNeededLocked(); err != nil || changed {
+		t.Fatalf("reloadConfigFromDiskIfNeededLocked() = changed %v, err %v; want false,nil", changed, err)
+	}
+}
 
 func TestUpdateConfigEditingModelToDifferentProviderUsesOnlyNewProviderCredential(t *testing.T) {
 	dir := t.TempDir()

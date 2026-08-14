@@ -11,6 +11,7 @@ import (
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/prompt"
+	"github.com/alanchenchen/suna/internal/skill"
 )
 
 func (a *Agent) buildSystemPrompt(ctx context.Context) (string, error) {
@@ -23,11 +24,13 @@ func (a *Agent) buildSystemPrompt(ctx context.Context) (string, error) {
 	projectConfig = loadProjectInstructions(wd)
 	skills := ""
 	if a.skills != nil {
-		skills = a.skills.Summary()
+		var project []skill.Descriptor
+		project = a.ProjectSkills().Descriptors()
+		skills = skill.RenderSummary(a.skills.EnabledDescriptors(), project, a.cfg.SkillsDir())
 	}
 	return a.prompts.RenderSystem(prompt.SystemPromptData{
 		OS: env["OS"], Arch: env["Arch"], WorkDir: wd, Workspace: a.cfg.Guard.Workspace, DataDir: a.cfg.DataDir, ActiveModel: a.activeModelSummary(),
-		ModelRouting: a.modelRoutingSummary(), ProjectConfig: projectConfig.Content, ProjectConfigSource: projectConfig.Source, Skills: skills, SkillsDir: a.cfg.SkillsDir(),
+		ModelRouting: a.modelRoutingSummary(), ProjectConfig: projectConfig.Content, ProjectConfigSource: projectConfig.Source, Skills: skills,
 	})
 }
 

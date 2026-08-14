@@ -283,13 +283,15 @@ Default data directory:
 ~/.suna/config.toml        # main config
 ~/.suna/credentials.toml   # API keys
 ~/.suna/memory.db          # memory, session state, usage
-~/.suna/skills/            # Skills
+~/.suna/skills/            # global Skills
 ~/.suna/attachments/       # images and binary attachments
 ~/.suna/mcp-workdirs/      # default working directories for stdio MCP servers
 ~/.suna/logs/app.log       # logs
 ```
 
 For troubleshooting, check `~/.suna/logs/app.log` first.
+
+Global Skills use `~/.suna/skills/`. Project Skills are discovered once per Session runtime from `.agents/skills` or compatible agent directories between the Session cwd and Git worktree root; project Skills are project-managed and cannot be toggled in Suna.
 
 ## TCP daemon for third-party clients
 

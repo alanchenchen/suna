@@ -1,10 +1,8 @@
 package skill
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -22,6 +20,8 @@ type Record struct {
 type Info struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
+	Scope       Scope    `json:"scope"`
+	CanToggle   bool     `json:"can_toggle"`
 	Enabled     bool     `json:"enabled"`
 	Valid       bool     `json:"valid"`
 	Reasons     []string `json:"reasons,omitempty"`
@@ -36,8 +36,6 @@ type CheckResult struct {
 	Description string   `json:"description,omitempty"`
 	Error       string   `json:"error,omitempty"`
 }
-
-const maxSkillIndexBytes = 64 * 1024
 
 type Skill struct {
 	Name        string
@@ -63,7 +61,12 @@ func NewManager(root string, records map[string]Record) *Manager {
 func (m *Manager) Root() string { return m.root }
 
 func (m *Manager) SetRecords(records map[string]Record) { m.records = cloneRecords(records) }
-func (m *Manager) Records() map[string]Record           { return cloneRecords(m.records) }
+func (m *Manager) ApplyRecords(records map[string]Record) {
+	m.records = cloneRecords(records)
+	m.infos = nil
+	m.rebuildInfos()
+}
+func (m *Manager) Records() map[string]Record { return cloneRecords(m.records) }
 
 func (m *Manager) Reload(ctx context.Context) error {
 	_ = ctx
@@ -83,7 +86,8 @@ func (m *Manager) Reload(ctx context.Context) error {
 		if !entry.IsDir() {
 			continue
 		}
-		s := readSkillDir(filepath.Join(m.root, entry.Name()), entry.Name())
+		dir := filepath.Join(m.root, entry.Name())
+		s := readSkillDir(dir, entry.Name())
 		if existing, ok := m.skills[s.Name]; ok {
 			msg := fmt.Sprintf("duplicate skill name %q", s.Name)
 			existing.Valid = false
@@ -105,17 +109,28 @@ func (m *Manager) List() []Info {
 
 func (m *Manager) Summary() string {
 	var lines []string
+	for _, item := range m.EnabledDescriptors() {
+		desc := strings.TrimSpace(item.Description)
+		if desc == "" {
+			desc = "No description provided."
+		}
+		lines = append(lines, fmt.Sprintf("- %s: %s", item.Name, desc))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m *Manager) EnabledDescriptors() []Descriptor {
+	if m == nil {
+		return nil
+	}
+	items := make([]Descriptor, 0, len(m.skills))
 	for _, info := range m.List() {
 		if !info.Enabled || !info.Valid {
 			continue
 		}
-		desc := strings.TrimSpace(info.Description)
-		if desc == "" {
-			desc = "No description provided."
-		}
-		lines = append(lines, fmt.Sprintf("- %s: %s", info.Name, desc))
+		items = append(items, Descriptor{Name: info.Name, Description: info.Description, Scope: ScopeGlobal, Path: info.Path, Valid: true})
 	}
-	return strings.Join(lines, "\n")
+	return items
 }
 
 func (m *Manager) Load(name string) (string, bool, string) {
@@ -166,152 +181,19 @@ func (m *Manager) rebuildInfos() {
 	for name, s := range m.skills {
 		seen[name] = true
 		record := m.records[name]
-		m.infos = append(m.infos, Info{Name: name, Description: s.Description, Enabled: record.Enabled, Valid: s.Valid, Reasons: append([]string(nil), s.Reasons...), Path: s.Dir, Error: s.Error})
+		m.infos = append(m.infos, Info{Name: name, Description: s.Description, Scope: ScopeGlobal, CanToggle: s.Valid, Enabled: record.Enabled, Valid: s.Valid, Reasons: append([]string(nil), s.Reasons...), Path: s.Dir, Error: s.Error})
 	}
 	for name, record := range m.records {
 		if seen[name] {
 			continue
 		}
-		m.infos = append(m.infos, Info{Name: name, Enabled: record.Enabled, Valid: false, Reasons: append([]string(nil), record.Reasons...), Error: "skill not found"})
+		m.infos = append(m.infos, Info{Name: name, Scope: ScopeGlobal, CanToggle: false, Enabled: record.Enabled, Valid: false, Reasons: append([]string(nil), record.Reasons...), Error: "skill not found"})
 	}
 }
 
 func readSkillDir(dir, fallback string) *Skill {
-	path := filepath.Join(dir, "SKILL.md")
-	content, err := readSkillIndexContent(path)
-	if err != nil {
-		return &Skill{Name: fallback, Dir: dir, Path: path, Valid: false, Error: "SKILL.md missing or unreadable"}
-	}
-	name, desc := parseSkillHeader(content)
-	if name == "" {
-		name = fallback
-	}
-	if !validName(name) {
-		return &Skill{Name: fallback, Dir: dir, Path: path, Valid: false, Error: "invalid skill name"}
-	}
-	return &Skill{Name: name, Description: desc, Dir: dir, Path: path, Valid: true}
-}
-
-func readSkillIndexContent(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-	// Reload 只需要 Skill 索引信息，避免 daemon 启动时把完整 SKILL.md 常驻内存。
-	data, err := io.ReadAll(io.LimitReader(file, int64(maxSkillIndexBytes)+1))
-	if err != nil {
-		return "", err
-	}
-	if len(data) > maxSkillIndexBytes {
-		data = trimPartialTrailingLine(data[:maxSkillIndexBytes])
-	}
-	return string(data), nil
-}
-
-func trimPartialTrailingLine(data []byte) []byte {
-	if len(data) == 0 || data[len(data)-1] == '\n' {
-		return data
-	}
-	idx := bytes.LastIndexByte(data, '\n')
-	if idx < 0 {
-		return nil
-	}
-	return data[:idx+1]
-}
-
-func parseSkillHeader(content string) (name, description string) {
-	body := content
-	if strings.HasPrefix(content, "---\n") || strings.HasPrefix(content, "---\r\n") {
-		end := frontmatterEnd(content)
-		if end > 0 {
-			fm := content[4:end]
-			body = strings.TrimLeft(content[end+4:], "\r\n")
-			name, description = parseFrontmatter(fm)
-		} else {
-			// 索引窗口可能只包含 frontmatter 前半段；已丢弃半截尾行，因此可安全解析完整行里的元信息。
-			name, description = parseFrontmatter(content[4:])
-			body = ""
-		}
-	}
-	if name == "" {
-		name = extractH1(body)
-	}
-	if description == "" {
-		description = extractDescription(body)
-	}
-	return strings.Clone(strings.TrimSpace(name)), strings.Clone(strings.TrimSpace(description))
-}
-
-func frontmatterEnd(content string) int {
-	if idx := strings.Index(content[4:], "\n---\n"); idx >= 0 {
-		return idx + 4
-	}
-	if idx := strings.Index(content[4:], "\n---\r\n"); idx >= 0 {
-		return idx + 4
-	}
-	return -1
-}
-
-func parseFrontmatter(fm string) (name, description string) {
-	for _, line := range strings.Split(fm, "\n") {
-		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		idx := strings.Index(line, ":")
-		if idx < 0 {
-			continue
-		}
-		key := strings.TrimSpace(line[:idx])
-		val := trimYAMLScalar(line[idx+1:])
-		switch key {
-		case "name":
-			name = val
-		case "description":
-			description = val
-		}
-	}
-	return
-}
-
-func trimYAMLScalar(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) >= 2 {
-		q := s[0]
-		if (q == '\'' || q == '"') && s[len(s)-1] == q {
-			return s[1 : len(s)-1]
-		}
-	}
-	return s
-}
-
-func extractH1(body string) string {
-	for _, line := range strings.Split(body, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "# ") {
-			return strings.TrimSpace(line[2:])
-		}
-	}
-	return ""
-}
-
-func extractDescription(body string) string {
-	seenH1 := false
-	for _, line := range strings.Split(body, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "# ") {
-			seenH1 = true
-			continue
-		}
-		if seenH1 && line != "" && !strings.HasPrefix(line, "#") {
-			if len(line) > 240 {
-				return line[:240]
-			}
-			return line
-		}
-	}
-	return ""
+	desc := readDescriptor(dir, fallback, ScopeGlobal)
+	return &Skill{Name: desc.Name, Description: desc.Description, Dir: dir, Path: filepath.Join(dir, "SKILL.md"), Valid: desc.Valid, Error: desc.Error}
 }
 
 const (

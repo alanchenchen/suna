@@ -74,6 +74,9 @@ func (a *Agent) executeTool(ctx context.Context, call runner.ToolExecution, even
 	execCtx := ctx
 	if name == skilltools.ToolLoad || name == skilltools.ToolStart {
 		execCtx = contextWithSkillRuntime(ctx, a, events)
+		if name == skilltools.ToolLoad {
+			execCtx = skilltools.WithProjectCatalog(execCtx, a.ProjectSkills())
+		}
 	}
 	if name == agenttools.ToolAskUser || name == agenttools.ToolSpawn {
 		execCtx = agenttools.WithEvents(ctx, events)

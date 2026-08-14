@@ -1,9 +1,14 @@
 package chat
 
-import "github.com/alanchenchen/suna/internal/protocol"
+import (
+	"strings"
+
+	"github.com/alanchenchen/suna/internal/protocol"
+)
 
 type SkillAction struct {
 	Name    string
+	Scope   string
 	Enabled bool
 }
 
@@ -26,11 +31,18 @@ func (m *Model) SelectSkill(cannotToggleMessage string) (SkillAction, bool) {
 		return SkillAction{}, false
 	}
 	row, ok := selected.(skillItem)
-	if !ok || !SkillCanToggle(row.skill) {
+	if !ok {
+		return SkillAction{}, false
+	}
+	if SkillIsProject(row.skill) {
+		m.SkillsError = ""
+		return SkillAction{}, false
+	}
+	if !SkillCanToggle(row.skill) {
 		m.SkillsError = cannotToggleMessage
 		return SkillAction{}, false
 	}
-	return SkillAction{Name: row.skill.Name, Enabled: !SkillIsActive(row.skill)}, true
+	return SkillAction{Name: row.skill.Name, Scope: row.skill.Scope, Enabled: !SkillIsActive(row.skill)}, true
 }
 
 func (m *Model) SetSkills(skills []protocol.SkillInfo) {
@@ -47,8 +59,30 @@ func SkillIsActive(s protocol.SkillInfo) bool {
 	return s.Enabled && s.Valid
 }
 
+func SkillIsProject(s protocol.SkillInfo) bool {
+	return strings.EqualFold(strings.TrimSpace(s.Scope), "project")
+}
+
 func SkillCanToggle(s protocol.SkillInfo) bool {
-	return SkillIsActive(s) || s.Valid
+	return !SkillIsProject(s) && s.CanToggle
+}
+
+func (m *Model) SkillActionText(toggle, projectManaged, unavailable string) (string, bool) {
+	selected, ok := m.SkillsList.Selected()
+	if !ok {
+		return unavailable, false
+	}
+	row, ok := selected.(skillItem)
+	if !ok {
+		return unavailable, false
+	}
+	if SkillIsProject(row.skill) {
+		return projectManaged, false
+	}
+	if SkillCanToggle(row.skill) {
+		return toggle, true
+	}
+	return unavailable, false
 }
 
 func SkillHasIssue(s protocol.SkillInfo) bool {

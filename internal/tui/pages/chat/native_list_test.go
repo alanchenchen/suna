@@ -10,6 +10,15 @@ import (
 	"github.com/alanchenchen/suna/internal/protocol"
 )
 
+func TestSkillItemKeyIncludesScopeAndPath(t *testing.T) {
+	global := skillItem{skill: protocol.SkillInfo{Name: "writer", Scope: "global"}}
+	projectA := skillItem{skill: protocol.SkillInfo{Name: "writer", Scope: "project", Path: "/repo/a/writer"}}
+	projectB := skillItem{skill: protocol.SkillInfo{Name: "writer", Scope: "project", Path: "/repo/b/writer"}}
+	if global.Key() == projectA.Key() || projectA.Key() == projectB.Key() {
+		t.Fatalf("Skill keys must distinguish scope and exact project path: %q %q %q", global.Key(), projectA.Key(), projectB.Key())
+	}
+}
+
 func TestSkillItemFilterValueUsesNameAndDescriptionOnly(t *testing.T) {
 	item := skillItem{skill: protocol.SkillInfo{
 		Name:        "webpack-notes",
@@ -81,6 +90,43 @@ func TestNativeDelegateUsesCompactSingleLineAndVisibleActiveState(t *testing.T) 
 	}
 	if strings.Count(strings.TrimSpace(view), "\n") != 0 {
 		t.Fatalf("list row = %q, want one compact line", view)
+	}
+}
+
+func TestNativeDelegateKeepsProjectPathBeforeDescription(t *testing.T) {
+	delegate := nativeDelegate{styles: ListStyles{}, text: testListText()}
+	view := delegate.renderItem(54, false, skillItem{skill: protocol.SkillInfo{Name: "writer", Scope: "project", Path: "/repo/.agents/skills/writer", Description: "A deliberately long description", Valid: true, Enabled: true}})
+	if !strings.Contains(view, "/repo/.agents/skills/writer") {
+		t.Fatalf("project Skill row = %q, want exact path visible before truncation", view)
+	}
+}
+
+func TestNativeDelegateRendersSkillScopeBadgeWithStatusOnOneLine(t *testing.T) {
+	tests := []struct {
+		name      string
+		skill     protocol.SkillInfo
+		wantBadge string
+		wantMark  string
+	}{
+		{name: "global active", skill: protocol.SkillInfo{Name: "global-skill", Scope: "global", Valid: true, Enabled: true, CanToggle: true}, wantBadge: "[GLOBAL]", wantMark: "✓"},
+		{name: "project issue", skill: protocol.SkillInfo{Name: "project-skill", Scope: "project", Valid: false}, wantBadge: "[PROJECT]", wantMark: "!"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			delegate := nativeDelegate{styles: ListStyles{}, text: testListText()}
+			view := delegate.renderItem(80, true, skillItem{skill: tt.skill})
+			for _, want := range []string{tt.wantBadge, tt.wantMark, tt.skill.Name} {
+				if !strings.Contains(view, want) {
+					t.Fatalf("skill row = %q, want %q", view, want)
+				}
+			}
+			if strings.Contains(view, "\n") {
+				t.Fatalf("skill row = %q, want one line", view)
+			}
+			if got := lipgloss.Width(view); got > 80 {
+				t.Fatalf("skill row width = %d, want <= 80; row=%q", got, view)
+			}
+		})
 	}
 }
 

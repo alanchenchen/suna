@@ -21,4 +21,4 @@ Environment: {{.OS}}/{{.Arch}}, cwd `{{.WorkDir}}`, active model `{{.ActiveModel
 {{.Skills}}
 {{end}}
 
-Skills directory: `{{.SkillsDir}}`. After creating or importing a Skill, use `skill_start`; do not bypass its verification and enable decisions.
+After creating or importing a global Skill, use `skill_start`; do not bypass its verification and enable decisions.

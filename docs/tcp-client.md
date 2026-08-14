@@ -141,14 +141,14 @@ TCP 是一条长期连接，framing 为 **NDJSON**：
 TCP client 连接后，必须先发送：
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.4","client":{"name":"my-ui","version":"1.0.0","type":"desktop"}}}
+{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.5","client":{"name":"my-ui","version":"1.0.0","type":"desktop"}}}
 ```
 
 建议字段：
 
 | 字段 | 是否必填 | 说明 |
 |---|---:|---|
-| `protocol_version` | 否 | 当前公开版本为 `"0.4"`；推荐始终传入。 |
+| `protocol_version` | 否 | 当前公开版本为 `"0.5"`；推荐始终传入。 |
 | `client.name` | 否 | 客户端名称，用于诊断。 |
 | `client.version` | 否 | 客户端版本。 |
 | `client.type` | 否 | 例如 `desktop`、`ide`、`web_gateway`、`script`。 |
@@ -157,7 +157,7 @@ TCP client 连接后，必须先发送：
 
 ```json
 {
-  "protocol_version":"0.4",
+  "protocol_version":"0.5",
   "runtime_version":"v0.x.x",
   "transport":"tcp",
   "capabilities":{"agent":true,"session":true,"handoff":true,"mcp_status_updates":true},
@@ -309,7 +309,7 @@ export class SunaClient {
 
     const client = new SunaClient(socket);
     await client.request("runtime.hello", {
-      protocol_version: "0.4",
+      protocol_version: "0.5",
       client: { name: "example-ui", version: "1.0.0", type: "node" },
     });
     return client;
@@ -431,7 +431,7 @@ try {
 实现一个 Suna TCP JSON-RPC client：
 1. 执行 `suna serve --json`，解析 stdout 的 tcp_endpoint；
 2. 使用长期 TCP connection 和 NDJSON，一行一条 JSON；
-3. 第一条 request 必须是 runtime.hello，protocol_version 为 0.4；
+3. 第一条 request 必须是 runtime.hello，protocol_version 为 0.5；
 4. 用整数 request ID 和 pending map 匹配 response；
 5. 独立分发无 ID 的 daemon notification；
 6. 先 session.list，再 session.create 或 session.attach；

@@ -64,6 +64,49 @@ func TestNativeListOverlayKeepsChromeForNoMatches(t *testing.T) {
 	}
 }
 
+func TestSkillsOverlayActionTextFollowsSelectedScopeInNormalAndFilteringModes(t *testing.T) {
+
+	tui := New(LocaleEN)
+	tui.width = 100
+	tui.height = 30
+	tui.chat.SetSkills([]protocol.SkillInfo{
+		{Name: "global-skill", Scope: "global", Valid: true, CanToggle: true},
+		{Name: "project-skill", Scope: "project", Valid: true, CanToggle: true},
+	})
+	tui.chat.InitNativeLists(false, tui.nativeListStyles(), tui.nativeListText())
+
+	globalView := stripANSIForTest(tui.renderSkillsOverlay(tui.width))
+	if !strings.Contains(globalView, "Enter/Space toggle") {
+		t.Fatalf("global footer = %q, want toggle action", globalView)
+	}
+
+	tui.chat.SkillsList.List().CursorDown()
+	projectView := stripANSIForTest(tui.renderSkillsOverlay(tui.width))
+	if !strings.Contains(projectView, "project-managed") {
+		t.Fatalf("project footer = %q, want project-managed action", projectView)
+	}
+	if strings.Contains(projectView, "Enter project-managed") || strings.Contains(projectView, "Enter/Space project-managed") {
+		t.Fatalf("project footer = %q, must not advertise an actionable key", projectView)
+	}
+
+	listModel := tui.chat.SkillsList.List()
+	listModel.SetFilterText("global-skill")
+	listModel.SetFilterState(list.Filtering)
+	globalFilteringView := stripANSIForTest(tui.renderSkillsOverlay(tui.width))
+	if !strings.Contains(globalFilteringView, "Enter toggle") {
+		t.Fatalf("global filtering footer = %q, want toggle action", globalFilteringView)
+	}
+
+	listModel.SetFilterText("project-skill")
+	projectFilteringView := stripANSIForTest(tui.renderSkillsOverlay(tui.width))
+	if !strings.Contains(projectFilteringView, "project-managed") {
+		t.Fatalf("project filtering footer = %q, want project-managed action", projectFilteringView)
+	}
+	if strings.Contains(projectFilteringView, "Enter project-managed") || strings.Contains(projectFilteringView, "Enter/Space project-managed") {
+		t.Fatalf("project filtering footer = %q, must not advertise an actionable key", projectFilteringView)
+	}
+}
+
 func TestNativeListOverlayShrinksToContent(t *testing.T) {
 	tui := New(LocaleEN)
 	tui.width = 100

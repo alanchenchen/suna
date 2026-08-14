@@ -155,9 +155,25 @@ Workspace 是本地文件和明显 exec 路径的目录硬边界，不能被用�
 
 ## Skill 当前实现
 
-Skill 默认目录为 `~/.suna/skills/`。每个 Skill 是一个目录，至少包含 `SKILL.md`。
+Skill 有两类来源：
 
-Suna 识别通用 front matter：
+- 全局 Skill：`~/.suna/skills/<skill-name>/SKILL.md`，由 Suna 配置管理启用状态。
+- 项目 Skill：Session cwd 到 Git worktree 根之间发现的兼容目录，项目文件存在且有效即对该 Session 可用。
+
+项目目录按以下优先级逐层选择第一个非空根：
+
+```text
+.agents/skills
+.claude/skills
+.github/skills
+.gemini/skills
+.cursor/skills
+.opencode/skills
+```
+
+非 Git 目录只检查 Session cwd；每个根只扫描一级子目录。项目 Catalog 在 Session runtime 创建时读取一次，不做 watcher 或逐轮扫描。
+
+Suna 使用有界 YAML frontmatter parser；启动索引阶段最多读取 64 KiB frontmatter，不读取正文：
 
 ```markdown
 ---
@@ -168,12 +184,15 @@ description: When to use this skill.
 
 当前流程：
 
-- daemon 启动时轻量扫描 Skill 目录和 `SKILL.md` 元信息。
-- 手动放入目录的有效 Skill 默认可用。
-- 通过对话导入或生成的 Skill 先保持未启用。
-- `skill_start` 会执行静态检查，提示是否进行 LLM review，最后询问是否启用。
-- LLM 根据 active skill index 中的 description 判断是否需要 `skill_load(name)`。
-- `scripts/` 辅助脚本没有额外 sandbox；执行仍走普通 `exec` 工具和 Guard。
+- daemon 启动时轻量扫描全局 Skill 目录和受限元信息。
+- Session runtime 创建时扫描一次项目 Skill，并缓存轻量 Catalog；每轮 Prompt 只读取内存摘要。
+- 项目 Skill 类似 `AGENTS.md`，由项目管理，不能通过 Suna toggle。
+- 全局 Skill toggle 只更新管理状态；正文和资源文件不做热更新管理。
+- 手动放入全局目录的有效 Skill 默认可用。
+- 通过对话导入或生成的全局 Skill 先保持未启用。
+- `skill_start` 对全局 Skill 执行静态检查，提示是否进行 LLM review，最后询问是否启用。
+- LLM 根据 Available Skills 中的 `name`、`scope`、项目路径和 description 判断是否需要 `skill_load(name, scope, path)`。
+- 完整 `SKILL.md` 只在 `skill_load` 时读取；`scripts/` 辅助脚本没有额外 sandbox，执行仍走普通 `exec` 工具和 Guard。
 
 ## MCP 当前实现
 

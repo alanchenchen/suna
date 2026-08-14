@@ -50,6 +50,21 @@ func (s *service) OnConnect(ctx context.Context, connID string, sink protocol.Ev
 	s.daemon.addConnection(connID, sink)
 }
 
+func validateSkillSetScope(raw string) error {
+	scope := strings.ToLower(strings.TrimSpace(raw))
+	if scope == "" {
+		scope = string(skill.ScopeGlobal)
+	}
+	switch scope {
+	case string(skill.ScopeGlobal):
+		return nil
+	case string(skill.ScopeProject):
+		return fmt.Errorf("project skills are managed by the project and cannot be toggled")
+	default:
+		return fmt.Errorf("scope must be global or project")
+	}
+}
+
 func (s *service) OnDisconnect(ctx context.Context, connID string) {
 	s.daemon.removeConnection(connID)
 }
@@ -68,6 +83,21 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 	if skill.IsProtocolMethod(req.Method) {
 		if s.daemon.agent.Skills() == nil {
 			return nil, protocolError{code: -32603, message: "skill runtime is not initialized"}
+		}
+		if req.Method == protocol.MethodSkillList {
+			global := s.daemon.agent.Skills().CurrentList()
+			items := skill.ProtocolInfos(global)
+			if rt, _, sessionErr := s.daemon.sessions.attachedSession(req.ConnID); sessionErr == nil {
+				items = append(items, skill.ProjectProtocolInfos(rt.agent.ProjectSkills())...)
+			}
+			return protocol.SkillListResult{Skills: items}, nil
+		}
+		var params protocol.SkillSetParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return nil, invalidParams(err.Error())
+		}
+		if err := validateSkillSetScope(params.Scope); err != nil {
+			return nil, invalidParams(err.Error())
 		}
 		return s.daemon.agent.Skills().HandleProtocol(ctx, req, sink)
 	}
@@ -174,7 +204,7 @@ func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHell
 		return protocol.RuntimeHelloResult{}, invalidParams(err.Error())
 	}
 	requestedVersion := strings.TrimSpace(params.ProtocolVersion)
-	if requestedVersion != "" && requestedVersion != "0.4" {
+	if requestedVersion != "" && requestedVersion != "0.5" {
 		return protocol.RuntimeHelloResult{}, protocolError{code: -32602, message: "unsupported protocol version", data: protocol.ProtocolErrorData{Kind: "unsupported_capability", Reason: "protocol_version"}}
 	}
 	transport := strings.TrimSpace(params.Transport)
@@ -182,7 +212,7 @@ func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHell
 		transport = "unknown"
 	}
 	return protocol.RuntimeHelloResult{
-		ProtocolVersion: "0.4",
+		ProtocolVersion: "0.5",
 		RuntimeVersion:  version.Current(),
 		Transport:       transport,
 		Capabilities: map[string]bool{

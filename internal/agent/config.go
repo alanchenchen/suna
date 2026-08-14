@@ -51,40 +51,55 @@ func (a *Agent) Config() *config.Config {
 // ReloadConfigFromDiskIfNeeded 仅在候选配置和 Router 均可用后发布运行态快照。
 func (a *Agent) ReloadConfigFromDiskIfNeeded() (*config.Config, error) {
 	a.configMu.Lock()
-	defer a.configMu.Unlock()
+	cfg, changed, err := a.reloadConfigFromDiskIfNeededLocked()
+	a.configMu.Unlock()
+	if err == nil && changed {
+		a.reloadRuntimeConfig()
+	}
+	return cfg, err
+}
+
+func (a *Agent) reloadConfigFromDiskIfNeededLocked() (*config.Config, bool, error) {
 	if a.cfg == nil {
-		return nil, fmt.Errorf("config not loaded")
+		return nil, false, fmt.Errorf("config not loaded")
 	}
 	info, err := os.Stat(a.cfg.ConfigPath())
 	if err != nil {
 		// 首次启动时 config.toml 可能还不存在，这是正常的配置向导状态；
 		// 保持内存中的空配置即可，不要向上返回错误导致 daemon 状态请求刷 ERROR。
 		if os.IsNotExist(err) {
-			return a.cfg.Clone(), nil
+			return a.cfg.Clone(), false, nil
 		}
-		return a.cfg.Clone(), err
+		return a.cfg.Clone(), false, err
 	}
 	if !info.ModTime().After(a.configModTime) && len(a.cfg.Models) > 0 {
-		return a.cfg.Clone(), nil
+		return a.cfg.Clone(), false, nil
 	}
 	loaded, err := config.LoadFromDataDir(a.cfg.ConfigPath(), a.cfg.DataDir)
 	if err != nil {
-		return a.cfg.Clone(), err
+		return a.cfg.Clone(), false, err
 	}
 	router, err := newRouterForConfig(loaded)
 	if err != nil {
-		return a.cfg.Clone(), err
+		return a.cfg.Clone(), false, err
 	}
 
 	// cfg/router/modtime 在同一把锁内一次性发布，构建失败不改变任何运行态。
 	a.publishConfigLocked(loaded, router, info.ModTime())
-	a.reloadRuntimeConfigLocked()
-	return a.cfg.Clone(), nil
+	return a.cfg.Clone(), true, nil
 }
 
 func (a *Agent) UpdateConfig(params ConfigSetParams) (*config.Config, error) {
 	a.configMu.Lock()
-	defer a.configMu.Unlock()
+	cfg, err := a.updateConfigLocked(params)
+	a.configMu.Unlock()
+	if err == nil {
+		a.reloadRuntimeConfig()
+	}
+	return cfg, err
+}
+
+func (a *Agent) updateConfigLocked(params ConfigSetParams) (*config.Config, error) {
 	if a.cfg == nil {
 		return nil, fmt.Errorf("config not loaded")
 	}
@@ -192,19 +207,7 @@ func (a *Agent) UpdateConfig(params ConfigSetParams) (*config.Config, error) {
 		return nil, err
 	}
 	a.publishConfigLocked(cfg, router, modTime)
-	a.reloadRuntimeConfigLocked()
 	return a.cfg.Clone(), nil
-}
-
-func (a *Agent) reloadSkillsLocked() {
-	if a.cfg == nil || a.skills == nil {
-		return
-	}
-	a.skills.SetRoot(a.cfg.SkillsDir())
-	a.skills.SetStore(a.cfg)
-	a.skills.SetReviewer(agentSkillReviewer{})
-	a.skills.SetPrompter(agentSkillPrompter{})
-	_ = a.skills.Reload(context.Background())
 }
 
 func providerStillUsed(models []config.ModelConfig, provider string) bool {
@@ -458,12 +461,24 @@ func (a *Agent) materializeLegacyPendingMemoryQueueModelRef(cfg *config.Config, 
 	}
 }
 
-// reloadRuntimeConfigLocked 是发布后的无返回值同步。工具目录刷新失败不应把已经成功
+// reloadRuntimeConfig 是发布后的无返回值同步。工具目录刷新失败不应把已经成功
 // 提交的配置伪装为失败；后续刷新会重试。
-func (a *Agent) reloadRuntimeConfigLocked() {
-	a.reloadSkillsLocked()
+func (a *Agent) reloadRuntimeConfig() {
+	a.configMu.RLock()
+	cfg := a.cfg.Clone()
+	a.configMu.RUnlock()
+	if cfg == nil {
+		return
+	}
+	if a.skills != nil {
+		a.skills.SetRoot(cfg.SkillsDir())
+		a.skills.SetStore(agentSkillStore{agent: a})
+		a.skills.SetReviewer(agentSkillReviewer{})
+		a.skills.SetPrompter(agentSkillPrompter{})
+		_ = a.skills.Reload(context.Background())
+	}
 	if a.mcp != nil {
-		a.mcp.SetConfig(a.cfg.MCP)
+		a.mcp.SetConfig(cfg.MCP)
 	}
 	if a.tools != nil {
 		_ = a.tools.Reload(context.Background())

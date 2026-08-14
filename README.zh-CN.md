@@ -291,13 +291,15 @@ Workspace 是可选目录边界：设置后，本地文件和命令操作会限�
 ~/.suna/config.toml        # 主配置
 ~/.suna/credentials.toml   # API Key
 ~/.suna/memory.db          # 记忆、会话、用量等本地数据
-~/.suna/skills/            # Skill 目录
+~/.suna/skills/            # 全局 Skill 目录
 ~/.suna/attachments/       # 图片和二进制附件
 ~/.suna/mcp-workdirs/      # stdio MCP server 的默认工作目录
 ~/.suna/logs/app.log       # 日志
 ```
 
 排查问题时优先查看 `~/.suna/logs/app.log`。
+
+全局 Skill 使用 `~/.suna/skills/`。项目 Skill 会在 Session runtime 创建时，从 Session cwd 到 Git worktree 根之间的 `.agents/skills` 或兼容 Agent 目录发现一次；项目 Skill 由项目管理，不能在 Suna 中 toggle。
 
 ## 第三方客户端 TCP daemon
 

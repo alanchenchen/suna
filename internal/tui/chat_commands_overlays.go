@@ -195,7 +195,7 @@ func (t *TUI) updateSkillsOverlay(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, nil
 		case "enter":
 			if action, ok := t.chat.SelectSkill(t.tr("tui.skills.cannot_toggle")); ok {
-				return t, t.setSkillOverlayCmd(action.Name, action.Enabled)
+				return t, t.setSkillOverlayCmd(action.Name, action.Scope, action.Enabled)
 			}
 			return t, nil
 		}
@@ -206,19 +206,19 @@ func (t *TUI) updateSkillsOverlay(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if ks == "enter" || ks == " " || ks == "space" {
 		if action, ok := t.chat.SelectSkill(t.tr("tui.skills.cannot_toggle")); ok {
-			return t, t.setSkillOverlayCmd(action.Name, action.Enabled)
+			return t, t.setSkillOverlayCmd(action.Name, action.Scope, action.Enabled)
 		}
 		return t, nil
 	}
 	return t, t.chat.UpdateSkillsList(msg)
 }
 
-func (t *TUI) setSkillOverlayCmd(name string, enabled bool) tea.Cmd {
+func (t *TUI) setSkillOverlayCmd(name, scope string, enabled bool) tea.Cmd {
 	return func() tea.Msg {
 		if t.localCli == nil {
 			return ipcErrorNotification(notifyConfigError, errNotConnected(t))
 		}
-		if err := t.localCli.SetSkill(protocol.SkillSetParams{Name: strings.TrimSpace(name), Enabled: enabled}); err != nil {
+		if err := t.localCli.SetSkill(protocol.SkillSetParams{Name: strings.TrimSpace(name), Scope: strings.TrimSpace(scope), Enabled: enabled}); err != nil {
 			return ipcErrorNotification(notifyConfigError, err)
 		}
 		result, err := t.localCli.ListSkills()
@@ -427,12 +427,17 @@ func (t *TUI) renderMCPOverlay(width int) string {
 }
 
 func (t *TUI) renderSkillsOverlay(width int) string {
-	return t.renderNativeListOverlay(chatpage.NativeListSkills, &t.chat.SkillsList, width, t.nativeListText().Toggle, "tui.skills.empty", func() string {
+	action, actionable := t.chat.SkillActionText(
+		t.nativeListText().Toggle,
+		t.tr("tui.skills.project_managed"),
+		t.tr("tui.skills.unavailable"),
+	)
+	return t.renderNativeListOverlay(chatpage.NativeListSkills, &t.chat.SkillsList, width, action, "tui.skills.empty", func() string {
 		if t.chat.SkillsLoading && len(t.chat.Skills) == 0 {
 			return t.tr("tui.skills.loading")
 		}
 		return ""
-	}(), t.chat.SkillsError)
+	}(), t.chat.SkillsError, actionable)
 }
 
 func (t *TUI) renderMemoryOverlay(width int) string {

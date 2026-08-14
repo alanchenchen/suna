@@ -9,6 +9,7 @@ import (
 	"github.com/alanchenchen/suna/internal/media"
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
+	"github.com/alanchenchen/suna/internal/skill"
 )
 
 // SessionSnapshot 是 daemon attach/create 后给 UI 渲染用的会话快照。
@@ -41,7 +42,7 @@ func canonicalCWD(cwd string) string {
 	return cwd
 }
 
-func (a *Agent) NewSessionAgent(sessionID, cwd, modelRef string) *Agent {
+func (a *Agent) NewSessionAgentWithProjectSkills(sessionID, cwd, modelRef string, projectSkills *skill.Catalog) *Agent {
 	cwd = canonicalCWD(cwd)
 	root := a.root()
 	root.configMu.RLock()
@@ -76,6 +77,7 @@ func (a *Agent) NewSessionAgent(sessionID, cwd, modelRef string) *Agent {
 		prompts:       prompts,
 		store:         store,
 		skills:        skills,
+		projectSkills: projectSkills,
 		mcp:           mcp,
 		extractQueue:  extractQueue,
 		extractWorker: extractWorker,
@@ -119,6 +121,12 @@ func (a *Agent) SnapshotState(ctx context.Context) (SessionSnapshot, error) {
 func (a *Agent) SessionID() string { return a.sessionID }
 func (a *Agent) CWD() string       { return a.cwd }
 func (a *Agent) ModelRef() string  { return a.modelRef }
+func (a *Agent) ProjectSkills() *skill.Catalog {
+	if a == nil {
+		return nil
+	}
+	return a.projectSkills
+}
 
 func (a *Agent) SetModelRef(modelRef string) {
 	a.modelRef = strings.TrimSpace(modelRef)

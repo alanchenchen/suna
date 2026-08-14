@@ -96,7 +96,7 @@ TCP 客户端的限制：
 | `skill.list` / `skill.set` | 查询、启用或禁用 Skill。 |
 | `mcp.list` / `mcp.toggle` / `mcp.reload` | 查询、启用/禁用或重载 MCP server。 |
 
-不主推给第三方 runtime v0.4 依赖的 method：
+不主推给第三方 runtime v0.5 依赖的 method：
 
 | Method | 说明 |
 |---|---|
@@ -334,7 +334,7 @@ TUI 的“本会话 / 已加入 / 观察中”是 UI 根据 attach 方式、clie
 
 ## 11. Public / internal 边界
 
-public runtime v0.4 主推：
+public runtime v0.5 主推：
 
 - runtime handshake。
 - agent 消息和事件。
@@ -367,8 +367,9 @@ public runtime v0.4 主推：
 - 结构化错误新增 kind 时，应保持旧 kind 的含义稳定。
 - `agent.delta`、`agent.run`、`agent.usage` 的职责边界不能混淆。
 - v0.4 将 usage 缓存字段升级为 `cache_read_tokens` 与 `cache_creation_tokens`，不兼容旧 `cached_tokens`。
-- public runtime v0.4 暂不承诺 string id 或客户端 notification；如果未来支持，应在 JSON-RPC 层保持 id 原样 round-trip，避免污染 daemon 业务层。
 - protocol 0.4 不兼容旧 `session.new` / `session.restore` 主流程；旧客户端需要迁移到 `session.create` / `session.attach`。
+- public runtime v0.5 暂不承诺 string id 或客户端 notification；如果未来支持，应在 JSON-RPC 层保持 id 原样 round-trip，避免污染 daemon 业务层。
+- protocol 0.5 在 Skill 列表和设置语义中引入 `scope` / `can_toggle`，项目 Skill 通过精确 `path` 区分；0.4 客户端需要升级后再连接。
 
 ---
 

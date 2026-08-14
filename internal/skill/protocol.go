@@ -53,10 +53,26 @@ func (r *Runtime) protocolSet(ctx context.Context, raw any, _ protocol.EventSink
 	return protocol.SkillSetResult{Status: "ok"}, nil
 }
 
+func ProtocolInfos(in []Info) []protocol.SkillInfo {
+	return toProtocolInfos(in)
+}
+
 func toProtocolInfos(in []Info) []protocol.SkillInfo {
 	out := make([]protocol.SkillInfo, 0, len(in))
 	for _, item := range in {
-		out = append(out, protocol.SkillInfo{Name: item.Name, Description: item.Description, Enabled: item.Enabled, Valid: item.Valid, Reasons: item.Reasons, Path: item.Path, Error: item.Error})
+		out = append(out, protocol.SkillInfo{Name: item.Name, Description: item.Description, Scope: string(item.Scope), CanToggle: item.CanToggle, Enabled: item.Enabled, Valid: item.Valid, Reasons: item.Reasons, Path: item.Path, Error: item.Error})
+	}
+	return out
+}
+
+func ProjectProtocolInfos(catalog *Catalog) []protocol.SkillInfo {
+	if catalog == nil {
+		return nil
+	}
+	items := catalog.Descriptors()
+	out := make([]protocol.SkillInfo, 0, len(items))
+	for _, item := range items {
+		out = append(out, protocol.SkillInfo{Name: item.Name, Description: item.Description, Scope: string(ScopeProject), CanToggle: false, Enabled: item.Valid, Valid: item.Valid, Path: item.Path, Error: item.Error})
 	}
 	return out
 }

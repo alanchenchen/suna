@@ -39,7 +39,7 @@ func testListText() ListText {
 	return ListText{
 		SkillsTitle: "Skills", MCPTitle: "MCP Servers", ModelsTitle: "Models", CountSuffix: " items",
 		Filter: "Filter: ", Skill: "skill", Skills: "skills", Server: "server", Servers: "servers", Model: "model", Models: "models",
-		Toggle: "toggle", Reload: "reload", Select: "select", Close: "close", Tools: "tools",
+		Toggle: "toggle", Reload: "reload", Select: "select", Close: "close", Tools: "tools", GlobalScope: "GLOBAL", ProjectScope: "PROJECT",
 		Up: "up", Down: "down", FilterHelp: "filter", ClearFilter: "clear filter", Cancel: "cancel",
 	}
 }

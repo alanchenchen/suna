@@ -48,7 +48,7 @@ func TestManagerContentChangeDoesNotDisableEnabledSkill(t *testing.T) {
 func TestManagerReloadUsesSkillIndexWithoutFullContent(t *testing.T) {
 	root := t.TempDir()
 	path := writeSkill(t, root, "large", "large-skill", "Use for large tasks.")
-	largeTail := make([]byte, maxSkillIndexBytes*2)
+	largeTail := make([]byte, maxSkillFrontmatterBytes*2)
 	for i := range largeTail {
 		largeTail[i] = 'x'
 	}
@@ -65,7 +65,7 @@ func TestManagerReloadUsesSkillIndexWithoutFullContent(t *testing.T) {
 	if !ok || reason != "" {
 		t.Fatalf("Load(large-skill) ok = %v, reason = %q, want ok with empty reason", ok, reason)
 	}
-	if len(content) <= maxSkillIndexBytes {
+	if len(content) <= maxSkillFrontmatterBytes {
 		t.Fatalf("len(Load(large-skill)) = %d, want full content larger than index limit", len(content))
 	}
 }
@@ -83,26 +83,27 @@ func TestManagerReloadReadsFrontmatterMetaInAnyOrder(t *testing.T) {
 	}
 }
 
-func TestManagerReloadReadsPartialFrontmatterMeta(t *testing.T) {
+func TestManagerReloadRejectsOversizedUnterminatedFrontmatter(t *testing.T) {
 	root := t.TempDir()
-	padding := make([]byte, maxSkillIndexBytes-len("---\ndescription: Early description.\nname: partial-frontmatter\n")+1)
+	padding := make([]byte, maxSkillFrontmatterBytes-len("---\ndescription: Early description.\nname: partial-frontmatter\n")+1)
 	for i := range padding {
 		padding[i] = 'x'
 	}
 	writeFile(t, filepath.Join(root, "frontmatter", "SKILL.md"), "---\ndescription: Early description.\nname: partial-frontmatter\n"+string(padding)+"\n---\n")
-	m := NewManager(root, map[string]Record{"partial-frontmatter": {Enabled: true}})
+	m := NewManager(root, nil)
 
 	if err := m.Reload(context.Background()); err != nil {
 		t.Fatalf("Reload() error = %v", err)
 	}
-	if got := m.Summary(); got != "- partial-frontmatter: Early description." {
-		t.Fatalf("Summary() = %q, want %q", got, "- partial-frontmatter: Early description.")
+	infos := m.List()
+	if len(infos) != 1 || infos[0].Valid || infos[0].Error == "" {
+		t.Fatalf("infos = %#v, want one invalid oversized Skill", infos)
 	}
 }
 
 func TestManagerReloadIgnoresPartialTrailingIndexLine(t *testing.T) {
 	root := t.TempDir()
-	padding := make([]byte, maxSkillIndexBytes-len("# partial\n")-len("description starts but is incomplete"))
+	padding := make([]byte, maxSkillFrontmatterBytes-len("# partial\n")-len("description starts but is incomplete"))
 	for i := range padding {
 		padding[i] = 'x'
 	}

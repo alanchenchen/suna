@@ -46,6 +46,7 @@ type Agent struct {
 	prompts        *prompt.Loader
 	store          *memory.Store
 	skills         *skill.Runtime
+	projectSkills  *skill.Catalog
 	mcp            *mcp.Runtime
 	sessionID      string
 	cwd            string
@@ -103,10 +104,9 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 	}()
 
 	sessionID := uuid.New().String()
-	skillRuntime := skill.NewRuntime(cfg.SkillsDir(), cfg)
+	skillRuntime := skill.NewRuntime(cfg.SkillsDir(), nil)
 	skillRuntime.SetReviewer(agentSkillReviewer{})
 	skillRuntime.SetPrompter(agentSkillPrompter{})
-	skillRuntime.Reload(context.Background())
 
 	toolManager := tools.NewManager()
 	toolManager.RegisterProvider(builtin.NewProvider())
@@ -154,6 +154,8 @@ func NewAgent(cfg *config.Config) (*Agent, error) {
 		extractWorker: extractWorker,
 	}
 	toolManager.RegisterProvider(agenttools.NewProvider(agent))
+	skillRuntime.SetStore(agentSkillStore{agent: agent})
+	_ = skillRuntime.Reload(context.Background())
 	mcpRuntime.SetCatalogSync(agent.syncMCPToolCatalog)
 	if err := toolManager.Reload(context.Background()); err != nil {
 		return nil, fmt.Errorf("init agent tools: %w", err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -99,12 +100,38 @@ func TestRuntimeStartChoiceRetry(t *testing.T) {
 	}
 }
 
+func TestRuntimeToggleUsesLoadedCatalogWithoutRescanningFiles(t *testing.T) {
+	root := t.TempDir()
+	path := writeSkill(t, root, "toggle", "toggle", "Original description.")
+	store := &memoryStore{trust: map[string]Record{"toggle": {Enabled: false}}}
+	rt := NewRuntime(root, store)
+	if err := rt.Reload(context.Background()); err != nil {
+		t.Fatalf("Reload() error = %v", err)
+	}
+	writeFile(t, path, "---\nname: toggle\ndescription: Changed on disk.\n---\n")
+
+	if err := rt.SetEnabled(context.Background(), EnableDecision{Name: "toggle", Enabled: true}); err != nil {
+		t.Fatalf("SetEnabled() error = %v", err)
+	}
+	items := rt.EnabledDescriptors()
+	if len(items) != 1 || items[0].Description != "Original description." {
+		t.Fatalf("descriptors = %#v, want loaded catalog metadata without disk refresh", items)
+	}
+	content, err := rt.LoadContent("toggle")
+	if err != nil || !strings.Contains(content, "Changed on disk.") {
+		t.Fatalf("LoadContent() content = %q, err = %v, want current body from disk", content, err)
+	}
+}
+
 func TestRuntimeSetEnabledDoesNotRunCheck(t *testing.T) {
 	root := t.TempDir()
 	writeSkill(t, root, "toggle", "toggle-skill", "Toggle skill.")
 	writeFile(t, filepath.Join(root, "toggle", "scripts", "run.sh"), "curl https://example.com\n")
 	store := &memoryStore{trust: map[string]Record{"toggle-skill": {Enabled: false, Reasons: []string{"old reason"}}}}
 	rt := NewRuntime(root, store)
+	if err := rt.Reload(context.Background()); err != nil {
+		t.Fatalf("Reload() error = %v", err)
+	}
 
 	if err := rt.SetEnabled(context.Background(), EnableDecision{Name: "toggle-skill", Enabled: true}); err != nil {
 		t.Fatalf("SetEnabled() error = %v", err)
@@ -114,6 +141,22 @@ func TestRuntimeSetEnabledDoesNotRunCheck(t *testing.T) {
 	}
 	if got := store.trust["toggle-skill"].Reasons; len(got) != 1 || got[0] != "old reason" {
 		t.Fatalf("store.trust[toggle-skill].Reasons = %#v, want [old reason]", got)
+	}
+}
+
+func TestRuntimeSetEnabledMergesHostRecordSnapshot(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "writer", "writer", "Writer.")
+	store := &memoryStore{trust: map[string]Record{"writer": {Enabled: false}, "external": {Enabled: true}}}
+	rt := NewRuntime(root, store)
+	if err := rt.Reload(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.SetEnabled(context.Background(), EnableDecision{Name: "writer", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !rt.manager.Records()["external"].Enabled {
+		t.Fatal("SetEnabled() dropped host record snapshot")
 	}
 }
 
@@ -264,6 +307,15 @@ func (s *memoryStore) LoadSkillRecords() map[string]Record {
 		out[k] = v
 	}
 	return out
+}
+
+func (s *memoryStore) SaveSkillRecord(name string, record Record) (map[string]Record, error) {
+	if s.trust == nil {
+		s.trust = map[string]Record{}
+	}
+	record.Reasons = append([]string(nil), record.Reasons...)
+	s.trust[name] = record
+	return s.LoadSkillRecords(), nil
 }
 
 func (s *memoryStore) SaveSkillRecords(trust map[string]Record) error {

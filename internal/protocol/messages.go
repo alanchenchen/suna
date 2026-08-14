@@ -3,7 +3,7 @@ package protocol
 import "time"
 
 type RuntimeHelloParams struct {
-	// ProtocolVersion 是客户端期望的协议版本；为空时按当前默认 0.4 处理。
+	// ProtocolVersion 是客户端期望的协议版本；为空时按当前默认 0.5 处理。
 	ProtocolVersion string `json:"protocol_version,omitempty"`
 	// Transport 由 JSON-RPC transport 层注入并覆盖客户端输入，用于 runtime.hello 返回真实承载方式。
 	Transport string `json:"transport,omitempty"`
@@ -550,6 +550,8 @@ type MCPReloadResult struct {
 type SkillInfo struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description,omitempty"`
+	Scope       string   `json:"scope"`
+	CanToggle   bool     `json:"can_toggle"`
 	Enabled     bool     `json:"enabled"`
 	Valid       bool     `json:"valid"`
 	Reasons     []string `json:"reasons,omitempty"`
@@ -563,6 +565,7 @@ type SkillListResult struct {
 
 type SkillSetParams struct {
 	Name    string `json:"name"`
+	Scope   string `json:"scope,omitempty"`
 	Enabled bool   `json:"enabled"`
 }
 

@@ -16,6 +16,7 @@ const (
 type Store interface {
 	LoadSkillRecords() map[string]Record
 	SaveSkillRecords(map[string]Record) error
+	SaveSkillRecord(name string, record Record) (map[string]Record, error)
 }
 
 type EnableDecision struct {
@@ -130,8 +131,8 @@ func (r *Runtime) syncStoreLocked(ctx context.Context) error {
 	if err := r.store.SaveSkillRecords(records); err != nil {
 		return err
 	}
-	r.manager.SetRecords(records)
-	return r.manager.Reload(ctx)
+	r.manager.ApplyRecords(records)
+	return nil
 }
 
 func (r *Runtime) Reload(ctx context.Context) error {
@@ -149,16 +150,32 @@ func (r *Runtime) List(ctx context.Context) ([]Info, error) {
 	return r.manager.List(), nil
 }
 
-func (r *Runtime) Summary() string {
+func (r *Runtime) CurrentList() []Info {
 	if r == nil {
-		return ""
+		return nil
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.manager == nil {
-		return ""
+		return nil
 	}
-	return r.manager.Summary()
+	return r.manager.List()
+}
+
+func (r *Runtime) Summary() string {
+	return RenderSummary(r.EnabledDescriptors(), nil, r.root)
+}
+
+func (r *Runtime) EnabledDescriptors() []Descriptor {
+	if r == nil {
+		return nil
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.manager == nil {
+		return nil
+	}
+	return r.manager.EnabledDescriptors()
 }
 
 func (r *Runtime) Check(ctx context.Context, name string) (CheckResult, error) {
@@ -211,12 +228,10 @@ func (r *Runtime) Disable(ctx context.Context, name string) error {
 }
 
 func (r *Runtime) setEnabledLocked(ctx context.Context, name string, enabled bool, reasons []string, requireValid bool) error {
+	_ = ctx
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("name is required")
-	}
-	if err := r.reloadLocked(ctx); err != nil {
-		return err
 	}
 	if requireValid {
 		info, ok := r.manager.Info(name)
@@ -224,7 +239,7 @@ func (r *Runtime) setEnabledLocked(ctx context.Context, name string, enabled boo
 			return fmt.Errorf("skill %q is missing or invalid", name)
 		}
 	}
-	records := r.loadRecords()
+	records := r.manager.Records()
 	if records == nil {
 		records = map[string]Record{}
 	}
@@ -233,8 +248,13 @@ func (r *Runtime) setEnabledLocked(ctx context.Context, name string, enabled boo
 	if reasons != nil {
 		current.Reasons = append([]string(nil), reasons...)
 	}
-	records[name] = current
-	return r.saveRecordsLocked(ctx, records)
+	persisted, err := r.store.SaveSkillRecord(name, current)
+	if err != nil {
+		return err
+	}
+	// 持久化成功后应用宿主返回的完整记录快照，避免覆盖并发的外部配置变化。
+	r.manager.ApplyRecords(persisted)
+	return nil
 }
 
 func (r *Runtime) saveWorkflowCheckLocked(ctx context.Context, name string, enabled bool, check CheckResult) error {
@@ -246,14 +266,39 @@ func (r *Runtime) saveWorkflowDecisionLocked(ctx context.Context, result StartRe
 }
 
 func (r *Runtime) saveRecordsLocked(ctx context.Context, records map[string]Record) error {
+	_ = ctx
 	if r.store == nil {
 		return fmt.Errorf("skill record store is not configured")
 	}
 	if err := r.store.SaveSkillRecords(records); err != nil {
 		return err
 	}
-	r.manager.SetRecords(records)
-	return r.manager.Reload(ctx)
+	r.manager.ApplyRecords(records)
+	return nil
+}
+
+func (r *Runtime) LoadGlobal(name string) (Descriptor, string, error) {
+	if r == nil {
+		return Descriptor{}, "", fmt.Errorf("skill runtime is not initialized")
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.manager == nil {
+		return Descriptor{}, "", fmt.Errorf("skill runtime is not initialized")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return Descriptor{}, "", fmt.Errorf("name is required")
+	}
+	content, ok, reason := r.manager.Load(name)
+	if !ok {
+		return Descriptor{}, "", fmt.Errorf("%s", reason)
+	}
+	info, ok := r.manager.Info(name)
+	if !ok {
+		return Descriptor{}, "", fmt.Errorf("skill not found")
+	}
+	return Descriptor{Name: info.Name, Description: info.Description, Scope: ScopeGlobal, Path: info.Path, Valid: info.Valid}, content, nil
 }
 
 func (r *Runtime) LoadContent(name string) (string, error) {

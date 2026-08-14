@@ -94,11 +94,10 @@ func (r *Runtime) importLocal(ctx context.Context, source string, name string) (
 	if !info.IsDir() {
 		return ImportResult{}, fmt.Errorf("source must be a skill directory")
 	}
-	content, err := os.ReadFile(filepath.Join(absSource, "SKILL.md"))
+	parsedName, _, err := readSkillMetadata(filepath.Join(absSource, "SKILL.md"))
 	if err != nil {
-		return ImportResult{}, fmt.Errorf("source missing SKILL.md")
+		return ImportResult{}, err
 	}
-	parsedName, _ := parseSkillHeader(string(content))
 	if name == "" {
 		name = parsedName
 	}

@@ -65,23 +65,23 @@ func TestStopPublishesStoppingBeforeCancellation(t *testing.T) {
 	}
 }
 
-func TestRuntimeHelloUsesProtocolVersion04(t *testing.T) {
+func TestRuntimeHelloUsesProtocolVersion05(t *testing.T) {
 	d := &Daemon{state: protocol.DaemonRuntimeStarting, sinks: map[string]protocol.EventSink{}}
 	svc := newService(d)
-	result, err := svc.Handle(context.Background(), protocol.Request{Method: protocol.MethodRuntimeHello, Params: protocol.RuntimeHelloParams{ProtocolVersion: "0.4", Transport: "tcp"}}, nil)
+	result, err := svc.Handle(context.Background(), protocol.Request{Method: protocol.MethodRuntimeHello, Params: protocol.RuntimeHelloParams{ProtocolVersion: "0.5", Transport: "tcp"}}, nil)
 	if err != nil {
 		t.Fatalf("runtime.hello error = %v", err)
 	}
 	hello := result.(protocol.RuntimeHelloResult)
-	if hello.ProtocolVersion != "0.4" || !hello.Capabilities["mcp_status_updates"] {
+	if hello.ProtocolVersion != "0.5" || !hello.Capabilities["mcp_status_updates"] {
 		t.Fatalf("runtime.hello = %#v", hello)
 	}
 
-	_, err = svc.Handle(context.Background(), protocol.Request{Method: protocol.MethodRuntimeHello, Params: protocol.RuntimeHelloParams{ProtocolVersion: "0.3"}}, nil)
+	_, err = svc.Handle(context.Background(), protocol.Request{Method: protocol.MethodRuntimeHello, Params: protocol.RuntimeHelloParams{ProtocolVersion: "0.4"}}, nil)
 	if err == nil {
-		t.Fatal("runtime.hello 0.3 error = nil, want rejection")
+		t.Fatal("runtime.hello 0.4 error = nil, want rejection")
 	}
 	if coded, ok := err.(transportjsonrpc.CodedError); !ok || coded.Code() != -32602 {
-		t.Fatalf("runtime.hello 0.3 error = %#v, want -32602", err)
+		t.Fatalf("runtime.hello 0.4 error = %#v, want -32602", err)
 	}
 }

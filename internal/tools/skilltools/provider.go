@@ -14,6 +14,17 @@ const (
 	ToolStart = "skill_start"
 )
 
+type projectCatalogContextKey struct{}
+
+func WithProjectCatalog(ctx context.Context, catalog *skill.Catalog) context.Context {
+	return context.WithValue(ctx, projectCatalogContextKey{}, catalog)
+}
+
+func projectCatalogFromContext(ctx context.Context) *skill.Catalog {
+	catalog, _ := ctx.Value(projectCatalogContextKey{}).(*skill.Catalog)
+	return catalog
+}
+
 // Provider 只负责把 Skill Runtime 适配成统一工具来源；Skill 的领域逻辑仍留在 internal/skill。
 type Provider struct {
 	runtime *skill.Runtime
@@ -27,7 +38,7 @@ func (p *Provider) Specs(ctx context.Context) ([]tools.Spec, error) {
 	return []tools.Spec{
 		{
 			Name:        ToolLoad,
-			Description: "Load full details for an enabled skill. Use only when you need the skill's full instructions; do not use just to list or summarize available skills.",
+			Description: "Load full details for an available Skill. Global Skills must be enabled; project Skills must be selected by their exact discovered path. Use only when you need the Skill's full instructions.",
 			Parameters:  loadParameters(),
 			Category:    tools.Perceive,
 			Source:      tools.Source{Kind: tools.SourceSkill, ID: "runtime"},
@@ -50,7 +61,7 @@ func (p *Provider) Execute(ctx context.Context, call tools.Call) (tools.Result, 
 	}
 	switch call.Name {
 	case ToolLoad:
-		return p.executeLoad(call.Params), true
+		return p.executeLoad(ctx, call.Params), true
 	case ToolStart:
 		return p.executeStart(ctx, call.Params), true
 	default:
@@ -60,18 +71,41 @@ func (p *Provider) Execute(ctx context.Context, call tools.Call) (tools.Result, 
 
 func (p *Provider) Close(ctx context.Context) error { return nil }
 
-func (p *Provider) executeLoad(params map[string]any) tools.Result {
+func (p *Provider) executeLoad(ctx context.Context, params map[string]any) tools.Result {
 	name, _ := params["name"].(string)
+	scope, _ := params["scope"].(string)
+	path, _ := params["path"].(string)
 	name = strings.TrimSpace(name)
+	scope = strings.TrimSpace(scope)
+	path = strings.TrimSpace(path)
 	if name == "" {
 		return tools.ErrorResult("name is required")
 	}
-	content, err := p.runtime.LoadContent(name)
+	var (
+		desc    skill.Descriptor
+		content string
+		err     error
+	)
+	switch skill.Scope(scope) {
+	case skill.ScopeGlobal:
+		if path != "" {
+			return tools.ErrorResult("path must be omitted for global skills")
+		}
+		desc, content, err = p.runtime.LoadGlobal(name)
+	case skill.ScopeProject:
+		catalog := projectCatalogFromContext(ctx)
+		if catalog == nil {
+			return tools.ErrorResult("project skill catalog is unavailable for this session")
+		}
+		desc, content, err = catalog.LoadProject(name, path)
+	default:
+		return tools.ErrorResult("scope must be global or project")
+	}
 	if err != nil {
 		return tools.ErrorResult(err.Error())
 	}
-	res := tools.TextResult(fmt.Sprintf("[Skill: %s]\n%s", name, content))
-	res.Metadata = map[string]any{"skill_name": name}
+	res := tools.TextResult(fmt.Sprintf("[Skill: %s]\nScope: %s\nSkill root: %s\n\n%s", desc.Name, desc.Scope, desc.Path, content))
+	res.Metadata = map[string]any{"skill_name": desc.Name, "skill_scope": string(desc.Scope), "skill_path": desc.Path}
 	return res
 }
 
@@ -84,7 +118,11 @@ func (p *Provider) executeStart(ctx context.Context, params map[string]any) tool
 }
 
 func loadParameters() map[string]any {
-	return map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string", "description": "Exact skill name from Available Skills"}}, "required": []string{"name"}}
+	return map[string]any{"type": "object", "properties": map[string]any{
+		"name":  map[string]any{"type": "string", "description": "Exact Skill name from Available Skills"},
+		"scope": map[string]any{"type": "string", "enum": []string{string(skill.ScopeGlobal), string(skill.ScopeProject)}, "description": "Skill scope shown in Available Skills"},
+		"path":  map[string]any{"type": "string", "description": "Exact discovered Skill root. Required for project Skills and omitted for global Skills."},
+	}, "required": []string{"name", "scope"}}
 }
 
 func startParameters() map[string]any {
@@ -98,7 +136,7 @@ func startParameters() map[string]any {
 func ParamKeys(name string) map[string]bool {
 	switch name {
 	case ToolLoad:
-		return map[string]bool{"name": true}
+		return map[string]bool{"name": true, "scope": true, "path": true}
 	case ToolStart:
 		return map[string]bool{"action": true, "name": true, "source": true}
 	default:
