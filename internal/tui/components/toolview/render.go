@@ -259,19 +259,23 @@ func entryLabels(te *Entry, maxWidth int, deps RenderDeps) (string, string) {
 		return ExecMainLabel(te, maxWidth, deps.Labels), ""
 	}
 	label := DisplayIntentLabel(te, deps.Labels.Subtask)
+	intent := ""
+	if strings.TrimSpace(te.Intent) != "" {
+		intent = label
+	}
 	if HasFileChange(te) {
 		if path, _ := te.Metadata["path"].(string); path != "" {
 			main := te.Name + " " + CompactPath(path, maxInt(12, maxWidth-lipgloss.Width(te.Name)-1))
-			if strings.TrimSpace(label) != "" && strings.TrimSpace(label) != main {
-				return main, label
+			if intent != "" {
+				return main, intent
 			}
 			return main, ""
 		}
 	}
 	if summary := SemanticSummary(te, maxWidth, deps.Labels); summary != "" {
 		main := te.Name + " " + summary
-		if strings.TrimSpace(label) != "" && strings.TrimSpace(label) != main {
-			return main, label
+		if intent != "" {
+			return main, intent
 		}
 		return main, ""
 	}

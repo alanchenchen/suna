@@ -22,6 +22,30 @@ func TestInvalidSubtaskParentRendersAsMainEntry(t *testing.T) {
 	}
 }
 
+func TestEntryLabelsOnlyUsesExplicitIntentAsDetail(t *testing.T) {
+	deps := RenderDeps{Labels: RenderLabels{Subtask: "Subtask"}}
+	withoutIntent := &Entry{
+		Name:      "Readfile",
+		RawName:   "readfile",
+		Summary:   "internal/tui/tool.go",
+		ParamsRaw: map[string]any{"path": "internal/tui/tool.go"},
+	}
+	main, detail := entryLabels(withoutIntent, 72, deps)
+	if !strings.Contains(main, "Readfile") || !strings.Contains(main, "tool.go") {
+		t.Fatalf("entryLabels() main = %q, want tool and path summary", main)
+	}
+	if detail != "" {
+		t.Fatalf("entryLabels() detail = %q, want empty without explicit intent", detail)
+	}
+
+	withIntent := *withoutIntent
+	withIntent.Intent = "检查工具块渲染"
+	main, detail = entryLabels(&withIntent, 72, deps)
+	if !strings.Contains(main, "Readfile") || detail != "检查工具块渲染" {
+		t.Fatalf("entryLabels() = (%q, %q), want summary plus explicit intent", main, detail)
+	}
+}
+
 func TestRenderBlockUsesTitledContainerWithoutChangingEntryContent(t *testing.T) {
 	block := &Block{}
 	block.Add(&Entry{ID: "tool-1", Name: "Search", RawName: "search", Intent: "查找文件", Summary: "内容 \"prompt\" in .", Status: StatusDone})
