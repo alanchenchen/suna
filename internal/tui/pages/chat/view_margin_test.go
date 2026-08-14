@@ -64,6 +64,35 @@ func TestPreInputHintRendersAboveInputSeparator(t *testing.T) {
 	}
 }
 
+func TestCommandSuggestionsRenderAboveInputSeparator(t *testing.T) {
+	var m Model
+	m.InitComponents(ComponentDeps{})
+	view := m.View(ViewDeps{
+		Width:              32,
+		MiniPet:            "a\nb\nc",
+		TopMeta:            "model",
+		Conn:               "●",
+		Content:            "message",
+		Separator:          strings.Repeat("-", 32),
+		InputSeparator:     "  " + strings.Repeat("-", 28),
+		InputArea:          "  ▌ /",
+		CommandSuggestions: "  /new\n  /model",
+		StatusBar:          "  ctx ?/400k (0%)",
+	})
+	lines := strings.Split(view, "\n")
+	indexes := map[string]int{}
+	for i, line := range lines {
+		indexes[line] = i
+	}
+	firstSuggestion := indexes["  /new"]
+	lastSuggestion := indexes["  /model"]
+	separator := indexes["  "+strings.Repeat("-", 28)]
+	input := indexes["  ▌ /"]
+	if !(firstSuggestion < lastSuggestion && lastSuggestion < separator && separator < input) {
+		t.Fatalf("indexes first=%d last=%d separator=%d input=%d, want suggestions above separator above input; view = %q", firstSuggestion, lastSuggestion, separator, input, view)
+	}
+}
+
 func TestComputeLayoutMatchesViewRows(t *testing.T) {
 	const height = 18
 	inputArea := strings.Join([]string{

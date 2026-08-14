@@ -86,15 +86,15 @@ func (m Model) View(deps ViewDeps) string {
 	if deps.PreInputHint != "" {
 		sb.WriteString(deps.PreInputHint + "\n")
 	}
+	if deps.CommandSuggestions != "" {
+		sb.WriteString(deps.CommandSuggestions + "\n")
+	}
 	inputSeparator := deps.InputSeparator
 	if inputSeparator == "" {
 		inputSeparator = deps.Separator
 	}
 	sb.WriteString(inputSeparator + "\n")
 	sb.WriteString(deps.InputArea)
-	if deps.CommandSuggestions != "" {
-		sb.WriteString("\n" + deps.CommandSuggestions)
-	}
 	sb.WriteString("\n" + deps.StatusBar)
 	return sb.String()
 }
