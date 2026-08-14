@@ -299,15 +299,20 @@ func TestWorkspaceExecKeepsAmbiguousQuotedPathsBlocked(t *testing.T) {
 	g := NewGuardWithConfigModeAndWorkspace(nil, "test", ModeAuto, root, nil, nil, nil, nil)
 	commands := []string{
 		`cat "` + filepath.Join(outside, "secret.txt") + `"`,
-		`printf '%s' "mentions /tmp here"`,
-		`printf 'ls / ' | sh`,
-		`eval "ls / "`,
-		`python3 -Bc "import os; os.system('ls / ')"`,
-		`bash -xc "ls / "`,
-		`sh -c "cat /"`,
-		`sh -c "cat ` + filepath.Join(outside, "secret.txt") + `"`,
-		`python -c "open('` + filepath.Join(outside, "secret.txt") + `').read()"`,
-		`cat "unterminated`,
+	}
+	if runtime.GOOS != "windows" {
+		// 这些命令依赖 POSIX 根路径和 shell 语义；Windows 使用自身的路径与 shell 规则。
+		commands = append(commands,
+			`printf '%s' "mentions /tmp here"`,
+			`printf 'ls / ' | sh`,
+			`eval "ls / "`,
+			`python3 -Bc "import os; os.system('ls / ')"`,
+			`bash -xc "ls / "`,
+			`sh -c "cat /"`,
+			`sh -c "cat `+filepath.Join(outside, "secret.txt")+`"`,
+			`python -c "open('`+filepath.Join(outside, "secret.txt")+`').read()"`,
+			`cat "unterminated`,
+		)
 	}
 	for _, command := range commands {
 		result := g.Check(context.Background(), "exec", map[string]any{"command": command, "cwd": root})
