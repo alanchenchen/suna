@@ -278,6 +278,45 @@ func TestWorkspaceExecDoesNotTreatOrdinarySlashArgumentAsPath(t *testing.T) {
 	}
 }
 
+func TestWorkspaceExecAllowsStandaloneQuotedSlashProse(t *testing.T) {
+	root := t.TempDir()
+	g := NewGuardWithConfigModeAndWorkspace(nil, "test", ModeAuto, root, nil, nil, nil, nil)
+	commands := []string{
+		`git tag -m "GLOBAL / PROJECT" v1.0.0`,
+		`printf '%s' "before / after"`,
+	}
+	for _, command := range commands {
+		result := g.Check(context.Background(), "exec", map[string]any{"command": command, "cwd": root})
+		if result.Audit == "workspace_reject" {
+			t.Fatalf("standalone slash prose %q audit = %q, want normal Guard flow", command, result.Audit)
+		}
+	}
+}
+
+func TestWorkspaceExecKeepsAmbiguousQuotedPathsBlocked(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	g := NewGuardWithConfigModeAndWorkspace(nil, "test", ModeAuto, root, nil, nil, nil, nil)
+	commands := []string{
+		`cat "` + filepath.Join(outside, "secret.txt") + `"`,
+		`printf '%s' "mentions /tmp here"`,
+		`printf 'ls / ' | sh`,
+		`eval "ls / "`,
+		`python3 -Bc "import os; os.system('ls / ')"`,
+		`bash -xc "ls / "`,
+		`sh -c "cat /"`,
+		`sh -c "cat ` + filepath.Join(outside, "secret.txt") + `"`,
+		`python -c "open('` + filepath.Join(outside, "secret.txt") + `').read()"`,
+		`cat "unterminated`,
+	}
+	for _, command := range commands {
+		result := g.Check(context.Background(), "exec", map[string]any{"command": command, "cwd": root})
+		if result.Decision != Reject || result.Audit != "workspace_reject" {
+			t.Fatalf("ambiguous path command %q decision/audit = %s/%q, want reject/workspace_reject", command, result.Decision, result.Audit)
+		}
+	}
+}
+
 func TestWorkspaceBlocksExecCWDAndCommandPaths(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()

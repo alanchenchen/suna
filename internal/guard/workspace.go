@@ -58,7 +58,8 @@ func (g *Guard) checkWorkspace(ctx context.Context, tool string, params map[stri
 			return true, reason, auditReason
 		}
 		command, _ := params["command"].(string)
-		return g.checkExecWorkspacePaths(command, cwd)
+		shell, _ := params["shell"].(string)
+		return g.checkExecWorkspacePaths(command, cwd, shell)
 	default:
 		return false, "", ""
 	}
@@ -95,12 +96,19 @@ func workspaceAuditReason(field string) string {
 	}
 }
 
-func (g *Guard) checkExecWorkspacePaths(command string, cwd string) (bool, string, string) {
+func (g *Guard) checkExecWorkspacePaths(command string, cwd string, shell string) (bool, string, string) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return false, "", ""
 	}
-	if blocked, reason, auditReason := g.checkExecPathTokens(command, cwd); blocked {
+	quotedRanges, parsed, supported := shellQuotedRangesForWorkspace(command, shell)
+	if supported && !parsed {
+		return true, "workspace boundary: cannot parse exec.command safely", "workspace_unavailable"
+	}
+	if !execWorkspaceProseExemptionSafe(command, shell) {
+		quotedRanges = nil
+	}
+	if blocked, reason, auditReason := g.checkExecPathTokens(command, cwd, quotedRanges); blocked {
 		return true, reason, auditReason
 	}
 	for _, match := range execQuotedAbsPathPattern.FindAllStringSubmatch(command, -1) {
@@ -126,12 +134,90 @@ func (g *Guard) checkExecWorkspacePaths(command string, cwd string) (bool, strin
 	return false, "", ""
 }
 
-func (g *Guard) checkExecPathTokens(command string, cwd string) (bool, string, string) {
-	for _, match := range execPathTokenPattern.FindAllStringSubmatch(command, -1) {
-		if len(match) < 2 {
+type shellQuoteRange struct {
+	start, end int
+}
+
+// shellQuotedRangesForWorkspace 只为 POSIX shell 定位闭合引号范围；cmd 与 PowerShell
+// 的引号语义不同，不提供任何误判豁免。
+func shellQuotedRangesForWorkspace(command, shell string) ([]shellQuoteRange, bool, bool) {
+	lowerShell := strings.ToLower(strings.TrimSpace(shell))
+	if lowerShell == "auto" {
+		lowerShell = ""
+	}
+	if lowerShell == "cmd" || lowerShell == "powershell" || lowerShell == "pwsh" || (lowerShell == "" && runtime.GOOS == "windows") {
+		return nil, true, false
+	}
+	var ranges []shellQuoteRange
+	quote := byte(0)
+	start := -1
+	escaped := false
+	for i := 0; i < len(command); i++ {
+		ch := command[i]
+		if escaped {
+			escaped = false
 			continue
 		}
-		path := trimShellPathToken(match[1])
+		if ch == '\\' && quote != '\'' {
+			escaped = true
+			continue
+		}
+		if quote == 0 {
+			if ch == '\'' || ch == '"' {
+				quote = ch
+				start = i + 1
+			}
+			continue
+		}
+		if ch == quote {
+			ranges = append(ranges, shellQuoteRange{start: start, end: i})
+			quote = 0
+			start = -1
+		}
+	}
+	if quote != 0 || escaped {
+		return nil, false, true
+	}
+	return ranges, true, true
+}
+
+// execWorkspaceProseExemptionSafe 复用现有 shell analyzer 的分段与字段解析。
+// 只有能可靠解析且不含动态执行器的命令，才允许极窄的独立斜杠文字豁免。
+func execWorkspaceProseExemptionSafe(command, shell string) bool {
+	if hasDynamicShellSyntax(command, shell) {
+		return false
+	}
+	segments, ok := splitShellSegments(command, shell)
+	if !ok || len(segments) == 0 {
+		return false
+	}
+	for _, segment := range segments {
+		fields, ok := shellFields(segment)
+		if !ok || len(fields) == 0 {
+			return false
+		}
+		for _, field := range fields {
+			name := strings.ToLower(filepath.Base(field))
+			name = strings.TrimSuffix(name, ".exe")
+			switch name {
+			case "sh", "bash", "zsh", "fish", "cmd", "powershell", "pwsh",
+				"eval", "source", ".", "python", "python3", "node", "ruby", "perl", "php":
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func (g *Guard) checkExecPathTokens(command string, cwd string, quotedRanges []shellQuoteRange) (bool, string, string) {
+	for _, match := range execPathTokenPattern.FindAllStringSubmatchIndex(command, -1) {
+		if len(match) < 4 || match[2] < 0 || match[3] < 0 {
+			continue
+		}
+		path := trimShellPathToken(command[match[2]:match[3]])
+		if path == "/" && quotedStandaloneSlash(command, match[2], match[3], quotedRanges) {
+			continue
+		}
 		if path == "" || path == "." || strings.HasPrefix(path, "./-") || strings.Contains(path, "://") {
 			continue
 		}
@@ -143,6 +229,22 @@ func (g *Guard) checkExecPathTokens(command string, cwd string) (bool, string, s
 		}
 	}
 	return false, "", ""
+}
+
+func quotedStandaloneSlash(command string, start, end int, ranges []shellQuoteRange) bool {
+	for _, item := range ranges {
+		if start < item.start || end > item.end {
+			continue
+		}
+		leftSpace := start == item.start || isShellSpace(command[start-1])
+		rightSpace := end == item.end || isShellSpace(command[end])
+		return leftSpace && rightSpace
+	}
+	return false
+}
+
+func isShellSpace(ch byte) bool {
+	return ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n'
 }
 
 func resolveWorkspaceTarget(path string, baseDir string) (string, error) {
