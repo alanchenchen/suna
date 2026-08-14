@@ -38,7 +38,7 @@ type TranscriptDeps struct {
 	RenderSubtaskBlock   func(*toolview.Block) string
 	RenderError          func(string) string
 	RenderRestoreSummary func(string) string
-	RenderSkillLoad      func(protocol.SkillLoadParams) string
+	RenderSkillLoad      func(*SkillLoadView) string
 	RenderSkillReview    func(protocol.SkillReviewParams) string
 	RenderSystem         func(string) string
 	RenderAskSelected    func(string) string
@@ -229,10 +229,10 @@ func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptB
 			addBlock(i, msg.Streaming, "\n"+content+"\n")
 			inSunaBlock = false
 		case "skill":
-			if p, ok := msg.Content.(protocol.SkillLoadParams); ok && deps.RenderSkillLoad != nil {
-				addBlock(i, msg.Streaming, "\n"+deps.RenderSkillLoad(p)+"\n")
+			renderSunaHeader()
+			if p, ok := msg.Content.(*SkillLoadView); ok && deps.RenderSkillLoad != nil {
+				addBlock(i, msg.Streaming, deps.RenderSkillLoad(p)+"\n")
 			}
-			inSunaBlock = false
 		case "skill_review":
 			if p, ok := msg.Content.(protocol.SkillReviewParams); ok && deps.RenderSkillReview != nil {
 				addBlock(i, msg.Streaming, "\n"+deps.RenderSkillReview(p)+"\n")

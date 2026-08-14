@@ -68,6 +68,13 @@ func (m *Model) FinishCancellingTools(now time.Time) {
 		} else if !te.StartedAt.IsZero() {
 			te.Duration = now.Sub(te.StartedAt)
 		}
+		if te.RawName == "skill_load" {
+			if view := m.findSkillLoad(id); view != nil {
+				view.Status = "cancelled"
+				view.EndedAt = now
+				view.Duration = te.Duration
+			}
+		}
 		delete(m.ToolStartTimes, id)
 		delete(m.ActiveTools, id)
 	}

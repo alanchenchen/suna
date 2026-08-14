@@ -315,6 +315,8 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"tui.skills.help":               {LocaleEN: "↑↓ select · Space/Enter toggle · Esc close", LocaleZH: "↑↓ 选择 · Space/Enter 切换 · Esc 关闭"},
 		"tui.skill.loading":             {LocaleEN: "LOADING SKILL", LocaleZH: "正在加载 SKILL"},
 		"tui.skill.loaded":              {LocaleEN: "SKILL LOADED", LocaleZH: "已加载 SKILL"},
+		"tui.skill.failed":              {LocaleEN: "SKILL FAILED", LocaleZH: "加载 SKILL 失败"},
+		"tui.skill.cancelled":           {LocaleEN: "SKILL CANCELLED", LocaleZH: "已取消加载 SKILL"},
 		"tui.skill.review":              {LocaleEN: "SKILL LLM REVIEW", LocaleZH: "SKILL LLM REVIEW"},
 		"tui.memory.active_title":       {LocaleEN: "User profile memory", LocaleZH: "用户画像记忆"},
 		"tui.command.help.desc":         {LocaleEN: "Open help page", LocaleZH: "打开帮助页"},

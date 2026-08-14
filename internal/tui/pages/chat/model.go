@@ -27,6 +27,16 @@ const (
 
 // Model 持有 Chat 页面运行态。迁移期间 daemon 命令和样式仍由 root TUI 注入。
 
+type SkillLoadView struct {
+	ID        string
+	Name      string
+	Status    string
+	StartedAt time.Time
+	EndedAt   time.Time
+	Duration  time.Duration
+	Error     bool
+}
+
 type StreamingTextState struct {
 	Raw             strings.Builder
 	Pending         []string

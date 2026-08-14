@@ -583,14 +583,17 @@ func TestRenderSkillLoadMessageUsesHighlightedBadges(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80}
 	applyTheme(ThemeDark)
 
-	view := stripANSIForTest(tui.renderSkillLoadMessage(protocol.SkillLoadParams{Name: "img", Status: "loaded"}))
-	for _, want := range []string{"╭", "╰", "✓ 已加载 SKILL", "img"} {
+	view := stripANSIForTest(tui.renderSkillLoadMessage(&chatpage.SkillLoadView{Name: "img", Status: "loaded", Duration: time.Millisecond}))
+	for _, want := range []string{"╭", "╰", "✓ 已加载 SKILL", "img", "1ms"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("renderSkillLoadMessage() = %q, want substring %q", view, want)
 		}
 	}
 	if strings.Contains(view, "│✓") || strings.Contains(view, "img│") {
-		t.Fatalf("renderSkillLoadMessage() = %q, want horizontal breathing room inside box", view)
+		t.Fatalf("renderSkillLoadMessage() = %q, want compact space inside box", view)
+	}
+	if got, want := leadingSpaces(strings.Split(view, "\n")[0]), len(transcriptBlockIndent); got != want {
+		t.Fatalf("skill block leading spaces = %d, want %d", got, want)
 	}
 }
 
@@ -599,7 +602,7 @@ func TestRenderSkillLoadMessageSupportsLightTheme(t *testing.T) {
 	applyTheme(ThemeLight)
 	t.Cleanup(func() { applyTheme(ThemeDark) })
 
-	view := stripANSIForTest(tui.renderSkillLoadMessage(protocol.SkillLoadParams{Name: "img", Status: "loading"}))
+	view := stripANSIForTest(tui.renderSkillLoadMessage(&chatpage.SkillLoadView{Name: "img", Status: "loading", StartedAt: time.Now()}))
 	for _, want := range []string{"╭", "╰", "◐ LOADING SKILL", "img"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("renderSkillLoadMessage() = %q, want substring %q", view, want)

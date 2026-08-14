@@ -306,7 +306,12 @@ func (t *TUI) handleToolStartNotification(p protocol.ToolStartParams) {
 	if id == "" {
 		id = fmt.Sprintf("%s_%d", p.Tool, time.Now().UnixNano())
 	}
-	t.chat.StartTool(p, id, time.Now())
+	now := time.Now()
+	if p.Tool == "skill_load" {
+		t.chat.StartSkillLoad(p, id, now)
+		return
+	}
+	t.chat.StartTool(p, id, now)
 }
 
 func (t *TUI) handleToolGuardNotification(p protocol.ToolGuardParams) {
@@ -318,7 +323,11 @@ func (t *TUI) handleToolEndNotification(p protocol.ToolEndParams) {
 	if id == "" {
 		id = fmt.Sprintf("%s_%d", p.Tool, time.Now().UnixNano())
 	}
-	t.chat.EndTool(p, id, time.Now())
+	now := time.Now()
+	if t.chat.EndSkillLoad(p, id, now) {
+		return
+	}
+	t.chat.EndTool(p, id, now)
 }
 
 func (t *TUI) handleDaemonStateNotification(p protocol.DaemonStateParams) {
@@ -610,35 +619,6 @@ func (t *TUI) handleSkillLoadNotification(p protocol.SkillLoadParams) {
 	} else {
 		t.chat.ClearStatusLabel()
 	}
-	if t.updateLastSkillLoadMessage(p) {
-		t.scrollToBottomOnNextSync()
-		return
-	}
-	t.appendNonToolMessage(chatMsg{Role: "skill", Content: p})
-	t.scrollToBottomOnNextSync()
-}
-
-func (t *TUI) updateLastSkillLoadMessage(p protocol.SkillLoadParams) bool {
-	name := strings.TrimSpace(p.Name)
-	if name == "" {
-		return false
-	}
-	for i := len(t.chat.Messages) - 1; i >= 0; i-- {
-		msg := &t.chat.Messages[i]
-		switch msg.Role {
-		case "skill":
-			prev, ok := msg.Content.(protocol.SkillLoadParams)
-			if !ok || strings.TrimSpace(prev.Name) != name {
-				return false
-			}
-			msg.Content = p
-			msg.Render = chatMsg{}.Render
-			return true
-		case "assistant", "user", "error", "system", "restore_summary", "panel", "skill_review":
-			return false
-		}
-	}
-	return false
 }
 
 func (t *TUI) handleSkillReviewNotification(p protocol.SkillReviewParams) {

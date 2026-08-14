@@ -11,6 +11,7 @@ import (
 	"github.com/alanchenchen/suna/internal/protocol"
 	attachmentmodel "github.com/alanchenchen/suna/internal/tui/components/attachment"
 	textutil "github.com/alanchenchen/suna/internal/tui/components/text"
+	"github.com/alanchenchen/suna/internal/tui/components/toolview"
 	chatpage "github.com/alanchenchen/suna/internal/tui/pages/chat"
 )
 
@@ -86,7 +87,10 @@ func (t *TUI) renderErrorMessage(content string) string {
 	}
 	return strings.Join(lines, "\n")
 }
-func (t *TUI) renderSkillLoadMessage(p protocol.SkillLoadParams) string {
+func (t *TUI) renderSkillLoadMessage(p *chatpage.SkillLoadView) string {
+	if p == nil {
+		return ""
+	}
 	name := strings.TrimSpace(p.Name)
 	if name == "" {
 		name = "unknown"
@@ -94,7 +98,15 @@ func (t *TUI) renderSkillLoadMessage(p protocol.SkillLoadParams) string {
 	labelKey := "tui.skill.loaded"
 	icon := "✓"
 	accent := ColorAgent
-	if strings.TrimSpace(p.Status) == "loading" {
+	if p.Status == "cancelled" {
+		labelKey = "tui.skill.cancelled"
+		icon = "⊘"
+		accent = ColorDim
+	} else if p.Error {
+		labelKey = "tui.skill.failed"
+		icon = "✗"
+		accent = ColorError
+	} else if strings.TrimSpace(p.Status) == "loading" {
 		labelKey = "tui.skill.loading"
 		icon = "◐"
 		accent = ColorBrand
@@ -112,11 +124,14 @@ func (t *TUI) renderSkillLoadMessage(p protocol.SkillLoadParams) string {
 		Padding(0, 1).
 		Render(name)
 	content := badge + " " + nameBadge
-	box := boxStyle.
-		BorderForeground(accent).
-		Padding(0, 1).
-		Render(content)
-	return textutil.IndentLines(box, "    ")
+	if p.Duration > 0 {
+		content += styleDim.Render(" · " + toolview.FormatCompactDuration(p.Duration))
+	} else if p.Status == "loading" && !p.StartedAt.IsZero() {
+		content += styleDim.Render(" · ") + liveElapsedPlaceholder(p.StartedAt)
+	}
+	width := max(20, min(t.width-6, lipgloss.Width(content)+5))
+	box := renderTitledRoundBoxWithStyles(width, content, nil, lipgloss.NewStyle(), lipgloss.NewStyle().Foreground(accent))
+	return textutil.IndentLines(box, transcriptBlockIndent)
 }
 func (t *TUI) renderSkillReviewMessage(p protocol.SkillReviewParams) string {
 	name := strings.TrimSpace(p.Name)
