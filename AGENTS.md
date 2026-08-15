@@ -62,6 +62,7 @@ Suna 是本地终端 AI Agent：CLI 启动 TUI，TUI 通过 protocol/local trans
 - 每次功能开发后必须运行 `gofmt` 或 `go fmt`。
 - 每次功能开发后必须运行相关包测试；提交前优先运行 `go test ./...`。
 - 是否运行 `go build ./...` 或 `go build -o suna .` 视改动范围决定；入口、构建、跨平台或集成改动建议运行。
+- Suna 是跨平台应用；涉及操作系统差异的代码或测试必须保证支持平台行为正确，不得只依赖当前开发机语义。路径、换行符、Shell、进程、信号、权限、可执行文件和 build tag 等平台相关行为应使用可移植实现与断言，并按影响范围执行相应平台的测试或交叉构建。
 - 测试风格遵循 `plans/14-test-style.md`：默认使用标准 `testing` 包，不为普通测试引入 assertion framework；测试文件放在被测包旁边，内部包优先使用同包测试。
 - 测试应按行为命名，表驱动测试优先使用 `name`、`t.Run` 和 `tt := tt`；失败信息使用 `got` / `want`，默认用 `t.Fatal` / `t.Fatalf` 快速失败。
 - 测试 helper 必须调用 `t.Helper()`；文件、环境和外部依赖分别使用 `t.TempDir()`、`t.Setenv()`、fake/stub 隔离。

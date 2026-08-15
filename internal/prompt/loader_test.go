@@ -111,7 +111,7 @@ func TestRenderGuardReviewShowsStructuredParameterVisibility(t *testing.T) {
 	if strings.Contains(got, "Params contains `[omitted]`") {
 		t.Fatalf("rendered prompt = %q, want no marker-based policy", got)
 	}
-	if rules, action := strings.Index(got, "Goal:\n"), strings.Index(got, "Current action:\n"); rules < 0 || action < 0 || rules > action {
+	if rules, action := strings.Index(got, "Goal:"), strings.Index(got, "Current action:"); rules < 0 || action < 0 || rules > action {
 		t.Fatalf("rendered prompt does not keep stable review rules before dynamic action data: %q", got)
 	}
 }
