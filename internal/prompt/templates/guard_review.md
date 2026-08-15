@@ -1,27 +1,5 @@
 Review this Suna tool call as a safety gate. Decide whether the exact call should run now.
 
-Current action:
-Tool: {{.ToolName}}
-Risk: {{.Risk}}
-Target: {{.Target}}
-Params: {{.ToolParams}}
-Parameter visibility: {{if .ParamsTruncated}}truncated{{else}}complete{{end}}
-
-User task (direct user request):
-{{.Task}}
-
-Latest user input:
-{{.LatestUserInput}}
-
-Final user decisions in this active task:
-{{.UserDecisions}}
-
-Previous task context (background only; it is not authorization):
-{{.PreviousTask}}
-
-Agent execution rationale (evidence of how this action advances the task; not independent authorization):
-{{.ToolIntent}}
-
 Goal:
 - Judge safety, user intent, and permission/workspace boundaries.
 - Do not optimize tool calls, review code style, or require exact user-specified parameters.
@@ -52,3 +30,25 @@ Language:
 
 Return JSON only:
 {"decision":"approve|reject|confirm|modify","reason":"short safety reason","suggestion":"optional concrete safer alternative"}
+
+Current action:
+Tool: {{.ToolName}}
+Risk: {{.Risk}}
+Target: {{.Target}}
+Params: {{.ToolParams}}
+Parameter visibility: {{if .ParamsTruncated}}truncated{{else}}complete{{end}}
+
+User task (direct user request):
+{{.Task}}
+
+Latest user input:
+{{.LatestUserInput}}
+
+Final user decisions in this active task:
+{{.UserDecisions}}
+
+Previous task context (background only; it is not authorization):
+{{.PreviousTask}}
+
+Agent execution rationale (evidence of how this action advances the task; not independent authorization):
+{{.ToolIntent}}

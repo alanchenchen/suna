@@ -27,8 +27,9 @@ func TestRenderSystemKeepsCapabilitiesWithoutPrescriptiveDelegation(t *testing.T
 		t.Fatalf("RenderSystem() error = %v", err)
 	}
 	for _, want := range []string{
-		"Independent tool or `spawn` calls can be issued together",
-		"Keep dependent steps, user decisions, destructive actions, and writes to the same target sequential",
+		"Prefer issuing independent tool calls together when useful",
+		"Suna runs calls from the same response concurrently, including multiple `spawn` calls",
+		"Keep dependencies, user decisions, destructive actions, and writes to the same target sequential",
 		"Project workspace: `/workspace`",
 		"redirection targets inside it",
 		"Suna data directory: `/home/test/.suna`",
@@ -84,10 +85,13 @@ func TestRenderSubtaskSystemKeepsOutputContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderSubtaskSystem() error = %v", err)
 	}
-	for _, want := range []string{"Review the change.", "Available tools: readfile", "Workspace boundary: `/workspace`", "Focus on concurrency.", `"side_effects"`, `"status":"none|cleaned|remaining|unknown"`} {
+	for _, want := range []string{"Review the change.", "Available tools: readfile", "Workspace boundary: `/workspace`", "Focus on concurrency.", "Prefer issuing independent tool calls together when useful", "Suna runs them concurrently", `"side_effects"`, `"status":"none|cleaned|remaining|unknown"`} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rendered prompt missing %q: %q", want, got)
 		}
+	}
+	if contract, task := strings.Index(got, "Return exactly one JSON object"), strings.Index(got, "Review the change."); contract < 0 || task < 0 || contract > task {
+		t.Fatalf("rendered prompt does not keep the stable output contract before dynamic task data: %q", got)
 	}
 }
 
@@ -106,5 +110,8 @@ func TestRenderGuardReviewShowsStructuredParameterVisibility(t *testing.T) {
 	}
 	if strings.Contains(got, "Params contains `[omitted]`") {
 		t.Fatalf("rendered prompt = %q, want no marker-based policy", got)
+	}
+	if rules, action := strings.Index(got, "Goal:\n"), strings.Index(got, "Current action:\n"); rules < 0 || action < 0 || rules > action {
+		t.Fatalf("rendered prompt does not keep stable review rules before dynamic action data: %q", got)
 	}
 }

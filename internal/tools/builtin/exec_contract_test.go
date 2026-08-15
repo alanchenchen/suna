@@ -53,7 +53,7 @@ func TestExecSpecSeparatesValidOperationShapes(t *testing.T) {
 	execDescription := Exec{}.Spec().Description + " " +
 		foregroundProperties["command"].(map[string]any)["description"].(string) + " " +
 		foregroundProperties["cwd"].(map[string]any)["description"].(string)
-	for _, fact := range []string{"Prefer dedicated file, search, and HTTP tools", "shell redirection", "redirection targets", "configured workspace", "session cwd"} {
+	for _, fact := range []string{"Prefer dedicated file, search, and HTTP tools", "cwd", "path arguments", "redirects", "configured workspace", "workspace-local temp files", "instead of /tmp", "session cwd"} {
 		if !strings.Contains(strings.ToLower(execDescription), strings.ToLower(fact)) {
 			t.Fatalf("exec 描述缺少 %q：%q", fact, execDescription)
 		}

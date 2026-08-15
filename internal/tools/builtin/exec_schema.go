@@ -10,7 +10,7 @@ func (Exec) Spec() tools.Spec {
 	backgroundRun["background"] = map[string]any{"type": "boolean", "enum": []bool{true}, "description": "Run in the background. Must be true"}
 	backgroundRun["scope"] = map[string]any{"type": "string", "enum": []string{execScopeRun, execScopeSession}, "description": "Background lifetime scope. Default run"}
 
-	return builtinSpec("exec", "Run or manage a stateful shell command. Prefer dedicated file, search, and HTTP tools for supported operations. Keep ordinary project cwd, command path arguments, and redirection targets inside the configured workspace; use the Suna data directory only for explicit Suna-specific tasks. Omit action to run; use action=status or action=stop with a background job_id.", tools.Act, map[string]any{
+	return builtinSpec("exec", "Run or manage a stateful shell command. Prefer dedicated file, search, and HTTP tools for supported operations. Keep cwd, path arguments, and redirects inside the configured workspace; use workspace-local temp files instead of /tmp. Use the Suna data directory only for explicit Suna-specific tasks. Omit action to run; use action=status or action=stop with a background job_id.", tools.Act, map[string]any{
 		"type": "object",
 		"oneOf": []any{
 			map[string]any{
@@ -60,7 +60,7 @@ func (Exec) Spec() tools.Spec {
 func execRunProperties() map[string]any {
 	return map[string]any{
 		"action":  map[string]any{"type": "string", "enum": []string{"run"}, "description": "Run a command. May be omitted; run is the default action"},
-		"command": map[string]any{"type": "string", "description": "Shell command to execute. Prefer dedicated tools over shell redirection for file or text operations. Keep ordinary project command paths and redirection targets within the configured workspace."},
+		"command": map[string]any{"type": "string", "description": "Shell command to execute. Prefer dedicated tools over redirection. Keep path arguments and redirects inside the workspace."},
 		"cwd":     map[string]any{"type": "string", "description": "Optional working directory. Defaults to the session cwd; keep ordinary project work within the configured workspace."},
 		"timeout": map[string]any{"type": "integer", "minimum": 1, "description": "Total command lifetime in seconds, including process startup and execution. Foreground default: 60 seconds. Run-scoped background default: no timeout. Session-scoped background default: 1 hour"},
 		"env": map[string]any{
