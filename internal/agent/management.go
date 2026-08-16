@@ -46,6 +46,14 @@ func (a *Agent) UsageSummary(ctx context.Context, since time.Time) (*memory.Usag
 	return a.usage.UsageSummary(ctx, since)
 }
 
+func (a *Agent) PruneOperationalLogs(ctx context.Context, now time.Time) (memory.OperationalPruneResult, error) {
+	root := a.root()
+	if root == nil || root.store == nil {
+		return memory.OperationalPruneResult{}, fmt.Errorf("memory store not initialized")
+	}
+	return root.store.PruneOperationalLogs(ctx, now)
+}
+
 func (a *Agent) ListModels() []string {
 	if a.router == nil {
 		return nil

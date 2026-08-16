@@ -299,6 +299,8 @@ Workspace 是可选目录边界：设置后，本地文件和命令操作会限�
 
 排查问题时优先查看 `~/.suna/logs/app.log`。
 
+持久化 Session 会一直保留到用户明确删除；Suna 不会因为 Session 长期未使用或内容为空而自动删除。Guard 审计明细和逐请求模型用量属于运维数据，只保留最近 30 天。清理后 SQLite 会复用释放的页面，但不会自动执行 `VACUUM`，因此 `memory.db` 的磁盘体积不一定立即缩小。
+
 全局 Skill 使用 `~/.suna/skills/`。项目 Skill 会在 Session runtime 创建时，从 Session cwd 到 Git worktree 根之间的 `.agents/skills` 或兼容 Agent 目录发现一次；项目 Skill 由项目管理，不能在 Suna 中 toggle。
 
 ## 第三方客户端 TCP daemon

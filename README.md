@@ -291,6 +291,8 @@ Default data directory:
 
 For troubleshooting, check `~/.suna/logs/app.log` first.
 
+Persisted Sessions are kept until you explicitly delete them; Suna does not remove Sessions because they are old or empty. Guard audit entries and per-request model usage records are operational details retained for the most recent 30 days. Cleanup reuses freed SQLite pages and does not automatically run `VACUUM`, so `memory.db` may not immediately shrink on disk.
+
 Global Skills use `~/.suna/skills/`. Project Skills are discovered once per Session runtime from `.agents/skills` or compatible agent directories between the Session cwd and Git worktree root; project Skills are project-managed and cannot be toggled in Suna.
 
 ## TCP daemon for third-party clients

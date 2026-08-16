@@ -717,7 +717,7 @@ func (s *service) handleUsage(ctx context.Context) protocol.UsageResult {
 	now := time.Now()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	week := today.AddDate(0, 0, -7)
-	month := today.AddDate(0, -1, 0)
+	month := now.Add(-memory.OperationalLogRetention)
 	result := protocol.UsageResult{}
 	if sum, err := s.daemon.agent.UsageSummary(ctx, today); err == nil && sum != nil {
 		result.Today = periodFromSummary(sum)

@@ -148,6 +148,7 @@ func (s *Store) migrate() error {
 			output_tokens INTEGER NOT NULL DEFAULT 0,
 			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
 		)`,
+		`CREATE INDEX IF NOT EXISTS idx_usage_log_created_at ON usage_log(created_at)`,
 
 		// Guard 审计日志
 		`CREATE TABLE IF NOT EXISTS audit_log (
@@ -162,6 +163,7 @@ func (s *Store) migrate() error {
 			result TEXT NOT NULL DEFAULT '',
 			error TEXT NOT NULL DEFAULT ''
 		)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp ON audit_log(timestamp)`,
 
 		// ── Phase 3+ 表（预留）──
 

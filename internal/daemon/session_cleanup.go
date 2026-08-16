@@ -100,61 +100,6 @@ func (m *sessionManager) removeSessionAttachments(sessionID string) {
 	}
 }
 
-func (m *sessionManager) pruneInactive(ctx context.Context, age time.Duration) {
-	if m == nil || m.store == nil || age <= 0 {
-		return
-	}
-	items, err := m.store.List(ctx)
-	if err != nil {
-		return
-	}
-	cutoff := time.Now().Add(-age)
-	for _, item := range items {
-		if item.MessageCount <= 0 {
-			m.deleteInactive(ctx, item.ID)
-			continue
-		}
-		if item.UpdatedAt.IsZero() || item.UpdatedAt.After(cutoff) {
-			continue
-		}
-		m.deleteInactive(ctx, item.ID)
-	}
-}
-
-func (m *sessionManager) deleteInactive(ctx context.Context, sessionID string) {
-	m.mu.Lock()
-	if m.deleting[sessionID] {
-		m.mu.Unlock()
-		return
-	}
-	rt := m.runtime[sessionID]
-	active := rt != nil && (len(rt.clients) > 0 || rt.status != sessionIdle || rt.stateOps > 0)
-	if active {
-		m.mu.Unlock()
-		return
-	}
-	// prune 与 attach 共用 deleting 标记，避免后台清理删除正在 attach 的 session 存储。
-	m.deleting[sessionID] = true
-	m.mu.Unlock()
-	deleted := false
-	defer func() {
-		m.mu.Lock()
-		delete(m.deleting, sessionID)
-		if deleted {
-			m.deleteVersion[sessionID]++
-			m.invalidateRuntimeUnloadNoLock(sessionID)
-			delete(m.runtime, sessionID)
-			delete(m.runtimeUnloadVersion, sessionID)
-		}
-		m.mu.Unlock()
-	}()
-	if err := m.deletePersistedSession(ctx, sessionID); err != nil {
-		return
-	}
-	deleted = true
-	m.removeSessionAttachments(sessionID)
-}
-
 func canonicalCWD(cwd string) string {
 	cwd = strings.TrimSpace(cwd)
 	if cwd == "" {

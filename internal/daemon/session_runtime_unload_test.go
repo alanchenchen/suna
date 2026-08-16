@@ -38,6 +38,23 @@ func TestSessionManagerUnloadsDetachedIdleRuntime(t *testing.T) {
 	}
 }
 
+func TestSessionManagerKeepsEmptySessionAfterRuntimeUnload(t *testing.T) {
+	ctx := context.Background()
+	m := newTestSessionManager(t)
+	m.runtimeUnloadDelay = 10 * time.Millisecond
+
+	snap, err := m.create(ctx, "client-a", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+	m.detach("client-a")
+	waitForRuntimeUnloaded(t, m, snap.Session.ID)
+
+	if meta, err := m.store.Get(ctx, snap.Session.ID); err != nil || meta == nil {
+		t.Fatalf("Get empty persisted session = (%#v, %v), want existing metadata", meta, err)
+	}
+}
+
 func TestSessionManagerReattachCancelsRuntimeUnload(t *testing.T) {
 	ctx := context.Background()
 	m := newTestSessionManager(t)

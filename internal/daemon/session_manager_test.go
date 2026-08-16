@@ -201,48 +201,6 @@ func TestSessionManagerUpdateRequiresAttachedIdleSession(t *testing.T) {
 		t.Fatalf("updated title = %q, want %q", got, title)
 	}
 }
-
-func TestSessionManagerPruneInactiveSkipsActiveSession(t *testing.T) {
-	ctx := context.Background()
-	m := newTestSessionManager(t)
-	snap, err := m.create(ctx, "client-a", t.TempDir(), "")
-	if err != nil {
-		t.Fatalf("create error = %v", err)
-	}
-	m.pruneInactive(ctx, 1)
-	meta, err := m.store.Get(ctx, snap.Session.ID)
-	if err != nil {
-		t.Fatalf("get error = %v", err)
-	}
-	if meta == nil {
-		t.Fatal("active empty session was pruned")
-	}
-}
-
-func TestSessionManagerPruneInactiveRemovesAttachments(t *testing.T) {
-	ctx := context.Background()
-	m := newTestSessionManager(t)
-	snap, err := m.create(ctx, "client-a", t.TempDir(), "")
-	if err != nil {
-		t.Fatalf("create error = %v", err)
-	}
-	attachmentRoot := filepath.Join(m.root.Config().AttachmentsDir(), snap.Session.ID)
-	if err := os.MkdirAll(attachmentRoot, 0755); err != nil {
-		t.Fatalf("MkdirAll attachments error = %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(attachmentRoot, "note.txt"), []byte("attachment"), 0644); err != nil {
-		t.Fatalf("WriteFile attachment error = %v", err)
-	}
-	m.detach("client-a")
-
-	m.pruneInactive(ctx, time.Hour)
-	if meta, err := m.store.Get(ctx, snap.Session.ID); err != nil || meta != nil {
-		t.Fatalf("Get pruned session = (%#v, %v), want (nil, nil)", meta, err)
-	}
-	if _, err := os.Stat(attachmentRoot); !os.IsNotExist(err) {
-		t.Fatalf("attachment root stat error = %v, want not exist", err)
-	}
-}
 func TestSessionManagerAttachDoesNotRecreateConcurrentlyDeletedSession(t *testing.T) {
 	ctx := context.Background()
 	m := newTestSessionManager(t)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/alanchenchen/suna/internal/agent"
 	"github.com/alanchenchen/suna/internal/config"
+	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/mcp"
 	"github.com/alanchenchen/suna/internal/protocol"
 )
@@ -122,10 +123,7 @@ func (d *Daemon) run(label string) error {
 	d.markReady()
 	go d.publishMCPUpdates(ctx)
 	d.agent.StartBackgroundResources(ctx, d.onMCPChange)
-
-	if d.sessions != nil {
-		go d.sessions.pruneInactive(ctx, 30*24*time.Hour)
-	}
+	go d.pruneOperationalLogs(ctx)
 
 	// 信号处理
 	sigCh := make(chan os.Signal, 1)
@@ -157,6 +155,19 @@ func (d *Daemon) run(label string) error {
 
 func (d *Daemon) markReady() {
 	d.setRuntimeState(protocol.DaemonRuntimeReady)
+}
+
+func (d *Daemon) pruneOperationalLogs(ctx context.Context) {
+	if d == nil || d.agent == nil {
+		return
+	}
+	result, err := d.agent.PruneOperationalLogs(ctx, time.Now())
+	if err != nil {
+		// 运维日志维护不能阻塞或关闭已就绪 daemon；失败只保留诊断。
+		logging.Error("memory", "operational_log_prune_failed", err, nil)
+		return
+	}
+	logging.Info("memory", "operational_log_pruned", logging.Event{"audit_rows": result.AuditRows, "usage_rows": result.UsageRows})
 }
 
 func (d *Daemon) setRuntimeState(state protocol.DaemonRuntimeState) {

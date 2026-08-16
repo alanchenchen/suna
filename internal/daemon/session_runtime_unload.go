@@ -1,9 +1,6 @@
 package daemon
 
-import (
-	"context"
-	"time"
-)
+import "time"
 
 const defaultRuntimeUnloadDelay = 2 * time.Second
 
@@ -74,14 +71,9 @@ func (m *sessionManager) finishStateOpNoLock(sessionID string, rt *sessionRuntim
 	m.scheduleRuntimeUnloadNoLock(sessionID)
 }
 
-// handleDetachedSession 保留空会话的既有自动清理语义；有持久化消息的会话仅卸载 runtime。
+// handleDetachedSession 只安排内存 runtime 卸载；持久化 Session 仅允许用户显式删除。
 func (m *sessionManager) handleDetachedSession(sessionID string, shouldCheck bool) {
 	if sessionID == "" || !shouldCheck {
-		return
-	}
-	meta, err := m.store.Get(context.Background(), sessionID)
-	if err == nil && meta != nil && meta.MessageCount == 0 {
-		m.deleteInactive(context.Background(), sessionID)
 		return
 	}
 	m.scheduleRuntimeUnload(sessionID)
