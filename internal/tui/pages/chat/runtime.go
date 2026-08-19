@@ -37,6 +37,16 @@ func (m *Model) AppendMessage(msg Msg) {
 	m.SubtaskToolCursorUserSet = false
 	m.SubtaskToolDetailExpanded = false
 	m.SubtaskToolDetailScroll = 0
+	m.appendMessage(msg)
+}
+
+func (m *Model) appendMessage(msg Msg) {
+	if msg.ID == 0 {
+		m.NextMessageID++
+		msg.ID = m.NextMessageID
+	} else if msg.ID > m.NextMessageID {
+		m.NextMessageID = msg.ID
+	}
 	m.Messages = append(m.Messages, msg)
 }
 

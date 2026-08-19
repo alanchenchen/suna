@@ -687,40 +687,41 @@ func TestRenderStreamingTextExpandsTabsBeforeWrapping(t *testing.T) {
 	}
 }
 
-func TestReasoningDetailClipsSourceBeforeRendering(t *testing.T) {
+func TestReasoningRunningDetailRequestStillClipsSource(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100}
-	tui.chat.ShowReasoningDetail = true
 
 	var lines []string
-	for i := 0; i < reasoningDetailSourceLines+20; i++ {
+	for i := 0; i < reasoningSummarySourceLines+20; i++ {
 		lines = append(lines, fmt.Sprintf("line-old-%03d", i))
 	}
 	lines = append(lines, "line-new")
-	got := stripANSIForTest(tui.renderThinkingBox(strings.Join(lines, "\n"), true, time.Now(), time.Time{}))
+	got := stripANSIForTest(tui.renderThinkingBoxMode(strings.Join(lines, "\n"), true, true, time.Now(), time.Time{}))
 	if strings.Contains(got, "line-old-000") {
-		t.Fatalf("renderThinkingBox() included clipped old reasoning: %q", got)
+		t.Fatalf("renderThinkingBoxMode() included clipped old reasoning: %q", got)
 	}
 	if !strings.Contains(got, "line-new") {
-		t.Fatalf("renderThinkingBox() = %q, want newest reasoning line", got)
+		t.Fatalf("renderThinkingBoxMode() = %q, want newest reasoning line", got)
+	}
+	if strings.Contains(got, "Ctrl+R") {
+		t.Fatalf("renderThinkingBoxMode() = %q, running reasoning should not show detail hint", got)
 	}
 }
 
-func TestReasoningCompletedDetailClipsHeadBeforeMarkdown(t *testing.T) {
+func TestReasoningCompletedDetailRendersCompleteContent(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100}
-	tui.chat.ShowReasoningDetail = true
 
 	var lines []string
-	lines = append(lines, "line-new")
-	for i := 0; i < reasoningDetailSourceLines+20; i++ {
-		lines = append(lines, "line-old")
+	lines = append(lines, "line-first")
+	for i := 0; i < reasoningSummarySourceLines+20; i++ {
+		lines = append(lines, fmt.Sprintf("line-middle-%03d", i))
 	}
-	lines = append(lines, "line-clipped")
-	got := stripANSIForTest(tui.renderThinkingBox(strings.Join(lines, "\n"), false, time.Now(), time.Now()))
-	if !strings.Contains(got, "line-new") {
-		t.Fatalf("renderThinkingBox() = %q, want first reasoning line", got)
+	lines = append(lines, "line-last")
+	got := stripANSIForTest(tui.renderThinkingBoxMode(strings.Join(lines, "\n"), false, true, time.Now(), time.Now()))
+	if !strings.Contains(got, "line-first") || !strings.Contains(got, "line-last") {
+		t.Fatalf("renderThinkingBoxMode() = %q, want complete reasoning content", got)
 	}
-	if strings.Contains(got, "line-clipped") {
-		t.Fatalf("renderThinkingBox() included clipped tail reasoning: %q", got)
+	if strings.Contains(got, "Ctrl+R") {
+		t.Fatalf("renderThinkingBoxMode() = %q, expanded reasoning should not show detail hint", got)
 	}
 }
 

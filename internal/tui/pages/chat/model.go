@@ -64,6 +64,7 @@ func (s *StreamingTextState) Text() string {
 }
 
 type Msg struct {
+	ID        uint64
 	Role      string
 	Content   any
 	Streaming bool
@@ -153,10 +154,12 @@ type Model struct {
 	ModelPickerOpen   bool
 	ModelList         overlaylist.Model
 
-	ShowToolDetail      bool
-	ShowReasoningDetail bool
-	ToolDetailScroll    int
-	SelectedToolID      string
+	ShowToolDetail   bool
+	ToolDetailScroll int
+	SelectedToolID   string
+
+	ExpandedReasoningID uint64
+	NextMessageID       uint64
 
 	SubtaskCursor             int
 	SubtaskCursorUserSet      bool

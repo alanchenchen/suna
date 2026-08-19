@@ -17,6 +17,7 @@ func (m *Model) HandleStreamStart(now time.Time) {
 }
 
 func (m *Model) HandleReasoningStart(now time.Time) {
+	m.ExpandedReasoningID = 0
 	m.ClearStatusLabel()
 	m.LastWaitingTool = ""
 	if m.Phase == PhaseFirstLLM || m.Phase == PhaseLLM || m.Phase == PhaseWaitingAfterTool {

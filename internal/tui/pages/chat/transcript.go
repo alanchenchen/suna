@@ -22,7 +22,8 @@ type TranscriptDeps struct {
 	MarkdownWidth int
 	Theme         string
 	RenderAll     bool
-	ReasoningMode string
+
+	ReasoningMode func(*Msg) string
 
 	SunaLabel     string
 	AskHelp       string
@@ -90,15 +91,6 @@ func (m *Model) SyncTranscript(deps TranscriptDeps) {
 		}
 		m.SetTranscriptYOffset(m.TranscriptYOffset)
 	}
-}
-
-func (m Model) HasStreamingMessage() bool {
-	for i := range m.Messages {
-		if m.Messages[i].Streaming {
-			return true
-		}
-	}
-	return false
 }
 
 type ResponseNavInfo struct {
@@ -195,8 +187,12 @@ func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptB
 			renderSunaHeader()
 			startLine := lineCount
 			if deps.RenderReasoning != nil {
+				mode := "reasoning_collapsed"
+				if deps.ReasoningMode != nil {
+					mode = deps.ReasoningMode(msg)
+				}
 				// 思考链展开时可能很长；离屏时只复用行数，避免滚动历史后仍反复渲染不可见内容。
-				if cachedLines, ok := m.cachedRenderedBlockLines(msg, deps.Width, deps.Theme, deps.ReasoningMode); ok && !deps.RenderAll && !m.shouldRenderBlockText(startLine, cachedLines) {
+				if cachedLines, ok := m.cachedRenderedBlockLines(msg, deps.Width, deps.Theme, mode); ok && !deps.RenderAll && !m.shouldRenderBlockText(startLine, cachedLines) {
 					addBlockWithLineCount(i, msg.Streaming, "", cachedLines)
 				} else {
 					addBlock(i, msg.Streaming, deps.RenderReasoning(msg))

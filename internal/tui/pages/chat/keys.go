@@ -76,10 +76,6 @@ func (m *Model) InsertNewline() {
 	m.Textarea.InsertString("\n")
 }
 
-func (m *Model) ToggleReasoningDetail() {
-	m.ShowReasoningDetail = !m.ShowReasoningDetail
-}
-
 func (m *Model) ToggleToolDetail(visibleIDs []string) {
 	if len(visibleIDs) == 0 {
 		m.ShowToolDetail = false

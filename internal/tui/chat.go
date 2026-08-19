@@ -111,7 +111,7 @@ func (t *TUI) syncContent() {
 		Width:         t.width,
 		MarkdownWidth: max(24, t.width-8),
 		Theme:         currentTheme.Name,
-		ReasoningMode: reasoningRenderMode(t.chat.ShowReasoningDetail),
+		ReasoningMode: t.chat.ReasoningMode,
 		SunaLabel:     t.tr("tui.chat.suna"),
 		AskHelp:       t.tr("tui.ask.help"),
 		AskChoiceHelp: t.tr("tui.ask.choice_help"),

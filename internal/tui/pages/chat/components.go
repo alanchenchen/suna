@@ -135,7 +135,8 @@ func (m *Model) ResetRuntime() {
 	m.CmdSuggestionIdx = 0
 	m.ResetNativeLists()
 	m.ShowToolDetail = false
-	m.ShowReasoningDetail = false
+	m.ExpandedReasoningID = 0
+	m.NextMessageID = 0
 	m.ToolDetailScroll = 0
 	m.SelectedToolID = ""
 	m.SubtaskCursor = 0

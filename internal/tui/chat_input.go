@@ -382,8 +382,17 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, nil
 		}
 	case ks == "ctrl+r":
-		t.chat.ToggleReasoningDetail()
+		if t.chat.Compacting || t.chat.HasStreamingReasoning() {
+			return t, nil
+		}
+		anchor, changed := t.chat.ToggleVisibleReasoningDetail()
+		if !changed {
+			return t, nil
+		}
+		t.cancelTranscriptScrollTimer()
 		t.syncContent()
+		t.chat.RestoreTranscriptAnchor(anchor)
+		t.layoutChat()
 		return t, nil
 	case ks == "ctrl+up":
 		t.jumpToLastAssistantStart()

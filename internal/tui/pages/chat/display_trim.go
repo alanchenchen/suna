@@ -66,6 +66,9 @@ func (m *Model) TrimDisplayHistory(limitBytes int) bool {
 	}
 	// 先清空被裁消息，断开大字符串/render cache/tool block 引用，再复制保留区，避免旧 backing array 滞留。
 	for i := 0; i < cutoff; i++ {
+		if m.Messages[i].ID != 0 && m.Messages[i].ID == m.ExpandedReasoningID {
+			m.ExpandedReasoningID = 0
+		}
 		m.Messages[i] = Msg{}
 	}
 	kept := append([]Msg(nil), m.Messages[cutoff:]...)

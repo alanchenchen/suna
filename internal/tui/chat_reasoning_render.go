@@ -10,16 +10,18 @@ import (
 )
 
 const (
-	// 思考框本身只展示少量行，流式阶段先裁剪源文本，避免每帧对完整思考链 wrap/markdown。
-	reasoningDetailSourceBytes = 32 * 1024
-	reasoningDetailSourceLines = 80
-	reasoningSummaryTailBytes  = 8 * 1024
-	reasoningRunningMaxRows    = 5
-	reasoningCompletedMaxRows  = 3
-	reasoningDetailMaxRows     = 10
+	reasoningSummarySourceLines = 80
+	reasoningSummaryTailBytes   = 8 * 1024
+	reasoningRunningMaxRows     = 5
+	reasoningCompletedMaxRows   = 3
 )
 
 func (t *TUI) renderThinkingBox(content string, running bool, startedAt, endedAt time.Time) string {
+	return t.renderThinkingBoxMode(content, running, false, startedAt, endedAt)
+}
+
+func (t *TUI) renderThinkingBoxMode(content string, running, detail bool, startedAt, endedAt time.Time) string {
+	detail = detail && !running
 	width := max(24, min(t.width-8, 62))
 	inner := width - 4
 	elapsed := reasoningElapsed(running, startedAt, endedAt)
@@ -31,49 +33,43 @@ func (t *TUI) renderThinkingBox(content string, running bool, startedAt, endedAt
 		// completed 状态保留精确时长，不含 spinner，不会因 tick 变化。
 		title = fmt.Sprintf("✓ %s %.1fs", t.tr("tui.chat.thinking"), elapsed.Seconds())
 	}
-	if !running && !t.chat.ShowReasoningDetail {
+	if !running && !detail {
 		title += " · " + t.tr("tui.chat.thinking_detail_hint")
 	}
 	display := strings.TrimSpace(content)
 	if running && display == "" {
 		display = t.tr("status.thinking")
 	}
-	if !t.chat.ShowReasoningDetail {
+	if !detail {
 		trimmed := strings.TrimSpace(clipTailBytes(display, reasoningSummaryTailBytes))
 		if running {
 			display = renderStreamingText(trimmed, inner)
 		} else {
-			display = renderStreamingText(clipHeadLinesBytes(trimmed, reasoningDetailSourceLines, reasoningSummaryTailBytes), inner)
+			display = renderStreamingText(clipHeadLinesBytes(trimmed, reasoningSummarySourceLines, reasoningSummaryTailBytes), inner)
 		}
 		if strings.TrimSpace(display) == "" {
 			display = t.tr("tui.chat.thought_done")
 		}
 	} else {
-		trimmed := strings.TrimSpace(content)
-		if running {
-			trimmed = clipTailLinesBytes(trimmed, reasoningDetailSourceLines, reasoningDetailSourceBytes)
-			display = renderStreamingText(trimmed, inner)
-		} else {
-			trimmed = clipHeadLinesBytes(trimmed, reasoningDetailSourceLines, reasoningDetailSourceBytes)
-			display = RenderMarkdown(trimmed, inner)
-		}
+		display = RenderMarkdown(strings.TrimSpace(content), inner)
 	}
 	lines := strings.Split(strings.TrimRight(display, "\n"), "\n")
 	body := make([]string, 0, len(lines))
 	for _, line := range lines {
 		body = append(body, textutil.WrapLine(line, inner)...)
 	}
-	body = limitThinkingBodyRows(body, t.chat.ShowReasoningDetail, running)
+	body = limitThinkingBodyRows(body, detail, running)
 	return textutil.IndentLines(renderThinkingRoundBox(width, title, body), transcriptBlockIndent) + "\n"
 }
 func limitThinkingBodyRows(lines []string, detail bool, running bool) []string {
+	lines = trimEmptyThinkingRows(lines)
+	if detail && !running {
+		return lines
+	}
 	maxRows := reasoningCompletedMaxRows
-	if detail {
-		maxRows = reasoningDetailMaxRows
-	} else if running {
+	if running {
 		maxRows = reasoningRunningMaxRows
 	}
-	lines = trimEmptyThinkingRows(lines)
 	if len(lines) <= maxRows {
 		return lines
 	}
@@ -113,14 +109,12 @@ func (t *TUI) renderReasoningMessage(msg *chatMsg) string {
 	if msg.Stream != nil {
 		content = msg.Stream.Text()
 	}
-	out := t.renderThinkingBox(content, msg.Streaming, msg.StartedAt, msg.EndedAt)
-	msg.Render = msgRenderCache{Width: t.width, Theme: currentTheme.Name, ContentLen: len(content), LineCount: chatpage.RenderedLineCount(out), Output: out, Mode: reasoningRenderMode(t.chat.ShowReasoningDetail)}
-	return out
-}
-
-func reasoningRenderMode(detail bool) string {
-	if detail {
-		return "reasoning_detail"
+	mode := t.chat.ReasoningMode(msg)
+	if !msg.Streaming && msg.Render.Width == t.width && msg.Render.Theme == currentTheme.Name && msg.Render.ContentLen == len(content) && msg.Render.Mode == mode && msg.Render.Output != "" {
+		return msg.Render.Output
 	}
-	return "reasoning_collapsed"
+	detail := mode == "reasoning_detail"
+	out := t.renderThinkingBoxMode(content, msg.Streaming, detail, msg.StartedAt, msg.EndedAt)
+	msg.Render = msgRenderCache{Width: t.width, Theme: currentTheme.Name, ContentLen: len(content), LineCount: chatpage.RenderedLineCount(out), Output: out, Mode: mode}
+	return out
 }
