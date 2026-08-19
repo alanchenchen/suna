@@ -105,6 +105,39 @@ func TestSubtaskBlockUsesAvailableWidthForRowSummary(t *testing.T) {
 	}
 }
 
+func TestSelectedSubtaskSummaryWrapsCompleteTask(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 72, height: 28, mode: uipage.Chat}
+	tui.initChatComponents()
+	task := strings.Repeat("完整任务描述不能被截断", 8)
+	entry := &toolEntry{
+		ID:        "spawn-1",
+		Name:      "Spawn",
+		RawName:   "spawn",
+		Intent:    "分析长任务",
+		Status:    toolRunning,
+		ParamsRaw: map[string]any{"task": task},
+	}
+
+	lines := tui.renderSelectedSubtaskSummary(entry, 24)
+	plainLines := make([]string, 0, len(lines))
+	for _, line := range lines {
+		plainLines = append(plainLines, stripANSIForTest(line))
+	}
+	plain := strings.Join(plainLines, "")
+	if strings.Contains(plain, entry.Intent) {
+		t.Fatalf("renderSelectedSubtaskSummary() = %q, should not repeat subtask intent", plain)
+	}
+	if !strings.Contains(plain, task) {
+		t.Fatalf("renderSelectedSubtaskSummary() = %q, want complete task %q", plain, task)
+	}
+	if strings.Contains(plain, "...") {
+		t.Fatalf("renderSelectedSubtaskSummary() = %q, should wrap instead of truncate task", plain)
+	}
+	if len(lines) < 4 {
+		t.Fatalf("renderSelectedSubtaskSummary() lines = %d, want wrapped task", len(lines))
+	}
+}
+
 func TestGlobalToolDetailSkipsSpawnAndSubtaskChildren(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 28, mode: uipage.Chat}
 	tui.initChatComponents()

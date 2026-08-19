@@ -135,8 +135,7 @@ func (t *TUI) renderSubtaskRows(ids []string, innerWidth int, selected int) []st
 }
 
 func (t *TUI) renderSelectedSubtaskSummary(te *toolEntry, innerWidth int) []string {
-	label := textutil.TruncateRunes(toolview.PlainIntentLabel(te), max(12, innerWidth))
-	parts := []string{styleHL.Render(label)}
+	var parts []string
 	if te != nil && te.Status == toolview.StatusError {
 		if reason := t.subtaskFailureReason(te); reason != "" {
 			parts = append(parts, styleDim.Render(t.tr("tui.subtask_panel.error")+": ")+styleToolErr.Render(textutil.TruncateRunes(reason, max(12, innerWidth-8))))
@@ -148,8 +147,13 @@ func (t *TUI) renderSelectedSubtaskSummary(te *toolEntry, innerWidth int) []stri
 	if tools := subtaskParamLabel(te, "tools"); tools != "" {
 		parts = append(parts, styleDim.Render(t.tr("tui.tool.tools")+": ")+styleToolDim.Render(textutil.TruncateRunes(tools, max(10, innerWidth-8))))
 	}
-	if task := subtaskParamLabel(te, "task"); task != "" {
-		parts = append(parts, styleDim.Render(t.tr("tui.tool.task")+": ")+styleToolDim.Render(textutil.TruncateRunes(task, max(12, innerWidth-8))))
+	if task := subtaskParamText(te, "task"); task != "" {
+		parts = append(parts, styleDim.Render(t.tr("tui.tool.task")+":"))
+		for _, line := range strings.Split(strings.TrimRight(task, "\n"), "\n") {
+			for _, wrapped := range textutil.WrapLine(textutil.ExpandTabs(line, 4), max(12, innerWidth)) {
+				parts = append(parts, styleToolDim.Render(wrapped))
+			}
+		}
 	}
 	return parts
 }
@@ -301,6 +305,10 @@ func (t *TUI) subtaskToolDetailHeight() int {
 }
 
 func subtaskParamLabel(te *toolEntry, key string) string {
+	return strings.Join(strings.Fields(subtaskParamText(te, key)), " ")
+}
+
+func subtaskParamText(te *toolEntry, key string) string {
 	if te == nil || te.ParamsRaw == nil {
 		return ""
 	}
@@ -308,7 +316,7 @@ func subtaskParamLabel(te *toolEntry, key string) string {
 	if !ok {
 		return ""
 	}
-	return strings.Join(strings.Fields(fmt.Sprintf("%v", value)), " ")
+	return strings.TrimSpace(fmt.Sprintf("%v", value))
 }
 
 func (t *TUI) subtaskStatusCounts(ids []string) (done, running, failed int) {
