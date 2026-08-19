@@ -493,7 +493,6 @@ func TestImagePasteOverlayLeftAlignsWithInputArea(t *testing.T) {
 		"content 4",
 		"  ────────────────────────────────",
 		"  ▌ 输入消息...",
-		"  help",
 		"  status",
 	}, "\n")
 	panel := "╭────────╮\n│ image │\n╰────────╯"

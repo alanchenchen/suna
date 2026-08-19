@@ -72,6 +72,8 @@ type Agent struct {
 	configMu       sync.RWMutex
 	configModTime  time.Time
 	runMu          sync.Mutex
+	steeringMu     sync.RWMutex
+	steering       *steeringMailbox
 	// currentInputBlocks 只在单次 Agent.Run 内保存当前用户消息的轻量媒体引用，供 spawn.input_images 显式转交给 subtask。
 	// 这里不能保存到跨轮状态；Run 结束必须清空，避免附件引用被误当作历史上下文继续使用。
 	currentInputBlocks []model.ContentBlock
@@ -196,6 +198,7 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 
 	runCtx, cancel := context.WithCancel(ctx)
 	runCtx, runIdentity := a.ensureRunExecutionContext(runCtx)
+	a.ensureSteeringMailbox(runIdentity.RunID)
 	a.cancelMu.Lock()
 	a.cancelFn = cancel
 	a.cancelMu.Unlock()
@@ -204,6 +207,7 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 		defer a.finishRun(events, cancel, runIdentity)
 
 		if a.router == nil {
+			a.rejectSteeringBeforeFailure(runIdentity.RunID, events)
 			events <- Event{Type: EventStatus, Error: true, RunError: a.modelUnavailableRunError()}
 			return
 		}
@@ -212,6 +216,7 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 		storedUserMessage := input.StoredMessage(model.RoleUser)
 		inputText := userMessage.Text()
 		if len(userMessage.Content) == 0 {
+			a.rejectSteeringBeforeFailure(runIdentity.RunID, events)
 			events <- Event{Type: EventStatus, Content: "input is required", Error: true}
 			return
 		}
@@ -222,7 +227,7 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 		// 多模态 raw media 只允许参与当前 agent run；run 结束后立即替换为轻量 metadata，避免进入下一轮上下文或会话快照。
 		defer func() {
 			a.currentInputBlocks = nil
-			a.replaceLastUserMessage(inputText, storedUserMessage)
+			a.replaceRunInputMessage(userMessage, storedUserMessage)
 			a.saveConversationState(runCtx)
 		}()
 		a.turnCount++
@@ -245,6 +250,7 @@ func (a *Agent) ResumeRun(ctx context.Context) <-chan Event {
 
 	runCtx, cancel := context.WithCancel(ctx)
 	runCtx, runIdentity := a.ensureRunExecutionContext(runCtx)
+	a.ensureSteeringMailbox(runIdentity.RunID)
 	a.cancelMu.Lock()
 	a.cancelFn = cancel
 	a.cancelMu.Unlock()
@@ -254,10 +260,12 @@ func (a *Agent) ResumeRun(ctx context.Context) <-chan Event {
 		defer a.saveConversationState(runCtx)
 
 		if a.router == nil {
+			a.rejectSteeringBeforeFailure(runIdentity.RunID, events)
 			events <- Event{Type: EventStatus, Error: true, RunError: a.modelUnavailableRunError()}
 			return
 		}
 		if !a.canResumeRunLocked() {
+			a.rejectSteeringBeforeFailure(runIdentity.RunID, events)
 			events <- Event{Type: EventStatus, Content: "no resumable run", Error: true}
 			return
 		}
@@ -282,6 +290,15 @@ func (a *Agent) ensureRunExecutionContext(ctx context.Context) (context.Context,
 	return tools.WithExecutionContext(ctx, execCtx), execCtx
 }
 
+func (a *Agent) rejectSteeringBeforeFailure(runID string, events chan<- Event) {
+	items := a.RejectPendingSteering(runID)
+	// TUI 逐条前插恢复草稿，因此逆序通知才能保持用户原始 FIFO 文本顺序。
+	for i := len(items) - 1; i >= 0; i-- {
+		item := items[i]
+		events <- Event{Type: EventSteering, Steering: &item}
+	}
+}
+
 func (a *Agent) finishRun(events chan Event, cancel context.CancelFunc, runIdentity tools.ExecutionContext) {
 	a.cancelMu.Lock()
 	a.cancelFn = nil
@@ -296,6 +313,7 @@ func (a *Agent) finishRun(events chan Event, cancel context.CancelFunc, runIdent
 		}
 		cleanupCancel()
 	}
+	a.clearSteeringMailbox(runIdentity.RunID)
 	close(events)
 	a.runMu.Unlock()
 }
@@ -308,14 +326,17 @@ func (a *Agent) modelUnavailableRunError() *RunError {
 }
 
 func (a *Agent) runCurrentWorking(runCtx context.Context, inputText string, events chan<- Event) {
+	runIdentity, _ := tools.ExecutionContextFrom(runCtx)
 	runCtx = tools.MergeExecutionContext(runCtx, tools.ExecutionContext{SessionID: a.sessionID, CWD: a.cwd, AttachmentDir: a.attachmentRoot()})
 	modelRef := a.modelRef
 	if a.router == nil {
+		a.rejectSteeringBeforeFailure(runIdentity.RunID, events)
 		events <- Event{Type: EventStatus, Error: true, RunError: a.modelUnavailableRunError()}
 		return
 	}
 	if modelRef == "" {
 		// 正常 session 在 create 或 legacy attach 时已固化 model_ref；此处仅处理损坏持久化数据。
+		a.rejectSteeringBeforeFailure(runIdentity.RunID, events)
 		events <- Event{Type: EventStatus, Error: true, RunError: &RunError{Kind: RunErrorNoModelConfigured}}
 		return
 	}
@@ -328,9 +349,11 @@ func (a *Agent) runCurrentWorking(runCtx context.Context, inputText string, even
 			if bindingErr.Kind == model.BindingErrorModelNotFound {
 				runErr = &RunError{Kind: RunErrorSessionModelUnavailable, ModelRef: modelRef}
 			}
+			a.rejectSteeringBeforeFailure(runIdentity.RunID, events)
 			events <- Event{Type: EventStatus, Error: true, RunError: runErr}
 			return
 		}
+		a.rejectSteeringBeforeFailure(runIdentity.RunID, events)
 		events <- Event{Type: EventStatus, Content: err.Error(), Error: true}
 		return
 	}
@@ -349,6 +372,12 @@ func (a *Agent) runCurrentWorking(runCtx context.Context, inputText string, even
 		EmitReasoning: true,
 		AutoCompress:  true,
 		SessionState:  a.sessionState,
+		TakeSteering: func(seal bool) []runner.SteeringInput {
+			return a.takeSteering(runIdentity.RunID, seal)
+		},
+		SealSteering: func() bool {
+			return a.sealSteering(runIdentity.RunID)
+		},
 	})
 	if err != nil {
 		content := err.Error()
@@ -359,6 +388,7 @@ func (a *Agent) runCurrentWorking(runCtx context.Context, inputText string, even
 			modelErr = &model.ModelError{Kind: model.ModelErrorCancelled, Message: content}
 			resumeAvailable = false
 		}
+		a.rejectSteeringBeforeFailure(runIdentity.RunID, events)
 		events <- Event{Type: EventStatus, Content: content, Error: true, ResumeAvailable: resumeAvailable, ModelError: modelErr}
 		return
 	}
@@ -408,6 +438,10 @@ func (a *Agent) newRunner(events chan<- Event) *runner.Runner {
 		Hooks: runner.Hooks{
 			CleanToolParams: a.cleanToolParams,
 			OnToolResult:    a.addToolSummary,
+			OnSteeringApplied: func(ctx context.Context, input runner.SteeringInput) {
+				item := a.onSteeringApplied(ctx, input)
+				events <- Event{Type: EventSteering, Steering: &item}
+			},
 			OnCompactCommit: a.commitCompactState,
 		},
 	}

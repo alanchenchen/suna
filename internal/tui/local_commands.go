@@ -130,6 +130,26 @@ func (t *TUI) sendMessageCmd(input string, attachments []attachmentItem) tea.Cmd
 	}
 }
 
+func (t *TUI) steerCmd(runID, clientMsgID, text string) tea.Cmd {
+	return func() tea.Msg {
+		if t.localCli == nil {
+			return steerResultMsg{ClientMsgID: clientMsgID, Err: fmt.Errorf("%s", t.tr("error.not_connected"))}
+		}
+		result, err := t.localCli.Steer(runID, clientMsgID, text)
+		return steerResultMsg{Message: result.Message, ClientMsgID: clientMsgID, Err: err}
+	}
+}
+
+func (t *TUI) removeSteeringCmd(runID, id string) tea.Cmd {
+	return func() tea.Msg {
+		if t.localCli == nil {
+			return steerRemoveResultMsg{Err: fmt.Errorf("%s", t.tr("error.not_connected"))}
+		}
+		result, err := t.localCli.RemoveSteering(runID, id)
+		return steerRemoveResultMsg{Message: result.Message, Err: err}
+	}
+}
+
 func (t *TUI) resumeRunCmd() tea.Cmd {
 	return func() tea.Msg {
 		if t.localCli == nil {

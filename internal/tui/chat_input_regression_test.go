@@ -171,7 +171,7 @@ func TestSelectionModeShowsReadOnlyComposerAndRestoresFocus(t *testing.T) {
 		t.Fatal("textarea.Focused() = true while terminal selection is active")
 	}
 	view := stripANSIForTest(tui.renderInputArea())
-	if !strings.Contains(view, "正在选择终端文本") {
+	if !strings.Contains(view, "拖动选择文本以复制") || !strings.Contains(view, "Esc 返回") {
 		t.Fatalf("renderInputArea() = %q, want terminal selection state", view)
 	}
 	if strings.Contains(view, "Esc 取消") {

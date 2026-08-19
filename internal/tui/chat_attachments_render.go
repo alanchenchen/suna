@@ -18,6 +18,10 @@ import (
 
 func (t *TUI) handlePaste(content string) tea.Cmd {
 	pending, ok, blocked := attachmentmodel.DetectImagePaste(content)
+	if t.canSteerCurrentRun() && (ok || blocked) {
+		t.appendNonToolMessage(chatMsg{Role: "error", Content: t.tr("tui.chat.queue_text_only")})
+		return nil
+	}
 	if blocked {
 		t.appendNonToolMessage(chatMsg{Role: "error", Content: t.tr("tui.attachment.base64_blocked")})
 		return nil

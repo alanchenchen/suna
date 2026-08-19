@@ -6,6 +6,8 @@ const (
 
 const (
 	MethodSendMessage = "agent.sendMessage"
+	MethodSteer       = "agent.steer"
+	MethodSteerRemove = "agent.steerRemove"
 	MethodResumeRun   = "agent.resumeRun"
 	MethodCancel      = "agent.cancel"
 	MethodAskReply    = "agent.askReply"
@@ -67,6 +69,7 @@ const (
 const (
 	NotifyAgentDelta          = "agent.delta"
 	NotifyAgentRun            = "agent.run"
+	NotifySteering            = "agent.steering"
 	NotifySessionUserMessage  = "session.user_message"
 	NotifySessionUpdated      = "session.updated"
 	NotifyUsage               = "agent.usage"

@@ -27,6 +27,18 @@ type Request struct {
 
 	MaxTurns     int
 	MaxToolCalls int
+
+	// TakeSteering 在模型请求之间的安全边界取出排队用户消息；seal=true 表示候选终态，队列为空时原子封闭。
+	TakeSteering func(seal bool) []SteeringInput
+	// SealSteering 在无法继续物理模型请求时原子封闭队列；返回是否仍有待应用消息。
+	SealSteering func() bool
+}
+
+type SteeringInput struct {
+	ID          string
+	ClientMsgID string
+	Sequence    uint64
+	Message     model.Message
 }
 
 type Result struct {
@@ -113,9 +125,10 @@ type UsageSink interface {
 }
 
 type Hooks struct {
-	CleanToolParams func(name string, params map[string]any) (map[string]any, string)
-	OnAssistantText func(ctx context.Context, content string)
-	OnToolResult    func(name string, result tools.Result)
+	CleanToolParams   func(name string, params map[string]any) (map[string]any, string)
+	OnAssistantText   func(ctx context.Context, content string)
+	OnToolResult      func(name string, result tools.Result)
+	OnSteeringApplied func(ctx context.Context, input SteeringInput)
 	// OnCompactCommit 在自动 compact 成功并改写 WorkingMemory 后同步提交独立 Session State。
 	// 返回错误时 runner 不继续请求模型，避免 recent window 已裁剪但会话状态未持久化。
 	OnCompactCommit func(ctx context.Context, sessionState string) error

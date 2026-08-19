@@ -18,6 +18,11 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 		t.startRunElapsed(p.RunID, time.Now())
 	}
 	if p.State == protocol.AgentRunRunning && p.RunID != "" {
+		if t.activeRunID != "" && p.RunID != t.activeRunID {
+			t.chat.PendingSteering = nil
+			t.chat.SteeringSubmissions = nil
+			t.chat.SteeringTerminal = nil
+		}
 		if t.completedRunID != "" {
 			t.resetTranscriptAutoResumeCycle()
 		}

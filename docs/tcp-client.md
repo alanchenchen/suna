@@ -141,14 +141,14 @@ TCP 是一条长期连接，framing 为 **NDJSON**：
 TCP client 连接后，必须先发送：
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.5","client":{"name":"my-ui","version":"1.0.0","type":"desktop"}}}
+{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.6","client":{"name":"my-ui","version":"1.0.0","type":"desktop"}}}
 ```
 
 建议字段：
 
 | 字段 | 是否必填 | 说明 |
 |---|---:|---|
-| `protocol_version` | 否 | 当前公开版本为 `"0.5"`；推荐始终传入。 |
+| `protocol_version` | 否 | 当前公开版本为 `"0.6"`；推荐始终传入。 |
 | `client.name` | 否 | 客户端名称，用于诊断。 |
 | `client.version` | 否 | 客户端版本。 |
 | `client.type` | 否 | 例如 `desktop`、`ide`、`web_gateway`、`script`。 |
@@ -157,12 +157,12 @@ TCP client 连接后，必须先发送：
 
 ```json
 {
-  "protocol_version":"0.5",
+  "protocol_version":"0.6",
   "runtime_version":"v0.x.x",
   "transport":"tcp",
-  "capabilities":{"agent":true,"session":true,"handoff":true,"mcp_status_updates":true},
+  "capabilities":{"agent":true,"session":true,"handoff":true,"run_steering":true,"mcp_status_updates":true},
   "content_sources":{"text":true,"image_path":true,"image_url":true},
-  "limits":{"max_tool_result_bytes":16384}
+  "limits":{"max_tool_result_bytes":16384,"max_steering_messages":32,"max_steering_bytes":65536}
 }
 ```
 
@@ -212,7 +212,7 @@ disabled / starting / active / error
 {"session_id":"SESSION_ID","require_active":true}
 ```
 
-Attach response 中的 `current_run`、`run_id`、`assistant_buffer` 与 `reasoning_buffer` 用于恢复正在进行的展示；同一 `run_id` 已收到终态后，客户端不得被迟到快照重新切回运行态。
+Attach response 中的 `current_run`、`run_id`、`assistant_buffer` 与 `reasoning_buffer` 用于恢复正在进行的展示；`pending_steering` 是 daemon 已接受但尚未应用的运行中消息，客户端按 `sequence` 显示并按 `can_control` 决定是否允许撤回。同一 `run_id` 已收到终态后，客户端不得被迟到快照重新切回运行态。
 
 未 attach 的客户端只通过 `session.updated` 观察轻量 Catalog 状态。只有 attach 到目标 session 后，才会收到该 session 的 `agent.run`、`agent.delta`、tool、AskUser、Guard、`session.user_message` 等详细事件。
 
@@ -227,6 +227,7 @@ Attach response 中的 `current_run`、`run_id`、`assistant_buffer` 与 `reason
 | Notification | 客户端应做什么 |
 |---|---|
 | `agent.run` | 更新 running / retrying / cancelling / done / failed / cancelled 状态；`cancelling` 不是终态，此时不要再次取消或发送下一条消息。 |
+| `agent.steering` | 按消息 ID 合并 queued / applied / removed / rejected；response 与 notification 可能乱序。 |
 | `agent.delta` | 追加 assistant 或 reasoning 流式文本。 |
 | `agent.usage` | 更新 token、context、耗时统计。 |
 | `agent.tool_start` / `agent.tool_guard` / `agent.tool_end` | 展示工具生命周期和结果。 |
@@ -234,8 +235,44 @@ Attach response 中的 `current_run`、`run_id`、`assistant_buffer` 与 `reason
 | `agent.guard_confirm` | 展示安全确认，并由允许回复的 client 决策。 |
 | `agent.interaction_resolved` | 移除对应 AskUser / Guard UI。 |
 | `session.updated` | 合并全局 Session Catalog 中的 metadata、`status` 与 `client_count`；该通知会发送给所有已完成握手的客户端，包括未 attach 目标 session 的客户端。 |
+| `session.user_message` | 追加正式 user turn；运行中消息只有在 `applied` 后才由此进入 transcript。 |
 
-### 5.6 Detach
+### 5.6 运行中发送消息
+
+如果 `runtime.hello.capabilities.run_steering=true`，current run owner 可以在运行期间排队文本消息：
+
+```json
+{"jsonrpc":"2.0","id":6,"method":"agent.steer","params":{"run_id":"RUN_ID","client_msg_id":"CLIENT_GENERATED_ID","parts":[{"type":"text","text":"不要修改配置，只检查问题。"}]}}
+```
+
+成功 response 返回 canonical message：
+
+```json
+{"message":{"id":"STEERING_ID","run_id":"RUN_ID","client_msg_id":"CLIENT_GENERATED_ID","state":"queued","sequence":1,"can_control":true,"parts":[{"type":"text","text":"不要修改配置，只检查问题。"}]}}
+```
+
+消息不会打断正在进行的模型请求或 Tool Call。daemon 只在完整模型响应结束、或同一批 Tool Result 全部写回后的安全边界应用；自动 Compact 期间到达的消息会在 Compact 提交后应用。`queued` 时不要把它渲染成正式用户消息，收到 `applied` 后再等待 `session.user_message` 追加 transcript。
+
+撤回尚未应用的消息：
+
+```json
+{"jsonrpc":"2.0","id":7,"method":"agent.steerRemove","params":{"run_id":"RUN_ID","id":"STEERING_ID"}}
+```
+
+只允许 current run owner 操作；AskUser/Guard 等待、cancelling、终态或错误 `run_id` 会被拒绝。第一版只支持文本，不支持附件、任意排序或编辑。`client_msg_id` 用于请求重试幂等，相同 ID 不得携带不同内容。
+
+`agent.steering` 的 `state`：
+
+```text
+queued / applied / removed / rejected
+```
+
+- `removed`、`rejected`：owner 可将消息内容恢复为输入草稿；
+- `applied`：消息已进入 Working Memory，不能撤回；
+- response 与 notification 可能先后乱序，客户端必须按 `id` 和 `client_msg_id` 幂等处理；
+- `session.attach.current_run.pending_steering` 用于恢复当前 daemon 进程内的待处理队列。
+
+### 5.7 Detach
 
 不再使用当前 session 时：
 
@@ -309,7 +346,7 @@ export class SunaClient {
 
     const client = new SunaClient(socket);
     await client.request("runtime.hello", {
-      protocol_version: "0.5",
+      protocol_version: "0.6",
       client: { name: "example-ui", version: "1.0.0", type: "node" },
     });
     return client;
@@ -431,7 +468,7 @@ try {
 实现一个 Suna TCP JSON-RPC client：
 1. 执行 `suna serve --json`，解析 stdout 的 tcp_endpoint；
 2. 使用长期 TCP connection 和 NDJSON，一行一条 JSON；
-3. 第一条 request 必须是 runtime.hello，protocol_version 为 0.5；
+3. 第一条 request 必须是 runtime.hello，protocol_version 为 0.6；
 4. 用整数 request ID 和 pending map 匹配 response；
 5. 独立分发无 ID 的 daemon notification；
 6. 先 session.list，再 session.create 或 session.attach；

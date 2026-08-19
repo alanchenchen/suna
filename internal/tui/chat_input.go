@@ -6,9 +6,12 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/google/uuid"
+
 	"github.com/alanchenchen/suna/internal/protocol"
 	"github.com/alanchenchen/suna/internal/tui/clipboard"
 	attachmentmodel "github.com/alanchenchen/suna/internal/tui/components/attachment"
+	"github.com/alanchenchen/suna/internal/tui/components/toolview"
 	chatpage "github.com/alanchenchen/suna/internal/tui/pages/chat"
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 )
@@ -47,6 +50,7 @@ func (t *TUI) updateInputCursorBlink() tea.Cmd {
 func (t *TUI) currentInteractionPresentation() chatpage.InteractionPresentation {
 	return chatpage.CurrentInteractionPresentation(chatpage.InputPolicyState{
 		Compacting:      t.chat.Compacting,
+		CanSteer:        t.canSteerCurrentRun(),
 		Loading:         t.chat.Loading,
 		Cancelling:      t.cancelling,
 		ObservingRun:    t.observingRun(),
@@ -54,7 +58,7 @@ func (t *TUI) currentInteractionPresentation() chatpage.InteractionPresentation 
 		AskAllowCustom:  activeAskAllowCustom(t.chat.ActiveAsk()),
 		StatusLabel:     t.currentInputStatusLabel(),
 		SpinnerView:     t.chat.Spinner.View(),
-		CompactRunning:  t.withRunElapsed(t.compactRunningLabel()),
+		CompactRunning:  t.compactElapsedLabel(),
 		RespondingLabel: t.withRunElapsed(t.tr("status.responding")),
 		ObservingLabel:  t.withRunElapsed(t.tr("tui.chat.observe_input")),
 		CancellingLabel: t.tr("status.cancelling"),
@@ -63,6 +67,18 @@ func (t *TUI) currentInteractionPresentation() chatpage.InteractionPresentation 
 
 func (t *TUI) currentInputPolicy() chatpage.InputPolicy {
 	return t.currentInteractionPresentation().InputPolicy
+}
+
+func (t *TUI) compactElapsedLabel() string {
+	label := t.compactRunningLabel()
+	if t.compactStartedAt.IsZero() {
+		return label
+	}
+	return label + " · " + toolview.FormatCompactDuration(time.Since(t.compactStartedAt))
+}
+
+func (t *TUI) canSteerCurrentRun() bool {
+	return t.chat.Loading && t.currentRunCanControl && t.activeRunID != "" && !t.cancelling && !t.observingRun() && t.chat.ActiveInteractionKind() == chatpage.InteractionNone
 }
 
 func activeAskAllowCustom(ask *chatpage.AskUserView) bool {
@@ -126,13 +142,28 @@ func (t *TUI) handleSend() tea.Cmd {
 	}
 	// 已注册的本地指令永远不写入 transcript，也不发送给 Agent。命令本身
 	// 不消费附件：先保留附件草稿，用户完成本地操作后仍可继续发送它们。
-	if chatpage.IsRegisteredSlashCommand(input) {
+	if chatpage.IsRegisteredSlashCommand(input) && !t.canSteerCurrentRun() {
 		cmd := t.handleCommand(input)
 		t.syncContent()
 		if cmd != nil {
 			return cmd
 		}
 		return t.syncInputFocus()
+	}
+
+	if t.canSteerCurrentRun() {
+		if len(attachments) > 0 {
+			t.chat.Textarea.SetValue(input)
+			t.appendNonToolMessage(chatMsg{Role: "error", Content: t.tr("tui.chat.queue_text_only")})
+			return t.syncInputFocus()
+		}
+		if input == "" {
+			return t.syncInputFocus()
+		}
+		clientMsgID := uuid.NewString()
+		t.chat.SteeringSubmissions = append(t.chat.SteeringSubmissions, chatpage.SteeringSubmission{ClientMsgID: clientMsgID, Text: input})
+		t.syncContent()
+		return t.steerCmd(t.activeRunID, clientMsgID, input)
 	}
 
 	t.appendNonToolMessage(chatMsg{Role: "user", Content: userMessageContent{Text: input, Attachments: attachments}})
@@ -166,6 +197,19 @@ func (t *TUI) handleSend() tea.Cmd {
 	return t.runAgent(input, attachments)
 }
 
+func restoreSteeringDraft(current, returned string) string {
+	current = strings.TrimSpace(current)
+	returned = strings.TrimSpace(returned)
+	switch {
+	case returned == "":
+		return current
+	case current == "":
+		return returned
+	default:
+		return returned + "\n" + current
+	}
+}
+
 func (t *TUI) hasDraft() bool {
 	return t.chat.HasDraft()
 }
@@ -179,6 +223,7 @@ func (t *TUI) resetPhase() {
 	t.finishStreamingMessages()
 	t.chat.Compacting = false
 	t.compactAuto = false
+	t.compactStartedAt = time.Time{}
 	t.chat.ResetPhase()
 	_ = t.syncInputFocus()
 }
@@ -276,6 +321,10 @@ func (t *TUI) resetConversationStats() {
 }
 
 func (t *TUI) updateCmdSuggestionState() {
+	if t.canSteerCurrentRun() {
+		t.chat.ClearCommandSuggestions()
+		return
+	}
 	val := t.chat.Textarea.Value()
 	if strings.HasPrefix(val, "/") && !strings.Contains(strings.TrimPrefix(val, "/"), " ") {
 		t.updateCmdSuggestions(val)
@@ -287,6 +336,10 @@ func (t *TUI) updateCmdSuggestions(input string) {
 	t.chat.UpdateCommandSuggestions(input, chatMaxCommandSuggestions)
 }
 func (t *TUI) acceptCommandSuggestion() tea.Cmd {
+	if t.canSteerCurrentRun() {
+		t.chat.ClearCommandSuggestions()
+		return t.handleSend()
+	}
 	suggestion, ok := t.chat.AcceptCommandSuggestion()
 	if !ok {
 		return nil
@@ -371,6 +424,9 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ks == "esc":
 		return t.updateChatEsc()
 	case ks == "ctrl+v":
+		if t.canSteerCurrentRun() {
+			return t, nil
+		}
 		return t, t.readClipboardImagePasteCmd(time.Now())
 	case ks == "ctrl+t":
 		t.toggleToolDetail()
@@ -394,6 +450,13 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.chat.RestoreTranscriptAnchor(anchor)
 		t.layoutChat()
 		return t, nil
+	case ks == "ctrl+z":
+		if t.canSteerCurrentRun() && len(t.chat.PendingSteering) > 0 {
+			last := t.chat.PendingSteering[len(t.chat.PendingSteering)-1]
+			if last.CanControl {
+				return t, t.removeSteeringCmd(last.RunID, last.ID)
+			}
+		}
 	case ks == "ctrl+up":
 		t.jumpToLastAssistantStart()
 		return t, t.pauseTranscriptAutoFollow()
@@ -479,7 +542,7 @@ func (t *TUI) updateChatEnter() (tea.Model, tea.Cmd) {
 			return t, t.askReplyCmd(askID, answer)
 		}
 	}
-	if !t.chat.Loading {
+	if !t.chat.Loading || t.canSteerCurrentRun() {
 		return t, t.handleSend()
 	}
 	return t, nil

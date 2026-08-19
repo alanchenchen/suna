@@ -824,7 +824,7 @@ func TestManualScrollIdleNeverSchedulesAutoResume(t *testing.T) {
 	}
 	tui.layoutChat()
 	tui.syncContent()
-	tui.chat.SetTranscriptYOffset(10)
+	tui.chat.SetTranscriptYOffset(min(10, max(0, tui.chat.TranscriptMaxYOffset()-1)))
 	_ = tui.pauseTranscriptAutoFollow()
 	for i := 0; i < tui.chat.Viewport.Height()+2; i++ {
 		tui.appendNonToolMessage(chatMsg{Role: "system", Content: fmt.Sprintf("空闲新增-%02d", i)})
@@ -903,7 +903,7 @@ func TestManualScrollResumeIgnoresStaleGeneration(t *testing.T) {
 	}
 	tui.layoutChat()
 	tui.syncContent()
-	tui.chat.SetTranscriptYOffset(10)
+	tui.chat.SetTranscriptYOffset(max(0, tui.chat.TranscriptMaxYOffset()-1))
 	tui.chat.Loading = true
 	_ = tui.pauseTranscriptAutoFollow()
 	tui.transcriptScrollNewLines = tui.chat.Viewport.Height()

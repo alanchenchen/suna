@@ -93,6 +93,22 @@ func (c *Client) SendMessage(content string, attachments []attachment.Item) erro
 	return c.Invoke(ctx, protocol.MethodSendMessage, protocol.SendMessageParams{Parts: parts}, nil)
 }
 
+func (c *Client) Steer(runID, clientMsgID, text string) (protocol.SteerResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout(protocol.MethodSteer))
+	defer cancel()
+	var result protocol.SteerResult
+	err := c.Invoke(ctx, protocol.MethodSteer, protocol.SteerParams{RunID: runID, ClientMsgID: clientMsgID, Parts: []protocol.MessagePart{{Type: "text", Text: text}}}, &result)
+	return result, err
+}
+
+func (c *Client) RemoveSteering(runID, id string) (protocol.SteerResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout(protocol.MethodSteerRemove))
+	defer cancel()
+	var result protocol.SteerResult
+	err := c.Invoke(ctx, protocol.MethodSteerRemove, protocol.SteerRemoveParams{RunID: runID, ID: id}, &result)
+	return result, err
+}
+
 func (c *Client) ResumeRun() error {
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout(protocol.MethodResumeRun))
 	defer cancel()

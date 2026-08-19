@@ -197,9 +197,9 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, t.transcriptScrollResumeCmd(remaining, m.Generation, m.SessionID)
 		}
 		t.transcriptScrollTimerScheduled = false
-		t.chat.JumpToBottom()
-		t.syncContent()
 		t.layoutChat()
+		t.syncContent()
+		t.chat.JumpToBottom()
 		return t, nil
 
 	case tea.WindowSizeMsg:
@@ -266,7 +266,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, cmd
 
 	case clipboardImagePasteMsg:
-		if t.inputLocked() || t.lastPasteAt.After(m.StartedAt) {
+		if t.inputLocked() || t.canSteerCurrentRun() || t.lastPasteAt.After(m.StartedAt) {
 			return t, nil
 		}
 		if m.Blocked {

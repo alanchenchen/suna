@@ -52,7 +52,9 @@ func (t *TUI) runAgent(input string, attachments []attachmentItem) tea.Cmd {
 	t.startLLMWait()
 	t.chat.ResumeAvailable = false
 	t.chat.ResetToolState()
-	return tea.Batch(t.maybeAutoTitleSessionCmd(input), t.sendMessageCmd(input, attachments), t.startChatSpinner())
+	cmd := tea.Batch(t.maybeAutoTitleSessionCmd(input), t.sendMessageCmd(input, attachments), t.startChatSpinner())
+	_ = t.syncInputFocus()
+	return cmd
 }
 
 func (t *TUI) maybeAutoTitleSessionCmd(input string) tea.Cmd {
@@ -92,8 +94,8 @@ func (t *TUI) startChatSpinner() tea.Cmd {
 }
 
 func (t *TUI) startLLMWait() {
-	t.chat.Textarea.Blur()
 	t.chat.StartLLMWait(time.Now())
+	_ = t.syncInputFocus()
 }
 
 func (t *TUI) appendNonToolMessage(msg chatMsg) {

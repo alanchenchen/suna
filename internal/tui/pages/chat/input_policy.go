@@ -18,6 +18,7 @@ type InteractionPresentation struct {
 // InputPolicyState 是推导输入锁定行为所需的最小运行态快照。
 type InputPolicyState struct {
 	Compacting      bool
+	CanSteer        bool
 	Loading         bool
 	Cancelling      bool
 	ObservingRun    bool
@@ -36,10 +37,13 @@ func CurrentInputPolicy(state InputPolicyState) InputPolicy {
 		// 取消期间仍允许用户准备下一份草稿；Loading 会继续阻止 Enter 发送，Esc 也不会再次取消。
 		return InputPolicy{}
 	}
-	if state.Compacting {
+	if state.Compacting && !state.CanSteer {
 		return InputPolicy{Locked: true, Placeholder: joinNonEmpty(state.SpinnerView, state.CompactRunning)}
 	}
 	if state.Loading && state.InteractionKind == InteractionNone {
+		if state.CanSteer {
+			return InputPolicy{}
+		}
 		if state.ObservingRun {
 			label := state.ObservingLabel
 			if label == "" {

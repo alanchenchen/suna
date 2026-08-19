@@ -50,9 +50,13 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			return result, ctx.Err()
 		}
 		if req.MaxTurns > 0 && turns >= req.MaxTurns {
+			if req.SealSteering != nil {
+				req.SealSteering()
+			}
 			return result, fmt.Errorf("max turns exceeded (%d)", req.MaxTurns)
 		}
-		turns++
+		// 每次物理模型请求前吸收已排队消息，避免消息恰好在上一个安全边界后到达而多等一轮。
+		r.applySteering(ctx, req, false)
 
 		messages := req.Working.Messages()
 		if req.Messages != nil {
@@ -114,12 +118,25 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 				}
 				return result, fmt.Errorf("context remains too large after compaction (%d tokens estimated, %d token input limit); start a new session or reduce the current input", estimated, inputLimit)
 			}
+			// Compact 提交后才吸收压缩期间到达的消息，保证它们不被折叠进刚生成的 Session State。
+			if r.applySteering(ctx, req, false) {
+				messages = req.Working.Messages()
+				if req.Messages != nil {
+					messages = req.Messages(ctx)
+				}
+				completionReq.Messages = trimToolResultsForContext(messages)
+				// 新消息可能再次越过输入预算；回到循环可按完整请求重新 Compact，且不会消耗物理模型 turn。
+				if shouldCompactRequest(completionReq, contextWindow, coef, calibrated) {
+					continue
+				}
+			}
 		}
 
 		if req.AutoCompress {
 			result.SessionState = req.SessionState
 		}
 
+		turns++
 		if r.Sink != nil {
 			r.Sink.Status(StatusEvent{Kind: StatusWaitingLLM})
 		}
@@ -156,16 +173,25 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			}
 		}
 
-		if fullContent != "" || len(toolCalls) > 0 {
-			if fullContent != "" && r.Hooks.OnAssistantText != nil {
-				r.Hooks.OnAssistantText(ctx, fullContent)
-			}
-			if len(toolCalls) == 0 {
-				req.Working.AddMessage(model.NewTextMessage(model.RoleAssistant, fullContent))
-			}
+		if fullContent != "" && r.Hooks.OnAssistantText != nil {
+			r.Hooks.OnAssistantText(ctx, fullContent)
 		}
 
 		if len(toolCalls) == 0 {
+			if fullContent != "" {
+				req.Working.AddMessage(model.NewTextMessage(model.RoleAssistant, fullContent))
+			}
+			if req.MaxTurns > 0 && turns >= req.MaxTurns {
+				if req.SealSteering != nil && req.SealSteering() {
+					return result, fmt.Errorf("max turns exceeded (%d) before queued user messages could be applied", req.MaxTurns)
+				}
+				result.FinalText = fullContent
+				result.ContextWindow = req.Binding.ContextWindow()
+				return result, nil
+			}
+			if r.applySteering(ctx, req, true) {
+				continue
+			}
 			result.FinalText = fullContent
 			result.ContextWindow = req.Binding.ContextWindow()
 			return result, nil
@@ -214,8 +240,30 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 				r.Hooks.OnToolResult(execResult.tc.Name, execResult.result)
 			}
 		}
+		if req.MaxTurns <= 0 || turns < req.MaxTurns {
+			r.applySteering(ctx, req, false)
+		}
 
 	}
+}
+
+func (r *Runner) applySteering(ctx context.Context, req Request, seal bool) bool {
+	if req.TakeSteering == nil {
+		return false
+	}
+	inputs := req.TakeSteering(seal)
+	applied := false
+	for _, input := range inputs {
+		if input.Message.Role != model.RoleUser || len(input.Message.Content) == 0 {
+			continue
+		}
+		req.Working.AddMessage(input.Message)
+		applied = true
+		if r.Hooks.OnSteeringApplied != nil {
+			r.Hooks.OnSteeringApplied(ctx, input)
+		}
+	}
+	return applied
 }
 
 func (r *Runner) completeWithRecovery(ctx context.Context, binding *model.ModelBinding, completionReq *model.CompletionRequest, req Request) (string, []model.ToolCall, *model.Usage, error) {

@@ -3,7 +3,7 @@ package protocol
 import "time"
 
 type RuntimeHelloParams struct {
-	// ProtocolVersion 是客户端期望的协议版本；为空时按当前默认 0.5 处理。
+	// ProtocolVersion 是客户端期望的协议版本；为空时按当前默认 0.6 处理。
 	ProtocolVersion string `json:"protocol_version,omitempty"`
 	// Transport 由 JSON-RPC transport 层注入并覆盖客户端输入，用于 runtime.hello 返回真实承载方式。
 	Transport string `json:"transport,omitempty"`
@@ -35,6 +35,40 @@ type SendMessageParams struct {
 	ClientMsgID string `json:"client_msg_id,omitempty"`
 	// Parts 是唯一输入载体；纯文本也必须作为 text part 传入，避免回到旧的 content string 分支。
 	Parts []MessagePart `json:"parts,omitempty"`
+}
+
+type SteerParams struct {
+	RunID       string        `json:"run_id"`
+	ClientMsgID string        `json:"client_msg_id"`
+	Parts       []MessagePart `json:"parts"`
+}
+
+type SteerRemoveParams struct {
+	RunID string `json:"run_id"`
+	ID    string `json:"id"`
+}
+
+type SteeringState string
+
+const (
+	SteeringQueued   SteeringState = "queued"
+	SteeringApplied  SteeringState = "applied"
+	SteeringRemoved  SteeringState = "removed"
+	SteeringRejected SteeringState = "rejected"
+)
+
+type SteeringMessage struct {
+	ID          string        `json:"id"`
+	RunID       string        `json:"run_id"`
+	ClientMsgID string        `json:"client_msg_id,omitempty"`
+	State       SteeringState `json:"state"`
+	Sequence    uint64        `json:"sequence"`
+	CanControl  bool          `json:"can_control"`
+	Parts       []MessagePart `json:"parts,omitempty"`
+}
+
+type SteerResult struct {
+	Message SteeringMessage `json:"message"`
 }
 
 type AgentDeltaKind string
@@ -136,8 +170,11 @@ type AgentRunParams struct {
 }
 
 type UserMessageParams struct {
-	SessionID string        `json:"session_id,omitempty"`
-	Parts     []MessagePart `json:"parts,omitempty"`
+	SessionID   string        `json:"session_id,omitempty"`
+	RunID       string        `json:"run_id,omitempty"`
+	MessageID   string        `json:"message_id,omitempty"`
+	ClientMsgID string        `json:"client_msg_id,omitempty"`
+	Parts       []MessagePart `json:"parts,omitempty"`
 }
 
 type SessionStateParams struct {
@@ -214,14 +251,15 @@ const (
 
 type CurrentRunView struct {
 	// RunID 标识当前活跃运行；客户端可用它避免迟到快照重新激活已终态的 run。
-	RunID           string         `json:"run_id,omitempty"`
-	State           AgentRunState  `json:"state,omitempty"`
-	Status          SessionStatus  `json:"status"`
-	Phase           AgentRunPhase  `json:"phase,omitempty"`
-	AssistantBuffer string         `json:"assistant_buffer,omitempty"`
-	ReasoningBuffer string         `json:"reasoning_buffer,omitempty"`
-	WaitingType     RunWaitingType `json:"waiting_type,omitempty"`
-	CanControl      bool           `json:"can_control"`
+	RunID           string            `json:"run_id,omitempty"`
+	State           AgentRunState     `json:"state,omitempty"`
+	Status          SessionStatus     `json:"status"`
+	Phase           AgentRunPhase     `json:"phase,omitempty"`
+	AssistantBuffer string            `json:"assistant_buffer,omitempty"`
+	ReasoningBuffer string            `json:"reasoning_buffer,omitempty"`
+	WaitingType     RunWaitingType    `json:"waiting_type,omitempty"`
+	CanControl      bool              `json:"can_control"`
+	PendingSteering []SteeringMessage `json:"pending_steering,omitempty"`
 }
 
 type SessionSnapshot struct {

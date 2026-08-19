@@ -126,6 +126,10 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 		return s.handleRuntimeHello(req)
 	case protocol.MethodSendMessage:
 		return s.handleSendMessage(ctx, req, sink)
+	case protocol.MethodSteer:
+		return s.handleSteer(ctx, req)
+	case protocol.MethodSteerRemove:
+		return s.handleSteerRemove(ctx, req)
 	case protocol.MethodResumeRun:
 		return s.handleResumeRun(ctx, req, sink)
 	case protocol.MethodCancel:
@@ -204,7 +208,7 @@ func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHell
 		return protocol.RuntimeHelloResult{}, invalidParams(err.Error())
 	}
 	requestedVersion := strings.TrimSpace(params.ProtocolVersion)
-	if requestedVersion != "" && requestedVersion != "0.5" {
+	if requestedVersion != "" && requestedVersion != "0.6" {
 		return protocol.RuntimeHelloResult{}, protocolError{code: -32602, message: "unsupported protocol version", data: protocol.ProtocolErrorData{Kind: "unsupported_capability", Reason: "protocol_version"}}
 	}
 	transport := strings.TrimSpace(params.Transport)
@@ -212,15 +216,15 @@ func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHell
 		transport = "unknown"
 	}
 	return protocol.RuntimeHelloResult{
-		ProtocolVersion: "0.5",
+		ProtocolVersion: "0.6",
 		RuntimeVersion:  version.Current(),
 		Transport:       transport,
 		Capabilities: map[string]bool{
 			"agent": true, "streaming": true, "tools": true, "guard": true, "ask_user": true,
-			"session": true, "multi_session": true, "handoff": true, "config": true, "memory": true, "skills": true, "mcp": true, "mcp_status_updates": true,
+			"session": true, "multi_session": true, "handoff": true, "run_steering": true, "config": true, "memory": true, "skills": true, "mcp": true, "mcp_status_updates": true,
 		},
 		ContentSources: map[string]bool{"text": true, "image_path": true, "image_url": true},
-		Limits:         map[string]int{"max_tool_result_bytes": maxToolResultBytes},
+		Limits:         map[string]int{"max_tool_result_bytes": maxToolResultBytes, "max_steering_messages": agent.MaxSteeringMessages, "max_steering_bytes": agent.MaxSteeringBytes},
 	}, nil
 }
 
@@ -267,7 +271,8 @@ func (s *service) handleResumeRun(ctx context.Context, req protocol.Request, sin
 }
 
 func (s *service) beginAgentRun(ctx context.Context, connID string) (*sessionRuntime, string, string, error) {
-	rt, sessionID, runID, err := s.daemon.sessions.beginRunWithNotification(connID, func(_ *sessionRuntime, id, idRun string) {
+	rt, sessionID, runID, err := s.daemon.sessions.beginRunWithNotification(connID, func(current *sessionRuntime, id, idRun string) {
+		current.agent.PrepareSteering(idRun)
 		// 初始 lifecycle 必须留在通知临界区，确保并发 cancel 不能先于 running。
 		s.emitAgentRun(ctx, id, connID, protocol.AgentRunParams{RunID: idRun, State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
 	})
@@ -378,6 +383,17 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 					})
 				}
 				s.emitGuardConfirm(ctx, sessionID, connID, params)
+			case agent.EventSteering:
+				flush()
+				if evt.Steering == nil {
+					continue
+				}
+				ownerID := s.daemon.sessions.runOwner(sessionID)
+				message := steeringMessage(*evt.Steering, runID, false)
+				s.emitSteering(ctx, sessionID, ownerID, message)
+				if evt.Steering.State == agent.SteeringApplied {
+					s.emitUserMessage(ctx, sessionID, "", protocol.UserMessageParams{SessionID: sessionID, RunID: runID, MessageID: evt.Steering.ID, ClientMsgID: evt.Steering.ClientMsgID, Parts: message.Parts})
+				}
 			case agent.EventStatus:
 				flush()
 				switch evt.Status {
@@ -480,7 +496,7 @@ func (s *service) emitAgentRun(ctx context.Context, sessionID, ownerID string, p
 
 func (s *service) emitUserMessage(ctx context.Context, sessionID, ownerID string, params protocol.UserMessageParams) {
 	for _, targetConnID := range s.daemon.sessions.connIDsForSession(sessionID) {
-		if targetConnID == ownerID {
+		if ownerID != "" && targetConnID == ownerID {
 			continue
 		}
 		emit(ctx, s.daemon.sinkFor(targetConnID, nil), protocol.NotifySessionUserMessage, params)

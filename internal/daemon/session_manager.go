@@ -406,6 +406,23 @@ func (m *sessionManager) connIDsForSession(sessionID string) []string {
 	return connIDs
 }
 
+func (m *sessionManager) steerableRun(connID, runID string) (*sessionRuntime, string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	sessionID := m.attached[connID]
+	rt := m.runtime[sessionID]
+	if sessionID == "" || rt == nil || rt.agent == nil {
+		return nil, "", fmt.Errorf("session_required")
+	}
+	if rt.runOwner != connID || rt.runID == "" || rt.runID != runID || rt.status == sessionIdle || rt.runState == protocol.AgentRunCancelling {
+		return nil, "", fmt.Errorf("session_busy")
+	}
+	if rt.waitingType != "" {
+		return nil, "", fmt.Errorf("interaction_pending")
+	}
+	return rt, sessionID, nil
+}
+
 func (m *sessionManager) runOwner(sessionID string) string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -581,6 +598,9 @@ func (m *sessionManager) setStatus(sessionID string, status sessionStatus) {
 	defer m.mu.Unlock()
 	if rt := m.runtime[sessionID]; rt != nil {
 		rt.status = status
+		if status != sessionWaiting {
+			rt.waitingType = ""
+		}
 		if status == sessionIdle {
 			rt.runOwner = ""
 			rt.runID = ""
@@ -662,7 +682,23 @@ func (m *sessionManager) snapshotForConn(connID string, meta memory.SessionMeta,
 	}
 	m.mu.RLock()
 	if rt != nil && rt.status != sessionIdle {
-		out.CurrentRun = &protocol.CurrentRunView{RunID: rt.runID, State: rt.runState, Status: protocol.SessionStatus(rt.status), Phase: rt.phase, AssistantBuffer: rt.assistant.String(), ReasoningBuffer: rt.reasoning.String(), WaitingType: rt.waitingType, CanControl: rt.runOwner != "" && rt.runOwner == connID && rt.runState != protocol.AgentRunCancelling}
+		runID := rt.runID
+		state := rt.runState
+		status := rt.status
+		phase := rt.phase
+		assistantBuffer := rt.assistant.String()
+		reasoningBuffer := rt.reasoning.String()
+		waitingType := rt.waitingType
+		canControl := rt.runOwner != "" && rt.runOwner == connID && rt.runState != protocol.AgentRunCancelling
+		m.mu.RUnlock()
+
+		pending := rt.agent.PendingSteering(runID)
+		view := &protocol.CurrentRunView{RunID: runID, State: state, Status: protocol.SessionStatus(status), Phase: phase, AssistantBuffer: assistantBuffer, ReasoningBuffer: reasoningBuffer, WaitingType: waitingType, CanControl: canControl}
+		for _, item := range pending {
+			view.PendingSteering = append(view.PendingSteering, steeringMessage(item, runID, canControl))
+		}
+		out.CurrentRun = view
+		return out
 	}
 	m.mu.RUnlock()
 	return out

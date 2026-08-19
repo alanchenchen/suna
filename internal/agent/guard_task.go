@@ -66,6 +66,33 @@ func (a *Agent) beginGuardTask(input string) {
 	a.guardTask.mu.Unlock()
 }
 
+func (a *Agent) activeGuardTaskText() string {
+	a.guardTaskMu.Lock()
+	defer a.guardTaskMu.Unlock()
+	if a.guardTask == nil {
+		return ""
+	}
+	a.guardTask.mu.RLock()
+	defer a.guardTask.mu.RUnlock()
+	return a.guardTask.task
+}
+
+func (a *Agent) updateGuardTaskInput(input string) {
+	input = trimForGuardMiddle(input, guardReviewLatestInputLimit)
+	if input == "" {
+		return
+	}
+	a.guardTaskMu.Lock()
+	defer a.guardTaskMu.Unlock()
+	if a.guardTask == nil {
+		a.guardTask = &guardTaskCard{task: input, latestInput: input}
+		return
+	}
+	a.guardTask.mu.Lock()
+	a.guardTask.latestInput = input
+	a.guardTask.mu.Unlock()
+}
+
 func (a *Agent) recordGuardTaskReceipt(call runner.ToolExecution, result *guard.GuardResult, approved bool) {
 	if result == nil {
 		return

@@ -72,6 +72,9 @@ func (agentSkillPrompter) AskChoice(ctx context.Context, question string, option
 		return "", fmt.Errorf("skill workflow requires main agent event stream")
 	}
 	replyCh := make(chan string, 1)
+	runID := runIDFromContext(ctx)
+	ag.SetSteeringInteractionPending(runID, true)
+	defer ag.SetSteeringInteractionPending(runID, false)
 	events <- Event{Type: EventAskUser, Question: question, Options: append([]string(nil), options...), AllowCustom: false, Reply: replyCh}
 	select {
 	case <-ctx.Done():

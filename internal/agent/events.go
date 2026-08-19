@@ -18,6 +18,7 @@ const (
 	EventToolGuard
 	EventSkillLoad
 	EventSkillReview
+	EventSteering
 )
 
 type EventStatusKind string
@@ -51,6 +52,8 @@ type Event struct {
 	SkillLoadStatus   string
 	SkillReview       string
 	SkillReviewStatus string
+
+	Steering *SteeringItem
 
 	Question    string
 	Options     []string

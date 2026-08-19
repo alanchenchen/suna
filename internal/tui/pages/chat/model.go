@@ -106,6 +106,13 @@ type GuardConfirmView struct {
 	ReviewMessage string
 }
 
+type SteeringSubmission struct {
+	ClientMsgID string
+	Text        string
+	Resolved    bool
+	Failed      bool
+}
+
 type Model struct {
 	Viewport viewport.Model
 	Textarea textarea.Model
@@ -118,23 +125,26 @@ type Model struct {
 	TranscriptWindowEnd       int
 	TranscriptWindowSignature transcriptWindowSignature
 
-	Messages           []Msg
-	DisplayDiscard     DisplayDiscardSummary
-	PendingInput       string
-	InputHistoryIndex  int
-	InputHistoryDraft  string
-	InputHistoryActive bool
-	LastAssistantText  string
-	Loading            bool
-	Compacting         bool
-	ResumeAvailable    bool
-	Phase              Phase
-	PhaseStart         time.Time
-	StatusLabel        string
-	StreamStart        time.Time
-	FollowBottom       bool
-	ForceBottom        bool
-	ManualScrollPaused bool
+	Messages            []Msg
+	DisplayDiscard      DisplayDiscardSummary
+	PendingInput        string
+	InputHistoryIndex   int
+	InputHistoryDraft   string
+	InputHistoryActive  bool
+	LastAssistantText   string
+	Loading             bool
+	Compacting          bool
+	ResumeAvailable     bool
+	PendingSteering     []protocol.SteeringMessage
+	SteeringSubmissions []SteeringSubmission
+	SteeringTerminal    map[string]protocol.SteeringState
+	Phase               Phase
+	PhaseStart          time.Time
+	StatusLabel         string
+	StreamStart         time.Time
+	FollowBottom        bool
+	ForceBottom         bool
+	ManualScrollPaused  bool
 
 	LastAssistantStartLine int
 	LastAssistantLineCount int

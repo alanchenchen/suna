@@ -430,6 +430,14 @@ func (t *TUI) renderInputArea() string {
 	}
 	width := max(40, t.width-4)
 	text := strings.TrimRight(t.chat.Textarea.View(), "\n")
+	runStatus := ""
+	if t.canSteerCurrentRun() {
+		status := t.currentInputStatusLabel()
+		if t.chat.Compacting {
+			status = t.compactElapsedLabel()
+		}
+		runStatus = renderInlineRunStatus(width, status, t.tr("tui.chat.input_help_running"))
+	}
 	// 输入区 placeholder 只按原始输入值判断，不能复用 HasDraft()。
 	// HasDraft() 会 trim 空白用于发送/退出判断；如果用户刚输入空格或换行，
 	// 这里仍应立刻隐藏 placeholder，避免 Bubble textarea 与外层占位文案不同步。
@@ -447,12 +455,18 @@ func (t *TUI) renderInputArea() string {
 	if presentation.GuardActive {
 		text = styleError.Render(t.tr("tui.guard.input_waiting"))
 	} else if presentation.TerminalSelection {
-		text = styleBrand.Render(t.tr("tui.selection_mode.input_waiting"))
+		text = renderInlineRunStatus(width, t.tr("tui.selection_mode.hint"), t.tr("tui.selection_mode.back"))
 	} else if emptyInput {
 		text = styleDim.Render(t.tr("tui.chat.input_placeholder"))
 	}
 	bar := renderInputComposerBar(width, strings.Split(text, "\n"), emptyInput, t.inputCursorVisible)
-	parts := make([]string, 0, 5)
+	parts := make([]string, 0, 7)
+	if runStatus != "" {
+		parts = append(parts, "  "+runStatus)
+	}
+	if queue := t.renderSteeringQueueLine(width); queue != "" {
+		parts = append(parts, "  "+queue)
+	}
 	if panel := t.renderAttachmentPanel(); panel != "" {
 		parts = append(parts, textutil.IndentLines(panel, "  "))
 	}
@@ -464,6 +478,46 @@ func (t *TUI) renderInputArea() string {
 		parts = append(parts, "  "+confirm)
 	}
 	return strings.Join(parts, "\n")
+}
+
+func (t *TUI) renderSteeringQueueLine(width int) string {
+	confirmed := len(t.chat.PendingSteering)
+	submitting := 0
+	latestSubmitting := ""
+	for _, item := range t.chat.SteeringSubmissions {
+		if item.Resolved {
+			continue
+		}
+		submitting++
+		latestSubmitting = item.Text
+	}
+	if confirmed == 0 && submitting == 0 {
+		return ""
+	}
+	if confirmed == 0 {
+		return styleDim.Render(t.i18n.Tf("tui.chat.queue_submitting", submitting))
+	}
+	latest := t.chat.PendingSteering[confirmed-1]
+	text := steeringMessageText(latest)
+	if submitting > 0 {
+		text = latestSubmitting
+	}
+	count := confirmed + submitting
+	label := t.tr("tui.chat.queue_one")
+	if count > 1 {
+		label = t.i18n.Tf("tui.chat.queue_many", count)
+	}
+	help := ""
+	if latest.CanControl {
+		help = t.tr("tui.chat.queue_undo")
+	}
+	available := max(12, width-lipgloss.Width(label)-lipgloss.Width(help)-8)
+	text = ansi.Truncate(text, available, "…")
+	line := styleBrand.Render("↳ ") + styleDim.Render(label+" · ") + styleToolDim.Render(text)
+	if help != "" {
+		line += styleDim.Render("  " + help)
+	}
+	return line
 }
 
 func renderInlineRunStatus(width int, status, help string) string {
@@ -509,7 +563,7 @@ func (t *TUI) lockedInputPlaceholder() string {
 		return t.tr("tui.guard.input_waiting")
 	}
 	if presentation.TerminalSelection {
-		return t.tr("tui.selection_mode.input_waiting")
+		return t.tr("tui.selection_mode.hint")
 	}
 	policy := presentation.InputPolicy
 	if policy.Placeholder != "" {
@@ -524,7 +578,7 @@ func (t *TUI) renderPreInputHint() string {
 		return styleError.Render("  ⚠ "+t.tr("tui.guard.input_waiting")) + styleDim.Render(" · ") + styleDim.Render(t.tr("tui.guard.help"))
 	}
 	if presentation.TerminalSelection {
-		return styleBrand.Render("  "+t.tr("tui.selection_mode.title")) + styleDim.Render(" · ") + styleDim.Render(t.tr("tui.selection_mode.hint"))
+		return ""
 	}
 	if block := t.renderHandoffBlock(); block != "" {
 		return block
@@ -558,12 +612,9 @@ func (t *TUI) inputHelp() string {
 		if t.observingRun() {
 			return t.tr("tui.chat.input_help_observing")
 		}
-		return t.tr("tui.chat.input_help_running")
+		return ""
 	}
-	if t.hasDraft() {
-		return t.tr("tui.chat.input_help_draft")
-	}
-	return t.tr("tui.chat.input_help_empty")
+	return ""
 }
 
 func (t *TUI) resumeHint() string {

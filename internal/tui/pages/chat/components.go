@@ -112,6 +112,9 @@ func (m *Model) ResetRuntime() {
 	m.Loading = false
 	m.Compacting = false
 	m.ResumeAvailable = false
+	m.PendingSteering = nil
+	m.SteeringSubmissions = nil
+	m.SteeringTerminal = nil
 	m.Phase = PhaseIdle
 	m.PhaseStart = time.Time{}
 	m.StatusLabel = ""

@@ -96,7 +96,8 @@ type TUI struct {
 	selectionMode bool
 
 	// Compact UI mode: auto compact should say model will continue; manual /compact should not.
-	compactAuto bool
+	compactAuto      bool
+	compactStartedAt time.Time
 
 	// Usage/context 统计，只用于状态栏展示。
 	sessionInputTok  int

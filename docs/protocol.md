@@ -77,7 +77,9 @@ TCP 客户端的限制：
 | Method | 语义 |
 |---|---|
 | `runtime.hello` | TCP transport 握手和能力发现。 |
-| `agent.sendMessage` | 发送用户消息；response 只表示已接收，模型输出通过 notification 下发。 |
+| `agent.sendMessage` | 发送用户消息并创建新 run；response 只表示已接收，模型输出通过 notification 下发。 |
+| `agent.steer` | 当前 run owner 在运行中排队一条文本消息；消息在下一安全边界进入同一 run。 |
+| `agent.steerRemove` | 按精确消息 ID 撤回一条尚未应用的运行中消息。 |
 | `agent.resumeRun` | 当前 run 失败且可恢复时，继续未完成 turn。 |
 | `agent.cancel` | 取消当前 run。 |
 | `agent.askReply` | 回复 `agent.ask_user`。 |
@@ -96,7 +98,7 @@ TCP 客户端的限制：
 | `skill.list` / `skill.set` | 查询、启用或禁用 Skill。 |
 | `mcp.list` / `mcp.toggle` / `mcp.reload` | 查询、启用/禁用或重载 MCP server。 |
 
-不主推给第三方 runtime v0.5 依赖的 method：
+不主推给第三方 runtime v0.6 依赖的 method：
 
 | Method | 说明 |
 |---|---|
@@ -118,6 +120,7 @@ daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 
 |---|---|
 | `agent.delta` | assistant / reasoning 文本增量。 |
 | `agent.run` | run 生命周期、retry、失败、取消和恢复能力。 |
+| `agent.steering` | 运行中消息的 queued / applied / removed / rejected 状态；客户端按 `id` 幂等合并。 |
 | `agent.usage` | token、context、耗时和速度统计。 |
 | `agent.tool_start` | 工具开始执行。 |
 | `agent.tool_guard` | 工具执行前 Guard 决策状态。 |
@@ -125,7 +128,7 @@ daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 
 | `agent.ask_user` | agent 请求用户输入；带 `can_reply`。 |
 | `agent.guard_confirm` | 高风险工具操作请求用户确认；带 `can_reply`。 |
 | `agent.interaction_resolved` | ask/guard 已处理，其他 UI 应关闭残留交互。 |
-| `session.user_message` | 同 session 其他客户端新增 user turn。 |
+| `session.user_message` | 同 session 新增的正式 user turn；运行中消息只有在 applied 后才通过该通知出现。 |
 | `session.updated` | 全局轻量 Session Catalog 增量；session metadata/status/client_count 变化时向所有已连接且完成握手的客户端广播。 |
 | `session.compact_result` | compact running / done / error / result 状态。 |
 | `config.state` | 配置变更后的主动状态通知。 |
@@ -175,6 +178,27 @@ Agent 运行事件必须按语义拆分，避免 UI 从文本流里推导状态�
 `retrying` 和 `cancelling` 不是终态。进入 `cancelling` 后 daemon 不再发布该 run 的 `running`、`retrying` 或 `done`，context 取消及其他竞态终态统一收敛为唯一 `cancelled`。客户端可以在 cancelling 期间保留或编辑下一份本地草稿，但不得发送、排队消息或再次取消。只有 `done`、`failed`、`cancelled` 表示当前 run 结束。
 
 `resume_available=true` 只在失败后表示客户端可以提供“继续/恢复”按钮，并调用 `agent.resumeRun`。
+
+### 运行中消息
+
+Protocol 0.6 支持 current run owner 在运行期间调用 `agent.steer` 排队文本消息。该能力不打断正在进行的模型请求或工具调用：
+
+- 完整模型响应结束后才可能应用；Thinking 结束不是独立注入点。
+- 模型返回 Tool Calls 时，必须等同一批全部 Tool Result 写回后再应用，不能破坏调用配对。
+- 模型返回纯文本且队列非空时，先保留该 assistant 响应，再应用消息并继续同一个 run。
+- 自动 Compact 期间可以排队；消息在 Compact 提交后进入 Working Memory，不会被折叠进刚生成的 Session State。
+- AskUser / Guard 等待、cancelling 和终态不接受新消息；立即停止仍使用 `agent.cancel`。
+
+`agent.steer` 第一版只接受 text parts。`client_msg_id` 在单个 run 内用于幂等：相同 ID 与相同文本返回 canonical 状态，不重复排队；相同 ID 与不同文本返回冲突。daemon 通过 `runtime.hello.limits` 声明消息数和总字节上限。
+
+状态通过 `agent.steering` 通知：
+
+- `queued`：daemon 已接受，但模型尚未看到；此时 owner 可按消息 `id` 撤回。
+- `applied`：消息已写入 Working Memory，即将参与下一次模型请求；随后 `session.user_message` 将它作为正式 user turn 广播。
+- `removed`：owner 已成功撤回；客户端可将内容恢复为草稿。
+- `rejected`：run 失败或取消前未能应用；owner 应将内容恢复为草稿。
+
+Method response 与 notification 共用连接，可能因并发先后到达。客户端必须按 `id` / `client_msg_id` 幂等合并，不能假设 response 一定先于 notification。`session.attach.current_run.pending_steering` 返回当前仍在内存队列中的消息，供重连或第三方客户端恢复；队列不承诺跨 daemon 进程崩溃持久化。
 
 ### `agent.usage`
 
@@ -334,7 +358,7 @@ TUI 的“本会话 / 已加入 / 观察中”是 UI 根据 attach 方式、clie
 
 ## 11. Public / internal 边界
 
-public runtime v0.5 主推：
+public runtime v0.6 主推：
 
 - runtime handshake。
 - agent 消息和事件。
@@ -368,8 +392,9 @@ public runtime v0.5 主推：
 - `agent.delta`、`agent.run`、`agent.usage` 的职责边界不能混淆。
 - v0.4 将 usage 缓存字段升级为 `cache_read_tokens` 与 `cache_creation_tokens`，不兼容旧 `cached_tokens`。
 - protocol 0.4 不兼容旧 `session.new` / `session.restore` 主流程；旧客户端需要迁移到 `session.create` / `session.attach`。
-- public runtime v0.5 暂不承诺 string id 或客户端 notification；如果未来支持，应在 JSON-RPC 层保持 id 原样 round-trip，避免污染 daemon 业务层。
+- public runtime v0.6 暂不承诺 string id 或客户端 notification；如果未来支持，应在 JSON-RPC 层保持 id 原样 round-trip，避免污染 daemon 业务层。
 - protocol 0.5 在 Skill 列表和设置语义中引入 `scope` / `can_toggle`，项目 Skill 通过精确 `path` 区分；0.4 客户端需要升级后再连接。
+- protocol 0.6 引入 current run 文本消息队列、精确撤回、状态通知和 attach 恢复；0.5 客户端需要升级后再连接。
 
 ---
 

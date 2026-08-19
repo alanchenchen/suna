@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ type notificationMsg = tuievents.NotificationMsg
 
 type agentDeltaMsg = tuievents.AgentDeltaMsg
 type agentRunMsg = tuievents.AgentRunMsg
+type steeringMsg = tuievents.SteeringMsg
 type userMessageMsg = tuievents.UserMessageMsg
 type sessionStateMsg = tuievents.SessionStateMsg
 type usageMsg = tuievents.UsageMsg
@@ -65,6 +67,15 @@ type sessionTitleUpdateResultMsg struct {
 type memoryListResultMsg struct{ Params protocol.MemoryListResult }
 type skillListResultMsg struct{ Params protocol.SkillListResult }
 type mcpListResultMsg struct{ Params protocol.MCPListResult }
+type steerResultMsg struct {
+	Message     protocol.SteeringMessage
+	ClientMsgID string
+	Err         error
+}
+type steerRemoveResultMsg struct {
+	Message protocol.SteeringMessage
+	Err     error
+}
 type cancelResultMsg struct {
 	Err      error
 	Rejected bool
@@ -97,6 +108,8 @@ func (t *TUI) handleNotificationMsg(msg notificationMsg) {
 		t.handleAgentDeltaNotification(m.Params)
 	case agentRunMsg:
 		t.handleAgentRunNotification(m.Params)
+	case steeringMsg:
+		t.handleSteeringNotification(m.Params)
 	case userMessageMsg:
 		t.handleUserMessageNotification(m.Params)
 	case sessionStateMsg:
@@ -144,7 +157,7 @@ func (t *TUI) handleNotificationMsg(msg notificationMsg) {
 
 func isChatRuntimeNotification(msg notificationMsg) bool {
 	switch m := msg.(type) {
-	case agentDeltaMsg, agentRunMsg, userMessageMsg, usageMsg, toolStartMsg, toolGuardMsg, toolEndMsg, askUserMsg, guardConfirmMsg, interactionResolvedMsg, compactResultMsg, memoryListMsg, skillLoadMsg, skillReviewMsg:
+	case agentDeltaMsg, agentRunMsg, steeringMsg, userMessageMsg, usageMsg, toolStartMsg, toolGuardMsg, toolEndMsg, askUserMsg, guardConfirmMsg, interactionResolvedMsg, compactResultMsg, memoryListMsg, skillLoadMsg, skillReviewMsg:
 		return true
 	case attachmentStatusMsg:
 		return m.Params.SessionID != ""
@@ -155,9 +168,112 @@ func isChatRuntimeNotification(msg notificationMsg) bool {
 	}
 }
 
+func (t *TUI) handleSteeringNotification(p protocol.SteeringMessage) {
+	if p.RunID == "" || (t.activeRunID != "" && p.RunID != t.activeRunID) {
+		return
+	}
+	t.removeSteeringSubmission(p.ClientMsgID)
+	idx := t.pendingSteeringIndex(p.ID)
+	switch p.State {
+	case protocol.SteeringQueued:
+		if _, terminal := t.chat.SteeringTerminal[p.ID]; terminal {
+			break
+		}
+		if idx >= 0 {
+			t.chat.PendingSteering[idx] = p
+		} else {
+			t.chat.PendingSteering = append(t.chat.PendingSteering, p)
+		}
+		sort.SliceStable(t.chat.PendingSteering, func(i, j int) bool {
+			return t.chat.PendingSteering[i].Sequence < t.chat.PendingSteering[j].Sequence
+		})
+	case protocol.SteeringApplied, protocol.SteeringRemoved, protocol.SteeringRejected:
+		if idx >= 0 {
+			t.chat.PendingSteering = append(t.chat.PendingSteering[:idx], t.chat.PendingSteering[idx+1:]...)
+		}
+		if t.chat.SteeringTerminal == nil {
+			t.chat.SteeringTerminal = make(map[string]protocol.SteeringState)
+		}
+		_, seen := t.chat.SteeringTerminal[p.ID]
+		t.chat.SteeringTerminal[p.ID] = p.State
+		if !seen && p.CanControl && (p.State == protocol.SteeringRemoved || p.State == protocol.SteeringRejected) {
+			if text := steeringMessageText(p); text != "" {
+				t.chat.Textarea.SetValue(restoreSteeringDraft(t.chat.Textarea.Value(), text))
+				t.chat.Textarea.CursorEnd()
+			}
+		}
+	}
+	t.layoutChat()
+	t.syncContent()
+}
+
+func (t *TUI) resolveSteeringSubmission(clientMsgID string, failed bool) (resolved bool, restore []string) {
+	if clientMsgID == "" {
+		return false, nil
+	}
+	for i := range t.chat.SteeringSubmissions {
+		if t.chat.SteeringSubmissions[i].ClientMsgID != clientMsgID {
+			continue
+		}
+		t.chat.SteeringSubmissions[i].Resolved = true
+		t.chat.SteeringSubmissions[i].Failed = failed
+		resolved = true
+		break
+	}
+	if !resolved {
+		return false, nil
+	}
+	for _, item := range t.chat.SteeringSubmissions {
+		if !item.Resolved {
+			return true, nil
+		}
+	}
+	for _, item := range t.chat.SteeringSubmissions {
+		if item.Failed {
+			restore = append(restore, item.Text)
+		}
+	}
+	t.chat.SteeringSubmissions = nil
+	return true, restore
+}
+
+func (t *TUI) restoreSteeringDrafts(texts []string) {
+	if len(texts) == 0 {
+		return
+	}
+	t.chat.Textarea.SetValue(restoreSteeringDraft(t.chat.Textarea.Value(), strings.Join(texts, "\n")))
+	t.chat.Textarea.CursorEnd()
+}
+
+func (t *TUI) pendingSteeringIndex(id string) int {
+	for i := range t.chat.PendingSteering {
+		if t.chat.PendingSteering[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func (t *TUI) removeSteeringSubmission(clientMsgID string) bool {
+	resolved, restore := t.resolveSteeringSubmission(clientMsgID, false)
+	t.restoreSteeringDrafts(restore)
+	return resolved
+}
+
+func steeringMessageText(message protocol.SteeringMessage) string {
+	var texts []string
+	for _, part := range message.Parts {
+		if part.Type == "text" && strings.TrimSpace(part.Text) != "" {
+			texts = append(texts, strings.TrimSpace(part.Text))
+		}
+	}
+	return strings.Join(texts, "\n")
+}
+
 func (t *TUI) handleAgentDeltaNotification(p protocol.AgentDeltaParams) {
 	t.chat.Compacting = false
 	t.compactAuto = false
+	t.compactStartedAt = time.Time{}
 	t.chat.ResumeAvailable = false
 	t.lastTextStreamAt = time.Now()
 	switch p.Kind {
@@ -301,7 +417,8 @@ func (t *TUI) handleToolStartNotification(p protocol.ToolStartParams) {
 	t.finishStreamingMessages()
 	t.chat.Compacting = false
 	t.compactAuto = false
-	t.chat.Textarea.Blur()
+	t.compactStartedAt = time.Time{}
+	_ = t.syncInputFocus()
 	id := p.ID
 	if id == "" {
 		id = fmt.Sprintf("%s_%d", p.Tool, time.Now().UnixNano())
@@ -347,6 +464,7 @@ func (t *TUI) handleCompactResultNotification(p protocol.CompactResult) {
 		if *p.Running {
 			t.finishStreamingMessages()
 			t.compactAuto = true
+			t.compactStartedAt = time.Now()
 			t.chat.Compacting = true
 			t.chat.Loading = true
 			t.chat.Phase = phaseFirstLLM
@@ -358,6 +476,7 @@ func (t *TUI) handleCompactResultNotification(p protocol.CompactResult) {
 		}
 		t.chat.Compacting = false
 		t.compactAuto = false
+		t.compactStartedAt = time.Time{}
 		if strings.TrimSpace(p.Error) != "" {
 			t.resetPhase()
 			t.appendNonToolMessage(chatMsg{Role: "error", Content: p.Error})
@@ -368,6 +487,7 @@ func (t *TUI) handleCompactResultNotification(p protocol.CompactResult) {
 	if strings.TrimSpace(p.Error) != "" {
 		t.chat.Compacting = false
 		t.compactAuto = false
+		t.compactStartedAt = time.Time{}
 		t.appendNonToolMessage(chatMsg{Role: "error", Content: p.Error})
 		_ = t.syncInputFocus()
 		return
@@ -478,12 +598,21 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) {
 	t.currentSession = p.Session
 	t.applyCurrentSessionModelConfig()
 	currentRun := p.CurrentRun
+	preserveSteeringState := currentRun != nil && currentRun.RunID != "" && currentRun.RunID == t.activeRunID
 	if currentRun != nil && t.completedRunID != "" && currentRun.RunID == t.completedRunID {
 		currentRun = nil
 	} else if currentRun != nil && currentRun.RunID != "" {
 		t.completedRunID = ""
 	}
 	t.currentRunCanControl = currentRun != nil && currentRun.CanControl
+	t.chat.PendingSteering = nil
+	if currentRun != nil {
+		t.chat.PendingSteering = append([]protocol.SteeringMessage(nil), currentRun.PendingSteering...)
+	}
+	if !preserveSteeringState {
+		t.chat.SteeringSubmissions = nil
+		t.chat.SteeringTerminal = nil
+	}
 	t.cancelling = false
 	t.chat.Messages = nil
 	t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}

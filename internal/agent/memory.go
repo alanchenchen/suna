@@ -22,15 +22,27 @@ func (a *Agent) enqueueMemoryEvent(ctx context.Context, role model.Role, content
 	a.extractQueue.Push(ctx, memory.DefaultUserID, a.modelRef, candidate)
 }
 
-func (a *Agent) replaceLastUserMessage(text string, replacement model.Message) {
+func (a *Agent) replaceRunInputMessage(original, replacement model.Message) {
+	if !messageHasImage(original) {
+		return
+	}
 	msgs := a.working.Messages()
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == model.RoleUser && msgs[i].Text() == text {
+	for i := range msgs {
+		if msgs[i].Role == model.RoleUser && msgs[i].Text() == original.Text() && messageHasImage(msgs[i]) {
 			msgs[i] = replacement
 			a.working.SetMessages(msgs)
 			return
 		}
 	}
+}
+
+func messageHasImage(msg model.Message) bool {
+	for _, block := range msg.Content {
+		if block.Type == model.ContentImage && block.Media != nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Agent) saveConversationState(ctx context.Context) {

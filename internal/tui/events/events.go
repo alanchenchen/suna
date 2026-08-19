@@ -27,6 +27,7 @@ type NotificationMsg interface{ isNotificationMsg() }
 
 type AgentDeltaMsg struct{ Params protocol.AgentDeltaParams }
 type AgentRunMsg struct{ Params protocol.AgentRunParams }
+type SteeringMsg struct{ Params protocol.SteeringMessage }
 type UserMessageMsg struct{ Params protocol.UserMessageParams }
 type SessionStateMsg struct{ Params protocol.SessionStateParams }
 type UsageMsg struct{ Params protocol.UsageParams }
@@ -61,6 +62,7 @@ type UnknownNotificationMsg struct{ Raw Notification }
 
 func (AgentDeltaMsg) isNotificationMsg()          {}
 func (AgentRunMsg) isNotificationMsg()            {}
+func (SteeringMsg) isNotificationMsg()            {}
 func (UserMessageMsg) isNotificationMsg()         {}
 func (SessionStateMsg) isNotificationMsg()        {}
 func (UsageMsg) isNotificationMsg()               {}
@@ -90,6 +92,8 @@ func Decode(notif Notification) tea.Msg {
 		return decodeParams[protocol.AgentDeltaParams](notif, func(p protocol.AgentDeltaParams) tea.Msg { return AgentDeltaMsg{Params: p} })
 	case protocol.NotifyAgentRun:
 		return decodeParams[protocol.AgentRunParams](notif, func(p protocol.AgentRunParams) tea.Msg { return AgentRunMsg{Params: p} })
+	case protocol.NotifySteering:
+		return decodeParams[protocol.SteeringMessage](notif, func(p protocol.SteeringMessage) tea.Msg { return SteeringMsg{Params: p} })
 	case protocol.NotifySessionUserMessage:
 		return decodeParams[protocol.UserMessageParams](notif, func(p protocol.UserMessageParams) tea.Msg { return UserMessageMsg{Params: p} })
 	case protocol.NotifySessionUpdated:
