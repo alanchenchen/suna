@@ -123,11 +123,6 @@ type TUI struct {
 	// transcript 同步由 daemon 通知触发时按帧合并，避免流式输出和工具事件风暴反复完整重渲染。
 	transcriptSyncDirty     bool
 	transcriptSyncScheduled bool
-	// transcriptScrollGeneration 使不可取消的旧 Tick 在用户切换会话或重新开始计时后自动失效。
-	transcriptScrollGeneration     uint64
-	transcriptScrollDeadline       time.Time
-	transcriptScrollNewLines       int
-	transcriptScrollTimerScheduled bool
 
 	// chatSpinnerTicking 保证 loading/compacting 的 spinner 只有一条 tick 链；Join running session 时也会按需启动。
 	chatSpinnerTicking bool

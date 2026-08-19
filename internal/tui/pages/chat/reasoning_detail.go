@@ -81,6 +81,9 @@ func (m *Model) RestoreTranscriptAnchor(anchor TranscriptAnchor) bool {
 			m.SetTranscriptYOffset(cursor - anchor.RelativeRow)
 			m.FollowBottom = m.TranscriptAtBottom()
 			m.ManualScrollPaused = !m.FollowBottom
+			if m.FollowBottom {
+				m.NewContentWhilePaused = false
+			}
 			return true
 		}
 		cursor += block.LineCount

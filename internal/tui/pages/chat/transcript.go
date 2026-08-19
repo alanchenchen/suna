@@ -420,8 +420,6 @@ func (m *Model) applyResponseNav(nav ResponseNavInfo) {
 		m.LastAssistantStartLine = nav.StartLine
 		m.LastAssistantLineCount = nav.LineCount
 		m.LastAssistantMsgIndex = nav.MsgIndex
-		m.ResponseNavJumped = false
-		m.ResponseNavDismissed = false
 	}
 	m.ResponseNavAvailable = m.LastAssistantLineCount > m.Viewport.Height()
 }
@@ -432,8 +430,6 @@ func (m *Model) JumpToLastAssistantStart() bool {
 	}
 	m.SetTranscriptYOffset(maxInt(0, m.LastAssistantStartLine))
 	m.FollowBottom = false
-	m.ResponseNavJumped = true
-	m.ResponseNavDismissed = false
 	return true
 }
 
@@ -442,14 +438,11 @@ func (m *Model) JumpToBottom() {
 	m.FollowBottom = true
 	m.ForceBottom = false
 	m.ManualScrollPaused = false
-	m.ResponseNavJumped = false
-	m.ResponseNavDismissed = true
+	m.NewContentWhilePaused = false
 }
 
 func (m *Model) ClearResponseNav() {
 	m.ResponseNavAvailable = false
-	m.ResponseNavJumped = false
-	m.ResponseNavDismissed = true
 }
 
 func transcriptLinesHash(lines []string) uint64 {

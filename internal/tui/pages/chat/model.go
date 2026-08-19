@@ -125,33 +125,32 @@ type Model struct {
 	TranscriptWindowEnd       int
 	TranscriptWindowSignature transcriptWindowSignature
 
-	Messages            []Msg
-	DisplayDiscard      DisplayDiscardSummary
-	PendingInput        string
-	InputHistoryIndex   int
-	InputHistoryDraft   string
-	InputHistoryActive  bool
-	LastAssistantText   string
-	Loading             bool
-	Compacting          bool
-	ResumeAvailable     bool
-	PendingSteering     []protocol.SteeringMessage
-	SteeringSubmissions []SteeringSubmission
-	SteeringTerminal    map[string]protocol.SteeringState
-	Phase               Phase
-	PhaseStart          time.Time
-	StatusLabel         string
-	StreamStart         time.Time
-	FollowBottom        bool
-	ForceBottom         bool
-	ManualScrollPaused  bool
+	Messages              []Msg
+	DisplayDiscard        DisplayDiscardSummary
+	PendingInput          string
+	InputHistoryIndex     int
+	InputHistoryDraft     string
+	InputHistoryActive    bool
+	LastAssistantText     string
+	Loading               bool
+	Compacting            bool
+	ResumeAvailable       bool
+	PendingSteering       []protocol.SteeringMessage
+	SteeringSubmissions   []SteeringSubmission
+	SteeringTerminal      map[string]protocol.SteeringState
+	Phase                 Phase
+	PhaseStart            time.Time
+	StatusLabel           string
+	StreamStart           time.Time
+	FollowBottom          bool
+	ForceBottom           bool
+	ManualScrollPaused    bool
+	NewContentWhilePaused bool
 
 	LastAssistantStartLine int
 	LastAssistantLineCount int
 	LastAssistantMsgIndex  int
 	ResponseNavAvailable   bool
-	ResponseNavJumped      bool
-	ResponseNavDismissed   bool
 	LastWaitingTool        string
 
 	ActiveInteraction *Interaction

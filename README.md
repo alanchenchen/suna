@@ -238,7 +238,9 @@ Ctrl+S             Selection mode for terminal text
 Ctrl+T             Toggle tool detail
 Ctrl+R             Toggle reasoning detail
 ?                  Toggle help
-PgUp / PgDn        Scroll
+PgUp / PgDn        Scroll; manual scrolling pauses follow
+Home               View the start of the current long response when the composer is empty
+End                Return to latest content and resume follow
 Ctrl+V             Paste text; if no terminal text is provided and clipboard has an image, attach image
 Ctrl+C             Quit
 ```

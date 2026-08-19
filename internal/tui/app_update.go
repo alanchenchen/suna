@@ -8,6 +8,15 @@ import (
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 )
 
+func notificationUpdatesChatContent(msg notificationMsg) bool {
+	switch msg.(type) {
+	case agentDeltaMsg, agentRunMsg, steeringMsg, userMessageMsg, toolStartMsg, toolGuardMsg, toolEndMsg, askUserMsg, guardConfirmMsg, interactionResolvedMsg, compactResultMsg, skillLoadMsg, skillReviewMsg:
+		return true
+	default:
+		return false
+	}
+}
+
 func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if background, ok := msg.(tea.BackgroundColorMsg); ok {
 		t.applyDetectedBackground(background.IsDark())
@@ -18,6 +27,9 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if notif, ok := msg.(notificationMsg); ok {
 		t.handleNotificationMsg(notif)
+		if t.mode == uipage.Chat && t.chat.ManualScrollPaused && notificationUpdatesChatContent(notif) {
+			t.chat.NewContentWhilePaused = true
+		}
 		if t.mode == uipage.Welcome && t.ready {
 			t.initWelcomeList()
 		}
@@ -39,11 +51,6 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if _, ok := msg.(spinner.TickMsg); ok && t.mode != uipage.Chat {
 		// spinner tick 只属于 Chat；离开 Chat 时终止链，避免回到运行会话后误判已有 tick。
 		t.chatSpinnerTicking = false
-		return t, nil
-	}
-	if _, ok := msg.(transcriptScrollResumeMsg); ok && t.mode != uipage.Chat {
-		// 离开 Chat 后到达的恢复 Tick 只能作废，不能跨页面或跨 run 保留 scheduled 状态。
-		t.cancelTranscriptScrollTimer()
 		return t, nil
 	}
 

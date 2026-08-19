@@ -587,7 +587,7 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) {
 		t.handoffRole = handoffRoleHost
 	}
 	if previousSessionID != p.Session.ID {
-		t.cancelTranscriptManualScroll()
+		t.clearTranscriptManualScroll()
 		t.completedRunID = ""
 		t.cancelNoticeRunID = ""
 		t.cancelling = false

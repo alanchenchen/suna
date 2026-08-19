@@ -122,12 +122,11 @@ func (m *Model) ResetRuntime() {
 	m.FollowBottom = false
 	m.ForceBottom = false
 	m.ManualScrollPaused = false
+	m.NewContentWhilePaused = false
 	m.LastAssistantStartLine = 0
 	m.LastAssistantLineCount = 0
 	m.LastAssistantMsgIndex = 0
 	m.ResponseNavAvailable = false
-	m.ResponseNavJumped = false
-	m.ResponseNavDismissed = false
 	m.LastWaitingTool = ""
 	m.ActiveInteraction = nil
 	m.InteractionQueue = nil

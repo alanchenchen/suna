@@ -57,14 +57,14 @@ func (m Model) RouteKey(key string, inputLocked bool, compacting bool) KeyTarget
 func AllowLockedInputKey(key string, compacting bool) bool {
 	if compacting {
 		switch key {
-		case "ctrl+c", "ctrl+t", "ctrl+r", "pgup", "pgdown", "up", "down", "tab":
+		case "ctrl+c", "ctrl+t", "ctrl+r", "pgup", "pgdown", "up", "down", "home", "end", "tab":
 			return true
 		default:
 			return false
 		}
 	}
 	switch key {
-	case "ctrl+c", "esc", "enter", "ctrl+j", "ctrl+t", "ctrl+r", "pgup", "pgdown", "up", "down", "tab":
+	case "ctrl+c", "esc", "enter", "ctrl+j", "ctrl+t", "ctrl+r", "pgup", "pgdown", "up", "down", "home", "end", "tab":
 		return true
 	default:
 		return false

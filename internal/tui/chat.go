@@ -20,10 +20,6 @@ type phase = chatpage.Phase
 
 type manualCompactRequestMsg struct{}
 type transcriptSyncMsg struct{}
-type transcriptScrollResumeMsg struct {
-	Generation uint64
-	SessionID  string
-}
 type inputCursorBlinkMsg struct{}
 type clipboardImagePasteMsg struct {
 	StartedAt time.Time
@@ -161,12 +157,8 @@ func (t *TUI) flushScheduledTranscriptSync() tea.Cmd {
 		return nil
 	}
 	t.trimDisplayHistoryIfNeeded()
-	beforeLines := t.chat.TranscriptTotalLines
 	t.syncContent()
-	if t.chat.ManualScrollPaused && t.chat.TranscriptTotalLines > beforeLines {
-		t.transcriptScrollNewLines += t.chat.TranscriptTotalLines - beforeLines
-	}
-	return t.scheduleTranscriptAutoResumeIfReady()
+	return nil
 }
 
 func (t *TUI) trimDisplayHistoryIfNeeded() bool {
@@ -180,36 +172,10 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case transcriptSyncMsg:
 		return t, t.flushScheduledTranscriptSync()
 
-	case transcriptScrollResumeMsg:
-		if t.mode != uipage.Chat {
-			t.cancelTranscriptScrollTimer()
-			return t, nil
-		}
-		if m.Generation != t.transcriptScrollGeneration || m.SessionID != t.currentSession.ID || !t.chat.ManualScrollPaused {
-			return t, nil
-		}
-		if !t.transcriptAutoResumeReady() {
-			t.transcriptScrollTimerScheduled = false
-			return t, nil
-		}
-		remaining := time.Until(t.transcriptScrollDeadline)
-		if remaining > 0 {
-			return t, t.transcriptScrollResumeCmd(remaining, m.Generation, m.SessionID)
-		}
-		t.transcriptScrollTimerScheduled = false
-		t.layoutChat()
-		t.syncContent()
-		t.chat.JumpToBottom()
-		return t, nil
-
 	case tea.WindowSizeMsg:
 		if t.transcriptSyncDirty {
-			// 先按旧布局结算 daemon 新增内容；resize 是新的用户查看行为，随后重新开始累计。
+			// 先按旧布局结算 daemon 新增内容；resize 不改变用户当前的阅读位置。
 			_ = t.flushScheduledTranscriptSync()
-		}
-		if t.chat.ManualScrollPaused {
-			t.resetTranscriptAutoResumeCycle()
-			t.transcriptScrollDeadline = time.Now().Add(transcriptScrollResumeDelay)
 		}
 		t.width = m.Width
 		t.height = m.Height
@@ -335,7 +301,8 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if t.chat.ScrollTranscript(delta) {
 						t.syncContent()
 					}
-					return t, t.pauseTranscriptAutoFollow()
+					t.updateTranscriptFollowAfterNavigation()
+					return t, nil
 				}
 			}
 		}
@@ -347,9 +314,10 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if t.chat.ScrollTranscript(delta) {
 				t.syncContent()
 			}
-			return t, tea.Batch(cmd, t.pauseTranscriptAutoFollow())
+			t.updateTranscriptFollowAfterNavigation()
+			return t, cmd
 		} else {
-			t.chat.FollowBottom = t.chat.TranscriptAtBottom()
+			t.updateTranscriptFollowAfterNavigation()
 		}
 		return t, cmd
 	}

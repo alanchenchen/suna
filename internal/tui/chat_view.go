@@ -587,7 +587,7 @@ func (t *TUI) renderPreInputHint() string {
 	if hint == "" {
 		return ""
 	}
-	return "  " + hint
+	return hint
 }
 
 func (t *TUI) inputHint() string {
@@ -625,14 +625,21 @@ func (t *TUI) resumeHint() string {
 }
 
 func (t *TUI) responseNavHint() string {
-	if t.inputLocked() || !t.chat.ResponseNavAvailable || t.chat.ResponseNavDismissed {
+	label := ""
+	key := ""
+	arrow := ""
+	switch {
+	case !t.chat.TranscriptAtBottom() && t.chat.NewContentWhilePaused:
+		arrow, label, key = "↓", t.tr("session.response_nav_new"), "End"
+	case !t.chat.TranscriptAtBottom():
+		arrow, label, key = "↓", t.tr("session.response_nav_latest"), "End"
+	case t.chat.ResponseNavAvailable:
+		arrow, label, key = "↑", t.tr("session.response_nav_start"), "Home"
+	default:
 		return ""
 	}
-	key := "session.response_nav_hint"
-	if t.chat.ResponseNavJumped {
-		key = "session.response_nav_jumped"
-	}
-	return styleDim.Render(t.tr(key))
+	content := styleBrand.Render(arrow) + " " + styleDim.Render(label) + styleDim.Render("   "+key)
+	return lipgloss.NewStyle().Width(max(1, t.width)).Align(lipgloss.Center).Render(content)
 }
 
 func (t *TUI) updateGuardConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {

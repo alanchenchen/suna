@@ -39,6 +39,7 @@ func RenderOverlay(width int, commands []Command, deps RenderDeps) string {
 		"  " + deps.Brand.Render("Ctrl+T") + deps.Dim.Render(" ") + deps.Tr("tui.key.tool_detail"),
 		"  " + deps.Brand.Render("Ctrl+R") + deps.Dim.Render(" ") + deps.Tr("tui.key.reasoning_detail"),
 		"  " + deps.Brand.Render("PgUp/PgDn") + deps.Dim.Render(" ") + deps.Tr("tui.key.scroll_up") + "/" + deps.Tr("tui.key.scroll_down"),
+		"  " + deps.Brand.Render("Home/End") + deps.Dim.Render(" ") + deps.Tr("tui.help.chat_navigation"),
 	}
 	body := strings.Join(common, "\n") + "\n\n" + strings.Join(commandLines, "\n") + "\n\n" + strings.Join(more, "\n")
 	w := min(max(44, maxLineWidth(body)+4), max(20, width-8))
@@ -63,6 +64,8 @@ func RenderContent(commands []Command, deps RenderDeps) string {
 		helpLine("/help", "tui.key.help", deps),
 		helpLine("↑/↓", "tui.help.chat_history", deps),
 		helpLine("PgUp/PgDn", "tui.help.chat_scroll", deps),
+		helpLine("Home", "tui.help.chat_response_start", deps),
+		helpLine("End", "tui.help.chat_latest", deps),
 		helpLine("Ctrl+S", "tui.help.copy_native", deps),
 		helpLine("Ctrl+C", "tui.key.quit", deps),
 		"",
