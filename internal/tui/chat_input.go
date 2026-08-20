@@ -404,7 +404,7 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.layoutChat()
 		return t, nil
 	case ks == "ctrl+z":
-		if t.canSteerCurrentRun() && len(t.chat.PendingSteering) > 0 {
+		if t.canSteerCurrentRun() && !t.hasUnresolvedSteeringSubmission() && len(t.chat.PendingSteering) > 0 {
 			last := t.chat.PendingSteering[len(t.chat.PendingSteering)-1]
 			if last.CanControl {
 				return t, t.removeSteeringCmd(last.RunID, last.ID)
@@ -469,6 +469,15 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 	t.updateCmdSuggestionState()
 	t.layoutChat()
 	return t, cmd
+}
+
+func (t *TUI) hasUnresolvedSteeringSubmission() bool {
+	for _, item := range t.chat.SteeringSubmissions {
+		if !item.Resolved {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *TUI) updateChatEnter() (tea.Model, tea.Cmd) {

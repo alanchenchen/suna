@@ -9,12 +9,15 @@ import (
 )
 
 func TestRunElapsedAppearsInInputAndFreezesInTranscript(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24, currentRunCanControl: true}
 	tui.initChatComponents()
 	tui.handleAgentRunNotification(protocol.AgentRunParams{RunID: "run-1", State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
 	tui.runStartedAt = time.Now().Add(-61 * time.Second)
 
 	input := stripANSIForTest(tui.renderInputArea())
+	if !strings.Contains(input, strings.TrimSpace(stripANSIForTest(tui.chat.Spinner.View()))) {
+		t.Fatalf("renderInputArea() = %q, want spinner in editable run status", input)
+	}
 	if !strings.Contains(input, "正在等待模型") || !strings.Contains(input, "1m1s") {
 		t.Fatalf("renderInputArea() = %q, want running status with total elapsed", input)
 	}

@@ -14,16 +14,20 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 	if p.RunID != "" && p.RunID == t.completedRunID {
 		return
 	}
-	if p.State == protocol.AgentRunRunning {
-		t.startRunElapsed(p.RunID, time.Now())
+	if isTerminalAgentRunState(p.State) && p.RunID != "" && t.activeRunID != "" && p.RunID != t.activeRunID {
+		// 旧 run 的迟到终态不能清理或终止当前 run 的 Composer 状态。
+		return
 	}
-	if p.State == protocol.AgentRunRunning && p.RunID != "" {
-		if t.activeRunID != "" && p.RunID != t.activeRunID {
+	if p.State == protocol.AgentRunRunning {
+		if p.RunID != "" && p.RunID != t.activeRunID {
 			t.chat.PendingSteering = nil
-			t.chat.SteeringSubmissions = nil
+			t.restoreUnresolvedSteeringSubmissions()
 			t.chat.SteeringTerminal = nil
 		}
-		t.completedRunID = ""
+		t.startRunElapsed(p.RunID, time.Now())
+		if p.RunID != "" {
+			t.completedRunID = ""
+		}
 	}
 	if p.State == protocol.AgentRunRunning && !t.cancelling {
 		t.currentRunCanControl = p.CanControl
@@ -37,6 +41,8 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 		if p.RunID != "" {
 			t.completedRunID = p.RunID
 		}
+		t.chat.PendingSteering = nil
+		t.restoreUnresolvedSteeringSubmissions()
 		t.clearRunRetryStatus()
 		t.currentRunCanControl = false
 		t.chat.ClearRunInteractions()
@@ -63,6 +69,8 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 		if p.RunID != "" {
 			t.completedRunID = p.RunID
 		}
+		t.chat.PendingSteering = nil
+		t.restoreUnresolvedSteeringSubmissions()
 		if t.cancelling {
 			t.chat.FinishCancellingTools(time.Now())
 			t.chatSpinnerTicking = false
@@ -84,6 +92,15 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 			t.startLLMWait()
 			t.chat.SetStatusLabel(t.tr("status.waiting_model"), time.Now())
 		}
+	}
+}
+
+func isTerminalAgentRunState(state protocol.AgentRunState) bool {
+	switch state {
+	case protocol.AgentRunDone, protocol.AgentRunFailed, protocol.AgentRunCancelled:
+		return true
+	default:
+		return false
 	}
 }
 

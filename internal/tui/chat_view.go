@@ -436,7 +436,9 @@ func (t *TUI) renderInputArea() string {
 		if t.chat.Compacting {
 			status = t.compactElapsedLabel()
 		}
-		runStatus = renderInlineRunStatus(width, status, t.tr("tui.chat.input_help_running"))
+		runStatus = renderInlineRunStatus(width, strings.TrimSpace(t.chat.Spinner.View()+" "+status), t.tr("tui.chat.input_help_running"))
+	} else if t.cancelling && t.chat.Loading {
+		runStatus = styleDim.Render(strings.TrimSpace(t.chat.Spinner.View() + " " + t.tr("status.cancelling")))
 	}
 	// 输入区 placeholder 只按原始输入值判断，不能复用 HasDraft()。
 	// HasDraft() 会 trim 空白用于发送/退出判断；如果用户刚输入空格或换行，
@@ -498,9 +500,9 @@ func (t *TUI) renderSteeringQueueLine(width int) string {
 		return styleDim.Render(t.i18n.Tf("tui.chat.queue_submitting", submitting))
 	}
 	latest := t.chat.PendingSteering[confirmed-1]
-	text := steeringMessageText(latest)
+	text := singleLineSteeringPreview(steeringMessageText(latest))
 	if submitting > 0 {
-		text = latestSubmitting
+		text = singleLineSteeringPreview(latestSubmitting)
 	}
 	count := confirmed + submitting
 	label := t.tr("tui.chat.queue_one")
@@ -508,7 +510,8 @@ func (t *TUI) renderSteeringQueueLine(width int) string {
 		label = t.i18n.Tf("tui.chat.queue_many", count)
 	}
 	help := ""
-	if latest.CanControl {
+	// 最新提交尚无 daemon ID，不能撤回；隐藏提示以保证文案与实际操作对象一致。
+	if submitting == 0 && latest.CanControl {
 		help = t.tr("tui.chat.queue_undo")
 	}
 	available := max(12, width-lipgloss.Width(label)-lipgloss.Width(help)-8)
@@ -518,6 +521,10 @@ func (t *TUI) renderSteeringQueueLine(width int) string {
 		line += styleDim.Render("  " + help)
 	}
 	return line
+}
+
+func singleLineSteeringPreview(text string) string {
+	return strings.Join(strings.Fields(text), " ")
 }
 
 func renderInlineRunStatus(width int, status, help string) string {

@@ -169,7 +169,7 @@ func isChatRuntimeNotification(msg notificationMsg) bool {
 }
 
 func (t *TUI) handleSteeringNotification(p protocol.SteeringMessage) {
-	if p.RunID == "" || (t.activeRunID != "" && p.RunID != t.activeRunID) {
+	if p.RunID == "" || p.RunID == t.completedRunID || (t.activeRunID != "" && p.RunID != t.activeRunID) {
 		return
 	}
 	t.removeSteeringSubmission(p.ClientMsgID)
@@ -235,6 +235,21 @@ func (t *TUI) resolveSteeringSubmission(clientMsgID string, failed bool) (resolv
 	}
 	t.chat.SteeringSubmissions = nil
 	return true, restore
+}
+
+func (t *TUI) restoreUnresolvedSteeringSubmissions() {
+	if len(t.chat.SteeringSubmissions) == 0 {
+		return
+	}
+	texts := make([]string, 0, len(t.chat.SteeringSubmissions))
+	for _, item := range t.chat.SteeringSubmissions {
+		if !item.Resolved {
+			texts = append(texts, item.Text)
+		}
+	}
+	// 终态后 RPC 结果可能迟到；先清空本地提交，再按原发送顺序恢复尚未确认的草稿，避免重复恢复。
+	t.chat.SteeringSubmissions = nil
+	t.restoreSteeringDrafts(texts)
 }
 
 func (t *TUI) restoreSteeringDrafts(texts []string) {
@@ -614,6 +629,9 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) {
 		t.chat.SteeringTerminal = nil
 	}
 	t.cancelling = false
+	t.chat.Compacting = false
+	t.compactAuto = false
+	t.compactStartedAt = time.Time{}
 	t.chat.Messages = nil
 	t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}
 	for _, m := range p.Messages {
@@ -630,11 +648,18 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) {
 		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.tr("session.restore_compacted")})
 	}
 	if currentRun != nil && currentRun.Status != protocol.SessionStatusIdle {
-		t.startRunElapsed(currentRun.RunID, time.Now())
+		now := time.Now()
+		t.startRunElapsed(currentRun.RunID, now)
 		if currentRun.State == protocol.AgentRunCancelling {
 			t.enterCancelling()
 		} else {
-			t.chat.StartLLMWait(time.Now())
+			t.chat.StartLLMWait(now)
+			if currentRun.Status == protocol.SessionStatusCompacting {
+				// attach 只能从当前时刻估算 Compact 耗时；状态仍应按 daemon 快照还原，不能退化成普通模型等待。
+				t.chat.Compacting = true
+				t.compactAuto = true
+				t.compactStartedAt = now
+			}
 		}
 		if currentRun.ReasoningBuffer != "" {
 			t.appendStreamMessage("reasoning", currentRun.ReasoningBuffer)
