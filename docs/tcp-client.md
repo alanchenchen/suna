@@ -141,14 +141,13 @@ TCP 是一条长期连接，framing 为 **NDJSON**：
 TCP client 连接后，必须先发送：
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.7","client":{"name":"my-ui","version":"1.0.0","type":"desktop"}}}
+{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"client":{"name":"my-ui","version":"1.0.0","type":"desktop"}}}
 ```
 
 建议字段：
 
 | 字段 | 是否必填 | 说明 |
 |---|---:|---|
-| `protocol_version` | 否 | 当前公开版本为 `"0.7"`；推荐始终传入。 |
 | `client.name` | 否 | 客户端名称，用于诊断。 |
 | `client.version` | 否 | 客户端版本。 |
 | `client.type` | 否 | 例如 `desktop`、`ide`、`web_gateway`、`script`。 |
@@ -157,14 +156,27 @@ TCP client 连接后，必须先发送：
 
 ```json
 {
-  "protocol_version":"0.7",
   "runtime_version":"v0.x.x",
   "transport":"tcp",
-  "capabilities":{"agent":true,"session":true,"handoff":true,"run_steering":true,"mcp_status_updates":true},
+  "catalog":{
+    "methods":["agent.sendMessage","agent.steer","session.create","config.get"],
+    "notifications":["agent.delta","agent.run","agent.steering","config.state"],
+    "features":["agent.steer.text","config.model.auth_mode.bearer"]
+  },
   "content_sources":{"text":true,"image_path":true,"image_url":true},
   "limits":{"max_tool_result_bytes":16384,"max_steering_messages":32,"max_steering_bytes":65536}
 }
 ```
+
+客户端应缓存三组清单，并封装统一判断：
+
+```js
+const canCall = (name) => hello.catalog.methods.includes(name);
+const canReceive = (name) => hello.catalog.notifications.includes(name);
+const canUse = (name) => hello.catalog.features.includes(name);
+```
+
+`runtime_version` 只用于展示和诊断，不用于推断功能。客户端必须忽略未知字段和 notification；若误调用不支持的方法，只处理该请求的 `method not found`，连接仍可继续使用。
 
 未握手就调用其他 method 会收到 `handshake_required` 错误。服务端也会关闭长期未完成握手的连接。
 
@@ -239,7 +251,7 @@ Attach response 中的 `current_run`、`run_id`、`assistant_buffer` 与 `reason
 
 ### 5.6 运行中发送消息
 
-如果 `runtime.hello.capabilities.run_steering=true`，current run owner 可以在运行期间排队文本消息：
+如果 `runtime.hello.catalog.features` 包含 `agent.steer.text`，current run owner 可以在运行期间排队文本消息：
 
 ```json
 {"jsonrpc":"2.0","id":6,"method":"agent.steer","params":{"run_id":"RUN_ID","client_msg_id":"CLIENT_GENERATED_ID","parts":[{"type":"text","text":"不要修改配置，只检查问题。"}]}}
@@ -346,7 +358,6 @@ export class SunaClient {
 
     const client = new SunaClient(socket);
     await client.request("runtime.hello", {
-      protocol_version: "0.7",
       client: { name: "example-ui", version: "1.0.0", type: "node" },
     });
     return client;
@@ -458,7 +469,12 @@ try {
 
 > 上例假设 endpoint 是 IPv4。若你的客户端要支持 `[::1]:port`，请使用语言标准库的 host/port parser，而不是手动 `split(":")`。
 
-Protocol 0.7 的 `config.get` / `config.set` 模型对象包含可选 `auth_mode`。省略表示协议默认；当前仅 Anthropic 协议接受 `bearer` 或 `both`。客户端编辑并回写模型时必须保留该字段：
+`config.get` / `config.set` 模型对象的可选 `auth_mode` 由 Feature 清单控制：
+
+- `config.model.auth_mode.bearer`：可使用 `bearer`；
+- `config.model.auth_mode.both`：可使用 `both`。
+
+Feature 缺失时隐藏对应 UI。客户端编辑并回写模型时，应保留自己不修改的配置字段。
 
 ```json
 {"provider":"example-provider","protocol":"anthropic","auth_mode":"bearer","model":"example-model","base_url":"https://api.example.com","context_window":200000,"max_output_tokens":8192}
@@ -474,13 +490,14 @@ Protocol 0.7 的 `config.get` / `config.set` 模型对象包含可选 `auth_mode
 实现一个 Suna TCP JSON-RPC client：
 1. 执行 `suna serve --json`，解析 stdout 的 tcp_endpoint；
 2. 使用长期 TCP connection 和 NDJSON，一行一条 JSON；
-3. 第一条 request 必须是 runtime.hello，protocol_version 为 0.7；
+3. 第一条 request 必须是 runtime.hello；缓存返回的 methods / notifications / features 功能清单；
 4. 用整数 request ID 和 pending map 匹配 response；
-5. 独立分发无 ID 的 daemon notification；
-6. 先 session.list，再 session.create 或 session.attach；
-7. agent.sendMessage 的 response 只表示 accepted；真实输出来自 agent.delta / agent.run；
-8. UI 离开 session 时调用 session.detach；断线后重新 serve 并重连；
-9. 不要访问 Suna 内部文件、SQLite、Agent 或 Go 包；所有业务交互走 protocol。
+5. 独立分发无 ID 的 daemon notification，并忽略未知 notification；
+6. 只调用 catalog.methods 中存在的方法，按 catalog.features 渐进启用可选 UI；
+7. 先 session.list，再 session.create 或 session.attach；
+8. agent.sendMessage 的 response 只表示 accepted；真实输出来自 agent.delta / agent.run；
+9. UI 离开 session 时调用 session.detach；断线后重新 serve 并重连；
+10. 不要访问 Suna 内部文件、SQLite、Agent 或 Go 包；所有业务交互走 protocol。
 ```
 
 协议字段、完整方法与错误语义请见 [protocol.md](protocol.md)。

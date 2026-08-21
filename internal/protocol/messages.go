@@ -3,11 +3,9 @@ package protocol
 import "time"
 
 type RuntimeHelloParams struct {
-	// ProtocolVersion 是客户端期望的协议版本；为空时按当前默认 0.7 处理。
-	ProtocolVersion string `json:"protocol_version,omitempty"`
 	// Transport 由 JSON-RPC transport 层注入并覆盖客户端输入，用于 runtime.hello 返回真实承载方式。
 	Transport string `json:"transport,omitempty"`
-	// Client 是第三方 UI/插件的自描述信息，只用于诊断和未来能力协商。
+	// Client 是第三方 UI/插件的自描述信息，只用于诊断。
 	Client RuntimeClient `json:"client,omitempty"`
 }
 
@@ -18,12 +16,10 @@ type RuntimeClient struct {
 }
 
 type RuntimeHelloResult struct {
-	ProtocolVersion string `json:"protocol_version"`
-	RuntimeVersion  string `json:"runtime_version"`
-	Transport       string `json:"transport"`
-	// Capabilities 是运行时能力开关；客户端应按 key 判断，不要从版本号推断能力。
-	Capabilities map[string]bool `json:"capabilities"`
-	// ContentSources 声明 agent.sendMessage 支持的内容来源，第三方 UI v0 主要使用 text/path/url。
+	RuntimeVersion string         `json:"runtime_version"`
+	Transport      string         `json:"transport"`
+	Catalog        RuntimeCatalog `json:"catalog"`
+	// ContentSources 声明 agent.sendMessage 支持的内容来源。
 	ContentSources map[string]bool `json:"content_sources"`
 	// Limits 暴露协议层稳定限制，例如 tool result 截断阈值。
 	Limits map[string]int `json:"limits,omitempty"`
@@ -109,7 +105,7 @@ const (
 type ProtocolErrorData struct {
 	// Kind 是稳定错误分类，UI/SDK 只能依赖它做分支，不应解析 message。
 	Kind string `json:"kind"`
-	// Reason 是可选机器可读补充原因，例如 unsupported protocol_version。
+	// Reason 是可选机器可读补充原因，例如交互状态或权限边界。
 	Reason string `json:"reason,omitempty"`
 	// Retryable 表示同一请求在条件不变时是否值得重试。
 	Retryable bool `json:"retryable,omitempty"`

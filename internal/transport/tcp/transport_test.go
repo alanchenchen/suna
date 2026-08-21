@@ -36,8 +36,19 @@ func (s *testService) Handle(ctx context.Context, req protocol.Request, _ protoc
 	s.lastRequest = req
 	s.lastContext = ctx
 	s.mu.Unlock()
+	if req.Method != protocol.MethodRuntimeHello && req.Method != "echo" {
+		return nil, testCodedError{code: -32601, message: "method not found"}
+	}
 	return map[string]string{"method": req.Method}, nil
 }
+
+type testCodedError struct {
+	code    int
+	message string
+}
+
+func (e testCodedError) Error() string { return e.message }
+func (e testCodedError) Code() int     { return e.code }
 
 func TestNewDefaultFallsBackToRandomPortWhenDefaultIsBusy(t *testing.T) {
 	busy, err := net.Listen("tcp", DefaultEndpoint)
@@ -128,15 +139,20 @@ func TestTransportServesJSONRPCOverTCP(t *testing.T) {
 	defer conn.Close()
 	decoder := json.NewDecoder(conn)
 
-	if _, err := conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.7"}}` + "\n")); err != nil {
+	if _, err := conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"client":{"name":"test-client","version":"1.0.0"}}}` + "\n")); err != nil {
 		t.Fatalf("hello Write error = %v", err)
 	}
 	assertHelloResponse(t, decoder, 1)
 
-	if _, err := conn.Write([]byte(`{"jsonrpc":"2.0","id":2,"method":"echo"}` + "\n")); err != nil {
+	if _, err := conn.Write([]byte(`{"jsonrpc":"2.0","id":2,"method":"unknown.method"}` + "\n")); err != nil {
+		t.Fatalf("unknown method Write error = %v", err)
+	}
+	assertErrorResponse(t, decoder, 2, -32601)
+
+	if _, err := conn.Write([]byte(`{"jsonrpc":"2.0","id":3,"method":"echo"}` + "\n")); err != nil {
 		t.Fatalf("echo Write error = %v", err)
 	}
-	assertMethodResponse(t, decoder, 2, "echo")
+	assertMethodResponse(t, decoder, 3, "echo")
 	service.mu.Lock()
 	gotTransport := protocol.TransportFromContext(service.lastContext)
 	service.mu.Unlock()
@@ -161,6 +177,22 @@ func assertHelloResponse(t *testing.T, decoder *json.Decoder, id int) {
 	}
 	if got := response.Result.Transport; got != "" {
 		t.Fatalf("hello transport = %q, want empty for a standalone test service", got)
+	}
+}
+
+func assertErrorResponse(t *testing.T, decoder *json.Decoder, id, code int) {
+	t.Helper()
+	var response struct {
+		ID    int `json:"id"`
+		Error *struct {
+			Code int `json:"code"`
+		} `json:"error"`
+	}
+	if err := decoder.Decode(&response); err != nil {
+		t.Fatalf("Decode error = %v", err)
+	}
+	if response.ID != id || response.Error == nil || response.Error.Code != code {
+		t.Fatalf("error response = %#v, want id %d code %d", response, id, code)
 	}
 }
 

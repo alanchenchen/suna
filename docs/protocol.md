@@ -70,9 +70,23 @@ TCP 客户端的限制：
 
 ---
 
-## 4. Method 总览
+## 4. Runtime 握手与功能清单
 
-第三方 TCP 客户端主推的 method：
+TCP client 连接后，第一条 request 必须是 `runtime.hello`。请求只需要携带客户端自身信息；daemon 返回 Git tag 来源的 Runtime 版本和公开功能清单。
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"client":{"name":"my-ui","version":"1.0.0","type":"desktop"}}}
+```
+
+功能清单固定分为三组：
+
+- `catalog.methods`：客户端可以主动调用的公开 RPC；
+- `catalog.notifications`：Runtime 可能主动发送的公开事件；
+- `catalog.features`：不能只从 method / notification 名称推断的细粒度能力。
+
+客户端应按清单渐进启用功能，不应根据 `runtime_version` 推断能力。`runtime_version` 只用于展示和诊断。
+
+### Methods
 
 | Method | 语义 |
 |---|---|
@@ -98,25 +112,13 @@ TCP 客户端的限制：
 | `skill.list` / `skill.set` | 查询、启用或禁用 Skill。 |
 | `mcp.list` / `mcp.toggle` / `mcp.reload` | 查询、启用/禁用或重载 MCP server。 |
 
-不主推给第三方 runtime v0.7 依赖的 method：
-
-| Method | 说明 |
-|---|---|
-| `daemon.status` | 可用于 smoke test 或诊断面板；`detail=false` 只返回 lifecycle/PID/endpoint 等轻量状态，`detail=true` 才聚合模型、Memory、Session 与 Usage 统计。 |
-| `daemon.stop` | 本地 daemon 管理语义；第三方客户端通常无需调用。 |
-| `attachment.status` / `attachment.clear` | 官方 TUI 附件缓存管理；第三方 UI 应自行管理上传和缓存，并向 `agent.sendMessage` 传 image path/url。 |
+Catalog 只列第三方客户端公开支持面。`daemon.status`、`daemon.stop`、`attachment.*`、`debug.*` 等 local/官方管理接口即使存在，也不属于公开 Catalog。
 
 daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 runtime 可服务，不表示所有 MCP 已 active；非 `ready` 时，除 `runtime.hello / daemon.status / daemon.stop` 外的请求返回 `runtime_unavailable`，并通过 `reason` 与 `retryable` 表达恢复语义。
 
 完整参数表和示例见 `docs/tcp-client.md`。
 
-Protocol 0.7 的 `ConfigModel` 新增可选 `auth_mode`：省略表示协议默认；当前仅 `protocol = "anthropic"` 接受 `bearer` 或 `both`。第三方客户端在读取、编辑并写回模型时必须保留该字段，不能按旧结构静默丢弃。
-
----
-
-## 5. Notification 总览
-
-第三方 TCP 客户端主推的 notification：
+### Notifications
 
 | Notification | 语义 |
 |---|---|
@@ -139,21 +141,27 @@ Protocol 0.7 的 `ConfigModel` 新增可选 `auth_mode`：省略表示协议默�
 | `skill.load` | Skill load 生命周期通知。 |
 | `skill.review` | Skill review 生命周期通知。 |
 
-偏官方 TUI / local 管理用途的 notification：
-
-| Notification | 说明 |
-|---|---|
-| `daemon.full_status` | daemon 聚合快照，主要供 TUI 刷新状态面板。第三方 UI 可用于诊断，但不应依赖它完成聊天主流程。 |
-
-完整参数表和示例见 `docs/tcp-client.md`。
+客户端必须忽略自己不认识的 notification，不能因此关闭连接。Catalog 用于提前初始化功能，但实际接收端仍应保持宽松。
 
 `mcp.list` 与 `mcp.updated` 采用相同的 snapshot + delta 语义。MCP server 的 `state` 只能是 `disabled / starting / active / error`；daemon core ready 不等待 MCP，只有 `active` server 的工具进入模型 Tool Catalog。多个 server 短时间完成时，Agent 会合并刷新目录，并在目录发布完成后再发送 `active` 增量。
 
-`session.list` 与 `session.updated` 共同维护全局轻量 Session Catalog：连接建立后用 `session.list` 获取初始快照，之后用 `session.updated` 合并 metadata、`status` 与 `client_count` 变化。`session.updated` 不表示接收方已经 attach 目标 session，也不携带消息、输出或工具详情。`agent.run`、`agent.delta`、tool、AskUser、Guard 与 `session.user_message` 等详细事件仍只发送给已 attach 目标 session 的客户端。
+`session.list` 与 `session.updated` 共同维护全局轻量 Session Catalog：连接建立后用 `session.list` 获取初始快照，之后用 `session.updated` 合并 metadata、`status` 与 `client_count` 变化。详细 agent 事件仍只发送给已 attach 目标 session 的客户端。
+
+### Features
+
+| Feature | 相关协议 | 客户端行为 |
+|---|---|---|
+| `agent.steer.text` | `agent.steer`、`agent.steerRemove`、`agent.steering` |允许 current run owner 排队和撤回纯文本消息。缺失时隐藏运行中输入。 |
+| `config.model.auth_mode.bearer` | `ConfigModel.auth_mode="bearer"` |在 Anthropic 模型配置中提供 Bearer 选项。 |
+| `config.model.auth_mode.both` | `ConfigModel.auth_mode="both"` |提供双认证头选项；只应向已知兼容端点展示。 |
+| `session.handoff` | multi-attach、`can_control`、`can_reply` |允许 observer 在 owner 离开后接管交互。 |
+| `skill.project` | `skill.list` 的 project scope、精确 `path` |展示项目 Skill，且不提供 toggle。 |
+
+Feature 名称一经公开，其语义保持不变。新增能力增加新名称，不通过全局协议版本或重复的 v1/v2 代际维护普通增量功能。
 
 ---
 
-## 6. Agent 事件分层
+## 5. Agent 事件分层
 
 Agent 运行事件必须按语义拆分，避免 UI 从文本流里推导状态。
 
@@ -183,7 +191,7 @@ Agent 运行事件必须按语义拆分，避免 UI 从文本流里推导状态�
 
 ### 运行中消息
 
-Protocol 0.6 支持 current run owner 在运行期间调用 `agent.steer` 排队文本消息。该能力不打断正在进行的模型请求或工具调用：
+Feature `agent.steer.text` 支持 current run owner 在运行期间调用 `agent.steer` 排队文本消息。该能力不打断正在进行的模型请求或工具调用：
 
 - 完整模型响应结束后才可能应用；Thinking 结束不是独立注入点。
 - 模型返回 Tool Calls 时，必须等同一批全部 Tool Result 写回后再应用，不能破坏调用配对。
@@ -218,7 +226,7 @@ Method response 与 notification 共用连接，可能因并发先后到达。�
 
 ---
 
-## 7. 错误模型
+## 6. 错误模型
 
 Suna 有三类主要错误对象：
 
@@ -288,7 +296,7 @@ agent.run state=failed error=ModelError
 
 ---
 
-## 8. Model request recovery
+## 7. Model request recovery
 
 Runner 在模型请求边界做自动 recovery：
 
@@ -316,7 +324,7 @@ agent.run state=failed
 
 ---
 
-## 9. Session attach 和 compact 语义
+## 8. Session attach 和 compact 语义
 
 ### `session.attach`
 
@@ -344,7 +352,7 @@ snapshot 不保证完整 tool timeline / event replay。
 
 ---
 
-## 10. Handoff 语义
+## 9. Handoff 语义
 
 Handoff 在 daemon 中只表现为 multi-attach、run owner 和权限字段，不引入 host/guest：
 
@@ -358,53 +366,40 @@ TUI 的“本会话 / 已加入 / 观察中”是 UI 根据 attach 方式、clie
 
 ---
 
-## 11. Public / internal 边界
+## 10. Public / internal 边界
 
-public runtime v0.7 主推：
+公开支持面以 `runtime.hello.catalog` 为准。第三方 UI 不应该直接读取 `.suna` 内部状态，也不应该自己实现 agent loop。推荐通过 `suna serve --json` 获取 TCP endpoint 后接入。
 
-- runtime handshake。
-- agent 消息和事件。
-- session list/create/attach/detach/update/delete/compact/usage。
-- config get/set。
-- memory list/delete/clear。
-- skill list/set。
-- MCP list/toggle/reload。
+以下接口偏官方 TUI / local 管理用途，不进入公开 Catalog：
 
-不主推或偏内部：
-
-- `daemon.stop`：local daemon 管理语义。
-- `daemon.full_status`：官方 TUI 聚合状态快照。
-- `attachment.*`：官方 TUI 附件缓存管理。
+- `daemon.status` / `daemon.stop`；
+- `daemon.full_status`；
+- `attachment.status` / `attachment.clear`；
+- `debug.*`；
 - local transport endpoint、PID 文件、Named Pipe / Unix socket 细节。
-
-第三方 UI 不应该直接读取 `.suna` 内部状态，也不应该自己实现 agent loop。推荐通过 `suna serve --json` 获取 TCP endpoint 后接入。
 
 ---
 
-## 12. 兼容性规则
+## 11. 演进规则
 
 修改 protocol 时必须遵守：
 
-- 新增字段应为 optional，不能破坏旧客户端。
-- 不改变已有字段语义。
-- 不复用 method 名作为 notification 名。
-- 不把 method response 伪装成 notification。
-- 不让 transport 改变业务语义。
-- 结构化错误新增 kind 时，应保持旧 kind 的含义稳定。
+- `runtime_version` 只用于展示和诊断，不用于判断功能。
+-新增公开 method、notification 或 feature 时同步更新 `internal/protocol` Catalog 与本文对应分组。
+-已有 Catalog 名称的语义保持稳定；增量能力增加新名称。
+-客户端只调用 `catalog.methods` 中存在的方法，并按 `catalog.features` 渐进启用细粒度 UI。
+-客户端必须忽略未知字段和 notification。
+-未知或不支持的 method 只让当前请求失败，不能关闭连接。
+-不复用 method 名作为 notification 名，不把 method response 伪装成 notification。
+-不让 transport 改变业务语义。
 - `agent.delta`、`agent.run`、`agent.usage` 的职责边界不能混淆。
-- v0.4 将 usage 缓存字段升级为 `cache_read_tokens` 与 `cache_creation_tokens`，不兼容旧 `cached_tokens`。
-- protocol 0.4 不兼容旧 `session.new` / `session.restore` 主流程；旧客户端需要迁移到 `session.create` / `session.attach`。
-- public runtime v0.7 暂不承诺 string id 或客户端 notification；如果未来支持，应在 JSON-RPC 层保持 id 原样 round-trip，避免污染 daemon 业务层。
-- protocol 0.5 在 Skill 列表和设置语义中引入 `scope` / `can_toggle`，项目 Skill 通过精确 `path` 区分；0.4 客户端需要升级后再连接。
-- protocol 0.6 引入 current run 文本消息队列、精确撤回、状态通知和 attach 恢复；0.5 客户端需要升级后再连接。
-- protocol 0.7 为模型配置增加 `auth_mode`；当前仅 Anthropic 协议支持显式 `bearer` / `both`，0.6 客户端需要升级后再编辑模型配置。
 
 ---
 
-## 13. 文档分工
+## 12. 文档分工
 
 | 文档 | 面向对象 | 职责 |
 |---|---|---|
-- `docs/tcp-client.md` | 第三方 UI 开发者 | 如何确保 daemon 已启动、连接 TCP、写 JSON-RPC client、调用 method、处理 notification 和错误。 |
+| `docs/tcp-client.md` | 第三方 UI 开发者 | 如何确保 daemon 已启动、连接 TCP、写 JSON-RPC client、调用 method、处理 notification 和错误。 |
 | `docs/protocol.md` | Suna 维护者 / transport 实现者 / 高级集成者 | protocol 语义边界、分层约束、错误模型、recovery 和兼容性规则。 |
 | `docs/architecture.md` | 架构读者 | CLI、TUI、daemon、agent、transport、config、memory、skill、MCP 的整体分层。 |

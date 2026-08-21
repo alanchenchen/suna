@@ -207,22 +207,14 @@ func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHell
 	if err := decodeParams(req.Params, &params); err != nil {
 		return protocol.RuntimeHelloResult{}, invalidParams(err.Error())
 	}
-	requestedVersion := strings.TrimSpace(params.ProtocolVersion)
-	if requestedVersion != "" && requestedVersion != "0.7" {
-		return protocol.RuntimeHelloResult{}, protocolError{code: -32602, message: "unsupported protocol version", data: protocol.ProtocolErrorData{Kind: "unsupported_capability", Reason: "protocol_version"}}
-	}
 	transport := strings.TrimSpace(params.Transport)
 	if transport == "" {
 		transport = "unknown"
 	}
 	return protocol.RuntimeHelloResult{
-		ProtocolVersion: "0.7",
-		RuntimeVersion:  version.Current(),
-		Transport:       transport,
-		Capabilities: map[string]bool{
-			"agent": true, "streaming": true, "tools": true, "guard": true, "ask_user": true,
-			"session": true, "multi_session": true, "handoff": true, "run_steering": true, "config": true, "memory": true, "skills": true, "mcp": true, "mcp_status_updates": true,
-		},
+		RuntimeVersion: version.Current(),
+		Transport:      transport,
+		Catalog:        protocol.CurrentRuntimeCatalog(),
 		ContentSources: map[string]bool{"text": true, "image_path": true, "image_url": true},
 		Limits:         map[string]int{"max_tool_result_bytes": maxToolResultBytes, "max_steering_messages": agent.MaxSteeringMessages, "max_steering_bytes": agent.MaxSteeringBytes},
 	}, nil
