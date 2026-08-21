@@ -47,7 +47,9 @@ func (t *TUI) renderSubtaskBlock(block *toolBlock) string {
 				lines = append(lines, t.renderSelectedSubtaskToolDetail(innerWidth)...)
 			}
 		}
-		lines = append(lines, styleDim.Render(t.tr(t.subtaskPanelHelpKey())))
+		if t.canToggleSubtaskDetailWithEnter() {
+			lines = append(lines, styleDim.Render(t.tr(t.subtaskPanelHelpKey())))
+		}
 	}
 	return textutil.IndentLines(renderTitledRoundBox(width, title, lines), transcriptBlockIndent)
 }
@@ -462,6 +464,14 @@ func (t *TUI) toggleToolDetail() {
 
 func (t *TUI) hasActiveSubtaskPanel() bool {
 	return len(t.visibleSubtaskIDs()) > 0
+}
+
+func (t *TUI) canToggleSubtaskDetailWithEnter() bool {
+	return t.hasActiveSubtaskPanel() &&
+		strings.TrimSpace(t.chat.Textarea.Value()) == "" &&
+		len(t.chat.Attachments) == 0 &&
+		len(t.chat.CmdSuggestions) == 0 &&
+		!t.chat.HasBlockingInteraction()
 }
 
 func (t *TUI) selectedSubtaskID() string {

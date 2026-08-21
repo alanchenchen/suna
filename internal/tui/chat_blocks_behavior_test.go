@@ -72,6 +72,51 @@ func TestSubtaskPanelKeyboardAndToolDetail(t *testing.T) {
 	}
 }
 
+func TestSubtaskPanelEnterSendsActiveRunMessageWhenComposerHasText(t *testing.T) {
+	tui := &TUI{
+		i18n:                 newTranslator(LocaleZH),
+		width:                100,
+		height:               30,
+		mode:                 uipage.Chat,
+		activeRunID:          "run-1",
+		currentRunCanControl: true,
+	}
+	tui.initChatComponents()
+	tui.chat.Loading = true
+	block := tui.ensureToolBlock()
+	block.Add(&toolEntry{ID: "spawn-1", Name: "Spawn", RawName: "spawn", Intent: "调研", Status: toolRunning})
+	tui.chat.Textarea.SetValue("补充要求")
+	if plain := stripANSIForTest(tui.renderSubtaskBlock(block)); strings.Contains(plain, "Enter 展开工具详情") {
+		t.Fatalf("subtask panel = %q, should not advertise Enter detail while composer has text", plain)
+	}
+
+	_, cmd := tui.updateChatKey("enter", tea.KeyPressMsg{})
+	if cmd == nil {
+		t.Fatal("Enter command = nil, want steering request")
+	}
+	if tui.chat.SubtaskToolDetailExpanded {
+		t.Fatal("SubtaskToolDetailExpanded = true, want input submission to take priority")
+	}
+	if got, want := len(tui.chat.SteeringSubmissions), 1; got != want {
+		t.Fatalf("SteeringSubmissions len = %d, want %d", got, want)
+	}
+	if got, want := tui.chat.SteeringSubmissions[0].Text, "补充要求"; got != want {
+		t.Fatalf("steering text = %q, want %q", got, want)
+	}
+}
+
+func TestSubtaskPanelEnterStillTogglesDetailWhenComposerIsEmpty(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 30, mode: uipage.Chat}
+	tui.initChatComponents()
+	block := tui.ensureToolBlock()
+	block.Add(&toolEntry{ID: "spawn-1", Name: "Spawn", RawName: "spawn", Intent: "调研", Status: toolRunning})
+
+	_, _ = tui.updateChatKey("enter", tea.KeyPressMsg{})
+	if !tui.chat.SubtaskToolDetailExpanded {
+		t.Fatal("SubtaskToolDetailExpanded = false, want empty-composer Enter to toggle detail")
+	}
+}
+
 func TestSubtaskTimelineKeepsMultilineIntentOnOneRow(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 28, mode: uipage.Chat}
 	tui.initChatComponents()

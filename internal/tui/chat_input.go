@@ -362,7 +362,7 @@ func (t *TUI) readClipboardImagePasteCmd(startedAt time.Time) tea.Cmd {
 func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch {
 	case ks == "enter":
-		if t.hasActiveSubtaskPanel() {
+		if t.canToggleSubtaskDetailWithEnter() {
 			t.chat.SubtaskToolDetailExpanded = !t.chat.SubtaskToolDetailExpanded
 			t.chat.SubtaskToolDetailScroll = 0
 			t.syncContent()
