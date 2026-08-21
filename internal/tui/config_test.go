@@ -117,7 +117,7 @@ func TestLeaveConfigKeepsCurrentDetailModelSelected(t *testing.T) {
 func TestConfigModelRefAfterEditUsesNewRef(t *testing.T) {
 	tui := &TUI{
 		i18n:   newTranslator(LocaleEN),
-		config: tuiconfig.Model{EditingName: "openai/gpt-4o-mini", Inputs: providerInputsForTest("openai", "openai_responses", "gpt-4o", "", "https://api.openai.com/v1", "128000", "", "", "")},
+		config: tuiconfig.Model{EditingName: "openai/gpt-4o-mini", Inputs: providerInputsForTest("openai", "openai_responses", "", "gpt-4o", "", "https://api.openai.com/v1", "128000", "", "", "")},
 		configState: protocol.ConfigParams{ActiveModel: "openai/gpt-4o", Models: []protocol.ConfigModel{
 			{Provider: "openai", Model: "gpt-4o", BaseURL: "https://api.openai.com/v1", ContextWindow: 128000},
 		}},
@@ -286,7 +286,7 @@ func TestProviderProtocolChangeClearsReasoningForSave(t *testing.T) {
 			Reasoning:       map[string]any{"reasoning_effort": "high"},
 		}}},
 	}
-	values := tuiconfig.ProviderFormValuesFromStrings([]string{"openai", "openai_responses", "gpt-5", "", "https://api.openai.com/v1", "128000", "8192", "", ""})
+	values := tuiconfig.ProviderFormValuesFromStrings([]string{"openai", "openai_responses", "", "gpt-5", "", "https://api.openai.com/v1", "128000", "8192", "", ""})
 
 	reasoning, cleared := tui.providerFormReasoningForSave(values)
 	if !cleared {
@@ -311,7 +311,7 @@ func TestProviderProtocolUnchangedKeepsReasoningForSave(t *testing.T) {
 			Reasoning:       existingReasoning,
 		}}},
 	}
-	values := tuiconfig.ProviderFormValuesFromStrings([]string{"openai", "openai_chat", "gpt-5", "", "https://api.openai.com/v1", "128000", "8192", "", ""})
+	values := tuiconfig.ProviderFormValuesFromStrings([]string{"openai", "openai_chat", "", "gpt-5", "", "https://api.openai.com/v1", "128000", "8192", "", ""})
 
 	reasoning, cleared := tui.providerFormReasoningForSave(values)
 	if cleared {
@@ -334,7 +334,7 @@ func TestProviderProtocolChangeWithEmptyReasoningDoesNotShowClearNotice(t *testi
 			MaxOutputTokens: 8192,
 		}}},
 	}
-	values := tuiconfig.ProviderFormValuesFromStrings([]string{"openai", "openai_responses", "gpt-5", "", "https://api.openai.com/v1", "128000", "8192", "", ""})
+	values := tuiconfig.ProviderFormValuesFromStrings([]string{"openai", "openai_responses", "", "gpt-5", "", "https://api.openai.com/v1", "128000", "8192", "", ""})
 
 	reasoning, cleared := tui.providerFormReasoningForSave(values)
 	if cleared {

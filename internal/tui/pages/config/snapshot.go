@@ -12,6 +12,7 @@ func SnapshotFromProtocol(p protocol.ConfigParams) []ModelConfig {
 		models = append(models, ModelConfig{
 			Provider:        cm.Provider,
 			Protocol:        coreconfig.ModelProtocol(cm.Protocol),
+			AuthMode:        coreconfig.AuthMode(cm.AuthMode),
 			Model:           cm.Model,
 			BaseURL:         cm.BaseURL,
 			ContextWindow:   cm.ContextWindow,

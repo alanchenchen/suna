@@ -206,6 +206,7 @@ func (m *Model) BuildReasoningSave(mc ModelConfig, reasoning map[string]any) pro
 		Model: protocol.ConfigModel{
 			Provider:        mc.Provider,
 			Protocol:        string(mc.Protocol),
+			AuthMode:        string(mc.AuthMode),
 			Model:           mc.Model,
 			BaseURL:         mc.BaseURL,
 			ContextWindow:   mc.ContextWindow,

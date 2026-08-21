@@ -128,7 +128,7 @@ func TestTransportServesJSONRPCOverTCP(t *testing.T) {
 	defer conn.Close()
 	decoder := json.NewDecoder(conn)
 
-	if _, err := conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.6"}}` + "\n")); err != nil {
+	if _, err := conn.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.7"}}` + "\n")); err != nil {
 		t.Fatalf("hello Write error = %v", err)
 	}
 	assertHelloResponse(t, decoder, 1)

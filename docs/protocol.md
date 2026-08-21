@@ -98,7 +98,7 @@ TCP 客户端的限制：
 | `skill.list` / `skill.set` | 查询、启用或禁用 Skill。 |
 | `mcp.list` / `mcp.toggle` / `mcp.reload` | 查询、启用/禁用或重载 MCP server。 |
 
-不主推给第三方 runtime v0.6 依赖的 method：
+不主推给第三方 runtime v0.7 依赖的 method：
 
 | Method | 说明 |
 |---|---|
@@ -109,6 +109,8 @@ TCP 客户端的限制：
 daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 runtime 可服务，不表示所有 MCP 已 active；非 `ready` 时，除 `runtime.hello / daemon.status / daemon.stop` 外的请求返回 `runtime_unavailable`，并通过 `reason` 与 `retryable` 表达恢复语义。
 
 完整参数表和示例见 `docs/tcp-client.md`。
+
+Protocol 0.7 的 `ConfigModel` 新增可选 `auth_mode`：省略表示协议默认；当前仅 `protocol = "anthropic"` 接受 `bearer` 或 `both`。第三方客户端在读取、编辑并写回模型时必须保留该字段，不能按旧结构静默丢弃。
 
 ---
 
@@ -358,7 +360,7 @@ TUI 的“本会话 / 已加入 / 观察中”是 UI 根据 attach 方式、clie
 
 ## 11. Public / internal 边界
 
-public runtime v0.6 主推：
+public runtime v0.7 主推：
 
 - runtime handshake。
 - agent 消息和事件。
@@ -392,9 +394,10 @@ public runtime v0.6 主推：
 - `agent.delta`、`agent.run`、`agent.usage` 的职责边界不能混淆。
 - v0.4 将 usage 缓存字段升级为 `cache_read_tokens` 与 `cache_creation_tokens`，不兼容旧 `cached_tokens`。
 - protocol 0.4 不兼容旧 `session.new` / `session.restore` 主流程；旧客户端需要迁移到 `session.create` / `session.attach`。
-- public runtime v0.6 暂不承诺 string id 或客户端 notification；如果未来支持，应在 JSON-RPC 层保持 id 原样 round-trip，避免污染 daemon 业务层。
+- public runtime v0.7 暂不承诺 string id 或客户端 notification；如果未来支持，应在 JSON-RPC 层保持 id 原样 round-trip，避免污染 daemon 业务层。
 - protocol 0.5 在 Skill 列表和设置语义中引入 `scope` / `can_toggle`，项目 Skill 通过精确 `path` 区分；0.4 客户端需要升级后再连接。
 - protocol 0.6 引入 current run 文本消息队列、精确撤回、状态通知和 attach 恢复；0.5 客户端需要升级后再连接。
+- protocol 0.7 为模型配置增加 `auth_mode`；当前仅 Anthropic 协议支持显式 `bearer` / `both`，0.6 客户端需要升级后再编辑模型配置。
 
 ---
 

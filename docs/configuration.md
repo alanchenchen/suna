@@ -211,6 +211,7 @@ api_key = "<API_KEY>"
 | `[[models]]` | array | 是 | 无 | 至少一个模型，否则配置不可用。 |
 | `models.provider` | string | 是 | 无 | 厂商/凭证命名空间，也是模型 ref 前缀；必须和 `credentials.toml` 分组名一致。 |
 | `models.protocol` | string | 否 | `openai_chat` | 模型协议，决定使用哪个请求适配器：`openai_chat` / `openai_responses` / `anthropic`。旧配置缺失时按 `openai_chat` 使用。 |
+| `models.auth_mode` | string | 否 | 协议默认 | 静态凭据认证模式。当前仅 `anthropic` 支持显式 `bearer` / `both`；省略时只发送标准 `X-Api-Key`。 |
 | `models.model` | string | 是 | 无 | 上游模型 ID。模型 ref 为 `provider/model`。 |
 | `models.base_url` | string | 是 | 无 | API endpoint。当前所有 provider 都要求显式配置，Suna 不依赖 SDK 默认地址。 |
 | `models.context_window` | int | 是 | 无 | 模型服务声明的总上下文窗口，按 `input + output` 理解；用于 status、usage 展示和 compact 预算。 |
@@ -275,6 +276,29 @@ max_output_tokens = 8192
 1. `base_url` 指向兼容服务；
 2. `credentials.toml` 中存在同名 table；
 3. 新建 session 使用相同的 `provider/model` ref 作为其初始模型；之后可通过 `/model` 单独切换。
+
+### Anthropic 认证模式
+
+`auth_mode` 当前仅对 `protocol = "anthropic"` 有效。TUI 使用固定选项，不接受自定义字符串：
+
+-省略：协议默认，只发送 `X-Api-Key`；
+- `bearer`：只发送 `Authorization: Bearer <credential>`；
+- `both`：将同一份 provider credential 同时通过 `X-Api-Key` 和 `Authorization: Bearer` 发送，仅用于已知兼容这种行为的端点。
+
+例如只接受 Bearer 的 Anthropic-compatible endpoint：
+
+```toml
+[[models]]
+provider = "example-provider"
+protocol = "anthropic"
+auth_mode = "bearer"
+model = "example-model"
+base_url = "https://api.example.com"
+context_window = 200000
+max_output_tokens = 8192
+```
+
+Suna 不根据 provider 名称或 endpoint 自动猜测，也不会在 401 后切换认证并隐式重试。非 Anthropic 协议设置非空 `auth_mode` 会被拒绝。
 
 ### context_window 与 max_output_tokens
 

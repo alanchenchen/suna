@@ -15,6 +15,7 @@ func (m Model) BuildProviderSave(v ProviderFormValues, existingReasoning map[str
 		Model: protocol.ConfigModel{
 			Provider:        v.Provider,
 			Protocol:        string(v.Protocol),
+			AuthMode:        string(v.AuthMode),
 			Model:           v.Model,
 			BaseURL:         v.Endpoint,
 			ContextWindow:   ParsePositiveInt(v.ContextWindow),

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/alanchenchen/suna/internal/config"
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 )
@@ -25,7 +26,17 @@ func NewAnthropicAdapter(spec AdapterSpec, deps AdapterDependencies) *AnthropicA
 	httpClient := compatibleHTTPClient(&http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12}})
 	// 关闭 SDK 隐式重试，避免一次 Suna Complete 在上游产生多次不可见请求；
 	// 未来如需重试应由 Suna 自己实现并记录日志。
-	opts := []option.RequestOption{option.WithAPIKey(spec.APIKey), option.WithHTTPClient(httpClient), option.WithMaxRetries(0)}
+	opts := []option.RequestOption{option.WithHTTPClient(httpClient), option.WithMaxRetries(0)}
+	// Anthropic 兼容端点的静态凭据头不统一；默认保持官方 X-Api-Key，
+	// Bearer 与双头模式必须由用户显式选择，禁止按 endpoint 猜测或在 401 后隐式重试。
+	switch spec.AuthMode {
+	case config.AuthModeBearer:
+		opts = append(opts, option.WithAuthToken(spec.APIKey))
+	case config.AuthModeBoth:
+		opts = append(opts, option.WithAPIKey(spec.APIKey), option.WithAuthToken(spec.APIKey))
+	default:
+		opts = append(opts, option.WithAPIKey(spec.APIKey))
+	}
 	if spec.BaseURL != "" {
 		opts = append(opts, option.WithBaseURL(spec.BaseURL))
 	}

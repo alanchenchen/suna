@@ -136,6 +136,7 @@ func (r *Router) createAdapter(mc config.ModelConfig, resolver MediaResolver) (A
 	}
 	spec := AdapterSpec{
 		Protocol:        mc.ProtocolOrDefault(),
+		AuthMode:        mc.AuthMode,
 		ModelID:         mc.Model,
 		BaseURL:         mc.BaseURL,
 		APIKey:          apiKey,

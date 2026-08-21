@@ -51,6 +51,7 @@ func TestUpdateConfigEditingModelToDifferentProviderUsesOnlyNewProviderCredentia
 		Model: ConfigModel{
 			Provider:        "anthropic",
 			Protocol:        config.ModelProtocolAnthropic,
+			AuthMode:        config.AuthModeBearer,
 			Model:           "claude-sonnet-4",
 			BaseURL:         "https://api.anthropic.com",
 			ContextWindow:   200000,
@@ -62,6 +63,17 @@ func TestUpdateConfigEditingModelToDifferentProviderUsesOnlyNewProviderCredentia
 	}
 	if got, want := updated.Models[0].APIKey, "test-anthropic-key"; got != want {
 		t.Fatalf("updated model API key = %q, want new provider credential %q", got, want)
+	}
+	if got, want := updated.Models[0].AuthMode, config.AuthModeBearer; got != want {
+		t.Fatalf("updated model AuthMode = %q, want %q", got, want)
+	}
+	savedBytes, err := os.ReadFile(filepath.Join(dir, "config.toml"))
+	if err != nil {
+		t.Fatalf("ReadFile(config.toml) error = %v", err)
+	}
+	saved := string(savedBytes)
+	if !strings.Contains(saved, `auth_mode = "bearer"`) {
+		t.Fatalf("saved config = %q, want auth_mode bearer", saved)
 	}
 	if got := loadModelCredential(t, dir, "anthropic", "claude-sonnet-4"); got != "test-anthropic-key" {
 		t.Fatalf("reloaded model API key = %q, want scoped anthropic credential", got)

@@ -3,6 +3,8 @@ package config
 import (
 	"sort"
 	"strings"
+
+	coreconfig "github.com/alanchenchen/suna/internal/config"
 )
 
 type RowsDeps struct {
@@ -142,17 +144,22 @@ func (m *Model) DetailRows(deps RowsDeps) []Row {
 		{"info", "", deps.Tr("tui.config.status"), status},
 		{"info", "", deps.Tr("tui.config.provider.type"), mc.Provider},
 		{"info", "", deps.Tr("tui.config.provider.protocol"), modelProtocolDisplay(mc, deps.Tr)},
-		{"info", "", deps.Tr("tui.config.provider.endpoint"), deps.DisplayEndpoint(mc.BaseURL)},
-		{"info", "", deps.Tr("tui.config.provider.api_key"), apiKey},
-		{"info", "", deps.Tr("tui.config.provider.model"), mc.Model},
-		{"info", "", deps.Tr("tui.config.provider.context_window"), deps.ContextDisplay(mc)},
-		{"info", "", deps.Tr("tui.config.provider.max_output_tokens"), deps.MaxOutputDisplay(mc)},
-		{"info", "", deps.Tr("tui.config.reasoning"), deps.ReasoningDisplay(mc)},
-		{"info", "", deps.Tr("tui.config.provider.subtask_for"), subtaskForDisplay(mc, deps.Tr)},
-		{"info", "", "", ""},
-		{"edit_model", "", "  " + deps.Tr("tui.config.edit_model"), ""},
-		{"edit_reasoning", "", "  " + deps.Tr("tui.config.edit_reasoning"), ""},
 	}
+	if mc.Protocol == coreconfig.ModelProtocolAnthropic {
+		rows = append(rows, Row{"info", "", deps.Tr("tui.config.provider.auth_mode"), authModeDisplay(mc, deps.Tr)})
+	}
+	rows = append(rows,
+		Row{"info", "", deps.Tr("tui.config.provider.endpoint"), deps.DisplayEndpoint(mc.BaseURL)},
+		Row{"info", "", deps.Tr("tui.config.provider.api_key"), apiKey},
+		Row{"info", "", deps.Tr("tui.config.provider.model"), mc.Model},
+		Row{"info", "", deps.Tr("tui.config.provider.context_window"), deps.ContextDisplay(mc)},
+		Row{"info", "", deps.Tr("tui.config.provider.max_output_tokens"), deps.MaxOutputDisplay(mc)},
+		Row{"info", "", deps.Tr("tui.config.reasoning"), deps.ReasoningDisplay(mc)},
+		Row{"info", "", deps.Tr("tui.config.provider.subtask_for"), subtaskForDisplay(mc, deps.Tr)},
+		Row{"info", "", "", ""},
+		Row{"edit_model", "", "  " + deps.Tr("tui.config.edit_model"), ""},
+		Row{"edit_reasoning", "", "  " + deps.Tr("tui.config.edit_reasoning"), ""},
+	)
 	if deps.IsActive != nil && !deps.IsActive(mc.Ref()) {
 		rows = append(rows, Row{"activate_model", mc.Ref(), "  " + deps.Tr("tui.config.activate_model"), ""})
 	}
@@ -164,6 +171,18 @@ func modelProtocolDisplay(mc ModelConfig, tr func(string) string) string {
 	label := tr("tui.config.protocol." + string(mc.Protocol))
 	if strings.HasPrefix(label, "tui.config.protocol.") {
 		return string(mc.Protocol)
+	}
+	return label
+}
+
+func authModeDisplay(mc ModelConfig, tr func(string) string) string {
+	key := string(mc.AuthMode)
+	if key == "" {
+		key = "default"
+	}
+	label := tr("tui.config.auth_mode." + key)
+	if strings.HasPrefix(label, "tui.config.auth_mode.") {
+		return key
 	}
 	return label
 }

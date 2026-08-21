@@ -9,9 +9,20 @@ import (
 	coreconfig "github.com/alanchenchen/suna/internal/config"
 )
 
-const ProviderFormFieldCount = 9
+const ProviderFormFieldCount = 10
 
-const ProviderFormProtocolIndex = 1
+const (
+	ProviderFormProviderIndex = iota
+	ProviderFormProtocolIndex
+	ProviderFormAuthModeIndex
+	ProviderFormModelIndex
+	ProviderFormAPIKeyIndex
+	ProviderFormEndpointIndex
+	ProviderFormContextWindowIndex
+	ProviderFormMaxOutputTokensIndex
+	ProviderFormStrengthsIndex
+	ProviderFormSubtaskForIndex
+)
 
 type ProviderFormSpec struct {
 	Labels       []string
@@ -23,6 +34,7 @@ type ProviderFormSpec struct {
 type ProviderFormLabels struct {
 	Provider        string
 	Protocol        string
+	AuthMode        string
 	Model           string
 	APIKey          string
 	Endpoint        string
@@ -54,30 +66,31 @@ func (m *Model) OpenProviderModelForm(provider string) {
 }
 
 func (m *Model) ProviderFormSpec(labels ProviderFormLabels, mc *ModelConfig) ProviderFormSpec {
-	fieldLabels := []string{labels.Provider, labels.Protocol, labels.Model, labels.APIKey, labels.Endpoint, labels.ContextWindow, labels.MaxOutputTokens, labels.Strengths, labels.SubtaskFor}
-	placeholders := []string{"Zhipu", "OpenAI Chat", "glm-5.1", "<API_KEY>", "https://api.example.com/v1", "128000", "8192", labels.StrengthsHint, labels.SubtaskForHint}
-	values := []string{"", string(coreconfig.ModelProtocolOpenAIChat), "", "", "", "", "", "", ""}
+	fieldLabels := []string{labels.Provider, labels.Protocol, labels.AuthMode, labels.Model, labels.APIKey, labels.Endpoint, labels.ContextWindow, labels.MaxOutputTokens, labels.Strengths, labels.SubtaskFor}
+	placeholders := []string{"Zhipu", "OpenAI Chat", "Default", "glm-5.1", "<API_KEY>", "https://api.example.com/v1", "128000", "8192", labels.StrengthsHint, labels.SubtaskForHint}
+	values := []string{"", string(coreconfig.ModelProtocolOpenAIChat), "", "", "", "", "", "", "", ""}
 	if mc != nil {
-		values[0] = mc.Provider
-		values[1] = string(coreconfig.NormalizeModelProtocol(mc.Protocol))
-		values[2] = mc.Model
-		values[4] = mc.BaseURL
+		values[ProviderFormProviderIndex] = mc.Provider
+		values[ProviderFormProtocolIndex] = string(coreconfig.NormalizeModelProtocol(mc.Protocol))
+		values[ProviderFormAuthModeIndex] = string(mc.AuthMode)
+		values[ProviderFormModelIndex] = mc.Model
+		values[ProviderFormEndpointIndex] = mc.BaseURL
 		if mc.ContextWindow > 0 {
-			values[5] = strconv.Itoa(mc.ContextWindow)
+			values[ProviderFormContextWindowIndex] = strconv.Itoa(mc.ContextWindow)
 		}
 		if mc.MaxOutputTokens > 0 {
-			values[6] = strconv.Itoa(mc.MaxOutputTokens)
+			values[ProviderFormMaxOutputTokensIndex] = strconv.Itoa(mc.MaxOutputTokens)
 		}
-		values[7] = strings.Join(mc.Strengths, ", ")
-		values[8] = strings.Join(mc.SubtaskFor, ", ")
+		values[ProviderFormStrengthsIndex] = strings.Join(mc.Strengths, ", ")
+		values[ProviderFormSubtaskForIndex] = strings.Join(mc.SubtaskFor, ", ")
 	} else {
-		values[0] = ""
-		values[1] = string(coreconfig.ModelProtocolOpenAIChat)
+		values[ProviderFormProviderIndex] = ""
+		values[ProviderFormProtocolIndex] = string(coreconfig.ModelProtocolOpenAIChat)
 	}
 	if m.FormProvider != "" {
-		values[0] = m.FormProvider
+		values[ProviderFormProviderIndex] = m.FormProvider
 	}
-	return ProviderFormSpec{Labels: fieldLabels, Placeholders: placeholders, Values: values, PasswordAt: 3}
+	return ProviderFormSpec{Labels: fieldLabels, Placeholders: placeholders, Values: values, PasswordAt: ProviderFormAPIKeyIndex}
 }
 
 func ProviderFormValuesFromStrings(values []string) ProviderFormValues {
@@ -87,7 +100,18 @@ func ProviderFormValuesFromStrings(values []string) ProviderFormValues {
 			vals[i] = strings.TrimSpace(values[i])
 		}
 	}
-	return ProviderFormValues{Provider: vals[0], Protocol: coreconfig.NormalizeModelProtocol(coreconfig.ModelProtocol(vals[1])), Model: vals[2], APIKey: vals[3], Endpoint: vals[4], ContextWindow: vals[5], MaxOutputTokens: vals[6], Strengths: vals[7], SubtaskFor: vals[8]}
+	return ProviderFormValues{
+		Provider:        vals[ProviderFormProviderIndex],
+		Protocol:        coreconfig.NormalizeModelProtocol(coreconfig.ModelProtocol(vals[ProviderFormProtocolIndex])),
+		AuthMode:        coreconfig.AuthMode(vals[ProviderFormAuthModeIndex]),
+		Model:           vals[ProviderFormModelIndex],
+		APIKey:          vals[ProviderFormAPIKeyIndex],
+		Endpoint:        vals[ProviderFormEndpointIndex],
+		ContextWindow:   vals[ProviderFormContextWindowIndex],
+		MaxOutputTokens: vals[ProviderFormMaxOutputTokensIndex],
+		Strengths:       vals[ProviderFormStrengthsIndex],
+		SubtaskFor:      vals[ProviderFormSubtaskForIndex],
+	}
 }
 
 type ProviderValidationLabels struct {
@@ -195,6 +219,26 @@ func NextProviderProtocol(current coreconfig.ModelProtocol, delta int) coreconfi
 		return coreconfig.ModelProtocolOpenAIChat
 	}
 	current = coreconfig.NormalizeModelProtocol(current)
+	idx := 0
+	for i, option := range options {
+		if option == current {
+			idx = i
+			break
+		}
+	}
+	idx = (idx + delta) % len(options)
+	if idx < 0 {
+		idx += len(options)
+	}
+	return options[idx]
+}
+
+func AuthModeOptions() []coreconfig.AuthMode {
+	return []coreconfig.AuthMode{"", coreconfig.AuthModeBearer, coreconfig.AuthModeBoth}
+}
+
+func NextAuthMode(current coreconfig.AuthMode, delta int) coreconfig.AuthMode {
+	options := AuthModeOptions()
 	idx := 0
 	for i, option := range options {
 		if option == current {

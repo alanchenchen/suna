@@ -14,6 +14,13 @@ const (
 	ModelProtocolAnthropic       ModelProtocol = "anthropic"
 )
 
+type AuthMode string
+
+const (
+	AuthModeBearer AuthMode = "bearer"
+	AuthModeBoth   AuthMode = "both"
+)
+
 func SupportedModelProtocols() []ModelProtocol {
 	return []ModelProtocol{ModelProtocolOpenAIChat, ModelProtocolOpenAIResponses, ModelProtocolAnthropic}
 }
@@ -42,7 +49,17 @@ func (c *Config) NormalizeModels() error {
 		if !IsSupportedModelProtocol(protocol) {
 			return fmt.Errorf("model %q protocol %q is not supported", c.Models[i].Ref(), c.Models[i].Protocol)
 		}
+		authMode := AuthMode(strings.ToLower(strings.TrimSpace(string(c.Models[i].AuthMode))))
+		switch authMode {
+		case "", AuthModeBearer, AuthModeBoth:
+		default:
+			return fmt.Errorf("model %q auth_mode %q is not supported", c.Models[i].Ref(), c.Models[i].AuthMode)
+		}
+		if authMode != "" && protocol != ModelProtocolAnthropic {
+			return fmt.Errorf("model %q auth_mode is only supported by the anthropic protocol", c.Models[i].Ref())
+		}
 		c.Models[i].Protocol = protocol
+		c.Models[i].AuthMode = authMode
 	}
 	return nil
 }

@@ -73,7 +73,7 @@ TUI 仍依赖 Bubble Tea/Bubbles 负责 terminal renderer、alt screen、mouse/k
 当前支持三类模型协议：
 
 - `protocol = "openai_responses"`：OpenAI Responses 协议。
-- `protocol = "anthropic"`：Anthropic Messages 协议。
+- `protocol = "anthropic"`：Anthropic Messages 协议；默认使用 `X-Api-Key`，可通过模型 `auth_mode = "bearer" | "both"` 显式适配兼容端点。
 - `protocol = "openai_chat"`：OpenAI-compatible Chat Completions 协议。
 
 模型 ref 为 `<provider>/<model>`。`provider` 用于厂商/凭证命名空间和匹配 `credentials.toml` 中的 API Key 分组，不再决定请求协议。

@@ -94,16 +94,22 @@ func (t *TUI) viewProviderForm() string {
 	view := t.config.ProviderFormView(t.tr(t.config.FormTitle), t.tr("tui.config.setup_title"), t.tr("tui.config.form_help"), min(max(48, t.width-8), 72))
 	var lines []string
 	for i, in := range t.config.Inputs {
-		if t.config.FormProvider != "" && i == 0 {
+		if t.config.FormProvider != "" && i == tuiconfig.ProviderFormProviderIndex {
 			lines = append(lines, styleDim.Render(t.tr("tui.config.provider.type")+": ")+styleHL.Render(t.config.FormProvider)+styleDim.Render("  "+t.tr("tui.config.locked")))
 			continue
 		}
-		if t.config.FormProvider != "" && i == 3 {
+		if t.config.FormProvider != "" && i == tuiconfig.ProviderFormAPIKeyIndex {
 			lines = append(lines, styleDim.Render(t.tr("tui.config.provider.api_key")+": ")+styleDim.Render(t.i18n.Tf("tui.config.api_key_reused", t.config.FormProvider)))
 			continue
 		}
 		if i == tuiconfig.ProviderFormProtocolIndex {
 			lines = append(lines, t.providerProtocolInputView(in))
+			continue
+		}
+		if i == tuiconfig.ProviderFormAuthModeIndex {
+			if t.providerFormUsesAnthropic() {
+				lines = append(lines, t.providerAuthModeInputView(in))
+			}
 			continue
 		}
 		lines = append(lines, in.View())
@@ -355,9 +361,25 @@ func (t *TUI) providerProtocolInputView(in textinput.Model) string {
 	if strings.HasPrefix(label, "tui.config.protocol.") {
 		label = in.Value()
 	}
+	return t.providerChoiceInputView(in, label, tuiconfig.ProviderFormProtocolIndex)
+}
+
+func (t *TUI) providerAuthModeInputView(in textinput.Model) string {
+	key := in.Value()
+	if key == "" {
+		key = "default"
+	}
+	label := t.tr("tui.config.auth_mode." + key)
+	if strings.HasPrefix(label, "tui.config.auth_mode.") {
+		label = key
+	}
+	return t.providerChoiceInputView(in, label, tuiconfig.ProviderFormAuthModeIndex)
+}
+
+func (t *TUI) providerChoiceInputView(in textinput.Model, label string, focusIndex int) string {
 	prompt := in.Prompt
 	style := styleDim
-	if t.config.InputFocus == tuiconfig.ProviderFormProtocolIndex {
+	if t.config.InputFocus == focusIndex {
 		prompt = styleBrand.Render(prompt)
 		style = styleHL
 	}

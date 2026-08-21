@@ -125,6 +125,7 @@ func (c *Config) GetMaxModelRPS() int {
 type ModelConfig struct {
 	Provider        string         `toml:"provider"`
 	Protocol        ModelProtocol  `toml:"protocol,omitempty"`
+	AuthMode        AuthMode       `toml:"auth_mode,omitempty"`
 	Model           string         `toml:"model"`
 	BaseURL         string         `toml:"base_url,omitempty"`
 	ContextWindow   int            `toml:"context_window,omitempty"`
@@ -146,6 +147,7 @@ type configTOML struct {
 type modelConfigTOML struct {
 	Provider        string          `toml:"provider"`
 	Protocol        ModelProtocol   `toml:"protocol"`
+	AuthMode        AuthMode        `toml:"auth_mode,omitempty"`
 	Model           string          `toml:"model"`
 	BaseURL         string          `toml:"base_url,omitempty"`
 	ContextWindow   int             `toml:"context_window,omitempty"`
@@ -346,6 +348,7 @@ func (c *Config) tomlView() configTOML {
 		models = append(models, modelConfigTOML{
 			Provider:        mc.Provider,
 			Protocol:        mc.ProtocolOrDefault(),
+			AuthMode:        mc.AuthMode,
 			Model:           mc.Model,
 			BaseURL:         mc.BaseURL,
 			ContextWindow:   mc.ContextWindow,

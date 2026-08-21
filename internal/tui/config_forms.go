@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	coreconfig "github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/tui/components/selection"
 	tuiconfig "github.com/alanchenchen/suna/internal/tui/pages/config"
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
@@ -20,13 +21,23 @@ func (t *TUI) updateProviderForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		t.config.Error = ""
 		t.config.Notice = ""
-		if t.config.InputFocus == tuiconfig.ProviderFormProtocolIndex {
+		switch t.config.InputFocus {
+		case tuiconfig.ProviderFormProtocolIndex:
 			switch m.String() {
 			case "left":
 				t.cycleProviderProtocol(-1)
 				return t, nil
 			case "right":
 				t.cycleProviderProtocol(1)
+				return t, nil
+			}
+		case tuiconfig.ProviderFormAuthModeIndex:
+			switch m.String() {
+			case "left":
+				t.cycleProviderAuthMode(-1)
+				return t, nil
+			case "right":
+				t.cycleProviderAuthMode(1)
 				return t, nil
 			}
 		}
@@ -59,7 +70,7 @@ func (t *TUI) updateProviderForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, nil
 		}
 	}
-	if t.config.InputFocus == tuiconfig.ProviderFormProtocolIndex {
+	if t.config.InputFocus == tuiconfig.ProviderFormProtocolIndex || t.config.InputFocus == tuiconfig.ProviderFormAuthModeIndex {
 		return t, nil
 	}
 	var cmd tea.Cmd
@@ -85,8 +96,8 @@ func (t *TUI) openProviderModelForm(provider string) {
 		}
 	}
 	t.initProviderForm(template)
-	if len(t.config.Inputs) > 3 {
-		t.config.Inputs[3].SetValue("")
+	if len(t.config.Inputs) > tuiconfig.ProviderFormAPIKeyIndex {
+		t.config.Inputs[tuiconfig.ProviderFormAPIKeyIndex].SetValue("")
 	}
 	t.focusConfigInput(t.nextEditableConfigInput(0, 1))
 }
@@ -115,6 +126,7 @@ func (t *TUI) providerFormLabels() tuiconfig.ProviderFormLabels {
 	return tuiconfig.ProviderFormLabels{
 		Provider:        t.tr("tui.config.provider.type"),
 		Protocol:        t.tr("tui.config.provider.protocol"),
+		AuthMode:        t.tr("tui.config.provider.auth_mode"),
 		Model:           t.tr("tui.config.provider.model"),
 		APIKey:          t.tr("tui.config.provider.api_key"),
 		Endpoint:        t.tr("tui.config.provider.endpoint"),
@@ -139,7 +151,7 @@ func (t *TUI) focusConfigInputWithDelta(idx, delta int) tea.Cmd {
 	var cmds []tea.Cmd
 	for i := range t.config.Inputs {
 		if i == t.config.InputFocus {
-			if i != tuiconfig.ProviderFormProtocolIndex {
+			if i != tuiconfig.ProviderFormProtocolIndex && i != tuiconfig.ProviderFormAuthModeIndex {
 				cmds = append(cmds, t.config.Inputs[i].Focus())
 			}
 		} else {
@@ -153,7 +165,10 @@ func (t *TUI) configInputEditable(idx int) bool {
 	if idx < 0 || idx >= len(t.config.Inputs) {
 		return false
 	}
-	if t.config.FormProvider != "" && (idx == 0 || idx == 3) {
+	if t.config.FormProvider != "" && (idx == tuiconfig.ProviderFormProviderIndex || idx == tuiconfig.ProviderFormAPIKeyIndex) {
+		return false
+	}
+	if idx == tuiconfig.ProviderFormAuthModeIndex && !t.providerFormUsesAnthropic() {
 		return false
 	}
 	return true
@@ -218,7 +233,11 @@ func (t *TUI) providerFormValues() tuiconfig.ProviderFormValues {
 	for i := range t.config.Inputs {
 		values[i] = t.config.Inputs[i].Value()
 	}
-	return tuiconfig.ProviderFormValuesFromStrings(values)
+	v := tuiconfig.ProviderFormValuesFromStrings(values)
+	if v.Protocol != coreconfig.ModelProtocolAnthropic {
+		v.AuthMode = ""
+	}
+	return v
 }
 
 func (t *TUI) validateProviderForm(v tuiconfig.ProviderFormValues) error {
@@ -461,4 +480,26 @@ func (t *TUI) cycleProviderProtocol(delta int) {
 	current := tuiconfig.ModelProtocolValue(t.config.Inputs[tuiconfig.ProviderFormProtocolIndex].Value())
 	next := tuiconfig.NextProviderProtocol(current, delta)
 	t.config.Inputs[tuiconfig.ProviderFormProtocolIndex].SetValue(string(next))
+	if next != coreconfig.ModelProtocolAnthropic && len(t.config.Inputs) > tuiconfig.ProviderFormAuthModeIndex {
+		t.config.Inputs[tuiconfig.ProviderFormAuthModeIndex].SetValue("")
+		if t.config.InputFocus == tuiconfig.ProviderFormAuthModeIndex {
+			t.focusConfigInputWithDelta(tuiconfig.ProviderFormModelIndex, 1)
+		}
+	}
+}
+
+func (t *TUI) cycleProviderAuthMode(delta int) {
+	if !t.providerFormUsesAnthropic() || len(t.config.Inputs) <= tuiconfig.ProviderFormAuthModeIndex {
+		return
+	}
+	current := coreconfig.AuthMode(t.config.Inputs[tuiconfig.ProviderFormAuthModeIndex].Value())
+	next := tuiconfig.NextAuthMode(current, delta)
+	t.config.Inputs[tuiconfig.ProviderFormAuthModeIndex].SetValue(string(next))
+}
+
+func (t *TUI) providerFormUsesAnthropic() bool {
+	if len(t.config.Inputs) <= tuiconfig.ProviderFormProtocolIndex {
+		return false
+	}
+	return tuiconfig.ModelProtocolValue(t.config.Inputs[tuiconfig.ProviderFormProtocolIndex].Value()) == coreconfig.ModelProtocolAnthropic
 }

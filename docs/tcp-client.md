@@ -141,14 +141,14 @@ TCP 是一条长期连接，framing 为 **NDJSON**：
 TCP client 连接后，必须先发送：
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.6","client":{"name":"my-ui","version":"1.0.0","type":"desktop"}}}
+{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"protocol_version":"0.7","client":{"name":"my-ui","version":"1.0.0","type":"desktop"}}}
 ```
 
 建议字段：
 
 | 字段 | 是否必填 | 说明 |
 |---|---:|---|
-| `protocol_version` | 否 | 当前公开版本为 `"0.6"`；推荐始终传入。 |
+| `protocol_version` | 否 | 当前公开版本为 `"0.7"`；推荐始终传入。 |
 | `client.name` | 否 | 客户端名称，用于诊断。 |
 | `client.version` | 否 | 客户端版本。 |
 | `client.type` | 否 | 例如 `desktop`、`ide`、`web_gateway`、`script`。 |
@@ -157,7 +157,7 @@ TCP client 连接后，必须先发送：
 
 ```json
 {
-  "protocol_version":"0.6",
+  "protocol_version":"0.7",
   "runtime_version":"v0.x.x",
   "transport":"tcp",
   "capabilities":{"agent":true,"session":true,"handoff":true,"run_steering":true,"mcp_status_updates":true},
@@ -346,7 +346,7 @@ export class SunaClient {
 
     const client = new SunaClient(socket);
     await client.request("runtime.hello", {
-      protocol_version: "0.6",
+      protocol_version: "0.7",
       client: { name: "example-ui", version: "1.0.0", type: "node" },
     });
     return client;
@@ -458,6 +458,12 @@ try {
 
 > 上例假设 endpoint 是 IPv4。若你的客户端要支持 `[::1]:port`，请使用语言标准库的 host/port parser，而不是手动 `split(":")`。
 
+Protocol 0.7 的 `config.get` / `config.set` 模型对象包含可选 `auth_mode`。省略表示协议默认；当前仅 Anthropic 协议接受 `bearer` 或 `both`。客户端编辑并回写模型时必须保留该字段：
+
+```json
+{"provider":"example-provider","protocol":"anthropic","auth_mode":"bearer","model":"example-model","base_url":"https://api.example.com","context_window":200000,"max_output_tokens":8192}
+```
+
 ---
 
 ## 8. 交给 AI 编码代理的最小任务描述
@@ -468,7 +474,7 @@ try {
 实现一个 Suna TCP JSON-RPC client：
 1. 执行 `suna serve --json`，解析 stdout 的 tcp_endpoint；
 2. 使用长期 TCP connection 和 NDJSON，一行一条 JSON；
-3. 第一条 request 必须是 runtime.hello，protocol_version 为 0.6；
+3. 第一条 request 必须是 runtime.hello，protocol_version 为 0.7；
 4. 用整数 request ID 和 pending map 匹配 response；
 5. 独立分发无 ID 的 daemon notification；
 6. 先 session.list，再 session.create 或 session.attach；

@@ -10,6 +10,7 @@ import (
 // AdapterSpec 是将模型配置编译后的静态协议适配信息。
 type AdapterSpec struct {
 	Protocol        config.ModelProtocol
+	AuthMode        config.AuthMode
 	ModelID         string
 	BaseURL         string
 	APIKey          string

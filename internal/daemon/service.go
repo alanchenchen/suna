@@ -208,7 +208,7 @@ func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHell
 		return protocol.RuntimeHelloResult{}, invalidParams(err.Error())
 	}
 	requestedVersion := strings.TrimSpace(params.ProtocolVersion)
-	if requestedVersion != "" && requestedVersion != "0.6" {
+	if requestedVersion != "" && requestedVersion != "0.7" {
 		return protocol.RuntimeHelloResult{}, protocolError{code: -32602, message: "unsupported protocol version", data: protocol.ProtocolErrorData{Kind: "unsupported_capability", Reason: "protocol_version"}}
 	}
 	transport := strings.TrimSpace(params.Transport)
@@ -216,7 +216,7 @@ func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHell
 		transport = "unknown"
 	}
 	return protocol.RuntimeHelloResult{
-		ProtocolVersion: "0.6",
+		ProtocolVersion: "0.7",
 		RuntimeVersion:  version.Current(),
 		Transport:       transport,
 		Capabilities: map[string]bool{
@@ -776,7 +776,7 @@ func (s *service) handleConfigSet(ctx context.Context, req protocol.Request, sin
 	if err := decodeParams(req.Params, &params); err != nil {
 		return nil, invalidParams(err.Error())
 	}
-	updated, err := s.daemon.agent.UpdateConfig(agent.ConfigSetParams{Action: params.Action, ModelRef: params.ModelRef, ActiveModel: params.ActiveModel, APIKey: params.APIKey, DeleteAPIKey: params.DeleteAPIKey, Locale: params.Locale, Theme: params.Theme, GuardMode: params.GuardMode, Workspace: params.Workspace, Model: agent.ConfigModel{Provider: params.Model.Provider, Protocol: config.ModelProtocol(params.Model.Protocol), Model: params.Model.Model, BaseURL: params.Model.BaseURL, ContextWindow: params.Model.ContextWindow, MaxOutputTokens: params.Model.MaxOutputTokens, Strengths: params.Model.Strengths, SubtaskFor: params.Model.SubtaskFor, Reasoning: params.Model.Reasoning}})
+	updated, err := s.daemon.agent.UpdateConfig(agent.ConfigSetParams{Action: params.Action, ModelRef: params.ModelRef, ActiveModel: params.ActiveModel, APIKey: params.APIKey, DeleteAPIKey: params.DeleteAPIKey, Locale: params.Locale, Theme: params.Theme, GuardMode: params.GuardMode, Workspace: params.Workspace, Model: agent.ConfigModel{Provider: params.Model.Provider, Protocol: config.ModelProtocol(params.Model.Protocol), AuthMode: config.AuthMode(params.Model.AuthMode), Model: params.Model.Model, BaseURL: params.Model.BaseURL, ContextWindow: params.Model.ContextWindow, MaxOutputTokens: params.Model.MaxOutputTokens, Strengths: params.Model.Strengths, SubtaskFor: params.Model.SubtaskFor, Reasoning: params.Model.Reasoning}})
 	if err != nil {
 		logging.Error("config", "update_failed", err, logging.Event{"action": params.Action, "model_ref": params.ModelRef, "active_model": params.ActiveModel})
 		return nil, invalidParams(err.Error())
@@ -856,7 +856,7 @@ func periodFromSummary(sum *memory.UsageSummary) protocol.UsagePeriod {
 func configToParams(cfg *config.Config) protocol.ConfigParams {
 	out := protocol.ConfigParams{ActiveModel: cfg.ActiveModel, Locale: cfg.UI.Locale, Theme: cfg.UI.Theme, GuardMode: cfg.Guard.ModeOrDefault(), Workspace: cfg.Guard.Workspace}
 	for _, mc := range cfg.Models {
-		out.Models = append(out.Models, protocol.ConfigModel{Provider: mc.Provider, Protocol: string(mc.ProtocolOrDefault()), Model: mc.Model, BaseURL: mc.BaseURL, ContextWindow: mc.ContextWindow, MaxOutputTokens: mc.MaxOutputTokens, Strengths: mc.Strengths, SubtaskFor: mc.SubtaskFor, Reasoning: mc.Reasoning, HasAPIKey: mc.APIKey != ""})
+		out.Models = append(out.Models, protocol.ConfigModel{Provider: mc.Provider, Protocol: string(mc.ProtocolOrDefault()), AuthMode: string(mc.AuthMode), Model: mc.Model, BaseURL: mc.BaseURL, ContextWindow: mc.ContextWindow, MaxOutputTokens: mc.MaxOutputTokens, Strengths: mc.Strengths, SubtaskFor: mc.SubtaskFor, Reasoning: mc.Reasoning, HasAPIKey: mc.APIKey != ""})
 	}
 	return out
 }
