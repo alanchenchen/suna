@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -49,5 +50,19 @@ func TestAcquireDaemonLeaseIsExclusive(t *testing.T) {
 	}
 	if err := second.Close(); err != nil {
 		t.Fatalf("second Close() error = %v", err)
+	}
+}
+
+func TestDaemonLeaseHeldCreatesMissingParentDir(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing", "sunad.lock")
+	held, err := daemonLeaseHeld(path)
+	if err != nil {
+		t.Fatalf("daemonLeaseHeld() error = %v", err)
+	}
+	if held {
+		t.Fatal("daemonLeaseHeld() = true, want false")
+	}
+	if _, err := os.Stat(filepath.Dir(path)); err != nil {
+		t.Fatalf("Stat(parent) error = %v", err)
 	}
 }
