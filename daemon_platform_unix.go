@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -22,7 +23,7 @@ type daemonLease struct {
 }
 
 func acquireDaemonLease(path string) (*daemonLease, error) {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	file, err := openDaemonLeaseFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("open daemon lock: %w", err)
 	}
@@ -52,7 +53,7 @@ func (l *daemonLease) Close() error {
 
 // daemonLeaseHeld 只探测当前 lock inode 是否由其他进程持有，不改变文件内容和生命周期。
 func daemonLeaseHeld(path string) (bool, error) {
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	file, err := openDaemonLeaseFile(path)
 	if err != nil {
 		return false, err
 	}
@@ -67,6 +68,14 @@ func daemonLeaseHeld(path string) (bool, error) {
 		return false, err
 	}
 	return false, nil
+}
+
+func openDaemonLeaseFile(path string) (*os.File, error) {
+	// 启动协调会先探测 lock；首次启动时必须在探测前创建数据目录。
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return nil, err
+	}
+	return os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 }
 
 func startBackground(cmd *exec.Cmd) error {
