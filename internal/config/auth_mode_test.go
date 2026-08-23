@@ -7,6 +7,29 @@ import (
 	"testing"
 )
 
+func TestNormalizeModelsAllowsReadableProviderIDsButRejectsSlash(t *testing.T) {
+	tests := []struct {
+		provider string
+		wantErr  bool
+	}{
+		{provider: "provider-name"},
+		{provider: "Provider Name"},
+		{provider: "Provider–Name"},
+		{provider: "Provider—Name"},
+		{provider: "provider/name", wantErr: true},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.provider, func(t *testing.T) {
+			cfg := Config{Models: []ModelConfig{{Provider: tt.provider, Model: "model"}}}
+			err := cfg.NormalizeModels()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("NormalizeModels() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestNormalizeModelsValidatesAuthModeByProtocol(t *testing.T) {
 	tests := []struct {
 		name     string

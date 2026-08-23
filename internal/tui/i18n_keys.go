@@ -477,6 +477,7 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"tui.error.invalid_context_window":    {LocaleEN: "Context window must be a positive integer", LocaleZH: "上下文窗口必须是正整数"},
 		"tui.error.invalid_max_output_tokens": {LocaleEN: "Max output tokens must be positive and smaller than context window", LocaleZH: "最大输出 Tokens 必须为正数且小于上下文窗口"},
 		"tui.error.invalid_protocol":          {LocaleEN: "Model protocol is invalid", LocaleZH: "模型协议无效"},
+		"tui.error.invalid_provider":          {LocaleEN: "Provider ID must not contain /", LocaleZH: "Provider ID 不能包含 /"},
 		"tui.error.api_key_required":          {LocaleEN: "API Key is required during setup", LocaleZH: "首次设置必须填写 API Key"},
 		"tui.error.provider_incomplete":       {LocaleEN: "Provider is incomplete; edit details first", LocaleZH: "Provider 配置不完整，请先编辑详情"},
 		"tui.error.daemon_not_connected":      {LocaleEN: "daemon not connected", LocaleZH: "daemon 未连接"},
