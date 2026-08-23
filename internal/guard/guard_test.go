@@ -415,18 +415,12 @@ func TestSmartReviewReceivesIntentContext(t *testing.T) {
 		got = req
 		return `{"decision":"approve","reason":"aligned","suggestion":""}`, nil
 	})
-	ctx := ReviewContext{
-		Task:             "prepare a report",
-		LatestUserInput:  "prepare a report",
-		UserDecisions:    "- The user approved a related medium risk writefile action.",
-		ToolIntent:       "write the report draft",
-		AssistantContext: "I will create the requested report file.",
-	}
+	ctx := ReviewContext{Evidence: "Latest direct user message:\n- prepare a report\n\nRecent resolved risk decisions:\n- Approved: tool=writefile"}
 	result := g.Check(context.Background(), "writefile", map[string]any{"path": "report.md", "content": "hello"}, ctx)
 	if result.Decision != Approve || result.Source != "llm" {
 		t.Fatalf("smart review decision/source = %s/%s, want approve/llm", result.Decision, result.Source)
 	}
-	if got.Context.Task != ctx.Task || got.Context.LatestUserInput != ctx.LatestUserInput || got.Context.UserDecisions != ctx.UserDecisions || got.Context.ToolIntent != ctx.ToolIntent || got.Context.AssistantContext != ctx.AssistantContext {
+	if got.Context.Evidence != ctx.Evidence {
 		t.Fatalf("review request context = %#v, want %#v", got.Context, ctx)
 	}
 	if got.Risk != "medium" || got.ToolName != "writefile" || got.Target != "report.md" {
@@ -439,7 +433,7 @@ func TestSmartReviewModifyIsDecision(t *testing.T) {
 	g.SetLLMReviewer(func(ctx context.Context, req ReviewRequest) (string, error) {
 		return `{"decision":"modify","reason":"too broad","suggestion":"use a narrower operation"}`, nil
 	})
-	result := g.Check(context.Background(), "writefile", map[string]any{"path": "out.txt", "content": "hello"}, ReviewContext{Task: "create output", LatestUserInput: "create output"})
+	result := g.Check(context.Background(), "writefile", map[string]any{"path": "out.txt", "content": "hello"}, ReviewContext{Evidence: "Latest direct user message:\n- create output"})
 	if result.Decision != Modify || result.Suggestion != "use a narrower operation" {
 		t.Fatalf("Check() result = %#v, want modify with suggestion", result)
 	}

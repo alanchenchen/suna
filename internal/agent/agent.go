@@ -30,34 +30,33 @@ import (
 
 type Agent struct {
 	// runtime 指向共享全局运行时；nil 表示当前对象就是运行时根 Agent。
-	runtime        *Agent
-	cfg            *config.Config
-	router         *model.Router
-	tools          *tools.Manager
-	guard          *guard.Guard
-	working        *memory.WorkingMemory
-	usage          *memory.UsageStore
-	sessionStore   *memory.SessionStore
-	stateStore     *memory.SessionStateStore
-	memories       *memory.MemoryStore
-	mediaStore     *media.Store
-	compressor     *memory.Compressor
-	calibrator     *model.TokenCalibrator
-	prompts        *prompt.Loader
-	store          *memory.Store
-	skills         *skill.Runtime
-	projectSkills  *skill.Catalog
-	mcp            *mcp.Runtime
-	sessionID      string
-	cwd            string
-	modelRef       string
-	turnCount      int
-	guardTask      *guardTaskCard
-	priorGuardTask *guardTaskSnapshot
-	guardTaskMu    sync.Mutex
-	guardGate      sync.Mutex
-	sessionState   string
-	toolSummary    memory.ToolSummary
+	runtime       *Agent
+	cfg           *config.Config
+	router        *model.Router
+	tools         *tools.Manager
+	guard         *guard.Guard
+	working       *memory.WorkingMemory
+	usage         *memory.UsageStore
+	sessionStore  *memory.SessionStore
+	stateStore    *memory.SessionStateStore
+	memories      *memory.MemoryStore
+	mediaStore    *media.Store
+	compressor    *memory.Compressor
+	calibrator    *model.TokenCalibrator
+	prompts       *prompt.Loader
+	store         *memory.Store
+	skills        *skill.Runtime
+	projectSkills *skill.Catalog
+	mcp           *mcp.Runtime
+	sessionID     string
+	cwd           string
+	modelRef      string
+	turnCount     int
+	guardTask     *guardTaskCard
+	guardTaskMu   sync.Mutex
+	guardGate     sync.Mutex
+	sessionState  string
+	toolSummary   memory.ToolSummary
 
 	extractQueue   *memory.ExtractQueue
 	extractWorker  *memory.Worker
@@ -221,7 +220,6 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 			return
 		}
 
-		a.beginGuardTask(inputText)
 		a.working.AddMessage(userMessage)
 		a.currentInputBlocks = cloneContentBlocks(userMessage.Content)
 		// 多模态 raw media 只允许参与当前 agent run；run 结束后立即替换为轻量 metadata，避免进入下一轮上下文或会话快照。

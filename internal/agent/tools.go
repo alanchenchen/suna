@@ -357,32 +357,16 @@ func (e subtaskExecutor) namespaced(id string) string {
 }
 
 func (a *Agent) buildGuardReviewContext(call runner.ToolExecution) guard.ReviewContext {
-	// smart guard 只传当前任务、用户最终决定和短工具意图，避免混杂历史工具输出。
-	// main 与 subtask 的 review 上下文必须隔离，避免子任务串用 main 对话上下文。
-	ctx := guard.ReviewContext{
-		ToolIntent: guardExecutionRationale(call),
-	}
 	messages := call.WorkingMessages
 	if len(messages) == 0 && a.working != nil {
 		messages = a.working.Messages()
 	}
-	ctx.Task, ctx.LatestUserInput, ctx.UserDecisions, ctx.PreviousTask = a.guardTaskReviewContext()
-	if ctx.Task == "" {
-		ctx.Task = trimForGuardMiddle(lastUserTextFromMessages(messages), guardReviewTaskLimit)
-	}
-	if ctx.LatestUserInput == "" {
-		ctx.LatestUserInput = trimForGuardMiddle(lastUserTextFromMessages(messages), guardReviewLatestInputLimit)
-	}
-	return ctx
+	actions := recentGuardActions(messages, a.toolSummary)
+	return guard.ReviewContext{Evidence: buildGuardEvidence(messages, a.recentGuardRiskDecisions(), actions, a.sessionState, guardExecutionRationale(call))}
 }
 
 func (a *Agent) buildSubtaskGuardReviewContext(call runner.ToolExecution) guard.ReviewContext {
-	ctx := guard.ReviewContext{
-		ToolIntent: guardExecutionRationale(call),
-	}
-	ctx.LatestUserInput = trimForGuardMiddle(lastUserTextFromMessages(call.WorkingMessages), guardReviewLatestInputLimit)
-	ctx.Task = trimForGuardMiddle(lastUserTextFromMessages(call.WorkingMessages), guardReviewTaskLimit)
-	return ctx
+	return guard.ReviewContext{Evidence: buildGuardEvidence(call.WorkingMessages, nil, nil, "", guardExecutionRationale(call))}
 }
 
 func guardExecutionRationale(call runner.ToolExecution) string {
@@ -637,17 +621,12 @@ func (a *Agent) guardLLMReview(ctx context.Context, req guard.ReviewRequest) (st
 	params := req.ParamsJSON
 	paramsTruncated := req.ParamsTruncated
 	reviewPrompt, err := a.prompts.RenderGuardReview(prompt.GuardReviewData{
-		ToolName:         req.ToolName,
-		ToolParams:       params,
-		ParamsTruncated:  paramsTruncated,
-		Target:           req.Target,
-		Risk:             req.Risk,
-		Task:             req.Context.Task,
-		LatestUserInput:  req.Context.LatestUserInput,
-		UserDecisions:    req.Context.UserDecisions,
-		PreviousTask:     req.Context.PreviousTask,
-		ToolIntent:       req.Context.ToolIntent,
-		AssistantContext: req.Context.AssistantContext,
+		ToolName:        req.ToolName,
+		ToolParams:      params,
+		ParamsTruncated: paramsTruncated,
+		Target:          req.Target,
+		Risk:            req.Risk,
+		Evidence:        req.Context.Evidence,
 	})
 	if err != nil {
 		return "", err

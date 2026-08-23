@@ -65,9 +65,6 @@ func (a *Agent) EnqueueSteering(runID, clientMsgID, text string) (SteeringItem, 
 	mailbox := a.steering
 	a.steeringMu.RUnlock()
 	item, created, err := mailbox.enqueue(runID, clientMsgID, text)
-	if err == nil && created {
-		a.updateGuardTaskInput(text)
-	}
 	return item, created, err
 }
 
@@ -75,13 +72,7 @@ func (a *Agent) RemoveSteering(runID, id string) (SteeringItem, bool, error) {
 	a.steeringMu.RLock()
 	mailbox := a.steering
 	a.steeringMu.RUnlock()
-	item, latest, removed, err := mailbox.remove(runID, id)
-	if err == nil && removed {
-		if latest == "" {
-			latest = a.activeGuardTaskText()
-		}
-		a.updateGuardTaskInput(latest)
-	}
+	item, _, removed, err := mailbox.remove(runID, id)
 	return item, removed, err
 }
 
@@ -138,7 +129,6 @@ func (a *Agent) takeSteering(runID string, seal bool) []runner.SteeringInput {
 func (a *Agent) onSteeringApplied(ctx context.Context, input runner.SteeringInput) SteeringItem {
 	text := input.Message.Text()
 	a.turnCount++
-	a.updateGuardTaskInput(text)
 	a.enqueueMemoryEvent(ctx, model.RoleUser, text, false, false, false, false)
 	return SteeringItem{ID: input.ID, ClientMsgID: input.ClientMsgID, Text: text, State: SteeringApplied, Sequence: input.Sequence}
 }
