@@ -178,7 +178,7 @@ const canUse = (name) => hello.catalog.features.includes(name);
 
 `runtime_version` 只用于展示和诊断，不用于推断功能。客户端必须忽略未知字段和 notification；若误调用不支持的方法，只处理该请求的 `method not found`，连接仍可继续使用。
 
-未握手就调用其他 method 会收到 `handshake_required` 错误。服务端也会关闭长期未完成握手的连接。
+未握手就调用其他 method 会收到 `handshake_required` 错误。服务端也会关闭长期未完成握手的连接。客户端处理 response error 时按 `data.kind → data.reason → error.code` 分支，`message` 只用于展示；未知 kind/reason 不得关闭连接。完整映射见 [protocol.md](protocol.md#6-错误模型)。
 
 ---
 

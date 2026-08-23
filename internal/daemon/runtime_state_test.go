@@ -9,15 +9,34 @@ import (
 	"github.com/alanchenchen/suna/internal/protocol"
 )
 
+func TestSessionStateErrorsMapToStableRequestKinds(t *testing.T) {
+	tests := []struct {
+		message string
+		kind    protocol.ErrorKind
+	}{
+		{message: "session_required", kind: protocol.ErrorKindSessionRequired},
+		{message: "session not loaded", kind: protocol.ErrorKindSessionRequired},
+		{message: "session_busy", kind: protocol.ErrorKindSessionBusy},
+		{message: "session not running", kind: protocol.ErrorKindSessionBusy},
+	}
+	for _, tt := range tests {
+		err := requestErrorForState(errors.New(tt.message))
+		data := err.Data().(protocol.ProtocolErrorData)
+		if err.Code() != int(protocol.ErrorCodeInvalidParams) || data.Kind != tt.kind {
+			t.Fatalf("requestErrorForState(%q) = code %d data %#v", tt.message, err.Code(), data)
+		}
+	}
+}
+
 func TestExpiredInteractionReplyReturnsInvalidRequestReason(t *testing.T) {
 	svc := newService(&Daemon{state: protocol.DaemonRuntimeReady, sinks: map[string]protocol.EventSink{}})
 	_, err := svc.handleAskReply(protocol.Request{Params: protocol.AskUserReply{ID: "expired", Answer: "answer"}})
-	var got protocolError
+	var got *protocol.RequestError
 	if !errors.As(err, &got) {
-		t.Fatalf("handleAskReply() error = %T %v, want protocolError", err, err)
+		t.Fatalf("handleAskReply() error = %T %v, want *protocol.RequestError", err, err)
 	}
 	data, ok := got.Data().(protocol.ProtocolErrorData)
-	if got.Code() != -32602 || !ok || data.Kind != "invalid_request" || data.Reason != "interaction_not_found" {
+	if got.Code() != int(protocol.ErrorCodeInvalidParams) || !ok || data.Kind != protocol.ErrorKindInvalidRequest || data.Reason != protocol.ErrorReasonInteractionNotFound {
 		t.Fatalf("interaction error = code %d data %#v", got.Code(), got.Data())
 	}
 }
@@ -43,7 +62,7 @@ func TestServiceExposesStartingStateButRejectsBusinessRequests(t *testing.T) {
 		t.Fatalf("session.list error = %T, want data error", err)
 	}
 	data, ok := dataErr.Data().(protocol.ProtocolErrorData)
-	if !ok || data.Kind != "runtime_unavailable" || data.Reason != "starting" || !data.Retryable {
+	if !ok || data.Kind != protocol.ErrorKindRuntimeUnavailable || data.Reason != protocol.ErrorReasonRuntimeStarting || !data.Retryable {
 		t.Fatalf("error data = %#v, want retryable runtime_unavailable", dataErr.Data())
 	}
 }
@@ -74,7 +93,7 @@ func TestStopPublishesStoppingBeforeCancellation(t *testing.T) {
 		t.Fatalf("session.list error = %T, want data error", err)
 	}
 	data, ok := dataErr.Data().(protocol.ProtocolErrorData)
-	if !ok || data.Kind != "runtime_unavailable" || data.Reason != "stopping" || data.Retryable {
+	if !ok || data.Kind != protocol.ErrorKindRuntimeUnavailable || data.Reason != protocol.ErrorReasonRuntimeStopping || data.Retryable {
 		t.Fatalf("error data = %#v, want non-retryable stopping runtime_unavailable", dataErr.Data())
 	}
 }

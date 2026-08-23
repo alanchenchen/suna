@@ -37,18 +37,10 @@ func (s *testService) Handle(ctx context.Context, req protocol.Request, _ protoc
 	s.lastContext = ctx
 	s.mu.Unlock()
 	if req.Method != protocol.MethodRuntimeHello && req.Method != "echo" {
-		return nil, testCodedError{code: -32601, message: "method not found"}
+		return nil, protocol.UnsupportedMethod(req.Method)
 	}
 	return map[string]string{"method": req.Method}, nil
 }
-
-type testCodedError struct {
-	code    int
-	message string
-}
-
-func (e testCodedError) Error() string { return e.message }
-func (e testCodedError) Code() int     { return e.code }
 
 func TestNewDefaultFallsBackToRandomPortWhenDefaultIsBusy(t *testing.T) {
 	busy, err := net.Listen("tcp", DefaultEndpoint)
@@ -147,7 +139,7 @@ func TestTransportServesJSONRPCOverTCP(t *testing.T) {
 	if _, err := conn.Write([]byte(`{"jsonrpc":"2.0","id":2,"method":"unknown.method"}` + "\n")); err != nil {
 		t.Fatalf("unknown method Write error = %v", err)
 	}
-	assertErrorResponse(t, decoder, 2, -32601)
+	assertErrorResponse(t, decoder, 2, int(protocol.ErrorCodeMethodNotFound))
 
 	if _, err := conn.Write([]byte(`{"jsonrpc":"2.0","id":3,"method":"echo"}` + "\n")); err != nil {
 		t.Fatalf("echo Write error = %v", err)
@@ -238,7 +230,7 @@ func TestTransportRequiresHelloBeforeRequests(t *testing.T) {
 	if err := json.NewDecoder(conn).Decode(&response); err != nil {
 		t.Fatalf("Decode error = %v", err)
 	}
-	if response.Error == nil || response.Error.Code != -32010 {
-		t.Fatalf("handshake error = %#v, want code -32010", response.Error)
+	if response.Error == nil || response.Error.Code != int(protocol.ErrorCodeHandshake) {
+		t.Fatalf("handshake error = %#v, want code %d", response.Error, protocol.ErrorCodeHandshake)
 	}
 }

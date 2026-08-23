@@ -10,7 +10,7 @@ import (
 func (s *service) requireSession(connID string) (*sessionRuntime, string, error) {
 	rt, id, err := s.daemon.sessions.attachedSession(connID)
 	if err != nil {
-		return nil, "", protocolError{code: -32602, message: err.Error(), data: protocol.ProtocolErrorData{Kind: "session_required"}}
+		return nil, "", protocol.SessionRequired(err.Error())
 	}
 	return rt, id, nil
 }
@@ -19,12 +19,12 @@ func (s *service) handleSessionList(ctx context.Context, req protocol.Request) (
 	var params protocol.SessionListParams
 	if req.Params != nil {
 		if err := decodeParams(req.Params, &params); err != nil {
-			return nil, invalidParams(err.Error())
+			return nil, protocol.InvalidRequest(err.Error())
 		}
 	}
 	items, err := s.daemon.sessions.list(ctx, params.ActiveOnly)
 	if err != nil {
-		return nil, protocolError{code: -32603, message: err.Error()}
+		return nil, protocol.InternalError(err.Error())
 	}
 	if params.CWD != "" {
 		cwd := canonicalCWD(params.CWD)
@@ -42,15 +42,15 @@ func (s *service) handleSessionList(ctx context.Context, req protocol.Request) (
 func (s *service) handleSessionCreate(ctx context.Context, req protocol.Request) (any, error) {
 	var params protocol.SessionCreateParams
 	if err := decodeParams(req.Params, &params); err != nil {
-		return nil, invalidParams(err.Error())
+		return nil, protocol.InvalidRequest(err.Error())
 	}
 	if strings.TrimSpace(params.CWD) == "" {
-		return nil, invalidParams("cwd is required")
+		return nil, protocol.InvalidRequest("cwd is required")
 	}
 	oldSessionID := s.daemon.sessions.currentSessionID(req.ConnID)
 	snapshot, err := s.daemon.sessions.create(ctx, req.ConnID, params.CWD, params.Title)
 	if err != nil {
-		return nil, protocolError{code: -32603, message: err.Error()}
+		return nil, protocol.InternalError(err.Error())
 	}
 	if oldSessionID != "" && oldSessionID != snapshot.Session.ID {
 		s.broadcastSessionState(ctx, oldSessionID)
@@ -62,15 +62,15 @@ func (s *service) handleSessionCreate(ctx context.Context, req protocol.Request)
 func (s *service) handleSessionAttach(ctx context.Context, req protocol.Request) (any, error) {
 	var params protocol.SessionAttachParams
 	if err := decodeParams(req.Params, &params); err != nil {
-		return nil, invalidParams(err.Error())
+		return nil, protocol.InvalidRequest(err.Error())
 	}
 	if strings.TrimSpace(params.SessionID) == "" {
-		return nil, invalidParams("session_id is required")
+		return nil, protocol.InvalidRequest("session_id is required")
 	}
 	oldSessionID := s.daemon.sessions.currentSessionID(req.ConnID)
 	snapshot, err := s.daemon.sessions.attach(ctx, req.ConnID, params.SessionID, params.RequireActive)
 	if err != nil {
-		return nil, protocolError{code: -32603, message: err.Error()}
+		return nil, protocol.InternalError(err.Error())
 	}
 	if oldSessionID != "" && oldSessionID != snapshot.Session.ID {
 		s.broadcastSessionState(ctx, oldSessionID)
@@ -90,14 +90,17 @@ func (s *service) handleSessionDetach(ctx context.Context, req protocol.Request)
 func (s *service) handleSessionUpdate(ctx context.Context, req protocol.Request) (any, error) {
 	var params protocol.SessionUpdateParams
 	if err := decodeParams(req.Params, &params); err != nil {
-		return nil, invalidParams(err.Error())
+		return nil, protocol.InvalidRequest(err.Error())
 	}
 	if strings.TrimSpace(params.SessionID) == "" {
-		return nil, invalidParams("session_id is required")
+		return nil, protocol.InvalidRequest("session_id is required")
 	}
 	updated, err := s.daemon.sessions.update(ctx, req.ConnID, params)
 	if err != nil {
-		return nil, protocolError{code: -32603, message: err.Error()}
+		if err.Error() == "session_required" || err.Error() == "session not loaded" || err.Error() == "session_busy" {
+			return nil, requestErrorForState(err)
+		}
+		return nil, protocol.InternalError(err.Error())
 	}
 	s.daemon.broadcastSessionState(ctx, updated.Session.ID)
 	return updated, nil
@@ -106,13 +109,13 @@ func (s *service) handleSessionUpdate(ctx context.Context, req protocol.Request)
 func (s *service) handleSessionDelete(ctx context.Context, req protocol.Request) (any, error) {
 	var params protocol.SessionDeleteParams
 	if err := decodeParams(req.Params, &params); err != nil {
-		return nil, invalidParams(err.Error())
+		return nil, protocol.InvalidRequest(err.Error())
 	}
 	if strings.TrimSpace(params.SessionID) == "" {
-		return nil, invalidParams("session_id is required")
+		return nil, protocol.InvalidRequest("session_id is required")
 	}
 	if err := s.daemon.sessions.delete(ctx, req.ConnID, params.SessionID); err != nil {
-		return nil, protocolError{code: -32603, message: err.Error()}
+		return nil, protocol.InternalError(err.Error())
 	}
 	return protocol.SessionDeleteResult{Deleted: true}, nil
 }

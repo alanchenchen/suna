@@ -251,18 +251,36 @@ method 参数错误、未握手、未知 method、内部错误等通过 JSON-RPC
 }
 ```
 
-`data.kind` 是稳定分类，UI/SDK 应根据它做分支，不要解析 `message`。
+`data.kind` 是稳定大类，`data.reason` 是客户端需要采取不同恢复动作时的可选细分。客户端应依次判断 `kind → reason → code`，`message` 只用于展示。
 
-常见 kind：
+公开 code/kind 映射：
 
-| kind | 含义 |
-|---|---|
-| `parse_error` | 输入行不是合法 JSON。 |
-| `invalid_request` | 请求或参数无效。 |
-| `unsupported_method` | method 不存在。 |
-| `unsupported_capability` | 当前 Runtime 未声明或不支持该能力。 |
-| `handshake_required` | TCP 客户端未先调用 `runtime.hello`。 |
-| `internal_error` | daemon 内部错误。 |
+| code | kind | 含义 |
+|---:|---|---|
+| `-32700` | `parse_error` | 输入行不是合法 JSON。 |
+| `-32600` | `invalid_request` | JSON-RPC 请求结构无效。 |
+| `-32601` | `unsupported_method` | method 不存在或不公开。 |
+| `-32602` | `invalid_request` |参数或引用的资源无效。 |
+| `-32602` | `session_required` |当前连接需要先 attach session。 |
+| `-32602` | `session_busy` | Session/Run 当前由其他流程控制或不允许该操作。 |
+| `-32603` | `runtime_unavailable` | Runtime 尚未 ready 或正在停止。 |
+| `-32603` | `internal_error` | daemon 内部操作失败。 |
+| `-32010` | `handshake_required` | TCP 客户端未先调用 `runtime.hello`。 |
+
+稳定 reason：
+
+| reason |常见 kind |客户端行为 |
+|---|---|---|
+| `starting` | `runtime_unavailable` | `retryable=true` 时稍后重试。 |
+| `stopping` | `runtime_unavailable` |等待 Runtime 重新启动。 |
+| `interaction_not_found` | `invalid_request` |刷新或关闭已经过期的 AskUser/Guard 交互。 |
+| `interaction_pending` | `session_busy` |先完成当前 AskUser/Guard。 |
+| `run_not_steerable` | `session_busy` |将消息保留为下一轮草稿。 |
+| `steering_not_found` | `invalid_request` |移除本地已过期的排队消息。 |
+| `steering_queue_full` | `invalid_request` |等待消息应用或减少排队内容。 |
+| `client_msg_conflict` | `invalid_request` |换用新的 `client_msg_id`。 |
+
+`unsupported_capability` 保留为未来细粒度能力拒绝分类；当前客户端主要通过 Runtime Catalog 在调用前判断能力。
 
 ### ModelError
 

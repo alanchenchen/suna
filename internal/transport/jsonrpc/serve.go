@@ -3,6 +3,7 @@ package jsonrpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -56,15 +57,15 @@ func ServeConn(ctx context.Context, conn Conn, svc protocol.Service, opts Option
 		}
 		var req Request
 		if err := json.Unmarshal(raw, &req); err != nil {
-			sendError(conn, 0, ErrParse, "parse error", ErrorData{Kind: "parse_error"})
+			sendRequestError(conn, 0, protocol.ParseError("parse error"))
 			continue
 		}
 		if req.JSONRPC != "2.0" || req.Method == "" {
-			sendError(conn, req.ID, ErrInvalidReq, "invalid request", ErrorData{Kind: "invalid_request"})
+			sendRequestError(conn, req.ID, protocol.InvalidRPCRequest("invalid request"))
 			continue
 		}
 		if !handshaked && req.Method != protocol.MethodRuntimeHello {
-			sendError(conn, req.ID, ErrHandshake, "runtime.hello is required before other methods", ErrorData{Kind: "handshake_required"})
+			sendRequestError(conn, req.ID, protocol.HandshakeRequired("runtime.hello is required before other methods"))
 			continue
 		}
 		params := req.Params
@@ -119,19 +120,30 @@ func sendResult(conn Conn, id int, result any) {
 }
 
 func sendProtocolError(conn Conn, id int, err error) {
-	// Service 返回的结构化错误在这里统一映射到 JSON-RPC error，避免各 transport 重复拼响应。
-	code := ErrInternal
+	// RequestError 保留完整机器语义；内部 coded error 使用 Protocol 集中的默认映射。
+	var requestErr *protocol.RequestError
+	if errors.As(err, &requestErr) {
+		sendRequestError(conn, id, requestErr)
+		return
+	}
 	if coded, ok := err.(CodedError); ok {
-		code = coded.Code()
+		data := any(protocol.ErrorDataForCode(coded.Code()))
+		if withData, ok := err.(DataError); ok {
+			if custom := withData.Data(); custom != nil {
+				data = custom
+			}
+		}
+		sendError(conn, id, coded.Code(), err.Error(), data)
+		return
 	}
-	var data any
-	if withData, ok := err.(DataError); ok {
-		data = withData.Data()
+	sendRequestError(conn, id, protocol.InternalError(err.Error()))
+}
+
+func sendRequestError(conn Conn, id int, err *protocol.RequestError) {
+	if err == nil {
+		err = protocol.InternalError("internal error")
 	}
-	if data == nil {
-		data = defaultErrorData(code)
-	}
-	sendError(conn, id, code, err.Error(), data)
+	sendError(conn, id, err.Code(), err.Error(), err.Data())
 }
 
 func sendError(conn Conn, id int, code int, message string, data any) {
@@ -144,17 +156,4 @@ func sendError(conn Conn, id int, code int, message string, data any) {
 	ctx, cancel := context.WithTimeout(context.Background(), sendTimeout)
 	defer cancel()
 	_ = conn.Send(ctx, raw)
-}
-
-func defaultErrorData(code int) ErrorData {
-	switch code {
-	case ErrNotFound:
-		return ErrorData{Kind: "unsupported_method"}
-	case ErrInvalidParams, ErrInvalidReq:
-		return ErrorData{Kind: "invalid_request"}
-	case ErrHandshake:
-		return ErrorData{Kind: "handshake_required"}
-	default:
-		return ErrorData{Kind: "internal_error"}
-	}
 }

@@ -138,18 +138,27 @@ func TestSteeringRejectsObserverWrongRunAndPendingInteraction(t *testing.T) {
 		t.Fatalf("beginAgentRun error = %v", err)
 	}
 	params := protocol.SteerParams{RunID: runID, ClientMsgID: "client-1", Parts: textParts("message")}
-	if _, err := svc.handleSteer(ctx, protocol.Request{ConnID: "observer", Params: params}); err == nil {
-		t.Fatal("observer steer error = nil")
+	if _, err := svc.handleSteer(ctx, protocol.Request{ConnID: "observer", Params: params}); !requestErrorMatches(err, protocol.ErrorKindSessionBusy, protocol.ErrorReasonRunNotSteerable) {
+		t.Fatalf("observer steer error = %#v", err)
 	}
 	params.RunID = "wrong"
-	if _, err := svc.handleSteer(ctx, protocol.Request{ConnID: "owner", Params: params}); err == nil {
-		t.Fatal("wrong run steer error = nil")
+	if _, err := svc.handleSteer(ctx, protocol.Request{ConnID: "owner", Params: params}); !requestErrorMatches(err, protocol.ErrorKindSessionBusy, protocol.ErrorReasonRunNotSteerable) {
+		t.Fatalf("wrong run steer error = %#v", err)
 	}
 	manager.setWaiting(snapshot.Session.ID, protocol.RunWaitingAsk)
 	params.RunID = runID
-	if _, err := svc.handleSteer(ctx, protocol.Request{ConnID: "owner", Params: params}); err == nil {
-		t.Fatal("pending interaction steer error = nil")
+	if _, err := svc.handleSteer(ctx, protocol.Request{ConnID: "owner", Params: params}); !requestErrorMatches(err, protocol.ErrorKindSessionBusy, protocol.ErrorReasonInteractionPending) {
+		t.Fatalf("pending interaction steer error = %#v", err)
 	}
+}
+
+func requestErrorMatches(err error, kind protocol.ErrorKind, reason protocol.ErrorReason) bool {
+	requestErr, ok := err.(*protocol.RequestError)
+	if !ok {
+		return false
+	}
+	data, ok := requestErr.Data().(protocol.ProtocolErrorData)
+	return ok && data.Kind == kind && data.Reason == reason
 }
 
 func textParts(text string) []protocol.MessagePart {
