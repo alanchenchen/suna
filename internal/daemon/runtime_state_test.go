@@ -2,11 +2,25 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 
 	"github.com/alanchenchen/suna/internal/protocol"
 )
+
+func TestExpiredInteractionReplyReturnsInvalidRequestReason(t *testing.T) {
+	svc := newService(&Daemon{state: protocol.DaemonRuntimeReady, sinks: map[string]protocol.EventSink{}})
+	_, err := svc.handleAskReply(protocol.Request{Params: protocol.AskUserReply{ID: "expired", Answer: "answer"}})
+	var got protocolError
+	if !errors.As(err, &got) {
+		t.Fatalf("handleAskReply() error = %T %v, want protocolError", err, err)
+	}
+	data, ok := got.Data().(protocol.ProtocolErrorData)
+	if got.Code() != -32602 || !ok || data.Kind != "invalid_request" || data.Reason != "interaction_not_found" {
+		t.Fatalf("interaction error = code %d data %#v", got.Code(), got.Data())
+	}
+}
 
 func TestServiceExposesStartingStateButRejectsBusinessRequests(t *testing.T) {
 	d := &Daemon{state: protocol.DaemonRuntimeStarting, sinks: map[string]protocol.EventSink{}}

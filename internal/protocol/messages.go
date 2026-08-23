@@ -411,20 +411,6 @@ type ConfigParams struct {
 	Workspace   string        `json:"workspace,omitempty"`
 }
 
-type ConfigModel struct {
-	Provider        string         `json:"provider"`
-	Protocol        string         `json:"protocol"`
-	AuthMode        string         `json:"auth_mode,omitempty"`
-	Model           string         `json:"model"`
-	BaseURL         string         `json:"base_url,omitempty"`
-	ContextWindow   int            `json:"context_window,omitempty"`
-	MaxOutputTokens int            `json:"max_output_tokens,omitempty"`
-	Strengths       []string       `json:"strengths,omitempty"`
-	SubtaskFor      []string       `json:"subtask_for,omitempty"`
-	Reasoning       map[string]any `json:"reasoning,omitempty"`
-	HasAPIKey       bool           `json:"has_api_key,omitempty"`
-}
-
 type ConfigSetParams struct {
 	Action       string      `json:"action"`
 	Model        ConfigModel `json:"model,omitempty"`

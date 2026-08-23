@@ -108,11 +108,12 @@ TCP client 连接后，第一条 request 必须是 `runtime.hello`。请求只�
 | `session.usage` | 查询用量摘要。 |
 | `config.get` | 读取配置。 |
 | `config.set` | 更新配置。 |
+| `daemon.status` | 查询 Runtime 状态、当前模型、连接数和可选详细统计。 |
 | `memory.list` / `memory.delete` / `memory.clear` | 查询、删除或清空 memory。 |
 | `skill.list` / `skill.set` | 查询、启用或禁用 Skill。 |
 | `mcp.list` / `mcp.toggle` / `mcp.reload` | 查询、启用/禁用或重载 MCP server。 |
 
-Catalog 只列第三方客户端公开支持面。`daemon.status`、`daemon.stop`、`attachment.*`、`debug.*` 等 local/官方管理接口即使存在，也不属于公开 Catalog。
+Catalog 只列第三方客户端公开支持面。`daemon.stop`、`attachment.*`、`debug.*` 等 local/官方管理接口即使存在，也不属于公开 Catalog。
 
 daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 runtime 可服务，不表示所有 MCP 已 active；非 `ready` 时，除 `runtime.hello / daemon.status / daemon.stop` 外的请求返回 `runtime_unavailable`，并通过 `reason` 与 `retryable` 表达恢复语义。
 
@@ -157,7 +158,9 @@ daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 
 | `session.handoff` | multi-attach、`can_control`、`can_reply` |允许 observer 在 owner 离开后接管交互。 |
 | `skill.project` | `skill.list` 的 project scope、精确 `path` |展示项目 Skill，且不提供 toggle。 |
 
-Feature 名称一经公开，其语义保持不变。新增能力增加新名称，不通过全局协议版本或重复的 v1/v2 代际维护普通增量功能。
+Feature 名称一经公开，其语义保持不变。新增能力增加新的稳定名称，不为普通增量功能维护重复的代际编号。
+
+`config.set` 的 `upsert_model` 使用字段 presence 更新已有模型：`model` 中缺失的可选字段保持原值，显式值才会覆盖。`auth_mode="default"` 恢复协议默认；`strengths=[]`、`subtask_for=[]` 和 `reasoning={}` 分别显式清空对应配置。创建新模型时，必填字段仍按现有规则校验，缺失的可选字段使用 Runtime 默认值。客户端不应为了修改单个字段而回写自己不理解的默认值。
 
 ---
 
@@ -257,7 +260,7 @@ method 参数错误、未握手、未知 method、内部错误等通过 JSON-RPC
 | `parse_error` | 输入行不是合法 JSON。 |
 | `invalid_request` | 请求或参数无效。 |
 | `unsupported_method` | method 不存在。 |
-| `unsupported_capability` | 当前 runtime 或协议版本不支持。 |
+| `unsupported_capability` | 当前 Runtime 未声明或不支持该能力。 |
 | `handshake_required` | TCP 客户端未先调用 `runtime.hello`。 |
 | `internal_error` | daemon 内部错误。 |
 
@@ -372,7 +375,7 @@ TUI 的“本会话 / 已加入 / 观察中”是 UI 根据 attach 方式、clie
 
 以下接口偏官方 TUI / local 管理用途，不进入公开 Catalog：
 
-- `daemon.status` / `daemon.stop`；
+- `daemon.stop`；
 - `daemon.full_status`；
 - `attachment.status` / `attachment.clear`；
 - `debug.*`；

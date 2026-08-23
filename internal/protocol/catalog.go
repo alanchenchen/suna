@@ -26,6 +26,7 @@ var runtimeCatalogMethods = []string{
 	MethodSteerRemove,
 	MethodConfigGet,
 	MethodConfigSet,
+	MethodDaemonStatus,
 	MethodMCPList,
 	MethodMCPReload,
 	MethodMCPToggle,

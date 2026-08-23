@@ -40,7 +40,7 @@ func TestUpdateConfigMaterializesRetainedLegacyPendingMemoryQueueWhenActiveModel
 
 	if _, err := a.UpdateConfig(ConfigSetParams{
 		Action: protocol.ConfigActionUpsertModel,
-		Model: ConfigModel{
+		Model: protocol.ConfigModel{
 			Provider:        "openai",
 			Model:           "gpt-test",
 			BaseURL:         "https://api.openai.com/v1",

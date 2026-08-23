@@ -77,7 +77,7 @@ type Conn interface {
 }
 
 type Options struct {
-	// RequireHello 为需要显式协商 protocol version 的 transport 打开首包握手门禁。
+	// RequireHello 为需要显式完成 Runtime capability handshake 的 transport 打开首包门禁。
 	RequireHello bool
 	// Transport 是承载层真实名称，会覆盖 runtime.hello params 中客户端伪造的 transport。
 	Transport string
