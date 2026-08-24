@@ -189,7 +189,9 @@ func (d delegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 }
 
 func welcomeContentWidth(viewportWidth int) int {
-	preferred := min(max(54, viewportWidth-14), 84)
+	// 菜单框比旧版收窄（84→64），避免“顶部窄、菜单宽”的比例失衡；
+	// 超窄终端仍跟随视口收缩。
+	preferred := min(max(44, viewportWidth-14), 64)
 	// Border and horizontal padding consume six cells outside Style.Width.
 	return min(preferred, max(1, viewportWidth-6))
 }

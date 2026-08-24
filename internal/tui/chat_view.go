@@ -164,7 +164,8 @@ func (t *TUI) mcpBadge() string {
 	}
 	total := len(t.chat.MCPServers)
 	if total == 0 {
-		return styleDim.Render("MCP 0")
+		// 没有配置 MCP 服务器时不显示徽标，右上角只保留连接点，避免长期占位噪音。
+		return ""
 	}
 	style := styleToolOk
 	if active == 0 {
@@ -357,19 +358,30 @@ func (t *TUI) renderChatStatusBar() string {
 		}
 	}
 	ctxPct := styleDim.Render(fmt.Sprintf("(%d%%)", pct))
+	bar := ""
 	if t.contextWindow > 0 {
-		ctxPct = styleDim.Render("(") + t.contextPercentStyle(pct).Render(fmt.Sprintf("%d%%", pct)) + styleDim.Render(")")
+		bar = t.renderContextBar(pct) + " "
 	}
-	ctxPart := styleDim.Render(fmt.Sprintf("ctx %s/%s ", ctx, window)) + ctxPct
+	ctxPart := styleDim.Render(fmt.Sprintf("ctx %s/%s ", ctx, window)) + bar + ctxPct
 	if !t.hasUsage {
-		return "  " + ctxPart + styleDim.Render(" · ") + styleDim.Render("↑? ↓? cached ? · ?t/s")
+		// 无用量数据时也走左右分栏：右侧占位右对齐，窄终端截断，避免初始状态全部挤在左侧。
+		right := styleDim.Render("↑? ↓? cached ? · ?t/s")
+		left := "  " + ctxPart
+		available := max(20, t.width-2)
+		rightWidth := lipgloss.Width(right)
+		if lipgloss.Width(left)+rightWidth > available {
+			right = textutil.TruncateRunes(right, max(8, available-lipgloss.Width(left)-1))
+			rightWidth = lipgloss.Width(right)
+		}
+		pad := max(1, available-lipgloss.Width(left)-rightWidth)
+		return left + strings.Repeat(" ", pad) + right
 	}
 	tokParts := []string{
 		styleUser.Render("↑" + fmtTok(t.lastInputTok)),
 		styleAgent.Render("↓" + fmtTok(t.lastOutputTok)),
 		styleBrand.Render("cached " + fmtTok(t.lastCachedTok)),
 	}
-	parts := []string{ctxPart, joinNonEmpty(tokParts, " ")}
+	parts := []string{joinNonEmpty(tokParts, " ")}
 	if t.lastTokensPerSec > 0 {
 		parts = append(parts, fmt.Sprintf("%.0ft/s", t.lastTokensPerSec))
 	} else if t.lastOutputTok > 0 && t.lastDuration.Seconds() > 0 {
@@ -377,7 +389,29 @@ func (t *TUI) renderChatStatusBar() string {
 	} else {
 		parts = append(parts, "0t/s")
 	}
-	return "  " + joinNonEmpty(parts, styleDim.Render(" · "))
+	right := joinNonEmpty(parts, styleDim.Render(" · "))
+	// 左右分栏：左侧上下文状态，右侧用量右对齐；空间不足时优先保留上下文，截断用量。
+	left := "  " + ctxPart
+	available := max(20, t.width-2)
+	rightWidth := lipgloss.Width(right)
+	if lipgloss.Width(left)+rightWidth > available {
+		right = textutil.TruncateRunes(right, max(8, available-lipgloss.Width(left)-1))
+		rightWidth = lipgloss.Width(right)
+	}
+	pad := max(1, available-lipgloss.Width(left)-rightWidth)
+	return left + strings.Repeat(" ", pad) + right
+}
+
+// renderContextBar 渲染上下文占用进度条（█ 填充 / ░ 空余），颜色随占用比例变化。
+func (t *TUI) renderContextBar(pct int) string {
+	const barWidth = 8
+	// 四舍五入，避免低占用（如 9%）在窄条下显示为全空。
+	filled := (barWidth*pct + 50) / 100
+	if filled > barWidth {
+		filled = barWidth
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+	return t.contextPercentStyle(pct).Render(bar)
 }
 
 func (t *TUI) contextPercentStyle(pct int) lipgloss.Style {

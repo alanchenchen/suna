@@ -172,6 +172,7 @@ func (t *TUI) viewWelcome() string {
 	}
 	return welcomepage.RenderView(welcomepage.ViewData{
 		Width:         t.width,
+		Height:        t.height,
 		Pet:           renderPet(petIdle, t.petFrame),
 		Info:          t.renderWelcomeInfo(),
 		Menu:          t.menu.View(),
