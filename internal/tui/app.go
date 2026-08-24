@@ -39,6 +39,7 @@ func (t *TUI) Init() tea.Cmd {
 		t.configGetCmd(),
 		t.sessionListCmd(),
 		t.listMCPCmd(),
+		t.startPetTick(),
 	)
 }
 

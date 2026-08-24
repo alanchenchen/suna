@@ -68,7 +68,7 @@ func (t *TUI) viewChat() string {
 	preInputHint := t.renderPreInputHint()
 	view := t.replaceLiveTranscriptPlaceholders(t.chat.View(chatpage.ViewDeps{
 		Width:              t.width,
-		MiniPet:            renderMiniPet(petState),
+		MiniPet:            renderMiniPet(petState, t.petFrame),
 		TopMeta:            t.chatTopMeta(),
 		Conn:               t.chatConnectionDot(petState),
 		Content:            t.chat.Viewport.View(),
@@ -122,6 +122,9 @@ func (t *TUI) layoutChat() {
 }
 
 func (t *TUI) chatPetState() petState {
+	if !t.petHappyUntil.IsZero() && time.Now().Before(t.petHappyUntil) {
+		return petHappy
+	}
 	if !t.chat.Loading {
 		return petIdle
 	}

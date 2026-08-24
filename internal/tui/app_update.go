@@ -22,6 +22,9 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.applyDetectedBackground(background.IsDark())
 		return t, nil
 	}
+	if _, ok := msg.(petTickMsg); ok {
+		return t, t.updatePetTick()
+	}
 	if notif, ok := msg.(localNotification); ok {
 		msg = decodeLocalNotification(notif)
 	}
