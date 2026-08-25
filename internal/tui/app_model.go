@@ -95,6 +95,11 @@ type TUI struct {
 	// 选择模式会临时释放鼠标给终端原生选择，Esc 返回后恢复 TUI 滚动。
 	selectionMode bool
 
+	// 鼠标拖选复制状态：只在 Chat transcript 区域生效，松开左键后自动复制选中文本。
+	mouseSel mouseSelection
+	// copiedFlashUntil 非零时在输入区上方短暂显示“已复制”提示，到期自动清除。
+	copiedFlashUntil time.Time
+
 	// Compact UI mode: auto compact should say model will continue; manual /compact should not.
 	compactAuto      bool
 	compactStartedAt time.Time

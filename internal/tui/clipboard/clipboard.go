@@ -30,3 +30,19 @@ func ReadImage() ([]byte, error) {
 	}
 	return data, nil
 }
+
+// WriteText 把文本写入系统剪贴板。该能力属于 TUI 输入层：只有用户触发复制意图时
+// （鼠标拖选松开）才写入，不在 daemon/core 中访问桌面剪贴板。
+// 返回 false 表示剪贴板不可用（如无 CGO 的 Linux 环境），调用方应静默降级。
+func WriteText(text string) bool {
+	if text == "" {
+		return false
+	}
+	initOnce.Do(func() {
+		initErr = xclipboard.Init()
+	})
+	if initErr != nil {
+		return false
+	}
+	return xclipboard.Write(xclipboard.FmtText, []byte(text)) != nil
+}

@@ -66,12 +66,17 @@ func (t *TUI) viewChat() string {
 		cmdSuggestions = t.renderCommandSuggestions()
 	}
 	preInputHint := t.renderPreInputHint()
+	content := t.chat.Viewport.View()
+	if t.mouseSel.dragging {
+		// 拖选进行中时叠加反色高亮，让用户看到当前选中的区域。
+		content = t.applyMouseSelectionHighlight(content)
+	}
 	view := t.replaceLiveTranscriptPlaceholders(t.chat.View(chatpage.ViewDeps{
 		Width:              t.width,
 		MiniPet:            renderMiniPet(petState, t.petFrame),
 		TopMeta:            t.chatTopMeta(),
 		Conn:               t.chatConnectionDot(petState),
-		Content:            t.chat.Viewport.View(),
+		Content:            content,
 		Separator:          separator,
 		InputSeparator:     inputSeparator,
 		InputArea:          t.renderInputArea(),
@@ -623,6 +628,10 @@ func (t *TUI) renderPreInputHint() string {
 	}
 	if presentation.TerminalSelection {
 		return ""
+	}
+	// 鼠标拖选复制成功后的短暂提示，优先于其他提示展示，避免被输入提示挤掉。
+	if t.mouseCopyFlashActive() {
+		return styleToolOk.Render("  ✓ " + t.tr("tui.mouse_select.copied"))
 	}
 	if block := t.renderHandoffBlock(); block != "" {
 		return block

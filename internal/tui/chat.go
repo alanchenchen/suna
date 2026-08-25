@@ -249,6 +249,11 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, nil
 
 	case tea.MouseMsg:
+		// 鼠标拖选复制优先于所有其他鼠标行为：左键在 transcript 区域按下后，
+		// 拖动/松开都归拖选处理，避免与滚轮和 viewport 点击冲突。
+		if t.handleMouseSelection(m) {
+			return t, nil
+		}
 		if t.chat.SubtaskToolDetailExpanded && t.hasActiveSubtaskPanel() {
 			if mm, ok := any(m).(tea.MouseWheelMsg); ok {
 				switch mm.Mouse().Button {

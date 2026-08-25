@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"time"
+
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
@@ -23,6 +25,10 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, nil
 	}
 	if _, ok := msg.(petTickMsg); ok {
+		// pet tick 链永续：顺带清理已过期的“已复制”提示，触发一次重渲染让提示消失。
+		if !t.mouseSel.copiedUntil.IsZero() && time.Now().After(t.mouseSel.copiedUntil) {
+			t.mouseSel.copiedUntil = time.Time{}
+		}
 		return t, t.updatePetTick()
 	}
 	if notif, ok := msg.(localNotification); ok {
