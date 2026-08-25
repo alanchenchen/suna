@@ -377,10 +377,13 @@ func (t *TUI) renderChatStatusBar() string {
 		bar = t.renderContextBar(pct) + " "
 	}
 	ctxPart := styleDim.Render(fmt.Sprintf("ctx %s/%s ", ctx, window)) + bar + ctxPct
+	// 左侧最前显示当前会话项目目录（basename），空间不足时优先隐藏 cwd 而非用量。
+	// 预留 70 列给 ctx 状态与右侧用量，剩余宽度给 cwd；窄终端下 cwd 自动截断/隐藏。
+	cwdPart := t.statusBarCWD(max(0, t.width-70))
 	if !t.hasUsage {
 		// 无用量数据时也走左右分栏：右侧占位右对齐，窄终端截断，避免初始状态全部挤在左侧。
 		right := styleDim.Render("↑? ↓? cached ? · ?t/s")
-		left := "  " + ctxPart
+		left := "  " + cwdPart + "  " + ctxPart
 		available := max(20, t.width-2)
 		rightWidth := lipgloss.Width(right)
 		if lipgloss.Width(left)+rightWidth > available {
@@ -405,7 +408,7 @@ func (t *TUI) renderChatStatusBar() string {
 	}
 	right := joinNonEmpty(parts, styleDim.Render(" · "))
 	// 左右分栏：左侧上下文状态，右侧用量右对齐；空间不足时优先保留上下文，截断用量。
-	left := "  " + ctxPart
+	left := "  " + cwdPart + "  " + ctxPart
 	available := max(20, t.width-2)
 	rightWidth := lipgloss.Width(right)
 	if lipgloss.Width(left)+rightWidth > available {
@@ -414,6 +417,28 @@ func (t *TUI) renderChatStatusBar() string {
 	}
 	pad := max(1, available-lipgloss.Width(left)-rightWidth)
 	return left + strings.Repeat(" ", pad) + right
+}
+
+// statusBarCWD 返回状态栏左侧的项目目录片段（📁 basename），
+// 复用 windowTitleWorkspace 的 basename 提取与控制字符清理；
+// 无会话目录时回退启动目录，两者都为空则返回空串（不显示）。
+// maxWidth 为片段最大宽度，超出时截断 basename；宽度不足时返回空串（隐藏）。
+func (t *TUI) statusBarCWD(maxWidth int) string {
+	workspace := windowTitleWorkspace(t.currentSession.CWD)
+	if workspace == "" {
+		workspace = windowTitleWorkspace(t.launchCWD)
+	}
+	if workspace == "" {
+		return ""
+	}
+	// 前缀 "📁 " 占 3 列（emoji 2 列 + 空格 1 列），末尾保留 1 空格与 ctx 分隔。
+	const prefix = "📁 "
+	avail := maxWidth - lipgloss.Width(prefix) - 1
+	if avail <= 0 {
+		return ""
+	}
+	workspace = textutil.TruncateRunes(workspace, avail)
+	return styleDim.Render(prefix + workspace + " ")
 }
 
 // renderContextBar 渲染上下文占用进度条（█ 填充 / ░ 空余），颜色随占用比例变化。
