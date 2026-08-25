@@ -100,7 +100,6 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"tui.selection_mode.title":                 {LocaleEN: "Selection mode", LocaleZH: "选择模式"},
 		"tui.selection_mode.hint":                  {LocaleEN: "Drag to select terminal text for copying", LocaleZH: "拖动选择文本以复制"},
 		"tui.selection_mode.back":                  {LocaleEN: "Esc back", LocaleZH: "Esc 返回"},
-		"tui.mouse_select.copied":                  {LocaleEN: "Copied to clipboard", LocaleZH: "已复制到剪贴板"},
 		"tui.chat.input_help_running":              {LocaleEN: "Esc cancel", LocaleZH: "Esc 取消"},
 		"tui.chat.input_help_observing":            {LocaleEN: "Esc back to Welcome", LocaleZH: "Esc 返回 Welcome"},
 		"tui.chat.observe_input":                   {LocaleEN: "Observing another run...", LocaleZH: "正在观察其他窗口的运行..."},
