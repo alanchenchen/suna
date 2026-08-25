@@ -19,7 +19,7 @@ import (
 
 type ConfigSetParams struct {
 	Action       string
-	Model        ConfigModel
+	Model        protocol.ConfigModel
 	ModelRef     string
 	ActiveModel  string
 	APIKey       string
@@ -30,17 +30,76 @@ type ConfigSetParams struct {
 	Workspace    *string
 }
 
-type ConfigModel struct {
-	Provider        string
-	Protocol        config.ModelProtocol
-	AuthMode        config.AuthMode
-	Model           string
-	BaseURL         string
-	ContextWindow   int
-	MaxOutputTokens int
-	Strengths       []string
-	SubtaskFor      []string
-	Reasoning       map[string]any
+func mergeModelConfig(models []config.ModelConfig, modelRef string, input protocol.ConfigModel) (config.ModelConfig, int) {
+	index := findModelTarget(models, modelRef, input)
+	var merged config.ModelConfig
+	if index >= 0 {
+		merged = cloneModelConfig(models[index])
+	}
+	applyModelConfig(&merged, input)
+	return merged, index
+}
+
+func findModelTarget(models []config.ModelConfig, modelRef string, input protocol.ConfigModel) int {
+	inputRef := ""
+	if input.Has(protocol.ConfigModelFieldProvider) && input.Has(protocol.ConfigModelFieldModel) {
+		inputRef = strings.TrimSpace(input.Provider) + "/" + strings.TrimSpace(input.Model)
+	}
+	fallback := -1
+	for i := range models {
+		ref := models[i].Ref()
+		if modelRef != "" && ref == modelRef {
+			return i
+		}
+		if fallback < 0 && inputRef != "" && ref == inputRef {
+			fallback = i
+		}
+	}
+	return fallback
+}
+
+func cloneModelConfig(model config.ModelConfig) config.ModelConfig {
+	model.Strengths = append([]string(nil), model.Strengths...)
+	model.SubtaskFor = append([]string(nil), model.SubtaskFor...)
+	model.Reasoning = cloneMap(model.Reasoning)
+	return model
+}
+
+func applyModelConfig(model *config.ModelConfig, input protocol.ConfigModel) {
+	if input.Has(protocol.ConfigModelFieldProvider) {
+		model.Provider = strings.TrimSpace(input.Provider)
+	}
+	if input.Has(protocol.ConfigModelFieldProtocol) {
+		model.Protocol = config.ModelProtocol(input.Protocol)
+	}
+	if input.Has(protocol.ConfigModelFieldAuthMode) {
+		mode := config.AuthMode(strings.ToLower(strings.TrimSpace(input.AuthMode)))
+		if mode == "default" {
+			mode = ""
+		}
+		model.AuthMode = mode
+	}
+	if input.Has(protocol.ConfigModelFieldModel) {
+		model.Model = strings.TrimSpace(input.Model)
+	}
+	if input.Has(protocol.ConfigModelFieldBaseURL) {
+		model.BaseURL = strings.TrimSpace(input.BaseURL)
+	}
+	if input.Has(protocol.ConfigModelFieldContextWindow) {
+		model.ContextWindow = input.ContextWindow
+	}
+	if input.Has(protocol.ConfigModelFieldMaxOutputTokens) {
+		model.MaxOutputTokens = input.MaxOutputTokens
+	}
+	if input.Has(protocol.ConfigModelFieldStrengths) {
+		model.Strengths = append([]string(nil), input.Strengths...)
+	}
+	if input.Has(protocol.ConfigModelFieldSubtaskFor) {
+		model.SubtaskFor = append([]string(nil), input.SubtaskFor...)
+	}
+	if input.Has(protocol.ConfigModelFieldReasoning) {
+		model.Reasoning = cloneMap(input.Reasoning)
+	}
 }
 
 func (a *Agent) Config() *config.Config {
@@ -112,24 +171,19 @@ func (a *Agent) updateConfigLocked(params ConfigSetParams) (*config.Config, erro
 	var credentialChange *stagedCredentialChange
 	switch params.Action {
 	case protocol.ConfigActionUpsertModel:
-		mc := config.ModelConfig{Provider: params.Model.Provider, Protocol: config.ModelProtocol(params.Model.Protocol), AuthMode: params.Model.AuthMode, Model: params.Model.Model, BaseURL: params.Model.BaseURL, ContextWindow: params.Model.ContextWindow, MaxOutputTokens: params.Model.MaxOutputTokens, Strengths: append([]string(nil), params.Model.Strengths...), SubtaskFor: append([]string(nil), params.Model.SubtaskFor...), Reasoning: cloneMap(params.Model.Reasoning)}
+		mc, existingIndex := mergeModelConfig(cfg.Models, params.ModelRef, params.Model)
 		if mc.Provider == "" || mc.Model == "" {
 			return nil, fmt.Errorf("provider and model are required")
 		}
 		ref := mc.Ref()
-		updated := false
-		for i, existing := range cfg.Models {
-			if existing.Ref() == params.ModelRef || existing.Ref() == ref {
-				// 仅同一 provider 可以沿用原模型的凭证，切换 provider 必须重新加载其独立凭证。
-				if existing.Provider == mc.Provider {
-					mc.APIKey = existing.APIKey
-				}
-				cfg.Models[i] = mc
-				updated = true
-				break
+		if existingIndex >= 0 {
+			existing := cfg.Models[existingIndex]
+			// 仅同一 provider 可以沿用原模型的凭证，切换 provider 必须重新加载其独立凭证。
+			if existing.Provider != mc.Provider {
+				mc.APIKey = ""
 			}
-		}
-		if !updated {
+			cfg.Models[existingIndex] = mc
+		} else {
 			// 同一 provider 的凭证由 credentials.toml 共享，新模型沿用已加载的密钥。
 			mc.APIKey = providerAPIKey(cfg.Models, mc.Provider)
 			cfg.Models = append(cfg.Models, mc)

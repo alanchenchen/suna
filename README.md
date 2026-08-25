@@ -1,6 +1,10 @@
 # Suna
 
+[![Go](https://img.shields.io/badge/Go-1.26-blue)](https://go.dev) [![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue)](LICENSE) [![Release](https://img.shields.io/github/v/release/alanchenchen/suna)](https://github.com/alanchenchen/suna/releases)
+
 > Local-first agent runtime with isolated subtasks, intent-aware Guard, memory, Skills, MCP, and a terminal UI.
+
+Suna is released under the [PolyForm Noncommercial License](LICENSE) — free for personal and non-commercial use.
 
 [中文 README](README.zh-CN.md) · [Documentation](docs/README.md) · [Subtasks](docs/subtask.md)
 

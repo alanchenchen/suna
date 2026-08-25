@@ -72,18 +72,29 @@ func (t *TUI) handleProtocolResultMsg(msg tea.Msg) tea.Cmd {
 		t.chat.SessionsLoading = false
 		t.chat.SessionsError = m.Message
 	case newSessionResultMsg:
-		t.applySessionSnapshot(m.Params)
+		switched := t.applySessionSnapshot(m.Params)
 		t.mode = uipage.Chat
 		schedule = true
 		if m.DeleteErr != nil {
 			t.appendNonToolMessage(chatMsg{Role: "error", Content: t.i18n.Tf("tui.command.new.delete_failed", m.DeleteErr.Error())})
 		}
-		return tea.Batch(t.attachmentStatusCmd(), t.scheduleTranscriptSync(), t.startChatSpinner())
+		cmds := []tea.Cmd{t.attachmentStatusCmd(), t.scheduleTranscriptSync(), t.startChatSpinner()}
+		if switched {
+			// 会话切换清空了 MCP 列表数据，主动拉取一次恢复徽标/overlay 状态；
+			// daemon 只在服务器状态变化时推送，不会主动发当前快照。
+			cmds = append(cmds, t.listMCPCmd())
+		}
+		return tea.Batch(cmds...)
 	case sessionSnapshotResultMsg:
-		t.applySessionSnapshot(m.Params)
+		switched := t.applySessionSnapshot(m.Params)
 		t.mode = uipage.Chat
 		schedule = true
-		return tea.Batch(t.attachmentStatusCmd(), t.scheduleTranscriptSync(), t.startChatSpinner())
+		cmds := []tea.Cmd{t.attachmentStatusCmd(), t.scheduleTranscriptSync(), t.startChatSpinner()}
+		if switched {
+			// 同上：会话切换后重新拉取 MCP 列表，恢复右上角徽章显示。
+			cmds = append(cmds, t.listMCPCmd())
+		}
+		return tea.Batch(cmds...)
 	case sessionMetadataResultMsg:
 		t.handleSessionStateNotification(protocol.SessionStateParams{Session: m.Session})
 	case sessionTitleUpdateResultMsg:

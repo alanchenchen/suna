@@ -39,17 +39,20 @@ func (m Model) View(deps ViewDeps) string {
 	}
 	var sb strings.Builder
 	pet := strings.Split(deps.MiniPet, "\n")
-	for len(pet) < 3 {
+	for len(pet) < 2 {
 		pet = append(pet, "")
 	}
 	gap := 2
 	used := lipgloss.Width(pet[1]) + gap + lipgloss.Width(deps.TopMeta) + gap + lipgloss.Width(deps.Conn)
-	pad := maxInt(gap, deps.Width-used)
+	pad := max(gap, deps.Width-used)
 
+	// pet 首行独占，第二行与 TopMeta/Conn 并排；超过两行时剩余行依次输出。
 	sb.WriteString(pet[0] + "\n")
 	sb.WriteString(pet[1])
 	sb.WriteString(strings.Repeat(" ", gap) + deps.TopMeta + strings.Repeat(" ", pad) + deps.Conn + "\n")
-	sb.WriteString(pet[2] + "\n")
+	for i := 2; i < len(pet); i++ {
+		sb.WriteString(pet[i] + "\n")
+	}
 	sb.WriteString(deps.Separator + "\n")
 
 	content := deps.Content

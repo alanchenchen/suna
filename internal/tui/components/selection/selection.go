@@ -15,10 +15,3 @@ func Rail(selected bool, indent int, style lipgloss.Style) string {
 	}
 	return strings.Repeat(" ", indent) + style.Render("▎ ")
 }
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

@@ -130,6 +130,86 @@ func TestToolIntentSchemaUsesCurrentUserLanguage(t *testing.T) {
 	}
 }
 
+func TestBuildGuardEvidenceIncludesBoundedSafeRecentFacts(t *testing.T) {
+	messages := []model.Message{
+		model.NewTextMessage(model.RoleUser, "original task"),
+		{Role: model.RoleAssistant, ToolCalls: []model.ToolCall{{ID: "ask-1", Name: agenttools.ToolAskUser, Arguments: `{"question":"Which scope?"}`}}},
+		{Role: model.RoleTool, ToolCallID: "ask-1", TextContent: `{"answer":"current file"}`},
+		{Role: model.RoleAssistant, ToolCalls: []model.ToolCall{{ID: "write-1", Name: "writefile", Arguments: `{"path":"report.md","content":"private body"}`}}},
+		{Role: model.RoleTool, ToolCallID: "write-1", TextContent: "PRIVATE TOOL OUTPUT"},
+		model.NewTextMessage(model.RoleUser, "do not change protocol"),
+	}
+	summary := memory.BuildToolSummary([]memory.ToolSummaryItem{{Name: "writefile", Status: "error", Summary: "PRIVATE TOOL OUTPUT"}})
+	actions := recentGuardActions(messages, summary)
+	state := "## Active context\n- keep the current review flow\n## Completed work / topic ledger\n- unrelated history\n## User requirements and decisions\n- do not add retries\n## Tool facts\n- private fact"
+	got := buildGuardEvidence(messages, []string{"Rejected: tool=filesystem; risk=high; target=workspace"}, actions, state, "apply the bounded edit")
+	for _, want := range []string{
+		"Latest direct user message", "do not change protocol",
+		"Question: Which scope?; Answer: current file",
+		"Earlier recent user messages", "original task",
+		"Rejected: tool=filesystem", "writefile: failed; target=report.md",
+		"keep the current review flow", "do not add retries", "apply the bounded edit",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("evidence missing %q:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"PRIVATE TOOL OUTPUT", "private body", "unrelated history", "private fact"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("evidence contains %q:\n%s", unwanted, got)
+		}
+	}
+}
+
+func TestBuildGuardEvidenceEnforcesSharedBudgetAndPriority(t *testing.T) {
+	messages := []model.Message{
+		model.NewTextMessage(model.RoleUser, "older-a "+strings.Repeat("a", 300)),
+		model.NewTextMessage(model.RoleUser, "older-b "+strings.Repeat("b", 300)),
+		{Role: model.RoleAssistant, ToolCalls: []model.ToolCall{{ID: "ask-1", Name: agenttools.ToolAskUser, Arguments: `{"question":"choose scope"}`}}},
+		{Role: model.RoleTool, ToolCallID: "ask-1", TextContent: `{"answer":"chosen scope"}`},
+		model.NewTextMessage(model.RoleUser, "LATEST-USER "+strings.Repeat("c", 300)),
+	}
+	risk := []string{"RISK-ONE " + strings.Repeat("r", 300), "RISK-TWO " + strings.Repeat("s", 300)}
+	actions := []string{"ACTION-ONE " + strings.Repeat("x", 300), "ACTION-TWO " + strings.Repeat("y", 300)}
+	got := buildGuardEvidence(messages, risk, actions, "## User requirements and decisions\n- SESSION-LOW "+strings.Repeat("z", 800), "RATIONALE-LOW "+strings.Repeat("q", 800))
+	if runes := len([]rune(got)); runes > guardEvidenceBudget {
+		t.Fatalf("evidence runes = %d, want <= %d", runes, guardEvidenceBudget)
+	}
+	for _, want := range []string{"LATEST-USER", "Question: choose scope; Answer: chosen scope", "RISK-ONE", "RISK-TWO"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("priority evidence missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestGuardEvidenceIgnoresQueuedSteeringUntilAppliedMessageExists(t *testing.T) {
+	a := &Agent{working: testWorkingMemory("original task")}
+	a.setSteeringMailbox("run-1")
+	if _, _, err := a.EnqueueSteering("run-1", "client-1", "do not delete"); err != nil {
+		t.Fatalf("EnqueueSteering() error = %v", err)
+	}
+	ctx := a.buildGuardReviewContext(runner.ToolExecution{WorkingMessages: a.working.Messages()})
+	if strings.Contains(ctx.Evidence, "do not delete") {
+		t.Fatalf("queued steering entered evidence: %q", ctx.Evidence)
+	}
+	a.working.AddMessage(model.NewTextMessage(model.RoleUser, "do not delete"))
+	ctx = a.buildGuardReviewContext(runner.ToolExecution{WorkingMessages: a.working.Messages()})
+	if !strings.Contains(ctx.Evidence, "do not delete") {
+		t.Fatalf("applied steering missing from evidence: %q", ctx.Evidence)
+	}
+}
+
+func TestGuardEvidenceIgnoresIncompleteAskUser(t *testing.T) {
+	messages := []model.Message{
+		model.NewTextMessage(model.RoleUser, "original task"),
+		{Role: model.RoleAssistant, ToolCalls: []model.ToolCall{{ID: "ask-1", Name: agenttools.ToolAskUser, Arguments: `{"question":"Which scope?"}`}}},
+	}
+	got := buildGuardEvidence(messages, nil, nil, "", "")
+	if strings.Contains(got, "Which scope?") || strings.Contains(got, "Resolved AskUser") {
+		t.Fatalf("incomplete AskUser entered evidence: %q", got)
+	}
+}
+
 func TestBuildGuardReviewContextUsesToolExecutionWorkingMessages(t *testing.T) {
 	a := &Agent{working: testWorkingMemory("main user request")}
 	ctx := a.buildGuardReviewContext(runner.ToolExecution{
@@ -140,14 +220,8 @@ func TestBuildGuardReviewContextUsesToolExecutionWorkingMessages(t *testing.T) {
 			model.NewTextMessage(model.RoleAssistant, "I inspected the delegated scope."),
 		},
 	})
-	if ctx.Task != "delegated subtask request" {
-		t.Fatalf("Task = %q, want delegated subtask request", ctx.Task)
-	}
-	if ctx.LatestUserInput != "delegated subtask request" {
-		t.Fatalf("LatestUserInput = %q, want delegated subtask request", ctx.LatestUserInput)
-	}
-	if ctx.UserDecisions != "" {
-		t.Fatalf("UserDecisions = %q, want empty", ctx.UserDecisions)
+	if !strings.Contains(ctx.Evidence, "delegated subtask request") || strings.Contains(ctx.Evidence, "main user request") {
+		t.Fatalf("review evidence = %q, want execution snapshot only", ctx.Evidence)
 	}
 }
 
@@ -333,7 +407,6 @@ func TestMainGuardGateMakesApprovedReceiptVisibleToNextReview(t *testing.T) {
 		t.Fatalf("Reload tools: %v", err)
 	}
 	a := &Agent{guard: guard.NewGuardWithMode(nil, "test", guard.ModeSmart), tools: mgr}
-	a.beginGuardTask("Update two related files for the active fix.")
 
 	var reviewCount int
 	var secondContext guard.ReviewContext
@@ -384,47 +457,37 @@ approved:
 	if reviewCount != 2 {
 		t.Fatalf("review count = %d, want 2", reviewCount)
 	}
-	if !strings.Contains(secondContext.UserDecisions, "approved") || !strings.Contains(secondContext.UserDecisions, "writefile") {
-		t.Fatalf("second review decisions = %q, want approved receipt", secondContext.UserDecisions)
+	if !strings.Contains(secondContext.Evidence, "Approved") || !strings.Contains(secondContext.Evidence, "writefile") {
+		t.Fatalf("second review evidence = %q, want approved receipt", secondContext.Evidence)
 	}
 }
 
-func TestGuardTaskCardStartsNewTaskForEveryNewUserInput(t *testing.T) {
+func TestGuardTaskCardKeepsOnlyRecentRiskDecisions(t *testing.T) {
 	a := &Agent{}
-	a.beginGuardTask("Fix the Gateway reconnect flow and add regression tests.")
-	a.recordGuardTaskReceipt(runner.ToolExecution{Name: "editfile", Params: map[string]any{"path": "gateway/bridge.go"}, Intent: "fix reconnect"}, &guard.GuardResult{Risk: guard.RiskMedium}, true)
+	a.recordGuardTaskReceipt(runner.ToolExecution{Name: "editfile", Params: map[string]any{"path": "old.go"}}, &guard.GuardResult{Risk: guard.RiskMedium}, true)
+	a.recordGuardTaskReceipt(runner.ToolExecution{Name: "editfile", Params: map[string]any{"path": "gateway/bridge.go"}}, &guard.GuardResult{Risk: guard.RiskMedium}, true)
+	a.recordGuardTaskReceipt(runner.ToolExecution{Name: "filesystem", Params: map[string]any{"action": "remove", "path": "build"}}, &guard.GuardResult{Risk: guard.RiskHigh}, false)
 
-	a.beginGuardTask("please continue with the regression test")
-	task, latest, receipts, prior := a.guardTaskReviewContext()
-	if task != "please continue with the regression test" {
-		t.Fatalf("Task = %q, want new user input", task)
-	}
-	if latest != "please continue with the regression test" {
-		t.Fatalf("LatestUserInput = %q, want new user input", latest)
-	}
-	if receipts != "" {
-		t.Fatalf("UserDecisions = %q, want cleared decisions", receipts)
-	}
-	if !strings.Contains(prior, "gateway/bridge.go") || !strings.Contains(prior, "approved") {
-		t.Fatalf("PreviousTask = %q, want prior approval receipt", prior)
+	decisions := strings.Join(a.recentGuardRiskDecisions(), "\n")
+	if strings.Contains(decisions, "old.go") || !strings.Contains(decisions, "gateway/bridge.go") || !strings.Contains(decisions, "Rejected") {
+		t.Fatalf("risk decisions = %q, want latest two receipts", decisions)
 	}
 }
 
 func TestGuardTaskCardRecordsSafeOperationReceipt(t *testing.T) {
 	a := &Agent{}
-	a.beginGuardTask("Fix the Gateway reconnect flow.")
 	a.recordGuardTaskReceipt(runner.ToolExecution{
 		Name:   "editfile",
 		Params: map[string]any{"path": "gateway/bridge.go", "edits": []any{map[string]any{"old_string": "secret-old", "new_string": "secret-new"}}},
 		Intent: "fix reconnect lifecycle",
 	}, &guard.GuardResult{Risk: guard.RiskMedium}, true)
 
-	_, _, receipts, _ := a.guardTaskReviewContext()
-	if !strings.Contains(receipts, "gateway/bridge.go") || !strings.Contains(receipts, "fix reconnect lifecycle") {
-		t.Fatalf("UserDecisions = %q, want target and rationale", receipts)
+	decisions := strings.Join(a.recentGuardRiskDecisions(), "\n")
+	if !strings.Contains(decisions, "gateway/bridge.go") || !strings.Contains(decisions, "editfile") {
+		t.Fatalf("risk decisions = %q, want safe target and tool", decisions)
 	}
-	if strings.Contains(receipts, "secret-old") || strings.Contains(receipts, "secret-new") {
-		t.Fatalf("UserDecisions = %q, must not expose edit contents", receipts)
+	if strings.Contains(decisions, "secret-old") || strings.Contains(decisions, "secret-new") || strings.Contains(decisions, "fix reconnect lifecycle") {
+		t.Fatalf("risk decisions = %q, must not expose edit contents or agent rationale", decisions)
 	}
 }
 
@@ -437,17 +500,18 @@ func TestTrimForGuardMiddlePreservesUTF8(t *testing.T) {
 
 func TestBuildSubtaskGuardReviewContextDoesNotUseMainTaskCard(t *testing.T) {
 	a := &Agent{working: testWorkingMemory("main task")}
-	a.beginGuardTask("main task")
 	a.recordGuardTaskReceipt(runner.ToolExecution{Name: "editfile", Params: map[string]any{"path": "main.go"}, Intent: "main approval"}, &guard.GuardResult{Risk: guard.RiskMedium}, true)
 
 	ctx := a.buildSubtaskGuardReviewContext(runner.ToolExecution{
 		WorkingMessages: []model.Message{model.NewTextMessage(model.RoleUser, "delegated task")},
 	})
-	if ctx.Task != "delegated task" || ctx.LatestUserInput != "delegated task" {
-		t.Fatalf("subtask task/input = %q/%q, want delegated task", ctx.Task, ctx.LatestUserInput)
+	if !strings.Contains(ctx.Evidence, "delegated task") {
+		t.Fatalf("subtask evidence = %q, want delegated task", ctx.Evidence)
 	}
-	if ctx.UserDecisions != "" {
-		t.Fatalf("subtask UserDecisions = %q, want empty", ctx.UserDecisions)
+	for _, unwanted := range []string{"main task", "main.go", "main approval"} {
+		if strings.Contains(ctx.Evidence, unwanted) {
+			t.Fatalf("subtask evidence = %q, must not contain %q", ctx.Evidence, unwanted)
+		}
 	}
 }
 

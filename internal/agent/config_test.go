@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,6 +15,15 @@ import (
 	"github.com/alanchenchen/suna/internal/protocol"
 	"github.com/alanchenchen/suna/internal/skill"
 )
+
+func decodeModelInput(t *testing.T, raw string) protocol.ConfigModel {
+	t.Helper()
+	var model protocol.ConfigModel
+	if err := json.Unmarshal([]byte(raw), &model); err != nil {
+		t.Fatalf("Unmarshal(ConfigModel) error = %v", err)
+	}
+	return model
+}
 
 func TestAgentSkillStoreSaveUpdatesConfigSnapshotAndModTime(t *testing.T) {
 	dir := t.TempDir()
@@ -38,6 +48,82 @@ func TestAgentSkillStoreSaveUpdatesConfigSnapshotAndModTime(t *testing.T) {
 	}
 }
 
+func TestUpdateConfigPatchPreservesMissingOptionalFieldsAndClearsExplicitValues(t *testing.T) {
+	dir := t.TempDir()
+	existing := openAIModel("gpt-4o-mini")
+	existing.Protocol = config.ModelProtocolAnthropic
+	existing.AuthMode = config.AuthModeBoth
+	existing.Strengths = []string{"general", "vision"}
+	existing.SubtaskFor = []string{"provider-a/**"}
+	existing.Reasoning = map[string]any{"effort": "high"}
+	cfg := newAgentConfig(dir, []config.ModelConfig{existing}, existing.Ref())
+	mustSaveCredential(t, dir, "openai", "test-openai-key")
+	a := &Agent{cfg: cfg}
+
+	updated, err := a.UpdateConfig(ConfigSetParams{
+		Action:   protocol.ConfigActionUpsertModel,
+		ModelRef: existing.Ref(),
+		Model:    decodeModelInput(t, `{"base_url":"https://api.example.com"}`),
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfig(preserve) error = %v", err)
+	}
+	got := updated.Models[0]
+	if got.AuthMode != config.AuthModeBoth || !reflect.DeepEqual(got.Strengths, existing.Strengths) || !reflect.DeepEqual(got.SubtaskFor, existing.SubtaskFor) || !reflect.DeepEqual(got.Reasoning, existing.Reasoning) {
+		t.Fatalf("preserved model = %#v, want optional fields from %#v", got, existing)
+	}
+
+	updated, err = a.UpdateConfig(ConfigSetParams{
+		Action:   protocol.ConfigActionUpsertModel,
+		ModelRef: existing.Ref(),
+		Model:    decodeModelInput(t, `{"auth_mode":"default","strengths":[],"subtask_for":[],"reasoning":{}}`),
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfig(clear) error = %v", err)
+	}
+	got = updated.Models[0]
+	if got.AuthMode != "" || len(got.Strengths) != 0 || len(got.SubtaskFor) != 0 || len(got.Reasoning) != 0 {
+		t.Fatalf("cleared model = %#v, want default/empty optional fields", got)
+	}
+}
+
+func TestUpdateConfigNewModelUsesDefaultsForMissingOptionalFields(t *testing.T) {
+	dir := t.TempDir()
+	cfg := newAgentConfig(dir, nil, "")
+	mustSaveCredential(t, dir, "provider-a", "test-api-key")
+	a := &Agent{cfg: cfg}
+	updated, err := a.UpdateConfig(ConfigSetParams{
+		Action: protocol.ConfigActionUpsertModel,
+		Model:  decodeModelInput(t, `{"provider":"provider-a","model":"model-a","base_url":"https://api.example.com/v1","context_window":128000,"max_output_tokens":8192}`),
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfig() error = %v", err)
+	}
+	got := updated.Models[0]
+	if got.ProtocolOrDefault() != config.ModelProtocolOpenAIChat || got.AuthMode != "" || len(got.Strengths) != 0 || len(got.SubtaskFor) != 0 || len(got.Reasoning) != 0 {
+		t.Fatalf("new model defaults = %#v", got)
+	}
+}
+
+func TestUpdateConfigPatchFallsBackToExplicitModelRefWithoutDuplicating(t *testing.T) {
+	dir := t.TempDir()
+	existing := openAIModel("gpt-4o-mini")
+	cfg := newAgentConfig(dir, []config.ModelConfig{existing}, existing.Ref())
+	mustSaveCredential(t, dir, "openai", "test-openai-key")
+	a := &Agent{cfg: cfg}
+	updated, err := a.UpdateConfig(ConfigSetParams{
+		Action:   protocol.ConfigActionUpsertModel,
+		ModelRef: "missing/old-model",
+		Model:    decodeModelInput(t, `{"provider":"openai","model":"gpt-4o-mini","base_url":"https://api.example.com/v1"}`),
+	})
+	if err != nil {
+		t.Fatalf("UpdateConfig() error = %v", err)
+	}
+	if len(updated.Models) != 1 || updated.Models[0].BaseURL != "https://api.example.com/v1" {
+		t.Fatalf("updated models = %#v, want one updated model", updated.Models)
+	}
+}
+
 func TestUpdateConfigEditingModelToDifferentProviderUsesOnlyNewProviderCredential(t *testing.T) {
 	dir := t.TempDir()
 	cfg := newAgentConfig(dir, []config.ModelConfig{openAIModel("gpt-4o-mini")}, "openai/gpt-4o-mini")
@@ -48,10 +134,10 @@ func TestUpdateConfigEditingModelToDifferentProviderUsesOnlyNewProviderCredentia
 	updated, err := a.UpdateConfig(ConfigSetParams{
 		Action:   protocol.ConfigActionUpsertModel,
 		ModelRef: "openai/gpt-4o-mini",
-		Model: ConfigModel{
+		Model: protocol.ConfigModel{
 			Provider:        "anthropic",
-			Protocol:        config.ModelProtocolAnthropic,
-			AuthMode:        config.AuthModeBearer,
+			Protocol:        string(config.ModelProtocolAnthropic),
+			AuthMode:        string(config.AuthModeBearer),
 			Model:           "claude-sonnet-4",
 			BaseURL:         "https://api.anthropic.com",
 			ContextWindow:   200000,
@@ -89,9 +175,9 @@ func TestUpdateConfigEditingModelToProviderWithoutCredentialFails(t *testing.T) 
 	_, err := a.UpdateConfig(ConfigSetParams{
 		Action:   protocol.ConfigActionUpsertModel,
 		ModelRef: "openai/gpt-4o-mini",
-		Model: ConfigModel{
+		Model: protocol.ConfigModel{
 			Provider:        "anthropic",
-			Protocol:        config.ModelProtocolAnthropic,
+			Protocol:        string(config.ModelProtocolAnthropic),
 			Model:           "claude-sonnet-4",
 			BaseURL:         "https://api.anthropic.com",
 			ContextWindow:   200000,
@@ -179,7 +265,7 @@ func TestUpdateConfigAddsModelWithExistingProviderCredential(t *testing.T) {
 
 	updated, err := a.UpdateConfig(ConfigSetParams{
 		Action: protocol.ConfigActionUpsertModel,
-		Model: ConfigModel{
+		Model: protocol.ConfigModel{
 			Provider:        "openai",
 			Model:           "gpt-4o",
 			BaseURL:         "https://api.openai.com/v1",
@@ -315,7 +401,7 @@ func TestUpdateConfigRouterBuildFailureLeavesRuntimeAndDiskUnchanged(t *testing.
 	_, err = a.UpdateConfig(ConfigSetParams{
 		Action:   protocol.ConfigActionUpsertModel,
 		ModelRef: "openai/gpt-4o-mini",
-		Model:    ConfigModel{Provider: "openai", Model: "gpt-4o-mini", BaseURL: "", ContextWindow: 128000, MaxOutputTokens: 8192},
+		Model:    protocol.ConfigModel{Provider: "openai", Model: "gpt-4o-mini", BaseURL: "", ContextWindow: 128000, MaxOutputTokens: 8192},
 	})
 	if err == nil {
 		t.Fatal("UpdateConfig() error = nil, want Router build failure")
@@ -405,7 +491,7 @@ func TestUpdateConfigPreservesSubtaskFor(t *testing.T) {
 	updated, err := a.UpdateConfig(ConfigSetParams{
 		Action:   protocol.ConfigActionUpsertModel,
 		ModelRef: "openai/gpt-4o-mini",
-		Model: ConfigModel{
+		Model: protocol.ConfigModel{
 			Provider:        "openai",
 			Model:           "gpt-4o-mini",
 			BaseURL:         "https://api.openai.com/v1",

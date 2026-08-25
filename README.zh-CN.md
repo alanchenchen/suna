@@ -1,6 +1,10 @@
 # Suna
 
+[![Go](https://img.shields.io/badge/Go-1.26-blue)](https://go.dev) [![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue)](LICENSE) [![Release](https://img.shields.io/github/v/release/alanchenchen/suna)](https://github.com/alanchenchen/suna/releases)
+
 > Local-first Agent Runtime：隔离 Subtask、意图感知 Guard、本地记忆、Skill、MCP，以及内置终端 TUI。
+
+Suna 以 [PolyForm Noncommercial License](LICENSE) 发布——个人与非商业用途免费。
 
 [English README](README.md) · [文档索引](docs/README.md) · [TCP 客户端接入](docs/tcp-client.md) · [Subtask 设计](docs/subtask.md)
 

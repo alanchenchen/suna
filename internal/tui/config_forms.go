@@ -249,6 +249,7 @@ func (t *TUI) validateProviderForm(v tuiconfig.ProviderFormValues) error {
 		InvalidContextWindow:   t.tr("tui.error.invalid_context_window"),
 		InvalidMaxOutputTokens: t.tr("tui.error.invalid_max_output_tokens"),
 		InvalidProtocol:        t.tr("tui.error.invalid_protocol"),
+		InvalidProvider:        t.tr("tui.error.invalid_provider"),
 	})
 }
 

@@ -197,7 +197,7 @@ func (d nativeDelegate) renderLineWithBadge(width int, rail, mark string, markSt
 	nameLimit := available
 	if detail != "" && available >= 10 {
 		// 为摘要保留一部分空间；名称仍是主信息，窄终端则只显示名称。
-		nameLimit = maxInt(4, available*3/5)
+		nameLimit = max(4, available*3/5)
 	}
 	name = truncateNative(strings.TrimSpace(name), nameLimit)
 	contentWidth := lipgloss.Width(name)
@@ -349,7 +349,7 @@ func (m *Model) UpdateModelList(msg tea.Msg) tea.Cmd  { return m.ModelList.Updat
 
 func truncateNative(value string, width int) string {
 	if width <= 1 {
-		return ansi.Truncate(value, maxInt(0, width), "")
+		return ansi.Truncate(value, max(0, width), "")
 	}
 	return ansi.Truncate(value, width, "…")
 }

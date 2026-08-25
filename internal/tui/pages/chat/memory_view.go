@@ -28,9 +28,9 @@ type MemoryOverlayView struct {
 }
 
 func (m Model) MemoryOverlayView(width, overlayMaxHeight int) MemoryOverlayView {
-	w := maxInt(52, minInt(92, width-4))
-	inner := maxInt(32, w-8)
-	bodyHeight := maxInt(5, minInt(16, overlayMaxHeight-10))
+	w := max(52, min(92, width-4))
+	inner := max(32, w-8)
+	bodyHeight := max(5, min(16, overlayMaxHeight-10))
 	rows := make([]MemoryRowView, 0, len(m.Memories)+1)
 	for i, item := range m.Memories {
 		rows = append(rows, MemoryRowView{Memory: item, Kind: MemoryRowItem, Selected: i == m.MemoryCursor})

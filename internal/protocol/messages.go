@@ -102,17 +102,6 @@ const (
 	AgentRunPhaseSkill   AgentRunPhase = "skill"
 )
 
-type ProtocolErrorData struct {
-	// Kind 是稳定错误分类，UI/SDK 只能依赖它做分支，不应解析 message。
-	Kind string `json:"kind"`
-	// Reason 是可选机器可读补充原因，例如交互状态或权限边界。
-	Reason string `json:"reason,omitempty"`
-	// Retryable 表示同一请求在条件不变时是否值得重试。
-	Retryable bool `json:"retryable,omitempty"`
-	// StatusCode 保留上游 HTTP/模型错误状态码，便于客户端展示和诊断。
-	StatusCode int `json:"status_code,omitempty"`
-}
-
 type ModelErrorKind string
 
 const (
@@ -409,20 +398,6 @@ type ConfigParams struct {
 	Theme       string        `json:"theme,omitempty"`
 	GuardMode   string        `json:"guard_mode,omitempty"`
 	Workspace   string        `json:"workspace,omitempty"`
-}
-
-type ConfigModel struct {
-	Provider        string         `json:"provider"`
-	Protocol        string         `json:"protocol"`
-	AuthMode        string         `json:"auth_mode,omitempty"`
-	Model           string         `json:"model"`
-	BaseURL         string         `json:"base_url,omitempty"`
-	ContextWindow   int            `json:"context_window,omitempty"`
-	MaxOutputTokens int            `json:"max_output_tokens,omitempty"`
-	Strengths       []string       `json:"strengths,omitempty"`
-	SubtaskFor      []string       `json:"subtask_for,omitempty"`
-	Reasoning       map[string]any `json:"reasoning,omitempty"`
-	HasAPIKey       bool           `json:"has_api_key,omitempty"`
 }
 
 type ConfigSetParams struct {

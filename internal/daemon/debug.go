@@ -11,12 +11,12 @@ import (
 
 func (s *service) handleDebugMemory(ctx context.Context, req protocol.Request) (protocol.DebugMemoryResult, error) {
 	if protocol.TransportFromContext(ctx) != "local" {
-		return protocol.DebugMemoryResult{}, protocolError{code: -32601, message: "debug.memory is local-only"}
+		return protocol.DebugMemoryResult{}, protocol.UnsupportedMethodMessage("debug.memory is local-only")
 	}
 
 	var params protocol.DebugMemoryParams
 	if err := decodeParams(req.Params, &params); err != nil {
-		return protocol.DebugMemoryResult{}, invalidParams(err.Error())
+		return protocol.DebugMemoryResult{}, protocol.InvalidRequest(err.Error())
 	}
 	if params.GC {
 		// 仅由显式诊断请求触发，正常运行路径绝不主动执行 GC。

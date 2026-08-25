@@ -72,7 +72,11 @@ func (s *service) OnDisconnect(ctx context.Context, connID string) {
 func (s *service) Handle(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
 	state := s.daemon.RuntimeState()
 	if state != protocol.DaemonRuntimeReady && req.Method != protocol.MethodRuntimeHello && req.Method != protocol.MethodDaemonStatus && req.Method != protocol.MethodDaemonStop {
-		return nil, protocolError{code: -32603, message: "runtime is " + string(state), data: protocol.ProtocolErrorData{Kind: "runtime_unavailable", Reason: string(state), Retryable: state == protocol.DaemonRuntimeStarting}}
+		reason := protocol.ErrorReasonRuntimeStopping
+		if state == protocol.DaemonRuntimeStarting {
+			reason = protocol.ErrorReasonRuntimeStarting
+		}
+		return nil, protocol.RuntimeUnavailable(reason, state == protocol.DaemonRuntimeStarting)
 	}
 	logging.Info("ipc", "request", logging.Event{"conn_id": req.ConnID, "method": req.Method, "request_id": req.ID})
 	sink = s.daemon.sinkFor(req.ConnID, sink)
@@ -82,7 +86,7 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 	s.ensureConfigLoaded()
 	if skill.IsProtocolMethod(req.Method) {
 		if s.daemon.agent.Skills() == nil {
-			return nil, protocolError{code: -32603, message: "skill runtime is not initialized"}
+			return nil, protocol.InternalError("skill runtime is not initialized")
 		}
 		if req.Method == protocol.MethodSkillList {
 			global := s.daemon.agent.Skills().CurrentList()
@@ -94,16 +98,16 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 		}
 		var params protocol.SkillSetParams
 		if err := decodeParams(req.Params, &params); err != nil {
-			return nil, invalidParams(err.Error())
+			return nil, protocol.InvalidRequest(err.Error())
 		}
 		if err := validateSkillSetScope(params.Scope); err != nil {
-			return nil, invalidParams(err.Error())
+			return nil, protocol.InvalidRequest(err.Error())
 		}
 		return s.daemon.agent.Skills().HandleProtocol(ctx, req, sink)
 	}
 	if mcp.IsProtocolMethod(req.Method) {
 		if s.daemon.agent.MCP() == nil {
-			return nil, protocolError{code: -32603, message: "mcp runtime is not initialized"}
+			return nil, protocol.InternalError("mcp runtime is not initialized")
 		}
 		result, err := s.daemon.agent.MCP().HandleProtocol(ctx, req)
 		if err != nil {
@@ -112,11 +116,11 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 		if req.Method == protocol.MethodMCPToggle {
 			cfg := s.daemon.agent.Config()
 			if cfg == nil {
-				return nil, protocolError{code: -32603, message: "config not loaded"}
+				return nil, protocol.InternalError("config not loaded")
 			}
 			cfg.MCP = s.daemon.agent.MCP().Config()
 			if err := cfg.Save(cfg.ConfigPath()); err != nil {
-				return nil, protocolError{code: -32603, message: err.Error()}
+				return nil, protocol.InternalError(err.Error())
 			}
 		}
 		return result, nil
@@ -140,7 +144,7 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 			s.emitAgentRun(ctx, sessionID, req.ConnID, protocol.AgentRunParams{RunID: runID, State: protocol.AgentRunCancelling, Phase: phase})
 		})
 		if err != nil {
-			return nil, protocolError{code: -32602, message: err.Error(), data: protocol.ProtocolErrorData{Kind: err.Error()}}
+			return nil, requestErrorForState(err)
 		}
 		if !newlyMarked {
 			// 同一 owner 重复取消是成功的幂等操作，不重复广播 cancelling 或调用 cancel。
@@ -182,7 +186,7 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 		var params protocol.DaemonStatusRequest
 		if req.Params != nil {
 			if err := decodeParams(req.Params, &params); err != nil {
-				return nil, invalidParams(err.Error())
+				return nil, protocol.InvalidRequest(err.Error())
 			}
 		}
 		return s.buildDaemonStatus(ctx, params.Detail), nil
@@ -198,14 +202,14 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 		}()
 		return map[string]string{"status": "stopping"}, nil
 	default:
-		return nil, protocolError{code: -32601, message: fmt.Sprintf("method not found: %s", req.Method)}
+		return nil, protocol.UnsupportedMethod(req.Method)
 	}
 }
 
 func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHelloResult, error) {
 	var params protocol.RuntimeHelloParams
 	if err := decodeParams(req.Params, &params); err != nil {
-		return protocol.RuntimeHelloResult{}, invalidParams(err.Error())
+		return protocol.RuntimeHelloResult{}, protocol.InvalidRequest(err.Error())
 	}
 	transport := strings.TrimSpace(params.Transport)
 	if transport == "" {
@@ -223,26 +227,26 @@ func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHell
 func (s *service) handleSendMessage(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
 	var params protocol.SendMessageParams
 	if err := decodeParams(req.Params, &params); err != nil {
-		return nil, invalidParams(err.Error())
+		return nil, protocol.InvalidRequest(err.Error())
 	}
 	// 先完成所有输入校验，再预留 run 和发布初始 running；同步拒绝不能产生伪 lifecycle。
 	rt, _, err := s.daemon.sessions.attachedSession(req.ConnID)
 	if err != nil {
-		return nil, protocolError{code: -32602, message: err.Error(), data: protocol.ProtocolErrorData{Kind: err.Error()}}
+		return nil, requestErrorForState(err)
 	}
 	input, err := s.agentInputFromParams(ctx, rt.agent, params)
 	if err != nil {
-		return nil, invalidParams(err.Error())
+		return nil, protocol.InvalidRequest(err.Error())
 	}
 	inputText := input.Text()
 	if inputText == "" && len(input.Blocks) == 0 {
-		return nil, invalidParams("content is required")
+		return nil, protocol.InvalidRequest("content is required")
 	}
 	// 在 RPC 内预留 run，绑定本次请求的 session runtime 与附件根目录；连接随后切换 session 不得改变消息归属。
 	var sessionID, runID string
 	rt, sessionID, runID, err = s.beginAgentRun(ctx, req.ConnID)
 	if err != nil {
-		return nil, protocolError{code: -32602, message: err.Error(), data: protocol.ProtocolErrorData{Kind: err.Error()}}
+		return nil, requestErrorForState(err)
 	}
 	runCtx := tools.MergeExecutionContext(ctx, tools.ExecutionContext{SessionID: sessionID, RunID: runID, BoundaryID: "main"})
 	s.emitUserMessage(ctx, sessionID, req.ConnID, protocol.UserMessageParams{SessionID: sessionID, Parts: params.Parts})
@@ -254,7 +258,7 @@ func (s *service) handleSendMessage(ctx context.Context, req protocol.Request, s
 func (s *service) handleResumeRun(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
 	rt, sessionID, runID, err := s.beginAgentRun(ctx, req.ConnID)
 	if err != nil {
-		return nil, protocolError{code: -32602, message: err.Error(), data: protocol.ProtocolErrorData{Kind: err.Error()}}
+		return nil, requestErrorForState(err)
 	}
 	runCtx := tools.MergeExecutionContext(ctx, tools.ExecutionContext{SessionID: sessionID, RunID: runID, BoundaryID: "main"})
 	events := rt.agent.ResumeRun(runCtx)
@@ -570,7 +574,7 @@ func (s *service) cancelPendingInteractions(sessionID string) {
 func (s *service) handleAskReply(req protocol.Request) (any, error) {
 	var params protocol.AskUserReply
 	if err := decodeParams(req.Params, &params); err != nil {
-		return nil, invalidParams(err.Error())
+		return nil, protocol.InvalidRequest(err.Error())
 	}
 	pending, err := s.claimInteractionReply(req.ConnID, params.ID, &s.pendingAsks, "ask session not found or expired")
 	if err != nil {
@@ -585,7 +589,7 @@ func (s *service) handleAskReply(req protocol.Request) (any, error) {
 func (s *service) handleGuardReply(req protocol.Request) (any, error) {
 	var params protocol.GuardReplyParams
 	if err := decodeParams(req.Params, &params); err != nil {
-		return nil, invalidParams(err.Error())
+		return nil, protocol.InvalidRequest(err.Error())
 	}
 	pending, err := s.claimInteractionReply(req.ConnID, params.ID, &s.pendingGuards, "guard confirmation not found or expired")
 	if err != nil {
@@ -600,7 +604,7 @@ func (s *service) handleGuardReply(req protocol.Request) (any, error) {
 func (s *service) claimInteractionReply(connID, id string, store *sync.Map, notFound string) (pendingInteraction, error) {
 	val, ok := store.Load(id)
 	if !ok {
-		return pendingInteraction{}, protocolError{code: -32601, message: notFound}
+		return pendingInteraction{}, protocol.InvalidRequestReason(notFound, protocol.ErrorReasonInteractionNotFound)
 	}
 	pending := val.(pendingInteraction)
 	if err := s.ensureInteractionReplyAllowed(connID, pending); err != nil {
@@ -612,7 +616,7 @@ func (s *service) claimInteractionReply(connID, id string, store *sync.Map, notF
 	}
 	val, ok = store.LoadAndDelete(id)
 	if !ok {
-		return pendingInteraction{}, protocolError{code: -32601, message: notFound}
+		return pendingInteraction{}, protocol.InvalidRequestReason(notFound, protocol.ErrorReasonInteractionNotFound)
 	}
 	return val.(pendingInteraction), nil
 }
@@ -622,10 +626,10 @@ func (s *service) ensureInteractionReplyAllowed(connID string, pending pendingIn
 		return nil
 	}
 	if !s.daemon.sessions.isClientAttached(connID, pending.sessionID) {
-		return protocolError{code: -32602, message: "reply client is not attached to the waiting session", data: protocol.ProtocolErrorData{Kind: "session_required"}}
+		return protocol.SessionRequired("reply client is not attached to the waiting session")
 	}
 	if s.daemon.sessions.isClientAttached(pending.ownerID, pending.sessionID) {
-		return protocolError{code: -32602, message: "interaction reply is owned by another client", data: protocol.ProtocolErrorData{Kind: "session_busy"}}
+		return protocol.SessionBusy("interaction reply is owned by another client")
 	}
 	return nil
 }
@@ -633,7 +637,7 @@ func (s *service) ensureInteractionReplyAllowed(connID string, pending pendingIn
 func (s *service) handleMemoryList(ctx context.Context, sink protocol.EventSink) (any, error) {
 	memories, err := s.daemon.agent.ListMemory(ctx)
 	if err != nil {
-		return nil, protocolError{code: -32603, message: err.Error()}
+		return nil, protocol.InternalError(err.Error())
 	}
 	result := protocol.MemoryListResult{Memories: make([]protocol.MemoryItem, 0, len(memories))}
 	for _, m := range memories {
@@ -645,11 +649,11 @@ func (s *service) handleMemoryList(ctx context.Context, sink protocol.EventSink)
 func (s *service) handleMemoryDelete(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
 	var params protocol.MemoryDeleteParams
 	if err := decodeParams(req.Params, &params); err != nil {
-		return nil, invalidParams(err.Error())
+		return nil, protocol.InvalidRequest(err.Error())
 	}
 	deleted, err := s.daemon.agent.DeleteMemory(ctx, params.ID)
 	if err != nil {
-		return nil, protocolError{code: -32603, message: err.Error()}
+		return nil, protocol.InternalError(err.Error())
 	}
 	if err := s.emitMemoryList(ctx, sink); err != nil {
 		return nil, err
@@ -660,7 +664,7 @@ func (s *service) handleMemoryDelete(ctx context.Context, req protocol.Request, 
 func (s *service) handleMemoryClear(ctx context.Context, sink protocol.EventSink) (any, error) {
 	deleted, err := s.daemon.agent.ClearMemory(ctx)
 	if err != nil {
-		return nil, protocolError{code: -32603, message: err.Error()}
+		return nil, protocol.InternalError(err.Error())
 	}
 	if err := s.emitMemoryList(ctx, sink); err != nil {
 		return nil, err
@@ -671,7 +675,7 @@ func (s *service) handleMemoryClear(ctx context.Context, sink protocol.EventSink
 func (s *service) emitMemoryList(ctx context.Context, sink protocol.EventSink) error {
 	memories, err := s.daemon.agent.ListMemory(ctx)
 	if err != nil {
-		return protocolError{code: -32603, message: err.Error()}
+		return protocol.InternalError(err.Error())
 	}
 	result := protocol.MemoryListResult{Memories: make([]protocol.MemoryItem, 0, len(memories))}
 	for _, m := range memories {
@@ -702,7 +706,7 @@ func toolSummaryPayload(summary memory.ToolSummary) *protocol.ToolSummaryPayload
 func (s *service) handleCompact(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
 	rt, sessionID, _, err := s.daemon.sessions.beginRun(req.ConnID)
 	if err != nil {
-		return nil, err
+		return nil, requestErrorForState(err)
 	}
 	// compact 会重写当前 session 的 working state，必须像普通 run 一样独占 session，不能和 LLM/tool run 并发。
 	s.daemon.sessions.setPhase(sessionID, protocol.AgentRunPhaseCompact)
@@ -714,7 +718,7 @@ func (s *service) handleCompact(ctx context.Context, req protocol.Request, sink 
 	}()
 	before, after, contextWindow, turnsCompressed, truncated, err := rt.agent.Compact(ctx)
 	if err != nil {
-		return nil, protocolError{code: -32603, message: err.Error()}
+		return nil, protocol.InternalError(err.Error())
 	}
 	result := protocol.CompactResult{BeforeTokens: before, AfterTokens: after, ContextWindow: contextWindow, TurnsCompressed: turnsCompressed, SummaryTokens: (before - after) / 2, TruncatedOutputs: truncated, Noop: turnsCompressed == 0}
 	emit(ctx, sink, protocol.NotifyCompactResult, result)
@@ -746,7 +750,7 @@ func (s *service) handleAttachmentStatus(req protocol.Request) (protocol.Attachm
 	}
 	root, bytes, count, err := rt.agent.AttachmentStatus()
 	if err != nil {
-		return protocol.AttachmentStatusResult{}, protocolError{code: -32603, message: err.Error()}
+		return protocol.AttachmentStatusResult{}, protocol.InternalError(err.Error())
 	}
 	return protocol.AttachmentStatusResult{SessionID: sessionID, Root: root, Bytes: bytes, Count: count}, nil
 }
@@ -758,7 +762,7 @@ func (s *service) handleAttachmentClear(req protocol.Request) (protocol.Attachme
 	}
 	root, removedBytes, removedCount, bytes, count, err := rt.agent.ClearAttachments()
 	if err != nil {
-		return protocol.AttachmentClearResult{}, protocolError{code: -32603, message: err.Error()}
+		return protocol.AttachmentClearResult{}, protocol.InternalError(err.Error())
 	}
 	return protocol.AttachmentClearResult{SessionID: sessionID, Root: root, BytesRemoved: removedBytes, CountRemoved: removedCount, Bytes: bytes, Count: count}, nil
 }
@@ -766,12 +770,12 @@ func (s *service) handleAttachmentClear(req protocol.Request) (protocol.Attachme
 func (s *service) handleConfigSet(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
 	var params protocol.ConfigSetParams
 	if err := decodeParams(req.Params, &params); err != nil {
-		return nil, invalidParams(err.Error())
+		return nil, protocol.InvalidRequest(err.Error())
 	}
-	updated, err := s.daemon.agent.UpdateConfig(agent.ConfigSetParams{Action: params.Action, ModelRef: params.ModelRef, ActiveModel: params.ActiveModel, APIKey: params.APIKey, DeleteAPIKey: params.DeleteAPIKey, Locale: params.Locale, Theme: params.Theme, GuardMode: params.GuardMode, Workspace: params.Workspace, Model: agent.ConfigModel{Provider: params.Model.Provider, Protocol: config.ModelProtocol(params.Model.Protocol), AuthMode: config.AuthMode(params.Model.AuthMode), Model: params.Model.Model, BaseURL: params.Model.BaseURL, ContextWindow: params.Model.ContextWindow, MaxOutputTokens: params.Model.MaxOutputTokens, Strengths: params.Model.Strengths, SubtaskFor: params.Model.SubtaskFor, Reasoning: params.Model.Reasoning}})
+	updated, err := s.daemon.agent.UpdateConfig(agent.ConfigSetParams{Action: params.Action, ModelRef: params.ModelRef, ActiveModel: params.ActiveModel, APIKey: params.APIKey, DeleteAPIKey: params.DeleteAPIKey, Locale: params.Locale, Theme: params.Theme, GuardMode: params.GuardMode, Workspace: params.Workspace, Model: params.Model})
 	if err != nil {
 		logging.Error("config", "update_failed", err, logging.Event{"action": params.Action, "model_ref": params.ModelRef, "active_model": params.ActiveModel})
-		return nil, invalidParams(err.Error())
+		return nil, protocol.InvalidRequest(err.Error())
 	}
 	logging.Info("config", "update_success", logging.Event{"action": params.Action, "model_ref": params.ModelRef, "active_model": params.ActiveModel})
 	result := configToParams(updated)
@@ -886,30 +890,20 @@ func truncateUTF8(s string, maxBytes int) string {
 	return s[:end]
 }
 
-type protocolError struct {
-	code    int
-	message string
-	data    any
-}
-
-func (e protocolError) Error() string { return e.message }
-func (e protocolError) Code() int     { return e.code }
-func (e protocolError) Data() any {
-	if e.data != nil {
-		return e.data
+func requestErrorForState(err error) *protocol.RequestError {
+	if err == nil {
+		return protocol.InternalError("internal error")
 	}
-	switch e.code {
-	case -32601:
-		return protocol.ProtocolErrorData{Kind: "unsupported_method"}
-	case -32602:
-		return protocol.ProtocolErrorData{Kind: "invalid_request"}
+	switch err.Error() {
+	case "session_required", "session not loaded":
+		return protocol.SessionRequired(err.Error())
+	case "session_busy", "session not running":
+		return protocol.SessionBusy(err.Error())
+	case "interaction_pending":
+		return protocol.SessionBusyReason(err.Error(), protocol.ErrorReasonInteractionPending)
 	default:
-		return protocol.ProtocolErrorData{Kind: "internal_error"}
+		return protocol.InvalidRequest(err.Error())
 	}
-}
-
-func invalidParams(message string) protocolError {
-	return protocolError{code: -32602, message: message, data: protocol.ProtocolErrorData{Kind: "invalid_request"}}
 }
 
 func protocolRunError(err *agent.RunError) *protocol.RunError {

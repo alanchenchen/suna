@@ -45,6 +45,9 @@ func NormalizeModelProtocol(protocol ModelProtocol) ModelProtocol {
 
 func (c *Config) NormalizeModels() error {
 	for i := range c.Models {
+		if strings.Contains(c.Models[i].Provider, "/") {
+			return fmt.Errorf("model provider %q must not contain '/'", c.Models[i].Provider)
+		}
 		protocol := NormalizeModelProtocol(c.Models[i].Protocol)
 		if !IsSupportedModelProtocol(protocol) {
 			return fmt.Errorf("model %q protocol %q is not supported", c.Models[i].Ref(), c.Models[i].Protocol)

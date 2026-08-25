@@ -101,7 +101,8 @@ func TestRenderGuardReviewShowsStructuredParameterVisibility(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	got, err := loader.RenderGuardReview(GuardReviewData{ToolName: "editfile", ToolParams: `{"path":"report.md"}`, ParamsTruncated: true})
+	evidence := "Latest direct user message:\n- keep report.md local"
+	got, err := loader.RenderGuardReview(GuardReviewData{ToolName: "editfile", ToolParams: `{"path":"report.md"}`, ParamsTruncated: true, Evidence: evidence})
 	if err != nil {
 		t.Fatalf("RenderGuardReview() error = %v", err)
 	}
@@ -111,7 +112,18 @@ func TestRenderGuardReviewShowsStructuredParameterVisibility(t *testing.T) {
 	if strings.Contains(got, "Params contains `[omitted]`") {
 		t.Fatalf("rendered prompt = %q, want no marker-based policy", got)
 	}
-	if rules, action := strings.Index(got, "Goal:"), strings.Index(got, "Current action:"); rules < 0 || action < 0 || rules > action {
+	if !strings.Contains(got, evidence) {
+		t.Fatalf("rendered prompt = %q, want bounded evidence", got)
+	}
+	if rules, action := strings.Index(got, "Rules:"), strings.Index(got, "Current action:"); rules < 0 || action < 0 || rules > action {
 		t.Fatalf("rendered prompt does not keep stable review rules before dynamic action data: %q", got)
+	}
+	if action, evidenceIndex := strings.Index(got, "Current action:"), strings.Index(got, evidence); action < 0 || evidenceIndex < 0 || action > evidenceIndex {
+		t.Fatalf("rendered prompt does not keep current action before dynamic evidence: %q", got)
+	}
+	for _, want := range []string{"Never use confirm to resolve task-fit uncertainty", "Use modify only for a clear intent conflict", "confirm only when the material risk is concrete", "Prefer approve for normal, aligned"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered prompt missing %q", want)
+		}
 	}
 }

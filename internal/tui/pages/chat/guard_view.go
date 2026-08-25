@@ -25,12 +25,12 @@ type GuardOverlayView struct {
 
 // GuardOverlayView 只产出 guard 浮层结构数据；风险颜色、滚动窗口和最终样式由 root adapter 处理。
 func (m Model) GuardOverlayView(width, overlayMaxHeight int, labels GuardOverlayLabels) GuardOverlayView {
-	w := maxInt(44, minInt(76, width-4))
+	w := max(44, min(76, width-4))
 	return GuardOverlayView{
 		Guard:      m.ActiveGuard(),
 		Width:      w,
-		Inner:      maxInt(20, w-8),
-		BodyHeight: maxInt(0, minInt(12, overlayMaxHeight-12)),
+		Inner:      max(20, w-8),
+		BodyHeight: max(0, min(12, overlayMaxHeight-12)),
 		Labels:     labels,
 	}
 }

@@ -122,11 +122,15 @@ type ProviderValidationLabels struct {
 	InvalidContextWindow   string
 	InvalidMaxOutputTokens string
 	InvalidProtocol        string
+	InvalidProvider        string
 }
 
 func ValidateProviderForm(v ProviderFormValues, setupMode bool, labels ProviderValidationLabels) error {
 	if v.Provider == "" || v.Model == "" {
 		return fmt.Errorf("%s", labels.Required)
+	}
+	if strings.Contains(v.Provider, "/") {
+		return fmt.Errorf("%s", labels.InvalidProvider)
 	}
 	if !coreconfig.IsSupportedModelProtocol(v.Protocol) {
 		return fmt.Errorf("%s", labels.InvalidProtocol)

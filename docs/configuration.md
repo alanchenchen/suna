@@ -209,7 +209,7 @@ api_key = "<API_KEY>"
 | `active_model` | string | 否 | 第一个 `[[models]]` | 新建 session 的默认模型，格式为 `provider/model`，必须匹配某个模型配置；不会改变已有 session 的模型。 |
 | `max_model_rps` | int | 否 | `10` | 每个模型 ref 的请求限速，避免 subtask 并发打爆供应商。保存时值为 0 会被省略。 |
 | `[[models]]` | array | 是 | 无 | 至少一个模型，否则配置不可用。 |
-| `models.provider` | string | 是 | 无 | 厂商/凭证命名空间，也是模型 ref 前缀；必须和 `credentials.toml` 分组名一致。 |
+| `models.provider` | string | 是 | 无 | 厂商/凭证命名空间，也是模型 ref 前缀；必须和 `credentials.toml` 分组名一致。允许空格、横线和普通 Unicode 字符，但不能包含 `/`。 |
 | `models.protocol` | string | 否 | `openai_chat` | 模型协议，决定使用哪个请求适配器：`openai_chat` / `openai_responses` / `anthropic`。旧配置缺失时按 `openai_chat` 使用。 |
 | `models.auth_mode` | string | 否 | 协议默认 | 静态凭据认证模式。当前仅 `anthropic` 支持显式 `bearer` / `both`；省略时只发送标准 `X-Api-Key`。 |
 | `models.model` | string | 是 | 无 | 上游模型 ID。模型 ref 为 `provider/model`。 |

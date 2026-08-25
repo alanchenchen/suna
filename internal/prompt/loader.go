@@ -70,17 +70,12 @@ func (l *Loader) RenderCompressWithState(previousState, content string) (string,
 
 func (l *Loader) RenderGuardReview(data GuardReviewData) (string, error) {
 	return l.Render("guard_review", map[string]any{
-		"ToolName":         data.ToolName,
-		"ToolParams":       data.ToolParams,
-		"ParamsTruncated":  data.ParamsTruncated,
-		"Target":           data.Target,
-		"Risk":             data.Risk,
-		"Task":             data.Task,
-		"LatestUserInput":  data.LatestUserInput,
-		"UserDecisions":    data.UserDecisions,
-		"PreviousTask":     data.PreviousTask,
-		"ToolIntent":       data.ToolIntent,
-		"AssistantContext": data.AssistantContext,
+		"ToolName":        data.ToolName,
+		"ToolParams":      data.ToolParams,
+		"ParamsTruncated": data.ParamsTruncated,
+		"Target":          data.Target,
+		"Risk":            data.Risk,
+		"Evidence":        data.Evidence,
 	})
 }
 
@@ -134,17 +129,12 @@ type SystemPromptData struct {
 }
 
 type GuardReviewData struct {
-	ToolName         string
-	ToolParams       string
-	ParamsTruncated  bool
-	Target           string
-	Risk             string
-	Task             string
-	LatestUserInput  string
-	UserDecisions    string
-	PreviousTask     string
-	ToolIntent       string
-	AssistantContext string
+	ToolName        string
+	ToolParams      string
+	ParamsTruncated bool
+	Target          string
+	Risk            string
+	Evidence        string
 }
 
 type SubtaskPromptData struct {

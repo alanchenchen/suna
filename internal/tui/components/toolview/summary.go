@@ -107,8 +107,8 @@ func searchSummary(mode, query, path string, maxWidth int) string {
 	if prefix == "" {
 		prefix = "auto"
 	}
-	pathLabel := CompactPath(path, maxInt(8, maxWidth/3))
-	queryBudget := maxInt(8, maxWidth-lipWidth(prefix)-lipWidth(pathLabel)-6)
+	pathLabel := CompactPath(path, max(8, maxWidth/3))
+	queryBudget := max(8, maxWidth-lipWidth(prefix)-lipWidth(pathLabel)-6)
 	queryLabel := compactText(query, queryBudget)
 	return compactText(fmt.Sprintf("%s %q in %s", prefix, queryLabel, pathLabel), maxWidth)
 }

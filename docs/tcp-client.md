@@ -178,7 +178,7 @@ const canUse = (name) => hello.catalog.features.includes(name);
 
 `runtime_version` 只用于展示和诊断，不用于推断功能。客户端必须忽略未知字段和 notification；若误调用不支持的方法，只处理该请求的 `method not found`，连接仍可继续使用。
 
-未握手就调用其他 method 会收到 `handshake_required` 错误。服务端也会关闭长期未完成握手的连接。
+未握手就调用其他 method 会收到 `handshake_required` 错误。服务端也会关闭长期未完成握手的连接。客户端处理 response error 时按 `data.kind → data.reason → error.code` 分支，`message` 只用于展示；未知 kind/reason 不得关闭连接。完整映射见 [protocol.md](protocol.md#6-错误模型)。
 
 ---
 
@@ -474,7 +474,7 @@ try {
 - `config.model.auth_mode.bearer`：可使用 `bearer`；
 - `config.model.auth_mode.both`：可使用 `both`。
 
-Feature 缺失时隐藏对应 UI。客户端编辑并回写模型时，应保留自己不修改的配置字段。
+Feature 缺失时隐藏对应 UI。`config.set/upsert_model` 编辑已有模型时使用字段 presence 语义：缺失字段保持原值，显式字段才覆盖；`auth_mode="default"` 恢复默认，`strengths=[]`、`subtask_for=[]`、`reasoning={}` 显式清空。创建新模型时，必填字段仍按现有规则校验，缺失的可选字段使用 Runtime 默认值。
 
 ```json
 {"provider":"example-provider","protocol":"anthropic","auth_mode":"bearer","model":"example-model","base_url":"https://api.example.com","context_window":200000,"max_output_tokens":8192}

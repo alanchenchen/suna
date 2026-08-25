@@ -170,24 +170,24 @@ func runningStatusIcon(deps RenderDeps) string {
 }
 
 func renderToolTitledBox(width int, title string, lines []string, styles RenderStyles) string {
-	maxOuterWidth := maxInt(20, width-4)
-	maxContentWidth := maxInt(8, maxOuterWidth-2)
-	title = textutil.TruncateRunes(strings.TrimSpace(title), maxInt(4, maxContentWidth-3))
+	maxOuterWidth := max(20, width-4)
+	maxContentWidth := max(8, maxOuterWidth-2)
+	title = textutil.TruncateRunes(strings.TrimSpace(title), max(4, maxContentWidth-3))
 	titlePrefix := "─ "
 	titleSuffix := " "
 	titleWidth := lipgloss.Width(titlePrefix) + lipgloss.Width(title) + lipgloss.Width(titleSuffix)
-	contentWidth := maxInt(8, titleWidth)
+	contentWidth := max(8, titleWidth)
 	for _, line := range lines {
-		contentWidth = maxInt(contentWidth, lipgloss.Width(line)+2)
+		contentWidth = max(contentWidth, lipgloss.Width(line)+2)
 	}
-	contentWidth = minInt(maxContentWidth, contentWidth)
-	topRest := strings.Repeat("─", maxInt(0, contentWidth-titleWidth))
+	contentWidth = min(maxContentWidth, contentWidth)
+	topRest := strings.Repeat("─", max(0, contentWidth-titleWidth))
 	top := styles.Dim.Render("╭"+titlePrefix) + styles.HL.Render(title) + styles.Dim.Render(titleSuffix+topRest+"╮")
 	bottom := styles.Dim.Render("╰" + strings.Repeat("─", contentWidth) + "╯")
 	out := []string{top}
 	for _, line := range lines {
 		content := ansi.Truncate(" "+line+" ", contentWidth, "…")
-		pad := strings.Repeat(" ", maxInt(0, contentWidth-lipgloss.Width(content)))
+		pad := strings.Repeat(" ", max(0, contentWidth-lipgloss.Width(content)))
 		out = append(out, styles.Dim.Render("│")+content+pad+styles.Dim.Render("│"))
 	}
 	out = append(out, bottom)
@@ -219,11 +219,11 @@ func RenderEntry(te *Entry, nested bool, deps RenderDeps) string {
 	if nested {
 		prefix = "      " + s.Dim.Render("└─ ")
 	}
-	maxWidth := maxInt(20, deps.width()-lipgloss.Width(stripANSI(prefix))-8)
+	maxWidth := max(20, deps.width()-lipgloss.Width(stripANSI(prefix))-8)
 	// 首行必须为耗时预留空间，避免长命令或长路径把右侧 duration 挤出可视区域。
 	durWidth := lipgloss.Width(dur)
 	statusWidth := lipgloss.Width(statusIcon)
-	headerBudget := maxInt(8, maxWidth-statusWidth-durWidth-2)
+	headerBudget := max(8, maxWidth-statusWidth-durWidth-2)
 	mainLabel, detailLabel := entryLabels(te, headerBudget, deps)
 	mainLabel = ansi.Truncate(mainLabel, headerBudget, "…")
 	line := fmt.Sprintf("%s%s %s%s", prefix, statusIcon, s.HL.Render(mainLabel), s.Dim.Render(dur))
@@ -240,7 +240,7 @@ func RenderEntry(te *Entry, nested bool, deps RenderDeps) string {
 	}
 	if te.Status == StatusError && !HasExecSummary(te) {
 		if err := ShortToolError(te.Result); err != "" {
-			line += "\n" + prefix + "  " + s.Err.Render(textutil.TruncateRunes(err, maxInt(24, deps.width()-12)))
+			line += "\n" + prefix + "  " + s.Err.Render(textutil.TruncateRunes(err, max(24, deps.width()-12)))
 		}
 	}
 	if te.Status == StatusDone || te.Status == StatusError {
@@ -265,7 +265,7 @@ func entryLabels(te *Entry, maxWidth int, deps RenderDeps) (string, string) {
 	}
 	if HasFileChange(te) {
 		if path, _ := te.Metadata["path"].(string); path != "" {
-			main := te.Name + " " + CompactPath(path, maxInt(12, maxWidth-lipgloss.Width(te.Name)-1))
+			main := te.Name + " " + CompactPath(path, max(12, maxWidth-lipgloss.Width(te.Name)-1))
 			if intent != "" {
 				return main, intent
 			}
@@ -488,13 +488,6 @@ func splitWrappedStyle(content string, width int, maxLines int, style lipgloss.S
 }
 
 func stripANSI(s string) string { return s }
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
 
 func topLevelEntries(block *Block) []*Entry {
 	if block == nil {

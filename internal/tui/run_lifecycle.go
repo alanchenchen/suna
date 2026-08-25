@@ -82,6 +82,8 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 		t.finishStreamingMessages()
 		t.chat.ResumeAvailable = false
 		t.appendRunElapsed(p.RunID)
+		// run 成功完成后短暂显示开心眼奖励帧（约 1.6 秒），再回到 idle。
+		t.petHappyUntil = time.Now().Add(petHappyDuration)
 		t.resetPhase()
 	case protocol.AgentRunRunning:
 		if t.cancelling {

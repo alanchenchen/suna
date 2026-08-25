@@ -126,6 +126,13 @@ type TUI struct {
 
 	// chatSpinnerTicking 保证 loading/compacting 的 spinner 只有一条 tick 链；Join running session 时也会按需启动。
 	chatSpinnerTicking bool
+
+	// petFrame 是宠物动画当前帧；petTicking 保证全局只有一条 pet tick 链，
+	// 离开 Chat/Welcome 时终止，避免多条链相互打架。
+	petFrame   int
+	petTicking bool
+	// petHappyUntil 非零时宠物显示开心眼（run 完成后的奖励帧），到期后回到 idle。
+	petHappyUntil time.Time
 }
 
 type guardConfirmView = chatpage.GuardConfirmView
