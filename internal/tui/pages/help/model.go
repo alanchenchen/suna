@@ -77,10 +77,3 @@ func (m *Model) ensure() {
 	vp.MouseWheelEnabled = true
 	m.vp = vp
 }
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

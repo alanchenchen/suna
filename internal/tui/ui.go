@@ -35,19 +35,6 @@ var (
 
 // UI 通用工具函数和小型面板渲染。
 // 这里集中放置跨页面复用的纯布局逻辑，页面文件只保留各自状态机和主要渲染入口。
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
 
 func fmtTok(n int) string {
 	if n >= 1_000_000 {

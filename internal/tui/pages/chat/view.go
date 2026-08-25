@@ -44,7 +44,7 @@ func (m Model) View(deps ViewDeps) string {
 	}
 	gap := 2
 	used := lipgloss.Width(pet[1]) + gap + lipgloss.Width(deps.TopMeta) + gap + lipgloss.Width(deps.Conn)
-	pad := maxInt(gap, deps.Width-used)
+	pad := max(gap, deps.Width-used)
 
 	// pet 首行独占，第二行与 TopMeta/Conn 并排；超过两行时剩余行依次输出。
 	sb.WriteString(pet[0] + "\n")

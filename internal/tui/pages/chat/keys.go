@@ -1,5 +1,7 @@
 package chat
 
+import "slices"
+
 // KeyTarget 描述 Chat key event 应先交给哪个 modal/区域处理。
 type KeyTarget int
 
@@ -88,19 +90,10 @@ func (m *Model) ToggleToolDetail(visibleIDs []string) {
 	if !m.ShowToolDetail {
 		return
 	}
-	if !containsString(visibleIDs, m.SelectedToolID) {
+	if !slices.Contains(visibleIDs, m.SelectedToolID) {
 		m.SelectedToolID = ""
 	}
 	if m.SelectedToolID == "" && len(visibleIDs) > 0 {
 		m.SelectedToolID = visibleIDs[0]
 	}
-}
-
-func containsString(items []string, target string) bool {
-	for _, item := range items {
-		if item == target {
-			return true
-		}
-	}
-	return false
 }

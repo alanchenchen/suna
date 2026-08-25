@@ -163,7 +163,7 @@ func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptB
 		switch msg.Role {
 		case "user":
 			if deps.RenderUserMessage != nil {
-				addBlock(i, msg.Streaming, "\n"+deps.RenderUserMessage(msg.Content, maxInt(20, deps.Width-8))+"\n")
+				addBlock(i, msg.Streaming, "\n"+deps.RenderUserMessage(msg.Content, max(20, deps.Width-8))+"\n")
 			}
 			inSunaBlock = false
 		case "assistant":
@@ -178,7 +178,7 @@ func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptB
 				}
 			}
 			endLine := lineCount
-			nav = ResponseNavInfo{StartLine: startLine, LineCount: maxInt(0, endLine-startLine), MsgIndex: i, Streaming: msg.Streaming}
+			nav = ResponseNavInfo{StartLine: startLine, LineCount: max(0, endLine-startLine), MsgIndex: i, Streaming: msg.Streaming}
 		case "run_duration":
 			if content, ok := msg.Content.(string); ok && deps.RenderRunDuration != nil {
 				addBlock(i, false, deps.RenderRunDuration(content)+"\n")
@@ -307,8 +307,8 @@ func (m Model) desiredTranscriptWindowRange() (int, int) {
 		return 0, m.TranscriptTotalLines
 	}
 	overscan := height * transcriptOverscanScreens
-	start := maxInt(0, m.TranscriptYOffset-overscan)
-	end := minInt(m.TranscriptTotalLines, m.TranscriptYOffset+height+overscan)
+	start := max(0, m.TranscriptYOffset-overscan)
+	end := min(m.TranscriptTotalLines, m.TranscriptYOffset+height+overscan)
 	return start, end
 }
 
@@ -358,8 +358,8 @@ func (m Model) visibleTranscriptLines(start, end int) []string {
 		if cursor >= end {
 			break
 		}
-		from := maxInt(0, start-cursor)
-		to := minInt(block.LineCount, end-cursor)
+		from := max(0, start-cursor)
+		to := min(block.LineCount, end-cursor)
 		lines = append(lines, blockLineRange(block.Text, from, to)...)
 		cursor = blockEnd
 	}
@@ -397,7 +397,7 @@ func (m *Model) ScrollTranscript(delta int) bool {
 }
 
 func (m *Model) PageTranscript(direction int) bool {
-	delta := maxInt(1, m.Viewport.Height()/2)
+	delta := max(1, m.Viewport.Height()/2)
 	if direction < 0 {
 		delta = -delta
 	}
@@ -405,7 +405,7 @@ func (m *Model) PageTranscript(direction int) bool {
 }
 
 func (m Model) TranscriptMaxYOffset() int {
-	return maxInt(0, m.TranscriptTotalLines-m.Viewport.Height())
+	return max(0, m.TranscriptTotalLines-m.Viewport.Height())
 }
 
 func (m Model) TranscriptAtBottom() bool {
@@ -428,7 +428,7 @@ func (m *Model) JumpToLastAssistantStart() bool {
 	if !m.ResponseNavAvailable {
 		return false
 	}
-	m.SetTranscriptYOffset(maxInt(0, m.LastAssistantStartLine))
+	m.SetTranscriptYOffset(max(0, m.LastAssistantStartLine))
 	m.FollowBottom = false
 	return true
 }
@@ -535,5 +535,5 @@ func clampInt(v, low, high int) int {
 	if high < low {
 		low, high = high, low
 	}
-	return minInt(high, maxInt(low, v))
+	return min(high, max(low, v))
 }

@@ -58,12 +58,12 @@ func (d DetailDeps) width() int {
 }
 
 func (d DetailDeps) bodyHeight() int {
-	return maxInt(1, d.OverlayMaxHeight-7)
+	return max(1, d.OverlayMaxHeight-7)
 }
 
 func (d DetailDeps) innerWidth() int {
-	w := maxInt(44, minInt(104, d.width()-4))
-	return maxInt(24, w-8)
+	w := max(44, min(104, d.width()-4))
+	return max(24, w-8)
 }
 
 // RenderDetailOverlay 渲染工具详情浮层，并通过 scrollOffset 维护虚拟滚动位置。
@@ -71,7 +71,7 @@ func RenderDetailOverlay(te *Entry, scrollOffset *int, deps DetailDeps) string {
 	if te == nil {
 		return ""
 	}
-	w := maxInt(44, minInt(104, deps.width()-4))
+	w := max(44, min(104, deps.width()-4))
 	bodyHeight := deps.bodyHeight()
 	// 工具结果可能很长；详情面板走虚拟数据源，只渲染当前可见窗口。
 	source := DetailLineSource(te, deps)
@@ -162,7 +162,7 @@ func BuildDetailLineSource(te *Entry, inner int, deps DetailDeps) scroll.LineSou
 func DetailHelpText(start, height, total int, deps DetailDeps) string {
 	var parts []string
 	if total > height {
-		parts = append(parts, fmt.Sprintf("PgUp/PgDn %s %d-%d/%d", deps.Labels.Scroll, start+1, minInt(total, start+height), total))
+		parts = append(parts, fmt.Sprintf("PgUp/PgDn %s %d-%d/%d", deps.Labels.Scroll, start+1, min(total, start+height), total))
 	}
 	if deps.SelectedTotal > 1 {
 		if deps.SelectedIndex > 0 {
@@ -177,7 +177,7 @@ func DetailHelpText(start, height, total int, deps DetailDeps) string {
 }
 
 func DetailPageStep(deps DetailDeps) int {
-	return maxInt(1, deps.bodyHeight()-1)
+	return max(1, deps.bodyHeight()-1)
 }
 
 func ScrollDetail(te *Entry, scrollOffset *int, delta int, deps DetailDeps) {
@@ -189,7 +189,7 @@ func ScrollDetail(te *Entry, scrollOffset *int, delta int, deps DetailDeps) {
 		return
 	}
 	bodyHeight := deps.bodyHeight()
-	maxOffset := maxInt(0, DetailLineSource(te, deps).Len()-bodyHeight)
+	maxOffset := max(0, DetailLineSource(te, deps).Len()-bodyHeight)
 	*scrollOffset += delta
 	if *scrollOffset < 0 {
 		*scrollOffset = 0
@@ -221,11 +221,4 @@ func appendSubtaskParams(sections *scroll.Sections, te *Entry, width int, deps D
 		appendLines("", deps.Styles.Dim.Render(deps.Labels.Task))
 		appendWrapped(fmt.Sprintf("%v", task))
 	}
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

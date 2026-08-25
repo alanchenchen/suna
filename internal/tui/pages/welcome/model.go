@@ -195,16 +195,3 @@ func welcomeContentWidth(viewportWidth int) int {
 	// Border and horizontal padding consume six cells outside Style.Width.
 	return min(preferred, max(1, viewportWidth-6))
 }
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
