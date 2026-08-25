@@ -67,6 +67,8 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 		return nil
 	case "/skills":
 		return t.handleSkills(parts)
+	case "/attachments":
+		return t.handleAttachments(parts)
 	case "/mcp":
 		return t.handleMCP(parts)
 	case "/help":
@@ -158,6 +160,64 @@ func (t *TUI) updateModelPicker(key string, msg tea.Msg) (tea.Model, tea.Cmd) {
 	return t, t.chat.UpdateModelPicker(msg)
 }
 
+func (t *TUI) handleAttachments(parts []string) tea.Cmd {
+	if len(parts) != 1 {
+		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.tr("tui.attachments.usage")})
+		return nil
+	}
+	t.chat.OpenAttachmentsOverlay()
+	return t.attachmentStatusCmd()
+}
+
+func (t *TUI) updateAttachmentsOverlay(ks string) (tea.Model, tea.Cmd) {
+	if t.chat.AttachmentsConfirm {
+		switch ks {
+		case "esc":
+			t.chat.CancelAttachmentsConfirm()
+			return t, nil
+		case "enter":
+			if t.chat.ConfirmAttachmentsClear() {
+				return t, t.attachmentClearCmd()
+			}
+			return t, nil
+		}
+		return t, nil
+	}
+	switch ks {
+	case "esc":
+		t.chat.CloseAttachmentsOverlay()
+		return t, t.syncInputFocus()
+	case "delete", "backspace", "ctrl+h":
+		if t.attachmentStatus.Count > 0 {
+			t.chat.BeginAttachmentsClear()
+		}
+		return t, nil
+	}
+	return t, nil
+}
+
+func (t *TUI) renderAttachmentsOverlay(width int) string {
+	w := max(52, min(92, width-4))
+	if t.chat.AttachmentsConfirm {
+		var lines []string
+		lines = append(lines, t.gradientText(t.tr("tui.attachments.clear_confirm_title")), "")
+		lines = append(lines, styleDim.Render(t.tr("tui.attachments.clear_confirm_body", t.attachmentStatus.Count)))
+		lines = append(lines, "", styleDim.Render(t.tr("tui.attachments.clear_confirm_help")))
+		return boxStyle.Width(w).Padding(1, 2).Render(strings.Join(lines, "\n"))
+	}
+	var lines []string
+	lines = append(lines, t.gradientText(t.tr("tui.attachments.title", t.attachmentStatus.Count, formatAttachmentSize(t.attachmentStatus.Bytes))))
+	if t.attachmentStatus.SessionID == "" || t.attachmentStatus.SessionID != t.currentSession.ID {
+		lines = append(lines, "", styleDim.Render("▀  ▀"), styleDim.Render(t.tr("tui.attachments.empty")))
+	} else if t.attachmentStatus.Count == 0 {
+		lines = append(lines, "", styleDim.Render("▀  ▀"), styleDim.Render(t.tr("tui.attachments.empty")))
+	} else {
+		lines = append(lines, "", styleDim.Render(t.tr("tui.attachments.description")))
+	}
+	lines = append(lines, "", styleDim.Render(t.tr("tui.attachments.help")))
+	return boxStyle.Width(w).Padding(1, 2).Render(strings.Join(lines, "\n"))
+}
+
 func (t *TUI) handleMemory(parts []string) tea.Cmd {
 	if len(parts) != 1 {
 		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.i18n.T("memory.list_hint")})
@@ -247,9 +307,6 @@ func (t *TUI) updateMemoryOverlay(ks string) (tea.Model, tea.Cmd) {
 				return t, t.clearMemoryOverlayCmd()
 			}
 			return t, nil
-		default:
-			t.chat.UpdateMemoryConfirmText(ks)
-			return t, nil
 		}
 	}
 	switch ks {
@@ -262,15 +319,15 @@ func (t *TUI) updateMemoryOverlay(ks string) (tea.Model, tea.Cmd) {
 	case "down":
 		t.chat.MoveMemoryCursor(1)
 		return t, nil
-	case "delete", "backspace", "ctrl+h":
-		if t.chat.BeginMemoryDelete() {
-			return t, nil
-		}
-		return t, nil
 	case "enter":
-		if t.chat.MemorySelectionIsClear() {
+		// 清空是主操作，选中清空项时用 enter 触发；空列表无操作。
+		if len(t.chat.Memories) > 0 && t.chat.MemorySelectionIsClear() {
 			t.chat.BeginMemoryClear()
 		}
+		return t, nil
+	case "delete", "backspace", "ctrl+h":
+		// 删除键只对普通条目生效；清空项用 enter 触发。
+		t.chat.BeginMemoryDelete()
 		return t, nil
 	}
 	return t, nil
@@ -450,6 +507,9 @@ func (t *TUI) renderMemoryOverlay(width int) string {
 	body = append(body, styleDim.Render(t.tr("tui.memory.description")), "")
 	if view.Loading {
 		body = append(body, styleDim.Render(t.tr("tui.memory.loading")))
+	} else if len(view.Rows) == 0 {
+		// 空状态带一只静态小宠物，与公共 overlay 组件一致。
+		body = append(body, styleDim.Render("▀  ▀"), styleDim.Render(t.tr("tui.memory.empty")))
 	} else {
 		for _, row := range view.Rows {
 			body = append(body, t.renderMemoryRowView(row, view.Inner)...)
@@ -457,7 +517,7 @@ func (t *TUI) renderMemoryOverlay(width int) string {
 	}
 	body, start, total := scrollWindow(body, view.Height, &t.chat.MemoryScroll)
 	title := t.tr("tui.memory.title", view.Total)
-	lines := []string{styleHL.Render(title), ""}
+	lines := []string{t.gradientText(title), ""}
 	lines = append(lines, body...)
 	if view.Error != "" {
 		lines = append(lines, "", styleError.Render(view.Error))
@@ -470,7 +530,7 @@ func (t *TUI) renderMemoryRowView(row chatpage.MemoryRowView, width int) []strin
 	cursor := "  "
 	contentStyle := styleToolDim
 	if row.Selected {
-		cursor = styleCursor.Render("▶ ")
+		cursor = styleCursor.Render("▎ ")
 		contentStyle = styleHL
 	}
 	if row.Kind == chatpage.MemoryRowClear {
@@ -507,13 +567,24 @@ func (t *TUI) renderMemoryConfirmOverlay(view chatpage.MemoryOverlayView) string
 	case chatpage.MemoryConfirmClear:
 		lines = append(lines, styleHL.Render(t.tr("tui.memory.clear_confirm_title")), "")
 		lines = append(lines, styleDim.Render(t.tr("tui.memory.clear_confirm_body", view.Total)), "")
-		lines = append(lines, t.tr("tui.memory.clear_confirm_input", view.ConfirmText))
-		lines = append(lines, "", styleDim.Render(t.tr("tui.memory.clear_confirm_help")))
+		lines = append(lines, styleDim.Render(t.tr("tui.memory.clear_confirm_help")))
 	}
 	return boxStyle.Width(view.Width).Padding(1, 2).Render(strings.Join(lines, "\n"))
 }
 
 func (t *TUI) memoryHelpText(start, height, total int) string {
+	// 空列表没有任何可执行操作，只提示关闭。
+	if len(t.chat.Memories) == 0 {
+		return t.tr("tui.memory.help_empty")
+	}
+	// help 文案随选中项动态变化：清空项是主操作（enter），普通条目是删除（delete）。
+	if t.chat.MemorySelectionIsClear() {
+		text := t.tr("tui.memory.help_clear")
+		if total > height {
+			text += fmt.Sprintf(" · %d-%d/%d", start+1, min(total, start+height), total)
+		}
+		return text
+	}
 	text := t.tr("tui.memory.help")
 	if total > height {
 		text += fmt.Sprintf(" · %d-%d/%d", start+1, min(total, start+height), total)
@@ -604,14 +675,16 @@ func (t *TUI) renderSessionsOverlay(width int) string {
 		return t.renderSessionDeleteConfirm(w)
 	}
 	var lines []string
-	lines = append(lines, styleHL.Render(t.tr("tui.sessions.title")))
+	lines = append(lines, t.gradientText(t.tr("tui.sessions.title")))
 	if t.chat.SessionsLoading && len(t.chat.Sessions) == 0 {
 		lines = append(lines, "", styleDim.Render(t.tr("tui.loading")))
 	} else if t.chat.SessionsError != "" {
 		lines = append(lines, "", styleErrLine.Render(t.chat.SessionsError))
 	}
 	if len(t.chat.Sessions) == 0 && !t.chat.SessionsLoading {
-		lines = append(lines, "", styleDim.Render(t.tr("tui.sessions.empty")))
+		// 空状态带一只静态小宠物，延续 pet 形象，避免纯文本显得生硬；逐行居中。
+		pet := styleDim.Render("▀  ▀")
+		lines = append(lines, "", centerCell(pet, inner), centerCell(styleDim.Render(t.tr("tui.sessions.empty")), inner))
 	}
 	start := 0
 	if t.chat.SessionCursor >= bodyHeight {
@@ -679,7 +752,7 @@ func (t *TUI) renderSessionRow(i int, s protocol.SessionInfo, width int) []strin
 	cursor := "  "
 	contentStyle := styleToolDim
 	if i == t.chat.SessionCursor {
-		cursor = styleCursor.Render("▶ ")
+		cursor = styleCursor.Render("▎ ")
 		contentStyle = styleHL
 	}
 	status := t.sessionStatusLabel(s)

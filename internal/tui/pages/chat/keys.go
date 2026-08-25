@@ -16,6 +16,7 @@ const (
 	KeyTargetMCP
 	KeyTargetMemory
 	KeyTargetSessions
+	KeyTargetAttachments
 	KeyTargetAttachment
 	KeyTargetBlocked
 )
@@ -46,6 +47,9 @@ func (m Model) RouteKey(key string, inputLocked bool, compacting bool) KeyTarget
 	}
 	if m.SessionsOverlayOpen {
 		return KeyTargetSessions
+	}
+	if m.AttachmentsOverlayOpen {
+		return KeyTargetAttachments
 	}
 	if m.AttachmentMode || m.AttachmentDelete {
 		return KeyTargetAttachment

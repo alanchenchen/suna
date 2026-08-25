@@ -187,7 +187,7 @@ func (t *TUI) renderSelectedSubtaskTools(innerWidth int) []string {
 		cursor := "  "
 		labelStyle := lipgloss.NewStyle()
 		if i == t.chat.SubtaskToolCursor {
-			cursor = styleCursor.Render("▶ ")
+			cursor = styleCursor.Render("▎ ")
 			labelStyle = styleHL
 		}
 		icon := t.subtaskStatusIcon(child)

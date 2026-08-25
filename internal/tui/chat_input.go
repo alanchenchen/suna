@@ -328,6 +328,8 @@ func (t *TUI) updateChatKey(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t.updateMemoryOverlay(ks)
 	case chatpage.KeyTargetSessions:
 		return t.updateSessionsOverlay(ks)
+	case chatpage.KeyTargetAttachments:
+		return t.updateAttachmentsOverlay(ks)
 	case chatpage.KeyTargetImagePasteConfirm:
 		cmd := t.updatePendingImagePaste(ks)
 		t.syncContent()

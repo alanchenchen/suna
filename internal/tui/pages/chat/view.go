@@ -21,15 +21,16 @@ type ViewDeps struct {
 	CommandSuggestions string
 	StatusBar          string
 
-	ToolDetailOverlay string
-	HelpOverlay       string
-	ModelOverlay      string
-	SkillsOverlay     string
-	MCPOverlay        string
-	MemoryOverlay     string
-	SessionsOverlay   string
-	GuardOverlay      string
-	Overlay           func(base, overlay string) string
+	ToolDetailOverlay  string
+	HelpOverlay        string
+	ModelOverlay       string
+	SkillsOverlay      string
+	MCPOverlay         string
+	MemoryOverlay      string
+	SessionsOverlay    string
+	AttachmentsOverlay string
+	GuardOverlay       string
+	Overlay            func(base, overlay string) string
 }
 
 // View 负责 Chat 页面主布局和 overlay 叠放顺序；具体样式和子组件渲染由 root adapter 注入。
@@ -76,6 +77,9 @@ func (m Model) View(deps ViewDeps) string {
 	}
 	if m.SessionsOverlayOpen && deps.SessionsOverlay != "" {
 		content = overlay(content, deps.SessionsOverlay, deps.Overlay)
+	}
+	if m.AttachmentsOverlayOpen && deps.AttachmentsOverlay != "" {
+		content = overlay(content, deps.AttachmentsOverlay, deps.Overlay)
 	}
 	if m.ActiveInteractionKind() == InteractionGuardConfirm && deps.GuardOverlay != "" {
 		content = overlay(content, deps.GuardOverlay, deps.Overlay)

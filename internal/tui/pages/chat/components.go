@@ -168,7 +168,6 @@ func (m *Model) ResetRuntime() {
 	m.MemoryScroll = 0
 	m.MemoryError = ""
 	m.MemoryConfirm = MemoryConfirmNone
-	m.MemoryConfirmText = ""
 	m.Sessions = nil
 	m.SessionsOverlayOpen = false
 	m.SessionsLoading = false

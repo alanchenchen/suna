@@ -207,7 +207,6 @@ type Model struct {
 	MemoryScroll      int
 	MemoryError       string
 	MemoryConfirm     MemoryConfirmMode
-	MemoryConfirmText string
 
 	Sessions            []protocol.SessionInfo
 	SessionsOverlayOpen bool
@@ -217,4 +216,7 @@ type Model struct {
 	SessionConfirm      SessionConfirmMode
 	SessionConfirmID    string
 	SessionRowKinds     []SessionRowKind
+
+	AttachmentsOverlayOpen bool
+	AttachmentsConfirm     bool
 }

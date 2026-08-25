@@ -53,6 +53,10 @@ func (t *TUI) viewChat() string {
 	if t.chat.SessionsOverlayOpen {
 		sessionsOverlay = t.renderSessionsOverlay(t.width)
 	}
+	attachmentsOverlay := ""
+	if t.chat.AttachmentsOverlayOpen {
+		attachmentsOverlay = t.renderAttachmentsOverlay(t.width)
+	}
 	guardOverlay := ""
 	if t.chat.ActiveInteractionKind() == chatpage.InteractionGuardConfirm {
 		guardOverlay = t.renderGuardOverlay(t.width)
@@ -70,7 +74,7 @@ func (t *TUI) viewChat() string {
 		Width:              t.width,
 		MiniPet:            renderMiniPet(petState, t.petFrame),
 		TopMeta:            t.chatTopMeta(),
-		Conn:               t.chatConnectionDot(petState),
+		Conn:               t.chatConnectionDot(),
 		Content:            t.chat.Viewport.View(),
 		Separator:          separator,
 		InputSeparator:     inputSeparator,
@@ -85,6 +89,7 @@ func (t *TUI) viewChat() string {
 		MCPOverlay:         mcpOverlay,
 		MemoryOverlay:      memoryOverlay,
 		SessionsOverlay:    sessionsOverlay,
+		AttachmentsOverlay: attachmentsOverlay,
 		GuardOverlay:       guardOverlay,
 		Overlay:            overlay.OverlayBlock,
 	}))
@@ -134,18 +139,17 @@ func (t *TUI) chatPetState() petState {
 	return petWorking
 }
 
-func (t *TUI) chatConnectionDot(state petState) string {
+func (t *TUI) chatConnectionDot() string {
 	badge := t.mcpBadge()
 	conn := ""
 	if t.localCli == nil || !t.localCli.Connected() {
 		conn = styleDim.Render("○")
 	} else {
-		switch state {
-		case petWorking:
+		// 连接点表达 daemon 健康状态：会话运行状态已由 pet 动画承担，避免重复。
+		// 有 MCP 服务器错误时降级为警告色，daemon 断开时显示空心点。
+		if t.hasMCPError() {
 			conn = styleToolRun.Render("●")
-		case petThinking:
-			conn = styleBrand.Render("●")
-		default:
+		} else {
 			conn = styleAgent.Render("●")
 		}
 	}
@@ -153,6 +157,16 @@ func (t *TUI) chatConnectionDot(state petState) string {
 		return badge + " " + conn
 	}
 	return conn
+}
+
+// hasMCPError 检查是否有 MCP 服务器处于错误状态，用于连接点降级为警告色。
+func (t *TUI) hasMCPError() bool {
+	for _, server := range t.chat.MCPServers {
+		if server.State == protocol.MCPServerError || server.Error != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *TUI) mcpBadge() string {
@@ -431,11 +445,18 @@ func (t *TUI) renderCommandSuggestions() string {
 	}
 	width := max(24, t.width-4)
 	var lines []string
+	lastGroup := chatpage.CommandGroup("")
 	for i, c := range view.Items {
+		if c.Group != lastGroup {
+			if titleKey := chatpage.CommandGroupTitle(c.Group); titleKey != "" {
+				lines = append(lines, styleDim.Render(t.tr(titleKey)))
+			}
+			lastGroup = c.Group
+		}
 		prefix := "  "
 		style := lipgloss.NewStyle()
 		if i == view.Selected {
-			prefix = styleCursor.Render("▶ ")
+			prefix = styleCursor.Render("▎ ")
 			style = styleHL
 		}
 		line := prefix + style.Render(fmt.Sprintf("%-16s", c.Cmd)) + styleDim.Render(t.tr(c.DescKey))
