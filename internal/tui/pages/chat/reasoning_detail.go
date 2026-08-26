@@ -24,6 +24,9 @@ func (m Model) HasStreamingReasoning() bool {
 }
 
 // ToggleVisibleReasoningDetail 切换当前视窗中最相关的已完成思考块。
+// 交互语义：按 Ctrl+R 直接展开视窗内最相关的块，同时自动折叠旧的展开块
+// （单展开约束，避免多块展开撑高 transcript）；只有视窗内最相关的块就是
+// 当前展开的块时才折叠（toggle 关闭）。
 func (m *Model) ToggleVisibleReasoningDetail() (TranscriptAnchor, bool) {
 	if m == nil || m.HasStreamingReasoning() {
 		return TranscriptAnchor{}, false
@@ -50,11 +53,6 @@ func (m *Model) ToggleVisibleReasoningDetail() (TranscriptAnchor, bool) {
 		if msg.Role != "reasoning" || msg.Streaming {
 			continue
 		}
-		if msg.ID == m.ExpandedReasoningID {
-			anchor := TranscriptAnchor{MessageID: msg.ID, RelativeRow: blockStart - viewportStart}
-			m.ExpandedReasoningID = 0
-			return anchor, true
-		}
 		distance := absInt((blockStart + blockEnd) - (viewportStart + viewportEnd))
 		if bestIndex < 0 || distance < bestDistance || (distance == bestDistance && blockStart > bestStart) {
 			bestIndex = block.MsgIndex
@@ -66,6 +64,13 @@ func (m *Model) ToggleVisibleReasoningDetail() (TranscriptAnchor, bool) {
 		return TranscriptAnchor{}, false
 	}
 	msg := &m.Messages[bestIndex]
+	if msg.ID == m.ExpandedReasoningID {
+		// 视窗内最相关的块就是当前展开的块：折叠（toggle 关闭）。
+		anchor := TranscriptAnchor{MessageID: msg.ID, RelativeRow: bestStart - viewportStart}
+		m.ExpandedReasoningID = 0
+		return anchor, true
+	}
+	// 展开视窗内最相关的块，自动替换旧的展开块（单展开约束）。
 	m.ExpandedReasoningID = msg.ID
 	return TranscriptAnchor{MessageID: msg.ID, RelativeRow: bestStart - viewportStart}, true
 }
