@@ -133,6 +133,17 @@ type TUI struct {
 	petTicking bool
 	// petHappyUntil 非零时宠物显示开心眼（run 完成后的奖励帧），到期后回到 idle。
 	petHappyUntil time.Time
+
+	// selection 是 transcript 内容行上的鼠标选区（拖动中或已定格），
+	// 锚定内容行索引，滚动跟随内容不丢失；y 复制、单击/Esc 清除。
+	selection Selection
+	// selectionEdgeTicking 保证 edge scroll 只有一条 tick 链（拖动到边缘时启动）。
+	selectionEdgeTicking   bool
+	selectionEdgeDirection int
+	lastSelectionMouseY    int
+	// copyFeedbackUntil 非零时状态栏显示“已复制”反馈，到期后消失。
+	copyFeedbackUntil time.Time
+	copyFeedbackText  string
 }
 
 type guardConfirmView = chatpage.GuardConfirmView

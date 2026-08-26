@@ -357,7 +357,32 @@ func leftAlignInputOverlayLine(line string, width int) string {
 	return strings.Repeat(" ", left) + line
 }
 
+// renderSelectionHint 渲染选区提示（显示在状态栏，替换常规内容，零布局变化）。
+// 拖动中提示操作方式，定格后提示复制键并显示已选行数；无选区时不显示（零开销）。
+func (t *TUI) renderSelectionHint() string {
+	if !t.selection.HasAny() {
+		return ""
+	}
+	if t.selection.Active {
+		return t.tr("tui.selection.drag_hint")
+	}
+	if t.selection.HasSelection {
+		start, end := t.selection.LineRange()
+		// 显示已选行数让用户确认选区范围；输入区选区无行高亮，行数反馈尤为重要。
+		return t.i18n.Tf("tui.selection.copy_hint_lines", end-start+1)
+	}
+	return ""
+}
+
 func (t *TUI) renderChatStatusBar() string {
+	// 复制反馈：选区复制成功后临时显示在状态栏左侧（1.5 秒后消失）。
+	if !t.copyFeedbackUntil.IsZero() && time.Now().Before(t.copyFeedbackUntil) && t.copyFeedbackText != "" {
+		return "  " + styleBrand.Render(t.copyFeedbackText) + strings.Repeat(" ", max(1, t.width-2-lipgloss.Width(t.copyFeedbackText)))
+	}
+	// 选区提示：拖动中/定格后显示在状态栏（替换常规内容，零布局变化，不抖动）。
+	if hint := t.renderSelectionHint(); hint != "" {
+		return "  " + styleBrand.Render(hint) + strings.Repeat(" ", max(1, t.width-2-lipgloss.Width(hint)))
+	}
 	ctx := "?"
 	if t.contextTokens > 0 {
 		ctx = fmtTok(t.contextTokens)

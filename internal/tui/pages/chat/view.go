@@ -15,6 +15,7 @@ type ViewDeps struct {
 
 	Content            string
 	Separator          string
+	SelectionHint      string
 	InputArea          string
 	InputSeparator     string
 	PreInputHint       string
@@ -92,6 +93,9 @@ func (m Model) View(deps ViewDeps) string {
 	}
 	if deps.PreInputHint != "" {
 		sb.WriteString(deps.PreInputHint + "\n")
+	}
+	if deps.SelectionHint != "" {
+		sb.WriteString(deps.SelectionHint + "\n")
 	}
 	if deps.CommandSuggestions != "" {
 		sb.WriteString(deps.CommandSuggestions + "\n")

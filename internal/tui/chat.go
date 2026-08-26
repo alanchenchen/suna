@@ -92,7 +92,8 @@ func (t *TUI) initChatComponents() tea.Cmd {
 		SpinnerStyle:   lipgloss.NewStyle().Foreground(ColorBrand),
 	})
 	t.chat.InitNativeLists(currentTheme.Name == ThemeDark, t.nativeListStyles(), t.nativeListText())
-
+	// 选区高亮由内容层处理（applySelectionStyle：strip ANSI + 反色），
+	// 不再使用 viewport 的 StyleLineFunc——它是外层包裹，无法覆盖行内 markdown 背景色。
 	t.syncContent()
 	t.layoutChat()
 	t.syncContent()
@@ -103,6 +104,17 @@ func (t *TUI) initChatComponents() tea.Cmd {
 
 func (t *TUI) syncContent() {
 	t.transcriptSyncDirty = false
+	// 同步选区到 chat 包：内容层应用选区样式（strip ANSI + 反色），
+	// 避免行内 markdown 背景色覆盖选区背景。无选区时置 -1（零开销）。
+	if t.selection.HasAny() && t.selection.Region == SelectionRegionTranscript {
+		start, end := t.selection.LineRange()
+		t.chat.SelectionStart = start
+		t.chat.SelectionEnd = end
+		t.chat.SelectionStyle = styleSelection
+	} else {
+		t.chat.SelectionStart = -1
+		t.chat.SelectionEnd = -1
+	}
 	t.chat.SyncTranscript(chatpage.TranscriptDeps{
 		Width:         t.width,
 		MarkdownWidth: max(24, t.width-8),
@@ -169,6 +181,9 @@ const textStreamSpinnerSuppressWindow = 120 * time.Millisecond
 
 func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m := msg.(type) {
+	case selectionEdgeScrollMsg:
+		return t, t.updateSelectionEdgeScroll()
+
 	case transcriptSyncMsg:
 		return t, t.flushScheduledTranscriptSync()
 
@@ -262,7 +277,46 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if t.mouseInComposer(m) {
+			// 输入区：按下左键启动输入区选区（复制输入框草稿），拖动/释放由选区状态机处理。
+			// 点击输入框区域时清除 transcript 选区（浏览器心智：点击即取消选择）。
+			if t.selection.HasSelection && t.selection.Region == SelectionRegionTranscript {
+				t.selection.Clear()
+				t.restoreTranscriptFollowAfterSelection()
+				t.syncContent()
+			}
+			if t.chat.ActiveInteractionKind() == chatpage.InteractionNone &&
+				!t.chat.HasOverlayOpen() && !t.chat.ShowToolDetail {
+				if _, isWheel := any(m).(tea.MouseWheelMsg); !isWheel {
+					// 内容区选区拖动中跨入输入区：Motion/Release 继续交给内容区处理，
+					// 避免事件被输入区分支吞掉导致选区卡在 Active 状态（y 键失效）。
+					if t.selection.Active && t.selection.Region == SelectionRegionTranscript {
+						if consumed, cmd := t.handleSelectionMouse(m); consumed {
+							return t, cmd
+						}
+					}
+					if consumed, cmd := t.handleInputSelectionMouse(m); consumed {
+						return t, cmd
+					}
+				}
+			}
 			return t, nil
+		}
+		// 内容区鼠标选区：按下/拖动/释放驱动选区状态机（浏览器式拖选复制）。
+		// 仅在无阻塞交互、无 overlay 时生效；滚轮事件不进入选区逻辑。
+		if t.chat.ActiveInteractionKind() == chatpage.InteractionNone &&
+			!t.chat.HasOverlayOpen() && !t.chat.ShowToolDetail {
+			if _, isWheel := any(m).(tea.MouseWheelMsg); !isWheel {
+				// 输入区选区拖动中跨入内容区：Motion/Release 继续交给输入区处理，
+				// 避免内容区用行号污染输入区选区（Region 不对称的对称处理）。
+				if t.selection.Active && t.selection.Region == SelectionRegionInput {
+					if consumed, cmd := t.handleInputSelectionMouse(m); consumed {
+						return t, cmd
+					}
+				}
+				if consumed, cmd := t.handleSelectionMouse(m); consumed {
+					return t, cmd
+				}
+			}
 		}
 		if t.chat.ActiveInteractionKind() == chatpage.InteractionGuardConfirm {
 			if mm, ok := any(m).(tea.MouseWheelMsg); ok {

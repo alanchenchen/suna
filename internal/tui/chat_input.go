@@ -307,6 +307,20 @@ func (t *TUI) updateChatKey(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.doQuit()
 		return t, tea.Quit
 	}
+	// 选区存在时优先处理复制/清除键；阻塞交互（Guard/AskUser）仍优先路由。
+	if t.selection.HasAny() && t.chat.ActiveInteractionKind() == chatpage.InteractionNone {
+		switch ks {
+		case "y":
+			t.copySelection()
+			return t, nil
+		case "esc":
+			t.selection.Clear()
+			t.stopSelectionEdgeScroll()
+			t.restoreTranscriptFollowAfterSelection()
+			t.syncContent()
+			return t, nil
+		}
+	}
 	switch t.chat.RouteKey(ks, t.inputLocked(), t.chat.Compacting) {
 	case chatpage.KeyTargetDiscardDraft:
 		return t.updateDiscardDraftConfirm(ks, msg)
