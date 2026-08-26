@@ -56,26 +56,19 @@ func TestCurrentInputPolicy(t *testing.T) {
 
 func TestCurrentInteractionPresentation(t *testing.T) {
 	tests := []struct {
-		name              string
-		state             InputPolicyState
-		terminalSelection bool
-		want              InteractionPresentation
+		name  string
+		state InputPolicyState
+		want  InteractionPresentation
 	}{
 		{
-			name:              "terminal selection locks composer",
-			terminalSelection: true,
-			want:              InteractionPresentation{InputPolicy: InputPolicy{Locked: true}, TerminalSelection: true},
-		},
-		{
-			name:              "guard takes priority over terminal selection",
-			state:             InputPolicyState{InteractionKind: InteractionGuardConfirm},
-			terminalSelection: true,
-			want:              InteractionPresentation{InputPolicy: InputPolicy{Locked: true}, GuardActive: true},
+			name:  "guard locks composer",
+			state: InputPolicyState{InteractionKind: InteractionGuardConfirm},
+			want:  InteractionPresentation{InputPolicy: InputPolicy{Locked: true}, GuardActive: true},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := CurrentInteractionPresentation(tt.state, tt.terminalSelection)
+			got := CurrentInteractionPresentation(tt.state)
 			if got != tt.want {
 				t.Fatalf("CurrentInteractionPresentation() = %#v, want %#v", got, tt.want)
 			}

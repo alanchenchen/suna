@@ -564,8 +564,6 @@ func (t *TUI) renderInputArea() string {
 	}
 	if presentation.GuardActive {
 		text = styleError.Render(t.tr("tui.guard.input_waiting"))
-	} else if presentation.TerminalSelection {
-		text = renderInlineRunStatus(width, t.tr("tui.selection_mode.hint"), t.tr("tui.selection_mode.back"))
 	} else if emptyInput {
 		text = styleDim.Render(t.tr("tui.chat.input_placeholder"))
 	}
@@ -677,9 +675,6 @@ func (t *TUI) lockedInputPlaceholder() string {
 	if presentation.GuardActive {
 		return t.tr("tui.guard.input_waiting")
 	}
-	if presentation.TerminalSelection {
-		return t.tr("tui.selection_mode.hint")
-	}
 	policy := presentation.InputPolicy
 	if policy.Placeholder != "" {
 		return policy.Placeholder
@@ -691,9 +686,6 @@ func (t *TUI) renderPreInputHint() string {
 	presentation := t.currentInteractionPresentation()
 	if presentation.GuardActive {
 		return styleError.Render("  ⚠ "+t.tr("tui.guard.input_waiting")) + styleDim.Render(" · ") + styleDim.Render(t.tr("tui.guard.help"))
-	}
-	if presentation.TerminalSelection {
-		return ""
 	}
 	if block := t.renderHandoffBlock(); block != "" {
 		return block
@@ -717,7 +709,7 @@ func (t *TUI) inputHint() string {
 
 func (t *TUI) inputHelp() string {
 	presentation := t.currentInteractionPresentation()
-	if presentation.TerminalSelection || presentation.GuardActive {
+	if presentation.GuardActive {
 		return ""
 	}
 	if presentation.Locked {

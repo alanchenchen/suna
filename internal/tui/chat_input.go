@@ -59,7 +59,7 @@ func (t *TUI) currentInteractionPresentation() chatpage.InteractionPresentation 
 		RespondingLabel: t.withRunElapsed(t.tr("status.responding")),
 		ObservingLabel:  t.withRunElapsed(t.tr("tui.chat.observe_input")),
 		CancellingLabel: t.tr("status.cancelling"),
-	}, t.selectionMode)
+	})
 }
 
 func (t *TUI) currentInputPolicy() chatpage.InputPolicy {
@@ -550,7 +550,6 @@ func (t *TUI) leaveCurrentSessionForWelcome() tea.Cmd {
 	t.welcomeIdlePicker = false
 	t.welcomeDeleteConfirm = false
 	t.welcomeDeleteID = ""
-	t.selectionMode = false
 	t.attachmentStatus = protocol.AttachmentStatusResult{}
 	t.updateSessionShortcuts()
 	return tea.Batch(t.detachSessionCmd(), t.refreshDaemonStatusCmd())

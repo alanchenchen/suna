@@ -11,8 +11,7 @@ type InputPolicy struct {
 // InteractionPresentation 统一描述当前输入区的真实交互状态，避免按键已被接管时仍渲染为普通输入。
 type InteractionPresentation struct {
 	InputPolicy
-	TerminalSelection bool
-	GuardActive       bool
+	GuardActive bool
 }
 
 // InputPolicyState 是推导输入锁定行为所需的最小运行态快照。
@@ -67,17 +66,12 @@ func CurrentInputPolicy(state InputPolicyState) InputPolicy {
 }
 
 // CurrentInteractionPresentation 将本地终端选择状态与 Chat runtime 状态投影为同一份输入呈现。
-// 终端选择是纯本地状态，Guard 则始终优先，避免安全交互被选择模式遮蔽。
-func CurrentInteractionPresentation(state InputPolicyState, terminalSelection bool) InteractionPresentation {
+// Guard 始终优先，避免安全交互被其他状态遮蔽。
+func CurrentInteractionPresentation(state InputPolicyState) InteractionPresentation {
 	policy := CurrentInputPolicy(state)
 	presentation := InteractionPresentation{InputPolicy: policy}
 	if state.InteractionKind == InteractionGuardConfirm {
 		presentation.GuardActive = true
-		return presentation
-	}
-	if terminalSelection {
-		presentation.TerminalSelection = true
-		presentation.Locked = true
 	}
 	return presentation
 }

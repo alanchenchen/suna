@@ -56,7 +56,7 @@ func TestGuardKeyBindingsRouteWithKeyPressMessages(t *testing.T) {
 	}
 }
 
-func TestGuardLocksComposerAndBlocksTerminalSelection(t *testing.T) {
+func TestGuardLocksComposer(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24}
 	tui.initChatComponents()
 	tui.chat.EnqueueGuardConfirm(&chatpage.GuardConfirmView{ID: "guard-1", Tool: "writefile", Risk: "high"})
@@ -72,22 +72,14 @@ func TestGuardLocksComposerAndBlocksTerminalSelection(t *testing.T) {
 	if !strings.Contains(view, "正在等待安全确认") {
 		t.Fatalf("renderInputArea() = %q, want guard waiting state", view)
 	}
-
-	_, _ = tui.Update(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModCtrl}))
-	if tui.selectionMode {
-		t.Fatal("selectionMode = true while guard confirmation is active")
-	}
 }
 
-func TestGuardNotificationExitsTerminalSelection(t *testing.T) {
+func TestGuardNotificationBlursTextarea(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24, currentRunCanControl: true, currentSession: protocol.SessionInfo{ID: "session-1", Status: protocol.SessionStatusRunning}}
 	tui.initChatComponents()
-	tui.selectionMode = true
+	tui.chat.Textarea.Focus()
 
 	tui.handleGuardConfirmNotification(protocol.GuardConfirmParams{ID: "guard-1", Tool: "writefile", SessionID: "session-1", CanReply: true})
-	if tui.selectionMode {
-		t.Fatal("selectionMode = true after guard notification")
-	}
 	if tui.chat.Textarea.Focused() {
 		t.Fatal("textarea.Focused() = true after guard notification")
 	}
@@ -128,15 +120,12 @@ func TestInteractionResolvedRestoresFocusForQueuedCustomAsk(t *testing.T) {
 	}
 }
 
-func TestChoiceOnlyAskUserNotificationExitsTerminalSelection(t *testing.T) {
+func TestChoiceOnlyAskUserNotificationBlursTextarea(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24, currentSession: protocol.SessionInfo{ID: "session-1", Status: protocol.SessionStatusWaiting}}
 	tui.initChatComponents()
-	tui.selectionMode = true
+	tui.chat.Textarea.Focus()
 
 	tui.handleAskUserNotification(protocol.AskUserParams{ID: "ask-1", SessionID: "session-1", Question: "continue?", Options: []string{"yes", "no"}, CanReply: true})
-	if tui.selectionMode {
-		t.Fatal("selectionMode = true after AskUser notification")
-	}
 	if tui.chat.Textarea.Focused() {
 		t.Fatal("textarea.Focused() = true after choice-only AskUser notification")
 	}
@@ -148,62 +137,11 @@ func TestChoiceOnlyAskUserNotificationExitsTerminalSelection(t *testing.T) {
 func TestCustomAskUserNotificationRestoresComposerFocus(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24, currentSession: protocol.SessionInfo{ID: "session-1", Status: protocol.SessionStatusWaiting}}
 	tui.initChatComponents()
-	tui.selectionMode = true
+	tui.chat.Textarea.Blur()
 
 	tui.handleAskUserNotification(protocol.AskUserParams{ID: "ask-1", SessionID: "session-1", Question: "continue?", AllowCustom: true, CanReply: true})
-	if tui.selectionMode {
-		t.Fatal("selectionMode = true after custom AskUser notification")
-	}
 	if !tui.chat.Textarea.Focused() {
 		t.Fatal("textarea.Focused() = false after custom AskUser notification")
-	}
-}
-
-func TestSelectionModeShowsReadOnlyComposerAndRestoresFocus(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24}
-	tui.initChatComponents()
-
-	_, _ = tui.Update(tea.KeyPressMsg(tea.Key{Code: 's', Mod: tea.ModCtrl}))
-	if !tui.selectionMode {
-		t.Fatal("selectionMode = false after Ctrl+S")
-	}
-	if tui.chat.Textarea.Focused() {
-		t.Fatal("textarea.Focused() = true while terminal selection is active")
-	}
-	view := stripANSIForTest(tui.renderInputArea())
-	if !strings.Contains(view, "拖动选择文本以复制") || !strings.Contains(view, "Esc 返回") {
-		t.Fatalf("renderInputArea() = %q, want terminal selection state", view)
-	}
-	if strings.Contains(view, "Esc 取消") {
-		t.Fatalf("renderInputArea() = %q, should not advertise run cancellation during terminal selection", view)
-	}
-
-	_, _ = tui.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
-	if tui.selectionMode {
-		t.Fatal("selectionMode = true after Esc")
-	}
-	if !tui.chat.Textarea.Focused() {
-		t.Fatal("textarea.Focused() = false after terminal selection exits")
-	}
-}
-
-func TestSelectionModeIgnoresWheelAsHistoryKeys(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24}
-	tui.initChatComponents()
-	tui.chat.Messages = []chatpage.Msg{{Role: "user", Content: "previous prompt"}}
-	tui.selectionMode = true
-
-	_, _ = tui.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
-	if got := tui.chat.Textarea.Value(); got != "" {
-		t.Fatalf("Textarea.Value() = %q, want empty while selection mode ignores up", got)
-	}
-	if tui.selectionMode != true {
-		t.Fatal("selectionMode changed after ignored up key")
-	}
-
-	_, _ = tui.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEsc}))
-	if tui.selectionMode {
-		t.Fatal("selectionMode = true after Esc, want false")
 	}
 }
 
