@@ -92,6 +92,7 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"tui.chat.worked_for":                      {LocaleEN: "Worked for", LocaleZH: "已工作"},
 		"tui.chat.thinking":                        {LocaleEN: "Thinking", LocaleZH: "思考"},
 		"tui.chat.thinking_detail_hint":            {LocaleEN: "Ctrl+R details", LocaleZH: "Ctrl+R 详情"},
+		"tui.chat.thinking_folded":                 {LocaleEN: "… {} rows folded", LocaleZH: "… 已折叠 {} 行"},
 		"tui.chat.thought_done":                    {LocaleEN: "Thought completed", LocaleZH: "思考完成"},
 		"tui.chat.input_placeholder":               {LocaleEN: "Type a message...", LocaleZH: "输入消息..."},
 		"tui.chat.queue_submitting":                {LocaleEN: "Queueing {} message(s)...", LocaleZH: "正在排队 {} 条..."},

@@ -173,8 +173,9 @@ func TestThinkingBoxCollapsedShowsAdaptivePreviewAndStopsElapsed(t *testing.T) {
 	if !strings.Contains(completed, "1.5s") {
 		t.Fatalf("renderThinkingBox(completed) = %q, want fixed duration", completed)
 	}
-	if !strings.Contains(completed, "Ctrl+R") || !strings.Contains(completed, "详情") {
-		t.Fatalf("renderThinkingBox(completed) = %q, want collapsed detail hint", completed)
+	// 内容 3 行未超过折叠上限（3 行），不显示展开提示（展开前后一致，提示是噪音）。
+	if strings.Contains(completed, "Ctrl+R") {
+		t.Fatalf("renderThinkingBox(completed) = %q, should not show detail hint when not truncated", completed)
 	}
 	if !strings.Contains(completed, "第一段") || !strings.Contains(completed, "第二段") || !strings.Contains(completed, "最终判断") {
 		t.Fatalf("renderThinkingBox(completed) = %q, want up to three completed reasoning lines", completed)
