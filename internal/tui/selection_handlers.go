@@ -239,7 +239,11 @@ func (t *TUI) copySelection() {
 	if strings.TrimSpace(text) == "" {
 		return
 	}
-	if err := clipboard.WriteText(text); err != nil {
+	write := t.clipboardWrite
+	if write == nil {
+		write = clipboard.WriteText
+	}
+	if err := write(text); err != nil {
 		return
 	}
 	t.copyFeedbackText = t.i18n.Tf("tui.selection.copied_chars", len([]rune(text)))

@@ -10,9 +10,12 @@ import (
 )
 
 // selectionTestTUI 构造一个带 transcript 内容的 TUI，供选区交互测试。
+// 注入 fake 剪贴板写入：headless CI 无 X11/Wayland 服务时真实 WriteText 会失败，
+// 导致复制反馈/选区清除断言无法验证。
 func selectionTestTUI(t *testing.T) *TUI {
 	t.Helper()
 	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24}
+	tui.clipboardWrite = func(string) error { return nil }
 	tui.initChatComponents()
 	// 3 条消息各 2 行 = 6 行内容
 	for i := 0; i < 3; i++ {

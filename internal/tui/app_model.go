@@ -31,6 +31,10 @@ type TUI struct {
 	program     *tea.Program
 	notifyQueue *notificationQueue
 
+	// clipboardWrite 是选区复制写入系统剪贴板的函数，测试可注入 fake 避免依赖
+	// 真实桌面剪贴板（headless CI 无 X11/Wayland 服务时 WriteText 会失败）。
+	clipboardWrite func(string) error
+
 	// 根应用状态：只负责页面路由和全局尺寸。
 	mode     uipage.Page
 	prevMode uipage.Page
