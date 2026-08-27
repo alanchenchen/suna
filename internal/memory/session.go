@@ -108,6 +108,27 @@ func (s *SessionStore) UpdateMetadata(ctx context.Context, id, title string, tit
 	return tx.Commit()
 }
 
+// UpdateTitleIfEmpty 只为没有消息且仍未命名的会话设置标题，返回是否实际更新。
+// 条件放在 SQL 中，避免多个客户端同时发送首条消息时互相覆盖标题。
+func (s *SessionStore) UpdateTitleIfEmpty(ctx context.Context, id, title string) (bool, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return false, nil
+	}
+	result, err := s.db.ExecContext(ctx, `
+		UPDATE sessions
+		SET title = ?, updated_at = ?
+		WHERE id = ? AND message_count = 0 AND TRIM(title) = ''`, title, time.Now(), id)
+	if err != nil {
+		return false, err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return updated == 1, nil
+}
+
 // MaterializeModelRefIfEmpty 只为尚未选择模型的旧会话固化一次模型引用。
 // 返回值表示本次调用是否取得了固化权；并发调用者必须重新读取最终值。
 func (s *SessionStore) MaterializeModelRefIfEmpty(ctx context.Context, id, modelRef string) (bool, error) {

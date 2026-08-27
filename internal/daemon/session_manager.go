@@ -531,6 +531,16 @@ func (m *sessionManager) update(ctx context.Context, connID string, params proto
 	return m.snapshotForConn(connID, *meta, rt, snap), nil
 }
 
+func (m *sessionManager) autoTitle(ctx context.Context, connID, sessionID, title string) (bool, error) {
+	m.mu.RLock()
+	attached := m.attached[connID] == sessionID
+	m.mu.RUnlock()
+	if !attached {
+		return false, fmt.Errorf("session_required")
+	}
+	return m.store.UpdateTitleIfEmpty(ctx, sessionID, title)
+}
+
 func (m *sessionManager) ensureAttached(connID string) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

@@ -31,6 +31,8 @@ func TestRenderSystemKeepsCapabilitiesWithoutPrescriptiveDelegation(t *testing.T
 		"Suna runs calls from the same response concurrently, including multiple `spawn` calls",
 		"Keep dependencies, user decisions, destructive actions, and writes to the same target sequential",
 		"Project workspace: `/workspace`",
+		"Project scope: treat `/workspace/project` as the active project root",
+		"A user-provided external path is in scope only for that explicit request",
 		"redirection targets inside it",
 		"Suna data directory: `/home/test/.suna`",
 		"configuration, logs, or Skills",
@@ -88,6 +90,14 @@ func TestRenderSubtaskSystemKeepsOutputContract(t *testing.T) {
 	for _, want := range []string{"Review the change.", "Available tools: readfile", "Workspace boundary: `/workspace`", "Focus on concurrency.", "Prefer issuing independent tool calls together when useful", "Suna runs them concurrently", `"side_effects"`, `"status":"none|cleaned|remaining|unknown"`} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rendered prompt missing %q: %q", want, got)
+		}
+	}
+	for _, want := range []string{
+		"Project scope: treat `/workspace/project` as the active project root",
+		"A user-provided external path is in scope only for that explicit request",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered subtask prompt missing %q: %q", want, got)
 		}
 	}
 	if contract, task := strings.Index(got, "Return exactly one JSON object"), strings.Index(got, "Review the change."); contract < 0 || task < 0 || contract > task {

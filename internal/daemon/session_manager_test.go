@@ -201,6 +201,32 @@ func TestSessionManagerUpdateRequiresAttachedIdleSession(t *testing.T) {
 		t.Fatalf("updated title = %q, want %q", got, title)
 	}
 }
+
+func TestSessionManagerAutoTitleOnlyUpdatesAnUntitledFirstMessage(t *testing.T) {
+	ctx := context.Background()
+	m := newTestSessionManager(t)
+	snap, err := m.create(ctx, "client-a", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+
+	updated, err := m.autoTitle(ctx, "client-a", snap.Session.ID, "首条消息")
+	if err != nil || !updated {
+		t.Fatalf("autoTitle() = (%v, %v), want (true, nil)", updated, err)
+	}
+	meta, err := m.store.Get(ctx, snap.Session.ID)
+	if err != nil {
+		t.Fatalf("Get error = %v", err)
+	}
+	if meta == nil || meta.Title != "首条消息" {
+		t.Fatalf("persisted title = %#v, want 首条消息", meta)
+	}
+
+	updated, err = m.autoTitle(ctx, "client-a", snap.Session.ID, "不应覆盖")
+	if err != nil || updated {
+		t.Fatalf("second autoTitle() = (%v, %v), want (false, nil)", updated, err)
+	}
+}
 func TestSessionManagerAttachDoesNotRecreateConcurrentlyDeletedSession(t *testing.T) {
 	ctx := context.Background()
 	m := newTestSessionManager(t)

@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -202,7 +201,7 @@ func (t *TUI) newSessionCmd(replaceSessionIDs ...string) tea.Cmd {
 		if t.localCli == nil {
 			return ipcErrorNotification(notifyConfigError, fmt.Errorf("%s", t.tr("error.not_connected")))
 		}
-		cwd, _ := os.Getwd()
+		cwd := t.newSessionCWD(replaceSessionID != "")
 		created, err := t.localCli.CreateSession(cwd, defaultSessionTitle(cwd))
 		if err != nil {
 			// 创建失败时旧会话仍保持附着，不能提前清空或删除它。
@@ -217,6 +216,13 @@ func (t *TUI) newSessionCmd(replaceSessionIDs ...string) tea.Cmd {
 		}
 		return newSessionResultMsg{Params: created}
 	}
+}
+
+func (t *TUI) newSessionCWD(fromCurrentSession bool) string {
+	if fromCurrentSession && strings.TrimSpace(t.currentSession.CWD) != "" {
+		return canonicalTUICWD(t.currentSession.CWD)
+	}
+	return currentProcessCWD()
 }
 
 func (t *TUI) attachSessionCmd(sessionID string, requireActive bool) tea.Cmd {

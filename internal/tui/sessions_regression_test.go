@@ -298,6 +298,22 @@ func TestWelcomeNewStartsWhenCurrentCWDSessionExists(t *testing.T) {
 	}
 }
 
+func TestNewSessionCWDUsesCurrentSessionWhenAvailable(t *testing.T) {
+	tui := &TUI{
+		currentSession: protocol.SessionInfo{ID: "session-1", CWD: "/tmp/project"},
+	}
+	if got, want := tui.newSessionCWD(true), canonicalTUICWD("/tmp/project"); got != want {
+		t.Fatalf("newSessionCWD(fromCurrentSession) = %q, want %q", got, want)
+	}
+}
+
+func TestNewSessionCWDFallsBackToProcessCWD(t *testing.T) {
+	tui := &TUI{}
+	if got, want := tui.newSessionCWD(false), currentProcessCWD(); got != want {
+		t.Fatalf("newSessionCWD(fallback) = %q, want %q", got, want)
+	}
+}
+
 func TestSessionDeleteConfirmationKeepsOriginalTargetAfterRefresh(t *testing.T) {
 	m := chatpage.Model{}
 	m.SetSessionOverlay(

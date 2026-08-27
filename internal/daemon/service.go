@@ -248,6 +248,14 @@ func (s *service) handleSendMessage(ctx context.Context, req protocol.Request, s
 	if err != nil {
 		return nil, requestErrorForState(err)
 	}
+	if title := autoTitleFromParts(params.Parts); title != "" {
+		if updated, titleErr := s.daemon.sessions.autoTitle(ctx, req.ConnID, sessionID, title); titleErr != nil {
+			logging.Error("session", "auto_title_failed", titleErr, logging.Event{"session_id": sessionID})
+		} else if updated {
+			// 标题已落库后广播一次，App、TUI 和其他客户端都能立即看到同一个标题。
+			s.daemon.broadcastSessionState(ctx, sessionID)
+		}
+	}
 	runCtx := tools.MergeExecutionContext(ctx, tools.ExecutionContext{SessionID: sessionID, RunID: runID, BoundaryID: "main"})
 	s.emitUserMessage(ctx, sessionID, req.ConnID, protocol.UserMessageParams{SessionID: sessionID, Parts: params.Parts})
 	events := rt.agent.Run(runCtx, input)
