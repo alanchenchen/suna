@@ -547,6 +547,36 @@ func TestBuildSubtaskGuardReviewContextDedupesShortTask(t *testing.T) {
 	}
 }
 
+// 长任务描述（含授权范围文件列表）完整注入：不被 180 runes 截断，
+// 文件列表必须完整可见，Guard review 才能确认授权范围（修复连环 modify 的核心场景）。
+func TestBuildSubtaskGuardReviewContextKeepsTaskFileList(t *testing.T) {
+	a := &Agent{}
+	// 任务描述超过 180 runes，文件列表在中间（之前会被 trimForGuardMiddle 截断成 [omitted]）。
+	task := "严格验证新语义并修到通过。只能修改以下测试文件：" +
+		"search-run.test.ts, search-model.test.ts, autosearch-content.test.ts, " +
+		"kernel-runtime.test.ts, mutation-observer.test.ts, visibility.test.ts, " +
+		"background-sync.test.ts, storage-adapter.test.ts, event-bus.test.ts, " +
+		"这些是授权范围，不要修改生产代码。"
+	if len([]rune(task)) <= 180 {
+		t.Fatalf("test task must exceed 180 runes, got %d", len([]rune(task)))
+	}
+	msgs := make([]model.Message, 0, 70)
+	msgs = append(msgs, model.NewTextMessage(model.RoleUser, task))
+	for i := 0; i < 69; i++ {
+		msgs = append(msgs, model.NewTextMessage(model.RoleAssistant, "step"))
+	}
+	ctx := a.buildSubtaskGuardReviewContext(runner.ToolExecution{WorkingMessages: msgs}, task)
+	// 文件列表必须完整可见（无截断标记）。
+	if strings.Contains(ctx.Evidence, "[omitted]") {
+		t.Fatalf("subtask evidence truncated file list: %q", ctx.Evidence)
+	}
+	for _, f := range []string{"search-run.test.ts", "event-bus.test.ts", "storage-adapter.test.ts"} {
+		if !strings.Contains(ctx.Evidence, f) {
+			t.Fatalf("subtask evidence missing %q: %q", f, ctx.Evidence)
+		}
+	}
+}
+
 func TestTruncateGuardReviewParamsKeepsStructuredSummary(t *testing.T) {
 	complete, completeTruncated := truncateGuardReviewParams(`{"path":"report.md"}`)
 	if completeTruncated {

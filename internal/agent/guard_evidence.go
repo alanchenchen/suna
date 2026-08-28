@@ -35,17 +35,20 @@ func buildGuardEvidence(messages []model.Message, riskDecisions, agentActions []
 	// 导致 Guard review 看不到用户意图而保守 modify。
 	for _, extra := range extraUsers {
 		if trimmed := strings.TrimSpace(extra); trimmed != "" {
-			trimmed = trimForGuardMiddle(trimmed, guardEvidenceUserItemRunes)
-			// 窗口内已有相同任务描述时不重复注入（短任务场景窗口内就是任务描述，
-			// 重复会出现 Latest 和 Earlier 两个 section 相同文本，浪费预算且可能让 LLM 困惑）。
-			duplicate := false
-			for _, existing := range users {
-				if existing == trimmed {
-					duplicate = true
+			// subtask 任务描述是唯一意图来源：完整注入，不做 180 截断。
+			// 截断会吃掉授权范围（如文件列表），导致 Guard review 无法确认而保守 modify。
+			// 预算由 addSection 兜底（subtask 场景其余证据为空，空余 1100+ runes）。
+			// 窗口内同一条消息已被 recentGuardUserEvidence 截断到 180，
+			// 用完整版替换截断版（前缀匹配），避免重复注入。
+			replaced := false
+			for i, existing := range users {
+				if existing == trimmed || strings.HasPrefix(trimmed, existing) {
+					users[i] = trimmed
+					replaced = true
 					break
 				}
 			}
-			if !duplicate {
+			if !replaced {
 				users = appendBoundedGuardEvidence(users, trimmed, guardEvidenceUserLimit)
 			}
 		}
