@@ -576,13 +576,3 @@ func TestBuildSubtaskGuardReviewContextKeepsTaskFileList(t *testing.T) {
 		}
 	}
 }
-
-func TestTruncateGuardReviewParamsKeepsStructuredSummary(t *testing.T) {
-	complete, completeTruncated := truncateGuardReviewParams(`{"path":"report.md"}`)
-	if completeTruncated {
-		t.Fatal("structured params marked truncated")
-	}
-	if complete != `{"path":"report.md"}` {
-		t.Fatalf("structured params = %q, want unchanged", complete)
-	}
-}

@@ -384,15 +384,6 @@ func guardExecutionRationale(call runner.ToolExecution) string {
 	return trimForGuard("Current step: "+intent+"\nAgent plan: "+context, 520)
 }
 
-func lastUserTextFromMessages(msgs []model.Message) string {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == model.RoleUser {
-			return msgs[i].Text()
-		}
-	}
-	return ""
-}
-
 func trimForGuard(s string, max int) string {
 	return trimForGuardMiddle(s, max)
 }
@@ -644,10 +635,6 @@ func (a *Agent) guardLLMReview(ctx context.Context, req guard.ReviewRequest) (st
 		return "", err
 	}
 	return readGuardReviewStream(ctx, ch, model.LLMGuardReviewTimeout)
-}
-
-func truncateGuardReviewParams(params string) (string, bool) {
-	return params, false
 }
 
 func readGuardReviewStream(ctx context.Context, ch <-chan model.Chunk, timeout time.Duration) (string, error) {
