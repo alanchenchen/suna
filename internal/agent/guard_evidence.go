@@ -28,8 +28,28 @@ type guardEvidenceBuilder struct {
 	sections  []string
 }
 
-func buildGuardEvidence(messages []model.Message, riskDecisions, agentActions []string, sessionState, rationale string) string {
+func buildGuardEvidence(messages []model.Message, riskDecisions, agentActions []string, sessionState, rationale string, extraUsers ...string) string {
 	users, answers := recentGuardUserEvidence(messages)
+	// subtask 场景：任务描述作为注入的用户意图（不受 64 条扫描窗口限制）。
+	// subtask 的任务描述是第一条也是唯一一条 user 消息，长任务（>64 条）时会被窗口挤出，
+	// 导致 Guard review 看不到用户意图而保守 modify。
+	for _, extra := range extraUsers {
+		if trimmed := strings.TrimSpace(extra); trimmed != "" {
+			trimmed = trimForGuardMiddle(trimmed, guardEvidenceUserItemRunes)
+			// 窗口内已有相同任务描述时不重复注入（短任务场景窗口内就是任务描述，
+			// 重复会出现 Latest 和 Earlier 两个 section 相同文本，浪费预算且可能让 LLM 困惑）。
+			duplicate := false
+			for _, existing := range users {
+				if existing == trimmed {
+					duplicate = true
+					break
+				}
+			}
+			if !duplicate {
+				users = appendBoundedGuardEvidence(users, trimmed, guardEvidenceUserLimit)
+			}
+		}
+	}
 	builder := guardEvidenceBuilder{remaining: guardEvidenceBudget}
 	if len(users) > 0 {
 		builder.addSection("Latest direct user message", users[len(users)-1:])

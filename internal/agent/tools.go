@@ -241,7 +241,7 @@ func (a *Agent) ExecuteSpawnTool(ctx context.Context, id string, params map[stri
 	}
 	ctx = model.WithBinding(ctx, binding)
 	ctx = tools.MergeExecutionContext(ctx, tools.ExecutionContext{BoundaryID: "spawn:" + spawnID})
-	r := a.newSubtaskRunner(events, spawnID, allowedTools)
+	r := a.newSubtaskRunner(events, spawnID, allowedTools, task)
 	st := subtask.New(subtask.Request{ID: spawnID, Task: task, Input: inputBlocks, Binding: binding, Invocation: model.Invocation{SessionScope: model.SessionScope(a.sessionID)}, System: subtaskPrompt, ToolDefs: toolDefs})
 	res, err := st.Run(ctx, r)
 	if execCtx, ok := tools.ExecutionContextFrom(ctx); ok && a.tools != nil {
@@ -292,8 +292,8 @@ func spawnToolResult(content string, res subtask.Result) tools.Result {
 	return tools.Result{Content: content, Error: errText, IsError: true}
 }
 
-func (a *Agent) newSubtaskRunner(events chan<- Event, spawnID string, allowedTools map[string]bool) *runner.Runner {
-	return &runner.Runner{Compressor: a.compressor, Calibrator: a.calibrator, Executor: subtaskExecutor{agent: a, events: events, allowedTools: allowedTools, spawnID: spawnID}, Sink: subtaskSink{events: events, spawnID: spawnID}, UsageSink: a, Hooks: runner.Hooks{CleanToolParams: a.cleanToolParams}}
+func (a *Agent) newSubtaskRunner(events chan<- Event, spawnID string, allowedTools map[string]bool, task string) *runner.Runner {
+	return &runner.Runner{Compressor: a.compressor, Calibrator: a.calibrator, Executor: subtaskExecutor{agent: a, events: events, allowedTools: allowedTools, spawnID: spawnID, task: task}, Sink: subtaskSink{events: events, spawnID: spawnID}, UsageSink: a, Hooks: runner.Hooks{CleanToolParams: a.cleanToolParams}}
 }
 
 type subtaskExecutor struct {
@@ -301,6 +301,7 @@ type subtaskExecutor struct {
 	events       chan<- Event
 	allowedTools map[string]bool
 	spawnID      string
+	task         string // subtask 任务描述，注入 Guard Evidence 作为用户意图（长任务时不被扫描窗口挤出）
 }
 
 func (e subtaskExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecution) tools.Result {
@@ -320,7 +321,7 @@ func (e subtaskExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecut
 		// subtask 也通过同一会话的 Guard gate，避免与主任务在同一 TUI 上交错确认。
 		// 它不记录到主任务回执，保持 subtask 的意图上下文隔离。
 		e.agent.guardGate.Lock()
-		result := e.agent.guard.Check(ctx, name, params, e.agent.buildSubtaskGuardReviewContext(call))
+		result := e.agent.guard.Check(ctx, name, params, e.agent.buildSubtaskGuardReviewContext(call, e.task))
 		e.agent.emitToolGuard(e.events, eventID, name, result)
 		allowed := true
 		if result.Decision == guard.Reject {
@@ -365,8 +366,10 @@ func (a *Agent) buildGuardReviewContext(call runner.ToolExecution) guard.ReviewC
 	return guard.ReviewContext{Evidence: buildGuardEvidence(messages, a.recentGuardRiskDecisions(), actions, a.sessionState, guardExecutionRationale(call))}
 }
 
-func (a *Agent) buildSubtaskGuardReviewContext(call runner.ToolExecution) guard.ReviewContext {
-	return guard.ReviewContext{Evidence: buildGuardEvidence(call.WorkingMessages, nil, nil, "", guardExecutionRationale(call))}
+func (a *Agent) buildSubtaskGuardReviewContext(call runner.ToolExecution, task string) guard.ReviewContext {
+	// subtask 任务描述作为注入的用户意图：长任务（>64 条消息）时任务描述会被
+	// Evidence 扫描窗口挤出，导致 Guard review 看不到用户意图而保守 modify。
+	return guard.ReviewContext{Evidence: buildGuardEvidence(call.WorkingMessages, nil, nil, "", guardExecutionRationale(call), task)}
 }
 
 func guardExecutionRationale(call runner.ToolExecution) string {
