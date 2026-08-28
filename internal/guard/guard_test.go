@@ -302,8 +302,9 @@ func TestWorkspaceExecKeepsAmbiguousQuotedPathsBlocked(t *testing.T) {
 	}
 	if runtime.GOOS != "windows" {
 		// 这些命令依赖 POSIX 根路径和 shell 语义；Windows 使用自身的路径与 shell 规则。
+		// 引号内路径只在解释器场景拦截（sh -c 会执行引号内容）；
+		// 数据场景（printf 参数）的引号内路径只是文本，不拦截。
 		commands = append(commands,
-			`printf '%s' "mentions /tmp here"`,
 			`printf 'ls / ' | sh`,
 			`eval "ls / "`,
 			`python3 -Bc "import os; os.system('ls / ')"`,
@@ -318,6 +319,22 @@ func TestWorkspaceExecKeepsAmbiguousQuotedPathsBlocked(t *testing.T) {
 		result := g.Check(context.Background(), "exec", map[string]any{"command": command, "cwd": root})
 		if result.Decision != Reject || result.Audit != "workspace_reject" {
 			t.Fatalf("ambiguous path command %q decision/audit = %s/%q, want reject/workspace_reject", command, result.Decision, result.Audit)
+		}
+	}
+}
+
+// 数据场景的引号内路径不拦截：printf 参数里的 /tmp 只是文本，不会被访问。
+func TestWorkspaceExecAllowsQuotedDataPaths(t *testing.T) {
+	root := t.TempDir()
+	g := NewGuardWithConfigModeAndWorkspace(nil, "test", ModeAuto, root, nil, nil, nil, nil)
+	for _, command := range []string{
+		`printf '%s' "mentions /tmp here"`,
+		`echo "path is /tmp/x"`,
+		`git commit -m "fix /tmp issue"`,
+	} {
+		result := g.Check(context.Background(), "exec", map[string]any{"command": command, "cwd": root})
+		if result.Audit == "workspace_reject" {
+			t.Fatalf("%q audit = workspace_reject, want normal flow (quoted data path)", command)
 		}
 	}
 }

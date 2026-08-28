@@ -172,15 +172,38 @@ func (g *Guard) SetLLMReviewer(reviewer LLMReviewer) {
 }
 
 func (g *Guard) Check(ctx context.Context, tool string, params map[string]any, reviewCtx ...ReviewContext) *GuardResult {
-	risk := g.assessRisk(tool, params)
+	// exec run 命令只解析一次 AST，供结构性高危 / risk / workspace 三处消费，
+	// 避免同一命令多次解析（设计方案：一次解析两处消费）。
+	var execAnalysis *ExecAnalysis
+	if tool == "exec" && execAction(params) == "run" {
+		if cmd, _ := params["command"].(string); strings.TrimSpace(cmd) != "" {
+			shell, _ := params["shell"].(string)
+			if a, ok := newExecAnalyzer().Analyze(cmd, shell); ok {
+				execAnalysis = &a
+			}
+		}
+	}
+	risk := g.assessRiskWithAnalysis(tool, params, execAnalysis)
 
-	if blocked, reason, auditReason := g.checkWorkspace(ctx, tool, params); blocked {
-		g.audit(ctx, tool, params, risk, "workspace_reject", auditReason)
-		return &GuardResult{Decision: Reject, Reason: reason, Risk: risk, Source: "rule", Audit: "workspace_reject"}
+	// 硬拦截顺序：结构性高危（组合特征兑底）→ blocked（危险命令）→ workspace（路径边界）→ sensitive（敏感文件）。
+	// 结构性高危不依赖规则穷举，所有 mode 一致拦截；auto 模式也只被这一层兑底。
+	if tool == "exec" && execAction(params) == "run" {
+		if isSystemicallyHighRiskAnalysis(execAnalysis) {
+			g.audit(ctx, tool, params, risk, "structural_high_risk", "blocked: systemically dangerous command")
+			return &GuardResult{Decision: Reject, Reason: "blocked: systemically dangerous command", Risk: risk, Source: "rule", Audit: "structural_high_risk"}
+		}
 	}
 	if blocked, reason := g.checkBlocked(tool, params); blocked {
 		g.audit(ctx, tool, params, risk, "blocked", reason)
 		return &GuardResult{Decision: Reject, Reason: reason, Risk: risk, Source: "rule", Audit: "blocked"}
+	}
+	if blocked, reason, auditReason := g.checkWorkspaceWithAnalysis(ctx, tool, params, execAnalysis); blocked {
+		g.audit(ctx, tool, params, risk, "workspace_reject", auditReason)
+		return &GuardResult{Decision: Reject, Reason: reason, Risk: risk, Source: "rule", Audit: "workspace_reject"}
+	}
+	if blocked, reason := g.checkSensitive(tool, params); blocked {
+		g.audit(ctx, tool, params, risk, "sensitive_reject", reason)
+		return &GuardResult{Decision: Reject, Reason: reason, Risk: risk, Source: "rule", Audit: "sensitive_reject"}
 	}
 	if allowed, reason := g.checkAllowed(tool, params); allowed {
 		if reason == "" {
@@ -283,15 +306,24 @@ func classifyReviewError(err error) (string, string) {
 	return "review_provider_error", "Smart Guard review request failed"
 }
 
-// extractJSON 从 LLM 回复中提取 JSON 对象。
+// extractJSON 从 LLM 回复中提取第一个完整 JSON 对象。
+// 先定位首个 {（容忍前导文本），再用 json.Decoder 严格取第一个完整对象，
+// 避免旧实现（首 { 到末 }）在多对象或正文含 {} 时取错。
 func extractJSON(s string) string {
-	s = strings.TrimSpace(s)
 	start := strings.Index(s, "{")
-	end := strings.LastIndex(s, "}")
-	if start >= 0 && end > start {
-		return s[start : end+1]
+	if start < 0 {
+		return ""
 	}
-	return s
+	dec := json.NewDecoder(strings.NewReader(s[start:]))
+	for {
+		var v json.RawMessage
+		if err := dec.Decode(&v); err != nil {
+			return ""
+		}
+		if len(v) > 0 && v[0] == '{' {
+			return string(v)
+		}
+	}
 }
 
 func (g *Guard) checkBlocked(tool string, params map[string]any) (bool, string) {
@@ -307,6 +339,32 @@ func (g *Guard) checkBlocked(tool string, params map[string]any) (bool, string) 
 	for _, rule := range g.userBlocked {
 		if rule.pattern.MatchString(target) {
 			return true, rule.reason
+		}
+	}
+	return false, ""
+}
+
+// checkSensitive 是硬拦截层的一部分：敏感文件读/写一律拒绝，所有 mode 一致。
+// 敏感路径规则由 IsSensitivePath 维护（凭证、密钥、SSH 目录等），此处只做调用位置提升，
+// 让 guard 审计能看到"敏感文件拦截"，而不是在 agent 层静默拦截。
+func (g *Guard) checkSensitive(tool string, params map[string]any) (bool, string) {
+	var paths []string
+	switch tool {
+	case "readfile", "writefile", "editfile", "listdir", "search":
+		if p, _ := params["path"].(string); p != "" {
+			paths = append(paths, p)
+		}
+	case "filesystem":
+		if p, _ := params["path"].(string); p != "" {
+			paths = append(paths, p)
+		}
+		if d, _ := params["destination"].(string); d != "" {
+			paths = append(paths, d)
+		}
+	}
+	for _, p := range paths {
+		if sensitive, reason := IsSensitivePath(p); sensitive {
+			return true, fmt.Sprintf("blocked: sensitive file (%s). Accessing credential/secret files is not allowed.", reason)
 		}
 	}
 	return false, ""
@@ -424,6 +482,12 @@ func (g *Guard) builtinAllowedCommands() []string {
 }
 
 func (g *Guard) assessRisk(tool string, params map[string]any) RiskLevel {
+	return g.assessRiskWithAnalysis(tool, params, nil)
+}
+
+// assessRiskWithAnalysis 支持复用已解析的 ExecAnalysis（Check 主流程传 analysis，
+// 避免同一命令多次 AST 解析）；analysis 为 nil 时自行解析（独立调用入口）。
+func (g *Guard) assessRiskWithAnalysis(tool string, params map[string]any, analysis *ExecAnalysis) RiskLevel {
 	switch tool {
 	case "exec":
 		switch execAction(params) {
@@ -436,7 +500,14 @@ func (g *Guard) assessRisk(tool string, params map[string]any) RiskLevel {
 		default:
 			cmd, _ := params["command"].(string)
 			shell, _ := params["shell"].(string)
-			return analyzeExecCommand(cmd, shell, g.allowedCmds)
+			if analysis == nil {
+				// 优先用 ExecAnalysis（AST 精确）；解析失败 fallback 旧分词器（能力不降级）。
+				if a, ok := newExecAnalyzer().Analyze(cmd, shell); ok {
+					return analyzeExecRisk(&a, g.allowedCmds)
+				}
+				return analyzeExecCommand(cmd, shell, g.allowedCmds)
+			}
+			return analyzeExecRisk(analysis, g.allowedCmds)
 		}
 	case "writefile":
 		path, _ := params["path"].(string)

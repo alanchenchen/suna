@@ -126,12 +126,12 @@ Guard 由 Agent 统一处理，工具只声明自身 Guard policy。
 
 - `readonly`：只允许只读操作。
 - `ask`：风险操作请求用户确认。
-- `auto`：除硬性拦截规则外自动放行。
+- `auto`：除硬性拦截规则（结构性高危、内置/用户 blocked、Workspace 边界、敏感文件）外自动放行。
 - `smart`：中高风险操作由当前 session 绑定的模型做 Smart Review。Review 只判断安全、用户意图和权限边界；安全且合理的调用会放行，不确定时请求确认，明确危险时拒绝，只有当前调用不安全或明显过宽且有具体等价替代时才建议修改。
 
-Workspace 是本地文件和明显 exec 路径的目录硬边界，不能被用户 allowed rule 绕过。它不是 OS sandbox，无法限制外部程序启动后自行访问的文件、网络或进程权限。
+Workspace 是本地文件和明显 exec 路径的目录硬边界，不能被用户 allowed rule 绕过。它不是 OS sandbox，无法限制外部程序启动后自行访问的文件、网络或进程权限。exec 路径分析使用完整 shell AST 解析：`/dev/null` 等丢弃输出设备豁免，变量/命令替换路径不参与静态检查，引号内路径只在解释器场景（如 `sh -c`）拦截。
 
-敏感路径、内置 blocked rule、用户 blocked rule 优先级高于普通 allowed rule。
+敏感路径、内置 blocked rule、用户 blocked rule 优先级高于普通 allowed rule。敏感文件（凭证、密钥、SSH 目录等）的读/写由 Guard 硬拦截层统一拒绝，所有 mode 一致。
 
 ## 记忆与会话状态
 
