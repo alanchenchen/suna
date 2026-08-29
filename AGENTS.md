@@ -57,6 +57,12 @@ Suna 是本地终端 AI Agent：CLI 启动 TUI，TUI 通过 protocol/local trans
 - 公开仓库隐私：代码、文档、示例、提示词、用户可见文案和测试夹具不得写入真实或仿真的 API key、token、Cookie、Authorization 值、私钥、带凭据 URL 或其他敏感凭据；使用 `<API_KEY>`、`<TOKEN>`、`test-api-key` 等无真实格式的占位符。敏感信息识别/脱敏功能的测试可保留格式模式，但测试输入和断言不得含可用凭据。
 - 公开仓库隐私：不得在代码、文档、示例、提示词、用户可见文案和测试夹具中固化私有、中转或内部模型提供商名称、域名、模型 ref 或配置；文档和用户可见内容优先使用 OpenAI、Anthropic 等官方提供商示例，通用兼容场景使用 `custom`、`example-provider`、`provider-a` 与 `https://api.example.com/v1`。新增或修改后应检索确认无残留。
 
+## 本地构建与打包
+
+- 用户说“快速调试 Runtime”或“本地构建”时，使用 `go build -o ./suna .`，不要使用 `go run .`；启动前先执行 `./suna stop`，避免新二进制连接到旧 daemon。
+- 用户说“本地打包 Suna”或“打一个 macOS 包”时，使用 `SUNA_BUILD_VERSION=dev-local ./build/build-darwin.sh`。Apple Silicon 使用 `dist/suna-darwin-arm64.zip`；Intel Mac 使用 `dist/suna-darwin-amd64.zip`。
+- 用户明确要求所有平台的本地发行包时，使用 `SUNA_BUILD_VERSION=dev-local ./build/build-release.sh`。本地打包不创建 Git tag、不推送，也不触发 GitHub Actions。
+
 ## 测试与提交前检查
 
 - 每次功能开发后必须运行 `gofmt` 或 `go fmt`。

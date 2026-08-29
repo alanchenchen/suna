@@ -480,6 +480,18 @@ Feature 缺失时隐藏对应 UI。`config.set/upsert_model` 编辑已有模型�
 {"provider":"example-provider","protocol":"anthropic","auth_mode":"bearer","model":"example-model","base_url":"https://api.example.com","context_window":200000,"max_output_tokens":8192}
 ```
 
+`config.discoverModels` 使用 Runtime 内已保存的模型凭证拉取可用模型列表。客户端只传已存在的 `model_ref`；Runtime 根据该模型配置解析 provider、endpoint、protocol、auth_mode 和 API Key，并只返回模型 ID 列表，不返回密钥明文。若供应商拒绝请求或未开放 `/models` 接口，返回结果中的 `error_message`，而不是把 API Key 暴露给客户端。
+
+```json
+{"model_ref":"example-provider/example-model"}
+```
+
+成功响应：
+
+```json
+{"models":["gpt-5.2","gpt-5.6-sol"]}
+```
+
 ---
 
 ## 8. 交给 AI 编码代理的最小任务描述

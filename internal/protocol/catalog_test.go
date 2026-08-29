@@ -11,7 +11,7 @@ func TestRuntimeCatalogIsStableAndContainsPublicCapabilities(t *testing.T) {
 	assertCatalogGroup(t, "notifications", catalog.Notifications)
 	assertCatalogGroup(t, "features", catalog.Features)
 
-	for _, method := range []string{MethodRuntimeHello, MethodSendMessage, MethodSteer, MethodConfigGet, MethodMCPList} {
+	for _, method := range []string{MethodRuntimeHello, MethodSendMessage, MethodSteer, MethodConfigDiscoverModels, MethodConfigGet, MethodMCPList} {
 		if !slices.Contains(catalog.Methods, method) {
 			t.Fatalf("catalog methods missing %q", method)
 		}

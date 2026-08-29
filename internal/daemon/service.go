@@ -192,6 +192,8 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 		return s.buildDaemonStatus(ctx, params.Detail), nil
 	case protocol.MethodConfigGet:
 		return configToParams(s.daemon.agent.Config()), nil
+	case protocol.MethodConfigDiscoverModels:
+		return s.handleConfigDiscoverModels(ctx, req)
 	case protocol.MethodConfigSet:
 		return s.handleConfigSet(ctx, req, sink)
 	case protocol.MethodDaemonStop:
@@ -204,6 +206,18 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 	default:
 		return nil, protocol.UnsupportedMethod(req.Method)
 	}
+}
+
+func (s *service) handleConfigDiscoverModels(ctx context.Context, req protocol.Request) (protocol.ConfigDiscoverModelsResult, error) {
+	var params protocol.ConfigDiscoverModelsParams
+	if err := decodeParams(req.Params, &params); err != nil {
+		return protocol.ConfigDiscoverModelsResult{}, protocol.InvalidRequest(err.Error())
+	}
+	if strings.TrimSpace(params.ModelRef) == "" {
+		return protocol.ConfigDiscoverModelsResult{}, protocol.InvalidRequest("model_ref is required")
+	}
+	models, message := discoverConfiguredModels(ctx, s.daemon.agent.Config(), params.ModelRef)
+	return protocol.ConfigDiscoverModelsResult{Models: models, ErrorMessage: message}, nil
 }
 
 func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHelloResult, error) {
@@ -860,9 +874,24 @@ func periodFromSummary(sum *memory.UsageSummary) protocol.UsagePeriod {
 func configToParams(cfg *config.Config) protocol.ConfigParams {
 	out := protocol.ConfigParams{ActiveModel: cfg.ActiveModel, Locale: cfg.UI.Locale, Theme: cfg.UI.Theme, GuardMode: cfg.Guard.ModeOrDefault(), Workspace: cfg.Guard.Workspace}
 	for _, mc := range cfg.Models {
-		out.Models = append(out.Models, protocol.ConfigModel{Provider: mc.Provider, Protocol: string(mc.ProtocolOrDefault()), AuthMode: string(mc.AuthMode), Model: mc.Model, BaseURL: mc.BaseURL, ContextWindow: mc.ContextWindow, MaxOutputTokens: mc.MaxOutputTokens, Strengths: mc.Strengths, SubtaskFor: mc.SubtaskFor, Reasoning: mc.Reasoning, HasAPIKey: mc.APIKey != ""})
+		out.Models = append(out.Models, protocol.ConfigModel{Provider: mc.Provider, Protocol: string(mc.ProtocolOrDefault()), AuthMode: string(mc.AuthMode), Model: mc.Model, BaseURL: mc.BaseURL, ContextWindow: mc.ContextWindow, MaxOutputTokens: mc.MaxOutputTokens, Strengths: mc.Strengths, SubtaskFor: mc.SubtaskFor, Reasoning: mc.Reasoning, HasAPIKey: mc.APIKey != "", APIKeyHint: apiKeyHint(mc.APIKey)})
 	}
 	return out
+}
+
+func apiKeyHint(key string) string {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	if len(key) <= 8 {
+		return "..." + key[len(key)-4:]
+	}
+	prefixLen := 2
+	if strings.HasPrefix(key, "sk-") {
+		prefixLen = 3
+	}
+	return key[:prefixLen] + "..." + key[len(key)-4:]
 }
 
 type toolDisplay struct {

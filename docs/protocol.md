@@ -108,6 +108,7 @@ TCP client 连接后，第一条 request 必须是 `runtime.hello`。请求只�
 | `session.usage` | 查询用量摘要。 |
 | `config.get` | 读取配置。 |
 | `config.set` | 更新配置。 |
+| `config.discoverModels` | 使用 Runtime 已保存的模型凭证拉取该模型 provider 的可用模型列表；只返回模型 ID，不返回 API Key。 |
 | `daemon.status` | 查询 Runtime 状态、当前模型、连接数和可选详细统计。 |
 | `memory.list` / `memory.delete` / `memory.clear` | 查询、删除或清空 memory。 |
 | `skill.list` / `skill.set` | 查询、启用或禁用 Skill。 |

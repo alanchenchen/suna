@@ -413,6 +413,15 @@ type ConfigSetParams struct {
 	Workspace    *string     `json:"workspace,omitempty"`
 }
 
+type ConfigDiscoverModelsParams struct {
+	ModelRef string `json:"model_ref"`
+}
+
+type ConfigDiscoverModelsResult struct {
+	Models       []string `json:"models"`
+	ErrorMessage string   `json:"error_message,omitempty"`
+}
+
 type MemoryStats struct {
 	Active int `json:"active"`
 	Core   int `json:"core"`

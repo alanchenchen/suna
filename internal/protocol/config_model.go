@@ -40,6 +40,7 @@ type ConfigModel struct {
 	SubtaskFor      []string       `json:"subtask_for"`
 	Reasoning       map[string]any `json:"reasoning"`
 	HasAPIKey       bool           `json:"has_api_key,omitempty"`
+	APIKeyHint      string         `json:"api_key_hint,omitempty"`
 	present         ConfigModelField
 	decoded         bool
 }

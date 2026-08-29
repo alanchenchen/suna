@@ -24,6 +24,7 @@ var runtimeCatalogMethods = []string{
 	MethodSendMessage,
 	MethodSteer,
 	MethodSteerRemove,
+	MethodConfigDiscoverModels,
 	MethodConfigGet,
 	MethodConfigSet,
 	MethodDaemonStatus,
