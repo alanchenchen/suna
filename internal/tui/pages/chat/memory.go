@@ -19,7 +19,6 @@ func (m *Model) OpenMemoryOverlay() {
 	m.MemoryLoading = true
 	m.MemoryError = ""
 	m.MemoryConfirm = MemoryConfirmNone
-	m.MemoryConfirmText = ""
 	m.MemoryCursor = ClampMemoryCursor(m.MemoryCursor, len(m.Memories))
 	m.SkillsOverlayOpen = false
 	m.MCPOverlayOpen = false
@@ -29,7 +28,6 @@ func (m *Model) CloseMemoryOverlay() {
 	m.MemoryOverlayOpen = false
 	m.MemoryError = ""
 	m.MemoryConfirm = MemoryConfirmNone
-	m.MemoryConfirmText = ""
 }
 
 func (m *Model) SetMemories(memories []protocol.MemoryItem) {
@@ -57,14 +55,16 @@ func (m *Model) BeginMemoryDelete() bool {
 		return false
 	}
 	m.MemoryConfirm = MemoryConfirmDelete
-	m.MemoryConfirmText = ""
 	m.MemoryError = ""
 	return true
 }
 
 func (m *Model) BeginMemoryClear() bool {
+	// 空列表清空无意义，防御性拒绝。
+	if len(m.Memories) == 0 {
+		return false
+	}
 	m.MemoryConfirm = MemoryConfirmClear
-	m.MemoryConfirmText = ""
 	m.MemoryError = ""
 	return true
 }
@@ -75,41 +75,20 @@ func (m *Model) ConfirmMemoryDelete() (MemoryAction, bool) {
 	}
 	id := m.Memories[m.MemoryCursor].ID
 	m.MemoryConfirm = MemoryConfirmNone
-	m.MemoryConfirmText = ""
 	return MemoryAction{ID: id}, id != ""
 }
 
 func (m *Model) ConfirmMemoryClear() bool {
-	if m.MemoryConfirm != MemoryConfirmClear || m.MemoryConfirmText != "clear" {
+	if m.MemoryConfirm != MemoryConfirmClear {
 		return false
 	}
 	m.MemoryConfirm = MemoryConfirmNone
-	m.MemoryConfirmText = ""
 	return true
 }
 
 func (m *Model) CancelMemoryConfirm() {
 	m.MemoryConfirm = MemoryConfirmNone
-	m.MemoryConfirmText = ""
 	m.MemoryError = ""
-}
-
-func (m *Model) UpdateMemoryConfirmText(key string) {
-	if m.MemoryConfirm != MemoryConfirmClear {
-		return
-	}
-	switch key {
-	case "backspace", "ctrl+h":
-		if len(m.MemoryConfirmText) > 0 {
-			m.MemoryConfirmText = m.MemoryConfirmText[:len(m.MemoryConfirmText)-1]
-		}
-	case "ctrl+u":
-		m.MemoryConfirmText = ""
-	default:
-		if len([]rune(key)) == 1 && len(m.MemoryConfirmText) < len("clear") {
-			m.MemoryConfirmText += key
-		}
-	}
 }
 
 func ClampMemoryCursor(cursor, n int) int {

@@ -237,7 +237,6 @@ Enter              Send / confirm
 Shift+Enter        Newline
 Ctrl+J             Newline
 Esc                Cancel run, go back, or close overlay
-Ctrl+S             Selection mode for terminal text
 ↑ / ↓             Recall previous / next input when the composer is empty
 Ctrl+T             Toggle tool detail
 Ctrl+R             Toggle reasoning detail

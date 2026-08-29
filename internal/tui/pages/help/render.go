@@ -35,7 +35,7 @@ func RenderOverlay(width int, commands []Command, deps RenderDeps) string {
 	more := []string{
 		deps.HL.Render(deps.Tr("tui.help.more")),
 		"  " + deps.Brand.Render("Shift+Enter/Ctrl+J") + deps.Dim.Render(" ") + deps.Tr("tui.key.newline"),
-		"  " + deps.Brand.Render("Ctrl+S") + deps.Dim.Render(" ") + deps.Tr("tui.help.copy_native"),
+		"  " + deps.Brand.Render("Mouse drag") + deps.Dim.Render(" ") + deps.Tr("tui.help.copy_drag"),
 		"  " + deps.Brand.Render("Ctrl+T") + deps.Dim.Render(" ") + deps.Tr("tui.key.tool_detail"),
 		"  " + deps.Brand.Render("Ctrl+R") + deps.Dim.Render(" ") + deps.Tr("tui.key.reasoning_detail"),
 		"  " + deps.Brand.Render("PgUp/PgDn") + deps.Dim.Render(" ") + deps.Tr("tui.key.scroll_up") + "/" + deps.Tr("tui.key.scroll_down"),
@@ -66,7 +66,7 @@ func RenderContent(commands []Command, deps RenderDeps) string {
 		helpLine("PgUp/PgDn", "tui.help.chat_scroll", deps),
 		helpLine("Home", "tui.help.chat_response_start", deps),
 		helpLine("End", "tui.help.chat_latest", deps),
-		helpLine("Ctrl+S", "tui.help.copy_native", deps),
+		helpText("tui.help.copy_drag", deps),
 		helpLine("Ctrl+C", "tui.key.quit", deps),
 		"",
 		strings.Join(commandLines, "\n"),

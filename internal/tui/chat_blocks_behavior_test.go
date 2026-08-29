@@ -481,8 +481,11 @@ func TestThinkingBoxCompletedShowsAtMostThreeBodyRows(t *testing.T) {
 	if strings.Contains(got, "第四行") || strings.Contains(got, "第五行") {
 		t.Fatalf("renderThinkingBox() = %q, should clip completed reasoning after three rows", got)
 	}
-	if !strings.Contains(got, "...") {
+	if !strings.Contains(got, "…") {
 		t.Fatalf("renderThinkingBox() = %q, want overflow marker", got)
+	}
+	if !strings.Contains(got, "已折叠 3 行") {
+		t.Fatalf("renderThinkingBox() = %q, want folded row count", got)
 	}
 }
 

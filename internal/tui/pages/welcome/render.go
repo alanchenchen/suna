@@ -41,8 +41,9 @@ func RenderView(data ViewData, deps ViewDeps) string {
 	// 块内左对齐 + 块整体居中，左边缘整齐。
 	sb.WriteString(centerBlock(strings.TrimRight(data.Pet, "\n"), data.Width) + "\n")
 	sb.WriteString("\n")
-	// 品牌渐变字与副标题居中，形成门面焦点。
-	sb.WriteString(centerLine(renderGradientBrand("Suna", deps), data.Width) + "\n")
+	// 品牌渐变字与副标题居中，形成门面焦点；两侧 ✦ 装饰用品牌色，
+	// 与渐变起点同色系，增强品牌名存在感而不抢 pet 动画的焦点。
+	sb.WriteString(centerLine(deps.Brand.Render("✦ ")+renderGradientBrand("Suna", deps)+deps.Brand.Render(" ✦"), data.Width) + "\n")
 	sb.WriteString(centerLine(deps.Dim.Render(deps.Tr("tui.welcome.subtitle")), data.Width) + "\n")
 	if !data.HasConfigured {
 		sb.WriteString("\n" + centerLine(deps.HL.Render(deps.Tr("tui.welcome.setup_hint")), data.Width) + "\n")
@@ -66,15 +67,17 @@ func RenderView(data ViewData, deps ViewDeps) string {
 
 // renderGradientBrand 渲染品牌名渐变字：逐字符在 Brand 与 HL 之间渐变，
 // 低色深终端由 lipgloss 自动降级为最接近的颜色，不破坏布局。
+// 注意：必须按 rune 索引取色，range 字符串的 i 是字节偏移，中文会越界。
 func renderGradientBrand(text string, deps ViewDeps) string {
 	from := deps.Brand.GetForeground()
 	to := deps.HL.GetForeground()
 	if from == nil || to == nil {
 		return deps.Brand.Render(text)
 	}
-	colors := lipgloss.Blend1D(len([]rune(text)), from, to)
+	runes := []rune(text)
+	colors := lipgloss.Blend1D(len(runes), from, to)
 	var sb strings.Builder
-	for i, r := range text {
+	for i, r := range runes {
 		sb.WriteString(lipgloss.NewStyle().Foreground(colors[i]).Bold(true).Render(string(r)))
 	}
 	return sb.String()

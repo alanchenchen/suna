@@ -5,6 +5,8 @@ import (
 	"hash/fnv"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/alanchenchen/suna/internal/protocol"
 	"github.com/alanchenchen/suna/internal/tui/components/toolview"
 )
@@ -61,6 +63,10 @@ type transcriptWindowSignature struct {
 	Height     int
 	TotalLines int
 	Hash       uint64
+	// SelStart/SelEnd 参与签名：选区变化时重设内容（高亮更新），
+	// 滚动（选区不变）时复用内容。
+	SelStart int
+	SelEnd   int
 }
 
 func (m *Model) SyncTranscript(deps TranscriptDeps) {
@@ -326,6 +332,7 @@ func (m *Model) applyTranscriptWindow() {
 
 func (m *Model) applyTranscriptWindowLines(start, end int, lines []string) {
 	// 内容签名不包含滚动偏移：在 overscan 窗口内滚动时复用同一批内容，只移动 viewport offset。
+	// 选区样式参与签名：选区变化时重设内容，滚动（选区不变）时复用内容。
 	sig := transcriptWindowSignature{
 		Start:      start,
 		End:        end,
@@ -333,14 +340,35 @@ func (m *Model) applyTranscriptWindowLines(start, end int, lines []string) {
 		Height:     m.Viewport.Height(),
 		TotalLines: m.TranscriptTotalLines,
 		Hash:       transcriptLinesHash(lines),
+		SelStart:   m.SelectionStart,
+		SelEnd:     m.SelectionEnd,
 	}
 	if sig != m.TranscriptWindowSignature {
 		m.TranscriptWindowStart = start
 		m.TranscriptWindowEnd = end
 		m.TranscriptWindowSignature = sig
-		m.Viewport.SetContentLines(lines)
+		m.Viewport.SetContentLines(m.applySelectionStyle(lines, start))
 	}
 	m.Viewport.SetYOffset(m.TranscriptYOffset - start)
+}
+
+// applySelectionStyle 对窗口内行应用选区样式：选中行 strip ANSI 后叠加反色背景，
+// 避免行内 markdown 背景色覆盖选区背景（StyleLineFunc 是外层包裹，无法覆盖行内 SGR）。
+// 无选区时原样返回（零开销）。
+func (m Model) applySelectionStyle(lines []string, windowStart int) []string {
+	if m.SelectionStart < 0 || m.SelectionEnd < m.SelectionStart {
+		return lines
+	}
+	out := make([]string, len(lines))
+	for i, line := range lines {
+		contentLine := windowStart + i
+		if contentLine >= m.SelectionStart && contentLine <= m.SelectionEnd {
+			out[i] = m.SelectionStyle.Render(ansi.Strip(line))
+		} else {
+			out[i] = line
+		}
+	}
+	return out
 }
 
 func (m Model) visibleTranscriptLines(start, end int) []string {
@@ -527,6 +555,37 @@ func blockLineRange(text string, start, end int) []string {
 		lineStart = i + 1
 	}
 	return lines
+}
+
+// SelectionPlainText 提取内容行范围 [start, end]（含端点）的纯文本（剥离 ANSI），
+// 供选区复制使用。数据源是 TranscriptBlocks（每块 Text + LineCount），
+// 按内容行偏移截取；越界范围自动 clamp。
+func (m Model) SelectionPlainText(start, end int) string {
+	if end < start || len(m.TranscriptBlocks) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	cursor := 0
+	for _, block := range m.TranscriptBlocks {
+		blockEnd := cursor + block.LineCount
+		if blockEnd <= start {
+			cursor = blockEnd
+			continue
+		}
+		// end 是含端点的行号：cursor == end 时该块第一行就是 end 行，仍需处理。
+		if cursor > end {
+			break
+		}
+		from := max(0, start-cursor)
+		to := min(block.LineCount, end-cursor+1)
+		lines := blockLineRange(block.Text, from, to)
+		for _, line := range lines {
+			sb.WriteString(ansi.Strip(line))
+			sb.WriteString("\n")
+		}
+		cursor = blockEnd
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 func AskSelectedLine(icon, value string) string { return fmt.Sprintf("  %s %s\n", icon, value) }

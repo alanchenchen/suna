@@ -37,7 +37,7 @@ Chat slash commands：
 
 未注册的 `/文本` 会作为普通用户消息发送，不会报错或执行隐藏命令。
 
-Chat transcript 的长历史渲染采用窗口化策略：TUI 页面状态保留完整消息和全局滚动 offset，但只把当前可见区域上下各一屏 overscan 的内容交给 Bubbles viewport。这个实现属于 Chat 业务层的虚拟滚动 / windowed rendering：viewport 不持有完整 transcript，滚动时按全局 y offset 切换可见窗口；但 Suna 不替换 Bubble Tea/Bubbles 的 terminal renderer，也不使用终端原生 scrollback 双模式。该策略不改变交互语义，鼠标滚轮、触控板、PageUp/PageDown、跳到回复开头/底部和 alt screen 行为保持不变；复制终端文本通过 `Ctrl+S` 进入选择模式，临时释放鼠标给终端原生选择，`Esc` 返回 TUI 滚动。滚动仍立即应用；如果新的 offset 仍在当前 overscan window 内，只移动 viewport offset，不重新同步 transcript，只有跨出 window 时才重建可见内容。
+Chat transcript 的长历史渲染采用窗口化策略：TUI 页面状态保留完整消息和全局滚动 offset，但只把当前可见区域上下各一屏 overscan 的内容交给 Bubbles viewport。这个实现属于 Chat 业务层的虚拟滚动 / windowed rendering：viewport 不持有完整 transcript，滚动时按全局 y offset 切换可见窗口；但 Suna 不替换 Bubble Tea/Bubbles 的 terminal renderer，也不使用终端原生 scrollback 双模式。该策略不改变交互语义，鼠标滚轮、触控板、PageUp/PageDown、跳到回复开头/底部和 alt screen 行为保持不变；内容区按住左键拖动即选中（选区锚定内容行，滚动跟随不丢失），`y` 复制纯文本到剪贴板，单击/Esc 清除，拖到边缘自动滚动跨页。滚动仍立即应用；如果新的 offset 仍在当前 overscan window 内，只移动 viewport offset，不重新同步 transcript，只有跨出 window 时才重建可见内容。
 
 assistant streaming 阶段使用轻量纯文本渲染，并对正在追加的消息维护增量 wrap cache。新 delta 到达时只处理追加部分和必要的换行状态，不再对完整已生成回复反复 split/wrap/join；窗口宽度变化或内容回退时才完整重算。streaming 完成后会清除 streaming 标记并使用完整 Markdown 渲染缓存，因此最终阅读体验不降级。这个优化用少量“当前 streaming 消息的已换行行缓存”换掉长回复 O(n²) 重排 CPU；缓存规模与当前消息长度同阶，不按 chunk 数增长，回复结束后会随渲染缓存生命周期回收或替换。文本流活跃时，spinner tick 不额外触发完整 transcript sync；文本流停顿或等待首 token 时，spinner 仍正常刷新等待状态。
 
@@ -126,12 +126,12 @@ Guard 由 Agent 统一处理，工具只声明自身 Guard policy。
 
 - `readonly`：只允许只读操作。
 - `ask`：风险操作请求用户确认。
-- `auto`：除硬性拦截规则外自动放行。
+- `auto`：除硬性拦截规则（结构性高危、内置/用户 blocked、Workspace 边界、敏感文件）外自动放行。
 - `smart`：中高风险操作由当前 session 绑定的模型做 Smart Review。Review 只判断安全、用户意图和权限边界；安全且合理的调用会放行，不确定时请求确认，明确危险时拒绝，只有当前调用不安全或明显过宽且有具体等价替代时才建议修改。
 
-Workspace 是本地文件和明显 exec 路径的目录硬边界，不能被用户 allowed rule 绕过。它不是 OS sandbox，无法限制外部程序启动后自行访问的文件、网络或进程权限。
+Workspace 是本地文件和明显 exec 路径的目录硬边界，不能被用户 allowed rule 绕过。它不是 OS sandbox，无法限制外部程序启动后自行访问的文件、网络或进程权限。exec 路径分析使用完整 shell AST 解析：`/dev/null` 等丢弃输出设备豁免，变量/命令替换路径不参与静态检查，引号内路径只在解释器场景（如 `sh -c`）拦截。
 
-敏感路径、内置 blocked rule、用户 blocked rule 优先级高于普通 allowed rule。
+敏感路径、内置 blocked rule、用户 blocked rule 优先级高于普通 allowed rule。敏感文件（凭证、密钥、SSH 目录等）的读/写由 Guard 硬拦截层统一拒绝，所有 mode 一致。
 
 ## 记忆与会话状态
 

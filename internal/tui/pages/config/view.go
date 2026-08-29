@@ -20,7 +20,6 @@ type HelpLabels struct {
 	Theme         string
 	Guard         string
 	Workspace     string
-	Attachments   string
 	OpenConfigDir string
 	AddModel      string
 	ModelRow      string
@@ -31,6 +30,9 @@ type HelpLabels struct {
 	Models        string
 	Detail        string
 	Home          string
+	ManageSkills  string
+	ManageMCP     string
+	ManageMemory  string
 }
 
 func (m Model) Help(rows []Row, labels HelpLabels) string {
@@ -41,6 +43,12 @@ func (m Model) Help(rows []Row, labels HelpLabels) string {
 		switch rows[m.Cursor].Kind {
 		case "section":
 			return labels.OpenModels
+		case "manage_skills":
+			return labels.ManageSkills
+		case "manage_mcp":
+			return labels.ManageMCP
+		case "manage_memory":
+			return labels.ManageMemory
 		case "general_language":
 			return labels.Language
 		case "general_theme":
@@ -49,8 +57,6 @@ func (m Model) Help(rows []Row, labels HelpLabels) string {
 			return labels.Guard
 		case "general_workspace":
 			return labels.Workspace
-		case "clear_attachments":
-			return labels.Attachments
 		case "open_config_dir":
 			return labels.OpenConfigDir
 		case "add_model", "provider_add_model", "add_provider_model":

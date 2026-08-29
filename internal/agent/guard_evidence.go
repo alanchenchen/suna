@@ -28,8 +28,31 @@ type guardEvidenceBuilder struct {
 	sections  []string
 }
 
-func buildGuardEvidence(messages []model.Message, riskDecisions, agentActions []string, sessionState, rationale string) string {
+func buildGuardEvidence(messages []model.Message, riskDecisions, agentActions []string, sessionState, rationale string, extraUsers ...string) string {
 	users, answers := recentGuardUserEvidence(messages)
+	// subtask 场景：任务描述作为注入的用户意图（不受 64 条扫描窗口限制）。
+	// subtask 的任务描述是第一条也是唯一一条 user 消息，长任务（>64 条）时会被窗口挤出，
+	// 导致 Guard review 看不到用户意图而保守 modify。
+	for _, extra := range extraUsers {
+		if trimmed := strings.TrimSpace(extra); trimmed != "" {
+			// subtask 任务描述是唯一意图来源：完整注入，不做 180 截断。
+			// 截断会吃掉授权范围（如文件列表），导致 Guard review 无法确认而保守 modify。
+			// 预算由 addSection 兜底（subtask 场景其余证据为空，空余 1100+ runes）。
+			// 窗口内同一条消息已被 recentGuardUserEvidence 截断到 180，
+			// 用完整版替换截断版（前缀匹配），避免重复注入。
+			replaced := false
+			for i, existing := range users {
+				if existing == trimmed || strings.HasPrefix(trimmed, existing) {
+					users[i] = trimmed
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				users = appendBoundedGuardEvidence(users, trimmed, guardEvidenceUserLimit)
+			}
+		}
+	}
 	builder := guardEvidenceBuilder{remaining: guardEvidenceBudget}
 	if len(users) > 0 {
 		builder.addSection("Latest direct user message", users[len(users)-1:])

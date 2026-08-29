@@ -27,6 +27,20 @@ type CommandSuggestionsView struct {
 	Visible  bool
 }
 
+// CommandGroupTitle 返回分组标题的 i18n key；未知分组返回空串（不渲染分组头）。
+func CommandGroupTitle(group CommandGroup) string {
+	switch group {
+	case CommandGroupSession:
+		return "tui.command.group.session"
+	case CommandGroupManage:
+		return "tui.command.group.manage"
+	case CommandGroupHelp:
+		return "tui.command.group.help"
+	default:
+		return ""
+	}
+}
+
 func (m Model) CommandSuggestionsView() CommandSuggestionsView {
 	if len(m.CmdSuggestions) == 0 {
 		return CommandSuggestionsView{}

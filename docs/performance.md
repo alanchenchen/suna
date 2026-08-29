@@ -238,7 +238,7 @@ spinner tick 不再无条件触发完整 transcript sync：当最近 120ms 内�
 - `TranscriptYOffset` 是全局滚动位置。
 - 每次只把当前可见区域上下各一屏 overscan 的 lines 传给 Bubbles viewport。
 - viewport 不再持有完整 transcript。
-- 鼠标滚轮、触控板、PageUp/PageDown、跳到回复开头/底部语义保持不变；复制终端文本通过 `Ctrl+S` 进入选择模式，临时释放鼠标给终端原生选择。
+- 鼠标滚轮、触控板、PageUp/PageDown、跳到回复开头/底部语义保持不变；内容区按住左键拖动即选中（选区锚定内容行，滚动跟随不丢失），`y` 复制纯文本到剪贴板，单击/Esc 清除，拖到边缘自动滚动跨页。
 - 滚动仍然即时应用；只有跨出当前 transcript window 时才重新同步 transcript，在当前 overscan window 内只移动 viewport offset，避免连续滚动时每个 wheel event 都触发完整同步。
 
 相关代码：

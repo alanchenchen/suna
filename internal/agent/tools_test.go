@@ -504,7 +504,7 @@ func TestBuildSubtaskGuardReviewContextDoesNotUseMainTaskCard(t *testing.T) {
 
 	ctx := a.buildSubtaskGuardReviewContext(runner.ToolExecution{
 		WorkingMessages: []model.Message{model.NewTextMessage(model.RoleUser, "delegated task")},
-	})
+	}, "subtask task description")
 	if !strings.Contains(ctx.Evidence, "delegated task") {
 		t.Fatalf("subtask evidence = %q, want delegated task", ctx.Evidence)
 	}
@@ -515,12 +515,64 @@ func TestBuildSubtaskGuardReviewContextDoesNotUseMainTaskCard(t *testing.T) {
 	}
 }
 
-func TestTruncateGuardReviewParamsKeepsStructuredSummary(t *testing.T) {
-	complete, completeTruncated := truncateGuardReviewParams(`{"path":"report.md"}`)
-	if completeTruncated {
-		t.Fatal("structured params marked truncated")
+// 长任务（>64 条消息）时任务描述被扫描窗口挤出，但注入的任务文本仍出现在 Evidence。
+func TestBuildSubtaskGuardReviewContextKeepsTaskOnLongRun(t *testing.T) {
+	a := &Agent{}
+	msgs := make([]model.Message, 0, 70)
+	// 第一条是任务描述（user），后续 69 条是 assistant/tool 消息，超过 64 条扫描窗口。
+	msgs = append(msgs, model.NewTextMessage(model.RoleUser, "original task in working"))
+	for i := 0; i < 69; i++ {
+		msgs = append(msgs, model.NewTextMessage(model.RoleAssistant, "step"))
 	}
-	if complete != `{"path":"report.md"}` {
-		t.Fatalf("structured params = %q, want unchanged", complete)
+	ctx := a.buildSubtaskGuardReviewContext(runner.ToolExecution{
+		WorkingMessages: msgs,
+	}, "injected subtask task")
+	if !strings.Contains(ctx.Evidence, "injected subtask task") {
+		t.Fatalf("long subtask evidence = %q, want injected task description", ctx.Evidence)
+	}
+	// 长任务时 working 里的原始任务描述（第一条 user 消息）会被 64 条扫描窗口挤出，
+	// 这正是注入任务描述要解决的场景：Evidence 必须仍包含用户意图。
+	if strings.Contains(ctx.Evidence, "original task in working") {
+		t.Fatalf("long subtask evidence = %q, original task should be evicted from window", ctx.Evidence)
+	}
+}
+
+// 短任务（窗口内已有任务描述）时不重复注入：避免 Latest 和 Earlier 两个 section 相同文本。
+func TestBuildSubtaskGuardReviewContextDedupesShortTask(t *testing.T) {
+	a := &Agent{}
+	msgs := []model.Message{model.NewTextMessage(model.RoleUser, "fix the login bug")}
+	ctx := a.buildSubtaskGuardReviewContext(runner.ToolExecution{WorkingMessages: msgs}, "fix the login bug")
+	if got := strings.Count(ctx.Evidence, "fix the login bug"); got != 1 {
+		t.Fatalf("short subtask evidence contains task %d times, want 1: %q", got, ctx.Evidence)
+	}
+}
+
+// 长任务描述（含授权范围文件列表）完整注入：不被 180 runes 截断，
+// 文件列表必须完整可见，Guard review 才能确认授权范围（修复连环 modify 的核心场景）。
+func TestBuildSubtaskGuardReviewContextKeepsTaskFileList(t *testing.T) {
+	a := &Agent{}
+	// 任务描述超过 180 runes，文件列表在中间（之前会被 trimForGuardMiddle 截断成 [omitted]）。
+	task := "严格验证新语义并修到通过。只能修改以下测试文件：" +
+		"search-run.test.ts, search-model.test.ts, autosearch-content.test.ts, " +
+		"kernel-runtime.test.ts, mutation-observer.test.ts, visibility.test.ts, " +
+		"background-sync.test.ts, storage-adapter.test.ts, event-bus.test.ts, " +
+		"这些是授权范围，不要修改生产代码。"
+	if len([]rune(task)) <= 180 {
+		t.Fatalf("test task must exceed 180 runes, got %d", len([]rune(task)))
+	}
+	msgs := make([]model.Message, 0, 70)
+	msgs = append(msgs, model.NewTextMessage(model.RoleUser, task))
+	for i := 0; i < 69; i++ {
+		msgs = append(msgs, model.NewTextMessage(model.RoleAssistant, "step"))
+	}
+	ctx := a.buildSubtaskGuardReviewContext(runner.ToolExecution{WorkingMessages: msgs}, task)
+	// 文件列表必须完整可见（无截断标记）。
+	if strings.Contains(ctx.Evidence, "[omitted]") {
+		t.Fatalf("subtask evidence truncated file list: %q", ctx.Evidence)
+	}
+	for _, f := range []string{"search-run.test.ts", "event-bus.test.ts", "storage-adapter.test.ts"} {
+		if !strings.Contains(ctx.Evidence, f) {
+			t.Fatalf("subtask evidence missing %q: %q", f, ctx.Evidence)
+		}
 	}
 }
