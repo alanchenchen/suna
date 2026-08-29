@@ -22,6 +22,14 @@ func (t *TUI) refreshNativeLists() {
 	t.chat.InitNativeLists(currentTheme.Name == ThemeDark, t.nativeListStyles(), t.nativeListText())
 }
 
+// ensureNativeLists 保证原生列表已初始化。Config 页的管理分组会在 Chat 页面
+// 尚未初始化时就打开 Skills/MCP 等浮层，零值 list.Model 的 SetSize 会崩溃。
+func (t *TUI) ensureNativeLists() {
+	if t.chat.SkillsList.Owner() == "" {
+		t.chat.InitNativeLists(currentTheme.Name == ThemeDark, t.nativeListStyles(), t.nativeListText())
+	}
+}
+
 // nativeListText 在 UI 层注入原生列表文案，通用列表组件不依赖翻译器。
 func (t *TUI) nativeListText() chatpage.ListText {
 	return chatpage.ListText{

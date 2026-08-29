@@ -273,23 +273,6 @@ func TestObserverCannotSendSteering(t *testing.T) {
 	}
 }
 
-func TestComposerHidesOrdinaryHelpAndSelectionModeUsesOneLine(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
-	tui.initChatComponents()
-	idle := stripANSIForTest(tui.renderInputArea())
-	if strings.Contains(idle, "Enter 发送") || strings.Contains(idle, "/ 命令") {
-		t.Fatalf("idle composer = %q, want ordinary help hidden", idle)
-	}
-	tui.selectionMode = true
-	selection := stripANSIForTest(tui.renderInputArea())
-	if got := strings.Count(selection, "拖动选择文本以复制"); got != 1 {
-		t.Fatalf("selection composer = %q, hint count %d", selection, got)
-	}
-	if !lineContainsAll(selection, "拖动选择文本以复制", "Esc 返回") {
-		t.Fatalf("selection composer = %q, want inline back action", selection)
-	}
-}
-
 func TestAutomaticCompactUsesIndependentElapsedTimeAndKeepsComposerEditable(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 90, height: 24, activeRunID: "run-1", currentRunCanControl: true}
 	tui.initChatComponents()

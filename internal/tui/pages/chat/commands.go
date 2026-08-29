@@ -2,22 +2,33 @@ package chat
 
 import "strings"
 
+// CommandGroup 是 slash 补全的分组标签，帮助用户按语义发现能力，而不是记忆命令名。
+type CommandGroup string
+
+const (
+	CommandGroupSession CommandGroup = "session"
+	CommandGroupManage  CommandGroup = "manage"
+	CommandGroupHelp    CommandGroup = "help"
+)
+
 type CommandSpec struct {
 	Cmd     string
 	DescKey string
+	Group   CommandGroup
 }
 
 func AllCommands() []CommandSpec {
 	return []CommandSpec{
-		{"/new", "tui.command.new.desc"},
-		{"/model", "tui.command.model.desc"},
-		{"/memory", "tui.command.memory.desc"},
-		{"/sessions", "tui.command.sessions.desc"},
-		{"/mcp", "tui.command.mcp.desc"},
-		{"/skills", "tui.command.skills.desc"},
-		{"/compact", "tui.command.compact.desc"},
-		{"/config", "tui.command.config.desc"},
-		{"/help", "tui.command.help.desc"},
+		{"/new", "tui.command.new.desc", CommandGroupSession},
+		{"/sessions", "tui.command.sessions.desc", CommandGroupSession},
+		{"/compact", "tui.command.compact.desc", CommandGroupSession},
+		{"/model", "tui.command.model.desc", CommandGroupSession},
+		{"/skills", "tui.command.skills.desc", CommandGroupManage},
+		{"/mcp", "tui.command.mcp.desc", CommandGroupManage},
+		{"/memory", "tui.command.memory.desc", CommandGroupManage},
+		{"/attachments", "tui.command.attachments.desc", CommandGroupManage},
+		{"/config", "tui.command.config.desc", CommandGroupManage},
+		{"/help", "tui.command.help.desc", CommandGroupHelp},
 	}
 }
 

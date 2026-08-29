@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
+	"charm.land/lipgloss/v2"
 
 	"github.com/alanchenchen/suna/internal/protocol"
 	"github.com/alanchenchen/suna/internal/tui/components/attachment"
@@ -125,6 +126,12 @@ type Model struct {
 	TranscriptWindowEnd       int
 	TranscriptWindowSignature transcriptWindowSignature
 
+	// SelectionStart/SelectionEnd 是内容行选区范围（含端点），-1 表示无选区。
+	// 内容层应用选区样式（strip ANSI + 反色），避免行内 markdown 背景色覆盖选区背景。
+	SelectionStart int
+	SelectionEnd   int
+	SelectionStyle lipgloss.Style
+
 	Messages              []Msg
 	DisplayDiscard        DisplayDiscardSummary
 	PendingInput          string
@@ -207,7 +214,6 @@ type Model struct {
 	MemoryScroll      int
 	MemoryError       string
 	MemoryConfirm     MemoryConfirmMode
-	MemoryConfirmText string
 
 	Sessions            []protocol.SessionInfo
 	SessionsOverlayOpen bool
@@ -217,4 +223,15 @@ type Model struct {
 	SessionConfirm      SessionConfirmMode
 	SessionConfirmID    string
 	SessionRowKinds     []SessionRowKind
+
+	AttachmentsOverlayOpen bool
+	AttachmentsConfirm     bool
+}
+
+// HasOverlayOpen 表示是否有任何列表 overlay 打开（model picker / skills / mcp /
+// memory / sessions / attachments）。内容区鼠标选区在这些 overlay 打开时不应生效，
+// 避免拖动误触发选区遮挡面板交互。
+func (m Model) HasOverlayOpen() bool {
+	return m.ModelPickerOpen || m.SkillsOverlayOpen || m.MCPOverlayOpen ||
+		m.MemoryOverlayOpen || m.SessionsOverlayOpen || m.AttachmentsOverlayOpen
 }

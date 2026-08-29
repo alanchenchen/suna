@@ -30,6 +30,10 @@ var (
 	styleLogoDim = lipgloss.NewStyle().Foreground(ColorDim)
 	styleBrand   = lipgloss.NewStyle().Foreground(ColorBrand).Bold(true)
 
+	// styleSelection 是内容区鼠标选区的反色高亮：品牌色背景 + 深色前景，
+	// 与 pet/面板的选中 rail 视觉一致；主题切换时在 applyThemePalette 重建。
+	styleSelection = lipgloss.NewStyle().Background(ColorBrand).Foreground(ColorDim)
+
 	boxStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(ColorDim)
 )
 

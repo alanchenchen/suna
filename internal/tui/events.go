@@ -378,8 +378,7 @@ func (t *TUI) handleAskUserNotification(p protocol.AskUserParams) {
 		return
 	}
 	if p.CanReply {
-		// 阻塞交互必须优先于本地终端选择，避免选择模式吞掉用户对 AskUser 的按键。
-		t.selectionMode = false
+		// 阻塞交互接管输入时必须先失焦，确保可见状态与按键归属一致。
 		t.chat.Textarea.Blur()
 	}
 	if !p.CanReply {
@@ -404,8 +403,7 @@ func (t *TUI) handleGuardConfirmNotification(p protocol.GuardConfirmParams) {
 		return
 	}
 	if p.CanReply {
-		// Guard 接管输入时必须同时退出本地选择，确保可见状态与按键归属一致。
-		t.selectionMode = false
+		// Guard 接管输入时必须先失焦，确保可见状态与按键归属一致。
 		t.chat.Textarea.Blur()
 	}
 	if !p.CanReply {

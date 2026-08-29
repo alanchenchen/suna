@@ -16,15 +16,14 @@ type MemoryRowView struct {
 }
 
 type MemoryOverlayView struct {
-	Rows        []MemoryRowView
-	Loading     bool
-	Error       string
-	Total       int
-	Width       int
-	Inner       int
-	Height      int
-	Confirm     MemoryConfirmMode
-	ConfirmText string
+	Rows    []MemoryRowView
+	Loading bool
+	Error   string
+	Total   int
+	Width   int
+	Inner   int
+	Height  int
+	Confirm MemoryConfirmMode
 }
 
 func (m Model) MemoryOverlayView(width, overlayMaxHeight int) MemoryOverlayView {
@@ -35,16 +34,18 @@ func (m Model) MemoryOverlayView(width, overlayMaxHeight int) MemoryOverlayView 
 	for i, item := range m.Memories {
 		rows = append(rows, MemoryRowView{Memory: item, Kind: MemoryRowItem, Selected: i == m.MemoryCursor})
 	}
-	rows = append(rows, MemoryRowView{Kind: MemoryRowClear, Selected: m.MemorySelectionIsClear()})
+	// 记忆为空时清空项没有意义，不显示；空状态由渲染层处理。
+	if len(m.Memories) > 0 {
+		rows = append(rows, MemoryRowView{Kind: MemoryRowClear, Selected: m.MemorySelectionIsClear()})
+	}
 	return MemoryOverlayView{
-		Rows:        rows,
-		Loading:     m.MemoryLoading && len(m.Memories) == 0,
-		Error:       m.MemoryError,
-		Total:       len(m.Memories),
-		Width:       w,
-		Inner:       inner,
-		Height:      bodyHeight,
-		Confirm:     m.MemoryConfirm,
-		ConfirmText: m.MemoryConfirmText,
+		Rows:    rows,
+		Loading: m.MemoryLoading && len(m.Memories) == 0,
+		Error:   m.MemoryError,
+		Total:   len(m.Memories),
+		Width:   w,
+		Inner:   inner,
+		Height:  bodyHeight,
+		Confirm: m.MemoryConfirm,
 	}
 }

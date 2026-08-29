@@ -47,6 +47,36 @@ func TestToggleVisibleReasoningDetailCollapsesVisibleExpandedBlock(t *testing.T)
 	}
 }
 
+func TestToggleVisibleReasoningDetailSwitchesToClosestBlock(t *testing.T) {
+	var m Model
+	m.InitComponents(ComponentDeps{})
+	m.Viewport.SetHeight(10)
+	m.AppendMessage(Msg{Role: "reasoning", Content: "older"})
+	m.AppendMessage(Msg{Role: "panel", Content: "middle"})
+	m.AppendMessage(Msg{Role: "reasoning", Content: "newer"})
+	m.TranscriptBlocks = []transcriptBlock{
+		{MsgIndex: 0, LineCount: 4},
+		{MsgIndex: 1, LineCount: 4},
+		{MsgIndex: 2, LineCount: 4},
+	}
+	m.TranscriptTotalLines = 12
+	m.TranscriptYOffset = 2
+	// 已展开 older（视窗内），滚动后按 Ctrl+R 应直接展开视窗内最相关的新块（newer），
+	// 同时自动折叠旧的展开块，而不是先折叠再展开。
+	m.ExpandedReasoningID = m.Messages[0].ID
+
+	anchor, changed := m.ToggleVisibleReasoningDetail()
+	if !changed {
+		t.Fatal("ToggleVisibleReasoningDetail() changed = false, want true")
+	}
+	if got, want := m.ExpandedReasoningID, m.Messages[2].ID; got != want {
+		t.Fatalf("ExpandedReasoningID = %d, want newer visible reasoning %d", got, want)
+	}
+	if anchor.MessageID != m.Messages[2].ID {
+		t.Fatalf("anchor.MessageID = %d, want %d", anchor.MessageID, m.Messages[2].ID)
+	}
+}
+
 func TestToggleVisibleReasoningDetailIgnoresStreamingReasoning(t *testing.T) {
 	var m Model
 	m.InitComponents(ComponentDeps{})

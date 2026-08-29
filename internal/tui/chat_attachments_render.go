@@ -121,7 +121,7 @@ func (t *TUI) renderAttachmentBox(items []attachmentItem, cursor int, selectable
 		prefix := "  "
 		st := lipgloss.NewStyle()
 		if selectable && i == cursor {
-			prefix = styleCursor.Render("▶ ")
+			prefix = styleCursor.Render("▎ ")
 			st = styleHL
 		}
 		nameWidth := max(10, inner-22)
@@ -168,7 +168,7 @@ func (t *TUI) renderAttachmentList(items []attachmentItem, cursor int, selectabl
 		prefix := "  "
 		st := lipgloss.NewStyle()
 		if selectable && i == cursor {
-			prefix = styleCursor.Render("▶ ")
+			prefix = styleCursor.Render("▎ ")
 			st = styleHL
 		}
 		line := fmt.Sprintf("%s%d  %-5s  %-24s  %s", prefix, i+1, item.Type, truncateMiddle(item.Name, 24), formatAttachmentSize(item.Size))

@@ -33,9 +33,6 @@ func (t *TUI) renderThinkingBoxMode(content string, running, detail bool, starte
 		// completed 状态保留精确时长，不含 spinner，不会因 tick 变化。
 		title = fmt.Sprintf("✓ %s %.1fs", t.tr("tui.chat.thinking"), elapsed.Seconds())
 	}
-	if !running && !detail {
-		title += " · " + t.tr("tui.chat.thinking_detail_hint")
-	}
 	display := strings.TrimSpace(content)
 	if running && display == "" {
 		display = t.tr("status.thinking")
@@ -51,6 +48,8 @@ func (t *TUI) renderThinkingBoxMode(content string, running, detail bool, starte
 			display = t.tr("tui.chat.thought_done")
 		}
 	} else {
+		// 展开态渲染 markdown：思考链中常有代码块，纯文本会丢失代码高亮与格式，
+		// 用户主动展开查看完整内容时 md 渲染更清晰。折叠态保持纯文本（截断预览）。
 		display = RenderMarkdown(strings.TrimSpace(content), inner)
 	}
 	lines := strings.Split(strings.TrimRight(display, "\n"), "\n")
@@ -58,25 +57,35 @@ func (t *TUI) renderThinkingBoxMode(content string, running, detail bool, starte
 	for _, line := range lines {
 		body = append(body, textutil.WrapLine(line, inner)...)
 	}
-	body = limitThinkingBodyRows(body, detail, running)
+	body, truncated := t.limitThinkingBodyRows(body, detail, running)
+	// 只有内容被截断时才提示展开：未截断时 Ctrl+R 展开前后一致，提示是噪音。
+	if !running && !detail && truncated {
+		title += " · " + t.tr("tui.chat.thinking_detail_hint")
+	}
 	return textutil.IndentLines(renderThinkingRoundBox(width, title, body), transcriptBlockIndent) + "\n"
 }
-func limitThinkingBodyRows(lines []string, detail bool, running bool) []string {
+
+// limitThinkingBodyRows 截断思考内容到固定行数，返回截断后的行与是否发生截断。
+// running 显示尾部（最新思考），completed 显示头部（早期思考）；
+// 省略行用样式化文案（含折叠行数，i18n），比裸 "..." 更有信息量。
+func (t *TUI) limitThinkingBodyRows(lines []string, detail bool, running bool) ([]string, bool) {
 	lines = trimEmptyThinkingRows(lines)
 	if detail && !running {
-		return lines
+		return lines, false
 	}
 	maxRows := reasoningCompletedMaxRows
 	if running {
 		maxRows = reasoningRunningMaxRows
 	}
 	if len(lines) <= maxRows {
-		return lines
+		return lines, false
 	}
+	folded := len(lines) - (maxRows - 1)
+	ellipsis := styleDim.Render(t.i18n.Tf("tui.chat.thinking_folded", folded))
 	if running {
-		return append([]string{"..."}, lines[len(lines)-maxRows+1:]...)
+		return append([]string{ellipsis}, lines[len(lines)-maxRows+1:]...), true
 	}
-	return append(append([]string(nil), lines[:maxRows-1]...), "...")
+	return append(append([]string(nil), lines[:maxRows-1]...), ellipsis), true
 }
 
 func trimEmptyThinkingRows(lines []string) []string {

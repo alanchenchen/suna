@@ -21,9 +21,6 @@ type RowsDeps struct {
 	Workspace             string
 	ConfigPath            string
 	CredentialsPath       string
-	AttachmentUsage       string
-	AttachmentAvailable   bool
-	AttachmentDisabled    string
 	ConfigDir             string
 	DisplayEndpoint       func(string) string
 	ContextDisplay        func(ModelConfig) string
@@ -48,15 +45,14 @@ func (m *Model) HomeRows(deps RowsDeps) []Row {
 	if active == "" {
 		active = deps.Tr("tui.config.none")
 	}
-	attachmentKind := "clear_attachments"
-	attachmentUsage := deps.AttachmentUsage
-	if !deps.AttachmentAvailable {
-		attachmentKind = "attachments_disabled"
-		attachmentUsage = deps.AttachmentDisabled
-	}
 	rows := []Row{
 		{"label", "", deps.Tr("tui.config.model_connections"), ""},
 		{"section", "models", deps.ProvidersSummary(len(deps.Models), active), ""},
+		{"info", "", "", ""},
+		{"label", "", deps.Tr("tui.config.manage.section"), ""},
+		{"manage_skills", "", "  " + deps.Tr("tui.config.manage.skills"), ""},
+		{"manage_mcp", "", "  " + deps.Tr("tui.config.manage.mcp"), ""},
+		{"manage_memory", "", "  " + deps.Tr("tui.config.manage.memory"), ""},
 		{"info", "", "", ""},
 		{"label", "", deps.Tr("tui.config.general.section"), ""},
 		{"general_language", "", "  " + deps.Tr("tui.config.language"), deps.CurrentLanguage},
@@ -67,7 +63,6 @@ func (m *Model) HomeRows(deps RowsDeps) []Row {
 		{"label", "", deps.Tr("tui.config.local_files"), ""},
 		{"info", "", "  " + deps.Tr("tui.config.config_path"), deps.ConfigPath},
 		{"info", "", "  " + deps.Tr("tui.config.credentials_path"), deps.CredentialsPath},
-		{attachmentKind, "", "  " + deps.Tr("tui.config.attachments"), attachmentUsage},
 		{"open_config_dir", "", "  " + deps.Tr("tui.config.open_config_folder"), deps.ConfigDir},
 	}
 	m.EnsureCursor(rows)

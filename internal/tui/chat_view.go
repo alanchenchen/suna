@@ -53,6 +53,10 @@ func (t *TUI) viewChat() string {
 	if t.chat.SessionsOverlayOpen {
 		sessionsOverlay = t.renderSessionsOverlay(t.width)
 	}
+	attachmentsOverlay := ""
+	if t.chat.AttachmentsOverlayOpen {
+		attachmentsOverlay = t.renderAttachmentsOverlay(t.width)
+	}
 	guardOverlay := ""
 	if t.chat.ActiveInteractionKind() == chatpage.InteractionGuardConfirm {
 		guardOverlay = t.renderGuardOverlay(t.width)
@@ -70,7 +74,7 @@ func (t *TUI) viewChat() string {
 		Width:              t.width,
 		MiniPet:            renderMiniPet(petState, t.petFrame),
 		TopMeta:            t.chatTopMeta(),
-		Conn:               t.chatConnectionDot(petState),
+		Conn:               t.chatConnectionDot(),
 		Content:            t.chat.Viewport.View(),
 		Separator:          separator,
 		InputSeparator:     inputSeparator,
@@ -85,6 +89,7 @@ func (t *TUI) viewChat() string {
 		MCPOverlay:         mcpOverlay,
 		MemoryOverlay:      memoryOverlay,
 		SessionsOverlay:    sessionsOverlay,
+		AttachmentsOverlay: attachmentsOverlay,
 		GuardOverlay:       guardOverlay,
 		Overlay:            overlay.OverlayBlock,
 	}))
@@ -134,18 +139,17 @@ func (t *TUI) chatPetState() petState {
 	return petWorking
 }
 
-func (t *TUI) chatConnectionDot(state petState) string {
+func (t *TUI) chatConnectionDot() string {
 	badge := t.mcpBadge()
 	conn := ""
 	if t.localCli == nil || !t.localCli.Connected() {
 		conn = styleDim.Render("○")
 	} else {
-		switch state {
-		case petWorking:
+		// 连接点表达 daemon 健康状态：会话运行状态已由 pet 动画承担，避免重复。
+		// 有 MCP 服务器错误时降级为警告色，daemon 断开时显示空心点。
+		if t.hasMCPError() {
 			conn = styleToolRun.Render("●")
-		case petThinking:
-			conn = styleBrand.Render("●")
-		default:
+		} else {
 			conn = styleAgent.Render("●")
 		}
 	}
@@ -153,6 +157,16 @@ func (t *TUI) chatConnectionDot(state petState) string {
 		return badge + " " + conn
 	}
 	return conn
+}
+
+// hasMCPError 检查是否有 MCP 服务器处于错误状态，用于连接点降级为警告色。
+func (t *TUI) hasMCPError() bool {
+	for _, server := range t.chat.MCPServers {
+		if server.State == protocol.MCPServerError || server.Error != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *TUI) mcpBadge() string {
@@ -343,7 +357,32 @@ func leftAlignInputOverlayLine(line string, width int) string {
 	return strings.Repeat(" ", left) + line
 }
 
+// renderSelectionHint 渲染选区提示（显示在状态栏，替换常规内容，零布局变化）。
+// 拖动中提示操作方式，定格后提示复制键并显示已选行数；无选区时不显示（零开销）。
+func (t *TUI) renderSelectionHint() string {
+	if !t.selection.HasAny() {
+		return ""
+	}
+	if t.selection.Active {
+		return t.tr("tui.selection.drag_hint")
+	}
+	if t.selection.HasSelection {
+		start, end := t.selection.LineRange()
+		// 显示已选行数让用户确认选区范围；输入区选区无行高亮，行数反馈尤为重要。
+		return t.i18n.Tf("tui.selection.copy_hint_lines", end-start+1)
+	}
+	return ""
+}
+
 func (t *TUI) renderChatStatusBar() string {
+	// 复制反馈：选区复制成功后临时显示在状态栏左侧（1.5 秒后消失）。
+	if !t.copyFeedbackUntil.IsZero() && time.Now().Before(t.copyFeedbackUntil) && t.copyFeedbackText != "" {
+		return "  " + styleBrand.Render(t.copyFeedbackText) + strings.Repeat(" ", max(1, t.width-2-lipgloss.Width(t.copyFeedbackText)))
+	}
+	// 选区提示：拖动中/定格后显示在状态栏（替换常规内容，零布局变化，不抖动）。
+	if hint := t.renderSelectionHint(); hint != "" {
+		return "  " + styleBrand.Render(hint) + strings.Repeat(" ", max(1, t.width-2-lipgloss.Width(hint)))
+	}
 	ctx := "?"
 	if t.contextTokens > 0 {
 		ctx = fmtTok(t.contextTokens)
@@ -363,10 +402,13 @@ func (t *TUI) renderChatStatusBar() string {
 		bar = t.renderContextBar(pct) + " "
 	}
 	ctxPart := styleDim.Render(fmt.Sprintf("ctx %s/%s ", ctx, window)) + bar + ctxPct
+	// 左侧最前显示当前会话项目目录（basename），空间不足时优先隐藏 cwd 而非用量。
+	// 预留 70 列给 ctx 状态与右侧用量，剩余宽度给 cwd；窄终端下 cwd 自动截断/隐藏。
+	cwdPart := t.statusBarCWD(max(0, t.width-70))
 	if !t.hasUsage {
 		// 无用量数据时也走左右分栏：右侧占位右对齐，窄终端截断，避免初始状态全部挤在左侧。
 		right := styleDim.Render("↑? ↓? cached ? · ?t/s")
-		left := "  " + ctxPart
+		left := "  " + cwdPart + "  " + ctxPart
 		available := max(20, t.width-2)
 		rightWidth := lipgloss.Width(right)
 		if lipgloss.Width(left)+rightWidth > available {
@@ -391,7 +433,7 @@ func (t *TUI) renderChatStatusBar() string {
 	}
 	right := joinNonEmpty(parts, styleDim.Render(" · "))
 	// 左右分栏：左侧上下文状态，右侧用量右对齐；空间不足时优先保留上下文，截断用量。
-	left := "  " + ctxPart
+	left := "  " + cwdPart + "  " + ctxPart
 	available := max(20, t.width-2)
 	rightWidth := lipgloss.Width(right)
 	if lipgloss.Width(left)+rightWidth > available {
@@ -400,6 +442,28 @@ func (t *TUI) renderChatStatusBar() string {
 	}
 	pad := max(1, available-lipgloss.Width(left)-rightWidth)
 	return left + strings.Repeat(" ", pad) + right
+}
+
+// statusBarCWD 返回状态栏左侧的项目目录片段（📁 basename），
+// 复用 windowTitleWorkspace 的 basename 提取与控制字符清理；
+// 无会话目录时回退启动目录，两者都为空则返回空串（不显示）。
+// maxWidth 为片段最大宽度，超出时截断 basename；宽度不足时返回空串（隐藏）。
+func (t *TUI) statusBarCWD(maxWidth int) string {
+	workspace := windowTitleWorkspace(t.currentSession.CWD)
+	if workspace == "" {
+		workspace = windowTitleWorkspace(t.launchCWD)
+	}
+	if workspace == "" {
+		return ""
+	}
+	// 前缀 "📁 " 占 3 列（emoji 2 列 + 空格 1 列），末尾保留 1 空格与 ctx 分隔。
+	const prefix = "📁 "
+	avail := maxWidth - lipgloss.Width(prefix) - 1
+	if avail <= 0 {
+		return ""
+	}
+	workspace = textutil.TruncateRunes(workspace, avail)
+	return styleDim.Render(prefix + workspace + " ")
 }
 
 // renderContextBar 渲染上下文占用进度条（█ 填充 / ░ 空余），颜色随占用比例变化。
@@ -431,11 +495,18 @@ func (t *TUI) renderCommandSuggestions() string {
 	}
 	width := max(24, t.width-4)
 	var lines []string
+	lastGroup := chatpage.CommandGroup("")
 	for i, c := range view.Items {
+		if c.Group != lastGroup {
+			if titleKey := chatpage.CommandGroupTitle(c.Group); titleKey != "" {
+				lines = append(lines, styleDim.Render(t.tr(titleKey)))
+			}
+			lastGroup = c.Group
+		}
 		prefix := "  "
 		style := lipgloss.NewStyle()
 		if i == view.Selected {
-			prefix = styleCursor.Render("▶ ")
+			prefix = styleCursor.Render("▎ ")
 			style = styleHL
 		}
 		line := prefix + style.Render(fmt.Sprintf("%-16s", c.Cmd)) + styleDim.Render(t.tr(c.DescKey))
@@ -493,8 +564,6 @@ func (t *TUI) renderInputArea() string {
 	}
 	if presentation.GuardActive {
 		text = styleError.Render(t.tr("tui.guard.input_waiting"))
-	} else if presentation.TerminalSelection {
-		text = renderInlineRunStatus(width, t.tr("tui.selection_mode.hint"), t.tr("tui.selection_mode.back"))
 	} else if emptyInput {
 		text = styleDim.Render(t.tr("tui.chat.input_placeholder"))
 	}
@@ -606,9 +675,6 @@ func (t *TUI) lockedInputPlaceholder() string {
 	if presentation.GuardActive {
 		return t.tr("tui.guard.input_waiting")
 	}
-	if presentation.TerminalSelection {
-		return t.tr("tui.selection_mode.hint")
-	}
 	policy := presentation.InputPolicy
 	if policy.Placeholder != "" {
 		return policy.Placeholder
@@ -620,9 +686,6 @@ func (t *TUI) renderPreInputHint() string {
 	presentation := t.currentInteractionPresentation()
 	if presentation.GuardActive {
 		return styleError.Render("  ⚠ "+t.tr("tui.guard.input_waiting")) + styleDim.Render(" · ") + styleDim.Render(t.tr("tui.guard.help"))
-	}
-	if presentation.TerminalSelection {
-		return ""
 	}
 	if block := t.renderHandoffBlock(); block != "" {
 		return block
@@ -646,7 +709,7 @@ func (t *TUI) inputHint() string {
 
 func (t *TUI) inputHelp() string {
 	presentation := t.currentInteractionPresentation()
-	if presentation.TerminalSelection || presentation.GuardActive {
+	if presentation.GuardActive {
 		return ""
 	}
 	if presentation.Locked {

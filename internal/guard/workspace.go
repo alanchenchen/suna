@@ -28,6 +28,12 @@ func normalizeWorkspaceRoot(path string) string {
 }
 
 func (g *Guard) checkWorkspace(ctx context.Context, tool string, params map[string]any) (bool, string, string) {
+	return g.checkWorkspaceWithAnalysis(ctx, tool, params, nil)
+}
+
+// checkWorkspaceWithAnalysis 支持复用已解析的 ExecAnalysis（Check 主流程传 analysis，
+// 避免同一命令多次 AST 解析）；analysis 为 nil 时自行解析（独立调用入口）。
+func (g *Guard) checkWorkspaceWithAnalysis(ctx context.Context, tool string, params map[string]any, analysis *ExecAnalysis) (bool, string, string) {
 	if g == nil || g.workspace == "" {
 		return false, "", ""
 	}
@@ -42,6 +48,13 @@ func (g *Guard) checkWorkspace(ctx context.Context, tool string, params map[stri
 		}
 		if dst, _ := params["destination"].(string); strings.TrimSpace(dst) != "" {
 			return g.checkWorkspacePath(tool, "destination", dst, g.workspace)
+		}
+		return false, "", ""
+	case "http":
+		// file:// URL 是本地文件访问，属于 workspace 边界；网络 URL 不是路径语义，不检查。
+		if u, _ := params["url"].(string); strings.HasPrefix(u, "file://") {
+			path := strings.TrimPrefix(u, "file://")
+			return g.checkWorkspacePath(tool, "url", path, g.workspace)
 		}
 		return false, "", ""
 	case "exec":
@@ -59,7 +72,7 @@ func (g *Guard) checkWorkspace(ctx context.Context, tool string, params map[stri
 		}
 		command, _ := params["command"].(string)
 		shell, _ := params["shell"].(string)
-		return g.checkExecWorkspacePaths(command, cwd, shell)
+		return g.checkExecWorkspacePathsWithAnalysis(command, cwd, shell, analysis)
 	default:
 		return false, "", ""
 	}
@@ -97,10 +110,85 @@ func workspaceAuditReason(field string) string {
 }
 
 func (g *Guard) checkExecWorkspacePaths(command string, cwd string, shell string) (bool, string, string) {
+	return g.checkExecWorkspacePathsWithAnalysis(command, cwd, shell, nil)
+}
+
+// checkExecWorkspacePathsWithAnalysis 复用已解析的 ExecAnalysis（Check 主流程传 analysis，
+// 避免同一命令多次 AST 解析）；analysis 为 nil 时自行解析（独立调用入口）。
+func (g *Guard) checkExecWorkspacePathsWithAnalysis(command string, cwd string, shell string, analysis *ExecAnalysis) (bool, string, string) {
 	command = strings.TrimSpace(command)
 	if command == "" {
 		return false, "", ""
 	}
+	// 优先用 ExecAnalysis（POSIX AST 精确提取命令参数与重定向）。
+	// ok=true 时完全信任 AST：路径来自 Commands.Args（引号/变量已展开或保守保留），
+	// 重定向来自 Redirects（op/fd 精确，/dev/null 与 fd 重定向天然豁免）。
+	if analysis == nil {
+		a, ok := newExecAnalyzer().Analyze(command, shell)
+		if !ok {
+			analysis = &ExecAnalysis{ParseFailed: true}
+		} else {
+			analysis = &a
+		}
+	}
+	if !analysis.ParseFailed {
+		// 命令参数中的路径候选。
+		for _, cmd := range analysis.Commands {
+			for _, arg := range cmd.Args {
+				if !isPathCandidate(arg) {
+					continue
+				}
+				if blocked, reason, auditReason := g.checkWorkspacePath("exec", "command", arg, cwd); blocked {
+					return true, reason, auditReason
+				}
+			}
+		}
+		// 引号内路径检查只针对解释器场景（sh -c "cat /"、printf 'ls / ' | sh）。
+		// 数据场景（printf '%s' "mentions /tmp here"）的引号内路径只是文本，printf 不会访问它，
+		// 不应拦截（旧实现无差别拦截是误判）。真实参数访问（cat "/tmp/x"）已由上方 AST 参数检查覆盖。
+		hasInterpreter := analysisHasInterpreter(*analysis)
+		if hasInterpreter {
+			for _, match := range execQuotedAbsPathPattern.FindAllStringSubmatch(command, -1) {
+				if len(match) < 2 {
+					continue
+				}
+				if blocked, reason, auditReason := g.checkWorkspacePath("exec", "command", match[1], cwd); blocked {
+					return true, reason, auditReason
+				}
+			}
+			for _, match := range execQuotedPathTokenPattern.FindAllStringSubmatch(command, -1) {
+				if len(match) < 2 {
+					continue
+				}
+				if blocked, reason, auditReason := g.checkWorkspacePath("exec", "command", match[1], cwd); blocked {
+					return true, reason, auditReason
+				}
+			}
+			for _, match := range execQuotedStandaloneSlashPattern.FindAllStringSubmatch(command, -1) {
+				if len(match) < 2 {
+					continue
+				}
+				if blocked, reason, auditReason := g.checkWorkspacePath("exec", "command", match[1], cwd); blocked {
+					return true, reason, auditReason
+				}
+			}
+		}
+		// 重定向目标。
+		for _, r := range analysis.Redirects {
+			if r.Op == "fd" || r.Target == "" {
+				continue
+			}
+			if r.Target == "/dev/null" {
+				// 丢弃输出设备，无文件副作用，不参与 workspace 检查。
+				continue
+			}
+			if blocked, reason, auditReason := g.checkWorkspacePath("exec", "redirection", r.Target, cwd); blocked {
+				return true, reason, auditReason
+			}
+		}
+		return false, "", ""
+	}
+	// fallback：解析失败（POSIX 语法错误）或 Windows 保守解析时用正则（能力不低于现状）。
 	quotedRanges, parsed, supported := shellQuotedRangesForWorkspace(command, shell)
 	if supported && !parsed {
 		return true, "workspace boundary: cannot parse exec.command safely", "workspace_unavailable"
@@ -132,6 +220,63 @@ func (g *Guard) checkExecWorkspacePaths(command string, cwd string, shell string
 		}
 	}
 	return false, "", ""
+}
+
+// isPathCandidate 判断参数是否值得做 workspace 检查：
+// 绝对路径、~ 开头、./ 或 ../ 开头、Windows drive 路径（C:\foo 或 C:/foo）、
+// 以及 ..（cd .. 可能越出 workspace）。纯命令标志（-r、--force）不是路径。
+// 含 $ 的变量展开路径不检查（$(pwd)/x、$dir/x 值无法静态确定，与旧正则语义一致）。
+// 必须以路径边界字符开头（/ ~ . \\ drive 字母），排除代码片段（perl 正则的 /g、
+// python 的 (x)/y 等——旧 execPathTokenPattern 要求路径前有开头/空格/等号边界）。
+func isPathCandidate(arg string) bool {
+	if arg == "" || arg == "." {
+		return false
+	}
+	if strings.HasPrefix(arg, "-") {
+		return false
+	}
+	if strings.Contains(arg, "$") {
+		return false
+	}
+	if arg == ".." || strings.HasPrefix(arg, "/") || strings.HasPrefix(arg, "~/") ||
+		strings.HasPrefix(arg, "./") || strings.HasPrefix(arg, "../") ||
+		strings.Contains(arg, "\\") || isWindowsDrivePath(arg) {
+		return true
+	}
+	// 含 / 但以非路径字符开头（( /g、{/x、)/y）是代码片段不是路径；
+	// 但含 /../ 或 /./ 段的相对路径（foo/../bar）是真实路径候选（旧正则 [^...]+/\.\.?/ 分支）。
+	if strings.Contains(arg, "/") {
+		first := arg[0]
+		if first == '.' || first == '/' || first == '~' || first == '\\' {
+			return true
+		}
+		return strings.Contains(arg, "/../") || strings.Contains(arg, "/./")
+	}
+	return false
+}
+
+// isWindowsDrivePath 判断是否为 Windows drive 路径（C:\foo、C:/foo）。
+func isWindowsDrivePath(arg string) bool {
+	if len(arg) < 3 {
+		return false
+	}
+	if (arg[0] < 'A' || arg[0] > 'Z') && (arg[0] < 'a' || arg[0] > 'z') {
+		return false
+	}
+	return arg[1] == ':' && (arg[2] == '\\' || arg[2] == '/')
+}
+
+// analysisHasInterpreter 判断命令是否含解释器（sh/bash/python 等）。
+// 含解释器时引号内独立斜杠不豁免（解释器可能执行引号内容），复刻旧 execWorkspaceProseExemptionSafe 语义。
+func analysisHasInterpreter(a ExecAnalysis) bool {
+	for _, cmd := range a.Commands {
+		switch strings.ToLower(cmd.Name) {
+		case "sh", "bash", "zsh", "fish", "cmd", "powershell", "pwsh",
+			"eval", "source", "python", "python3", "node", "ruby", "perl", "php":
+			return true
+		}
+	}
+	return false
 }
 
 type shellQuoteRange struct {

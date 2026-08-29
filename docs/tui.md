@@ -68,7 +68,7 @@ Chat transcript 遵循“完整数据在页面 model、渲染只取可见窗口�
 - TUI 展示历史有固定内存预算：超过阈值后从最顶部按完整 turn 释放到低水位，裁后第一条真实消息仍是 user，并在顶部保留一个累计摘要块；这个裁剪只影响当前 TUI 展示，不影响 daemon 的 WorkingMemory / Session State，也不持久化。
 - session attach/create snapshot 只把真实 user/assistant 作为最近可见消息恢复到 transcript；结构化工具摘要通过 snapshot `tool_summary` 返回，由 TUI 根据 locale 渲染成本地化 summary block，不要求 daemon 生成展示文案。
 - 文本流活跃时，spinner tick 不额外触发完整 transcript sync；文本流停顿或等待首 token 时，spinner 仍正常刷新等待状态。
-- 鼠标模式默认保持 Bubble Tea 的 cell motion，以保留触控板滚动；复制终端文本时可按 `Ctrl+S` 进入选择模式，TUI 临时关闭鼠标捕获，`Esc` 返回滚动。
+- 鼠标模式固定为 Bubble Tea 的 cell motion：内容区按住左键拖动即选中（选区锚定内容行，滚动跟随不丢失），`y` 复制纯文本到剪贴板，单击/Esc 清除；拖到内容区边缘自动滚动跨页。输入区同样支持拖选复制草稿。
 - window signature 完全一致时跳过重复 `SetContentLines`；这不是帧率限制，不应改成基于时间的节流。
 
 维护约定：

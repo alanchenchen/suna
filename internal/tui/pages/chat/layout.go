@@ -3,7 +3,7 @@ package chat
 const (
 	InputMaxHeight        = 6
 	MouseWheelDelta       = 3
-	MaxCommandSuggestions = 4
+	MaxCommandSuggestions = 10
 )
 
 type LayoutInput struct {

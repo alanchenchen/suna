@@ -31,6 +31,10 @@ type TUI struct {
 	program     *tea.Program
 	notifyQueue *notificationQueue
 
+	// clipboardWrite 是选区复制写入系统剪贴板的函数，测试可注入 fake 避免依赖
+	// 真实桌面剪贴板（headless CI 无 X11/Wayland 服务时 WriteText 会失败）。
+	clipboardWrite func(string) error
+
 	// 根应用状态：只负责页面路由和全局尺寸。
 	mode     uipage.Page
 	prevMode uipage.Page
@@ -92,9 +96,6 @@ type TUI struct {
 	// Help overlay 状态。
 	showHelp bool
 
-	// 选择模式会临时释放鼠标给终端原生选择，Esc 返回后恢复 TUI 滚动。
-	selectionMode bool
-
 	// Compact UI mode: auto compact should say model will continue; manual /compact should not.
 	compactAuto      bool
 	compactStartedAt time.Time
@@ -133,6 +134,17 @@ type TUI struct {
 	petTicking bool
 	// petHappyUntil 非零时宠物显示开心眼（run 完成后的奖励帧），到期后回到 idle。
 	petHappyUntil time.Time
+
+	// selection 是 transcript 内容行上的鼠标选区（拖动中或已定格），
+	// 锚定内容行索引，滚动跟随内容不丢失；y 复制、单击/Esc 清除。
+	selection Selection
+	// selectionEdgeTicking 保证 edge scroll 只有一条 tick 链（拖动到边缘时启动）。
+	selectionEdgeTicking   bool
+	selectionEdgeDirection int
+	lastSelectionMouseY    int
+	// copyFeedbackUntil 非零时状态栏显示“已复制”反馈，到期后消失。
+	copyFeedbackUntil time.Time
+	copyFeedbackText  string
 }
 
 type guardConfirmView = chatpage.GuardConfirmView

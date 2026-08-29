@@ -142,6 +142,7 @@ func applyThemePalette(p themePalette) {
 	styleMetaPill = lipgloss.NewStyle().Foreground(p.ToolText).Background(ColorBrand).Padding(0, 1).Bold(true)
 	styleThinkingIcon = lipgloss.NewStyle().Foreground(ColorBrand).Bold(true)
 	styleThinkingLabel = lipgloss.NewStyle().Foreground(ColorDim)
+	styleSelection = lipgloss.NewStyle().Background(ColorBrand).Foreground(p.ToolText)
 	styleThinkingValue = lipgloss.NewStyle().Foreground(ColorBrand).Bold(true)
 	styleGuardOK = lipgloss.NewStyle().Foreground(p.ToolText).Background(ColorAgent).Padding(0, 1).Bold(true)
 	styleGuardWarn = lipgloss.NewStyle().Foreground(p.ToolText).Background(ColorTool).Padding(0, 1).Bold(true)

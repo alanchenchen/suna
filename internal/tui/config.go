@@ -32,6 +32,25 @@ func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, nil
 	case tea.KeyPressMsg:
 		t.config.Notice = ""
+		// Config 页打开 chat overlay（管理分组）时，按键转发给对应 overlay；
+		// esc 关闭 overlay 后回到 Config 页，不退出配置。
+		if t.chat.SkillsOverlayOpen || t.chat.MCPOverlayOpen || t.chat.MemoryOverlayOpen {
+			ks := m.String()
+			var cmd tea.Cmd
+			switch {
+			case t.chat.SkillsOverlayOpen:
+				_, cmd = t.updateSkillsOverlay(ks, m)
+			case t.chat.MCPOverlayOpen:
+				_, cmd = t.updateMCPOverlay(ks, m)
+			case t.chat.MemoryOverlayOpen:
+				_, cmd = t.updateMemoryOverlay(ks)
+			}
+			// overlay 关闭后回到 Config 页；丢弃 chat 场景的 syncInputFocus，避免焦点漂移。
+			if !t.chat.SkillsOverlayOpen && !t.chat.MCPOverlayOpen && !t.chat.MemoryOverlayOpen {
+				return t, nil
+			}
+			return t, cmd
+		}
 		if t.config.SetupMode && !t.config.FormOpen && len(t.configState.Models) == 0 {
 			t.openProviderForm("", nil)
 			return t, t.config.Inputs[t.config.InputFocus].Focus()
@@ -211,16 +230,6 @@ func (t *TUI) workspaceDisplay() string {
 	return workspace
 }
 
-func (t *TUI) attachmentUsageDisplay() string {
-	if t.currentSession.ID == "" {
-		return t.tr("tui.config.attachments_no_session")
-	}
-	if t.attachmentStatus.SessionID != "" && t.attachmentStatus.SessionID != t.currentSession.ID {
-		return t.tr("tui.config.attachments_loading")
-	}
-	return fmt.Sprintf("%s / %d files", formatAttachmentSize(t.attachmentStatus.Bytes), t.attachmentStatus.Count)
-}
-
 func (t *TUI) displayEndpoint(endpoint string) string {
 	if endpoint == "" {
 		return t.tr("tui.config.missing")
@@ -281,24 +290,21 @@ func (t *TUI) configRowsDeps() tuiconfig.RowsDeps {
 		ProviderModelsSummary: func(provider string, count int) string {
 			return t.i18n.Tf("tui.config.provider_models_summary", provider, count)
 		},
-		Models:              t.configModelsSnapshot(),
-		ActiveModel:         t.configState.ActiveModel,
-		IsActive:            t.isDefaultModelRef,
-		ModelSummary:        t.modelSummary,
-		CurrentLanguage:     t.currentLangDisplay(),
-		Theme:               t.themeDisplay(),
-		GuardMode:           t.guardModeDisplay(),
-		Workspace:           t.workspaceDisplay(),
-		ConfigPath:          configFilePath(),
-		CredentialsPath:     credentialsFilePath(),
-		AttachmentUsage:     t.attachmentUsageDisplay(),
-		AttachmentAvailable: t.currentSession.ID != "",
-		AttachmentDisabled:  t.tr("tui.config.attachments_open_session"),
-		ConfigDir:           configDataDir(),
-		DisplayEndpoint:     t.displayEndpoint,
-		ContextDisplay:      contextDisplay,
-		MaxOutputDisplay:    maxOutputDisplay,
-		ReasoningDisplay:    t.reasoningDisplay,
+		Models:           t.configModelsSnapshot(),
+		ActiveModel:      t.configState.ActiveModel,
+		IsActive:         t.isDefaultModelRef,
+		ModelSummary:     t.modelSummary,
+		CurrentLanguage:  t.currentLangDisplay(),
+		Theme:            t.themeDisplay(),
+		GuardMode:        t.guardModeDisplay(),
+		Workspace:        t.workspaceDisplay(),
+		ConfigPath:       configFilePath(),
+		CredentialsPath:  credentialsFilePath(),
+		ConfigDir:        configDataDir(),
+		DisplayEndpoint:  t.displayEndpoint,
+		ContextDisplay:   contextDisplay,
+		MaxOutputDisplay: maxOutputDisplay,
+		ReasoningDisplay: t.reasoningDisplay,
 	}
 }
 
@@ -330,6 +336,18 @@ func (t *TUI) handleConfigAction(rows []tuiconfig.Row) tea.Cmd {
 	case "section":
 		t.config.Page = row.Name
 		t.config.Cursor = 0
+	case "manage_skills":
+		t.ensureNativeLists()
+		t.chat.OpenSkillsOverlay()
+		return t.listSkillsCmd()
+	case "manage_mcp":
+		t.ensureNativeLists()
+		t.chat.OpenMCPOverlay()
+		return t.listMCPCmd()
+	case "manage_memory":
+		t.ensureNativeLists()
+		t.chat.OpenMemoryOverlay()
+		return t.listMemoryCmd()
 	case "general_language":
 		return t.toggleLanguage()
 	case "general_theme":

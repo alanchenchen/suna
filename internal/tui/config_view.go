@@ -24,6 +24,16 @@ func (t *TUI) viewConfig() string {
 		return t.viewProviderForm()
 	}
 	base := t.viewConfigPage()
+	// 管理分组打开的 chat overlay 浮在 Config 页之上；esc 关闭后回到 Config。
+	if t.chat.SkillsOverlayOpen {
+		return overlay.OverlayBlock(base, t.renderSkillsOverlay(t.width))
+	}
+	if t.chat.MCPOverlayOpen {
+		return overlay.OverlayBlock(base, t.renderMCPOverlay(t.width))
+	}
+	if t.chat.MemoryOverlayOpen {
+		return overlay.OverlayBlock(base, t.renderMemoryOverlay(t.width))
+	}
 	if t.showHelp {
 		return overlay.OverlayBlock(base, t.renderHelpOverlay(t.width))
 	}
@@ -76,7 +86,6 @@ func (t *TUI) configHelp(rows []tuiconfig.Row) string {
 		Theme:         t.tr("tui.config.help_theme"),
 		Guard:         t.tr("tui.config.help_guard"),
 		Workspace:     t.tr("tui.config.help_workspace"),
-		Attachments:   t.tr("tui.config.help_attachments"),
 		OpenConfigDir: t.tr("tui.config.help_open_config_dir"),
 		AddModel:      t.tr("tui.config.help_add_model"),
 		ModelRow:      t.tr("tui.config.help_model_row"),
@@ -87,6 +96,9 @@ func (t *TUI) configHelp(rows []tuiconfig.Row) string {
 		Models:        t.tr("tui.config.help_models"),
 		Detail:        t.tr("tui.config.help_detail"),
 		Home:          t.tr("tui.config.help_home"),
+		ManageSkills:  t.tr("tui.config.help_manage_skills"),
+		ManageMCP:     t.tr("tui.config.help_manage_mcp"),
+		ManageMemory:  t.tr("tui.config.help_manage_memory"),
 	})
 }
 
@@ -161,14 +173,6 @@ func (t *TUI) renderConfigRow(sb *strings.Builder, idx int, row tuiconfig.Row) {
 		return
 	}
 	label, value := row.Label, row.Value
-	if row.Kind == "attachments_disabled" {
-		sb.WriteString("    " + styleDim.Render(label))
-		if value != "" {
-			sb.WriteString(styleDim.Render("  ") + styleDim.Render(value))
-		}
-		sb.WriteString("\n")
-		return
-	}
 	prefix := selection.Rail(t.config.Cursor == idx, 2, styleCursor)
 	st := lipgloss.NewStyle()
 	if t.config.Cursor == idx {

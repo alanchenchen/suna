@@ -13,7 +13,9 @@ import (
 // 列表的导航、筛选和分页仍完全由 Bubbles 负责。
 func (t *TUI) nativeListEmptyHint(model overlaylist.Model, emptyKey string) string {
 	if model.ItemCount() == 0 {
-		return styleDim.Render(t.tr(emptyKey))
+		// 空状态带一只静态小宠物，延续 pet 形象，避免纯文本显得生硬。
+		pet := styleDim.Render("▀  ▀")
+		return pet + "\n" + styleDim.Render(t.tr(emptyKey))
 	}
 	if model.VisibleCount() == 0 && strings.TrimSpace(model.List().FilterValue()) != "" {
 		return styleDim.Render(t.tr("tui.list.no_matches"))
@@ -37,13 +39,33 @@ func (t *TUI) nativeListHeader(model overlaylist.Model) string {
 		model.List().FilterInput.SetWidth(max(1, leftWidth-promptWidth-1))
 		left = model.List().FilterInput.View()
 	} else {
-		left = styleHL.Render(model.TitleText())
+		// 标题用 Brand→HL 渐变，与 welcome 门面呼应；低色深终端自动降级。
+		left = t.gradientText(model.TitleText())
 	}
 	// 输入框本身负责长查询的横向滚动。这里仅做安全裁剪，不能显示“…”并
 	// 伪装成筛选状态的一部分。
 	left = ansi.Truncate(left, leftWidth, "")
 	gap := max(1, width-lipgloss.Width(left)-countWidth)
 	return left + strings.Repeat(" ", gap) + count
+}
+
+// gradientText 渲染 Brand→HL 渐变文字（welcome 门面同款），
+// 无前景色时回退纯品牌色，保证低色深终端不破坏布局。
+// 注意：必须按 rune 索引取色，range 字符串的 i 是字节偏移，
+// 中文标题会越界（如“技能”第二个字偏移 3）。
+func (t *TUI) gradientText(text string) string {
+	from := styleBrand.GetForeground()
+	to := styleHL.GetForeground()
+	if from == nil || to == nil {
+		return styleBrand.Render(text)
+	}
+	runes := []rune(text)
+	colors := lipgloss.Blend1D(len(runes), from, to)
+	var sb strings.Builder
+	for i, r := range runes {
+		sb.WriteString(lipgloss.NewStyle().Foreground(colors[i]).Bold(true).Render(string(r)))
+	}
+	return sb.String()
 }
 
 // nativeListFooter 显示与当前状态严格一致的少量操作。键位判断和筛选状态机
@@ -111,7 +133,10 @@ func (t *TUI) renderNativeListOverlay(owner string, model *overlaylist.Model, wi
 
 	var rows []string
 	if hint != "" {
-		rows = []string{hint}
+		// 空状态两行（宠物+文案）逐行居中，与列表行左对齐区分开。
+		for _, line := range strings.Split(hint, "\n") {
+			rows = append(rows, centerCell(line, innerWidth))
+		}
 	} else {
 		rows = t.chat.NativeListRows(owner, t.nativeListStyles(), t.nativeListText(), innerWidth)
 	}
