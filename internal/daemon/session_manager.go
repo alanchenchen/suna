@@ -48,6 +48,11 @@ type detachResult struct {
 	orphaned  bool
 	idle      bool
 	agent     *agent.Agent
+	// owner 离开但 session 仍有其他 attach 时，控制权交给仍在线的连接。
+	newOwner string
+	runID    string
+	runState protocol.AgentRunState
+	phase    protocol.AgentRunPhase
 }
 
 type sessionManager struct {
@@ -69,8 +74,10 @@ type sessionManager struct {
 	// 回调在 sessionManager 锁外执行，不能重入 sessionManager 锁。
 	onOrphan func(sessionID string)
 	// onClientDetached 在仍有其他连接使用同一 runtime 时交接等待中的交互。
-	// 回调在 sessionManager 锁外执行。
-	onClientDetached func(connID, sessionID string)
+	// 回调在 sessionManager 锁外执行。newOwner 非空表示 run 控制权已交给该连接。
+	onClientDetached func(connID, sessionID, newOwner, runID string, runState protocol.AgentRunState, phase protocol.AgentRunPhase)
+	// canTakeHandoff 由 daemon 根据每条连接在 runtime.hello 中声明的能力决定。
+	canTakeHandoff func(connID string) bool
 }
 
 func newSessionManager(root *agent.Agent, store *memory.SessionStore) *sessionManager {
@@ -257,6 +264,13 @@ func (m *sessionManager) attach(ctx context.Context, connID, sessionID string, r
 	}
 	rt.clients[connID] = true
 	m.attached[connID] = sessionID
+	// owner 已不在 clients 里（刷新、切走、后台连接释放）时，当前这条
+	// 仍 attached 的连接接手，避免单窗口卡在 can_control=false。
+	if m.canTakeHandoff != nil && m.canTakeHandoff(connID) && rt.status != sessionIdle && rt.runID != "" && rt.runState != protocol.AgentRunCancelling {
+		if rt.runOwner == "" || !rt.clients[rt.runOwner] {
+			rt.runOwner = connID
+		}
+	}
 	delete(m.creating, sessionID)
 	if rt.stateOps > 0 {
 		rt.stateOps--
@@ -336,7 +350,21 @@ func (m *sessionManager) detachConnNoLock(connID string) detachResult {
 	}
 	delete(rt.clients, connID)
 	if len(rt.clients) != 0 {
-		return detachResult{sessionID: id}
+		result := detachResult{sessionID: id}
+		if rt.runOwner == connID && rt.status != sessionIdle && rt.runID != "" && rt.runState != protocol.AgentRunCancelling {
+			for next := range rt.clients {
+				if m.canTakeHandoff == nil || !m.canTakeHandoff(next) {
+					continue
+				}
+				rt.runOwner = next
+				result.newOwner = next
+				result.runID = rt.runID
+				result.runState = rt.runState
+				result.phase = rt.phase
+				break
+			}
+		}
+		return result
 	}
 	result := detachResult{sessionID: id, orphaned: true, idle: rt.status == sessionIdle}
 	if !result.idle {
@@ -356,7 +384,7 @@ func (m *sessionManager) finishDetach(connID string, result detachResult) {
 			m.onOrphan(result.sessionID)
 		}
 	} else if m.onClientDetached != nil {
-		m.onClientDetached(connID, result.sessionID)
+		m.onClientDetached(connID, result.sessionID, result.newOwner, result.runID, result.runState, result.phase)
 	}
 	if result.agent != nil {
 		result.agent.CancelCurrentRun()

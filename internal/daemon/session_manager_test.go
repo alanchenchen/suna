@@ -336,7 +336,7 @@ func TestSessionManagerAttachSwitchHandsOffRemainingClients(t *testing.T) {
 	}
 
 	var gotConnID, gotSessionID string
-	m.onClientDetached = func(connID, sessionID string) {
+	m.onClientDetached = func(connID, sessionID, _, _ string, _ protocol.AgentRunState, _ protocol.AgentRunPhase) {
 		gotConnID, gotSessionID = connID, sessionID
 	}
 	if _, err := m.attach(ctx, "owner", second.Session.ID, false); err != nil {
@@ -344,6 +344,108 @@ func TestSessionManagerAttachSwitchHandsOffRemainingClients(t *testing.T) {
 	}
 	if gotConnID != "owner" || gotSessionID != first.Session.ID {
 		t.Fatalf("handoff = (%q, %q), want (%q, %q)", gotConnID, gotSessionID, "owner", first.Session.ID)
+	}
+}
+
+func TestSessionManagerOwnerDetachTransfersControl(t *testing.T) {
+	ctx := context.Background()
+	m := newTestSessionManager(t)
+	m.canTakeHandoff = func(connID string) bool { return connID == "remaining" }
+	snap, err := m.create(ctx, "owner", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+	if _, err := m.attach(ctx, "remaining", snap.Session.ID, false); err != nil {
+		t.Fatalf("attach remaining error = %v", err)
+	}
+	if _, _, _, err := m.beginRun("owner"); err != nil {
+		t.Fatalf("beginRun error = %v", err)
+	}
+	if got := m.runOwner(snap.Session.ID); got != "owner" {
+		t.Fatalf("runOwner = %q, want owner", got)
+	}
+
+	var transferredTo, transferredRun string
+	m.onClientDetached = func(_, _, newOwner, runID string, _ protocol.AgentRunState, _ protocol.AgentRunPhase) {
+		transferredTo, transferredRun = newOwner, runID
+	}
+	m.detach("owner")
+	if got := m.runOwner(snap.Session.ID); got != "remaining" {
+		t.Fatalf("runOwner after owner detach = %q, want remaining", got)
+	}
+	if transferredTo != "remaining" || transferredRun == "" {
+		t.Fatalf("transfer callback = (%q, %q), want remaining with run id", transferredTo, transferredRun)
+	}
+}
+
+func TestSessionManagerAttachClaimsOrphanedRun(t *testing.T) {
+	ctx := context.Background()
+	m := newTestSessionManager(t)
+	m.canTakeHandoff = func(connID string) bool { return connID == "fresh" || connID == "claimer" }
+	snap, err := m.create(ctx, "stale", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+	if _, _, _, err := m.beginRun("stale"); err != nil {
+		t.Fatalf("beginRun error = %v", err)
+	}
+	if _, err := m.attach(ctx, "fresh", snap.Session.ID, false); err != nil {
+		t.Fatalf("attach fresh error = %v", err)
+	}
+	// stale 仍 attached，不能抢 owner。
+	if got := m.runOwner(snap.Session.ID); got != "stale" {
+		t.Fatalf("runOwner with both attached = %q, want stale", got)
+	}
+	m.detach("stale")
+	if got := m.runOwner(snap.Session.ID); got != "fresh" {
+		t.Fatalf("runOwner after stale left = %q, want fresh", got)
+	}
+
+	orphan, err := m.create(ctx, "gone", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create orphan error = %v", err)
+	}
+	if _, _, _, err := m.beginRun("gone"); err != nil {
+		t.Fatalf("beginRun orphan error = %v", err)
+	}
+	m.mu.Lock()
+	rt := m.runtime[orphan.Session.ID]
+	delete(rt.clients, "gone")
+	delete(m.attached, "gone")
+	m.mu.Unlock()
+	if _, err := m.attach(ctx, "claimer", orphan.Session.ID, false); err != nil {
+		t.Fatalf("attach claimer error = %v", err)
+	}
+	if got := m.runOwner(orphan.Session.ID); got != "claimer" {
+		t.Fatalf("runOwner after claiming orphaned run = %q, want claimer", got)
+	}
+}
+
+func TestSessionManagerDoesNotTransferControlWithoutHandoffCapability(t *testing.T) {
+	ctx := context.Background()
+	m := newTestSessionManager(t)
+	m.canTakeHandoff = func(string) bool { return false }
+	snap, err := m.create(ctx, "owner", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+	if _, err := m.attach(ctx, "tui", snap.Session.ID, false); err != nil {
+		t.Fatalf("attach error = %v", err)
+	}
+	if _, _, _, err := m.beginRun("owner"); err != nil {
+		t.Fatalf("beginRun error = %v", err)
+	}
+
+	var transferred string
+	m.onClientDetached = func(_, _, newOwner, _ string, _ protocol.AgentRunState, _ protocol.AgentRunPhase) {
+		transferred = newOwner
+	}
+	m.detach("owner")
+	if got := m.runOwner(snap.Session.ID); got != "owner" {
+		t.Fatalf("runOwner after owner detach = %q, want owner", got)
+	}
+	if transferred != "" {
+		t.Fatalf("transferred owner = %q, want empty", transferred)
 	}
 }
 

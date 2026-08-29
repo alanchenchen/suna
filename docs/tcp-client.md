@@ -141,7 +141,7 @@ TCP 是一条长期连接，framing 为 **NDJSON**：
 TCP client 连接后，必须先发送：
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"client":{"name":"my-ui","version":"1.0.0","type":"desktop"}}}
+{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"client":{"name":"my-ui","version":"1.0.0","type":"desktop","capabilities":["session.handoff"]}}}
 ```
 
 建议字段：
@@ -151,6 +151,7 @@ TCP client 连接后，必须先发送：
 | `client.name` | 否 | 客户端名称，用于诊断。 |
 | `client.version` | 否 | 客户端版本。 |
 | `client.type` | 否 | 例如 `desktop`、`ide`、`web_gateway`、`script`。 |
+| `client.capabilities` | 否 | 客户端愿意处理的可选语义列表。声明 `session.handoff` 后，才可在原 owner 离开时接管运行控制权。 |
 
 成功后可得到：
 

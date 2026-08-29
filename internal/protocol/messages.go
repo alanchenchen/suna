@@ -5,14 +5,15 @@ import "time"
 type RuntimeHelloParams struct {
 	// Transport 由 JSON-RPC transport 层注入并覆盖客户端输入，用于 runtime.hello 返回真实承载方式。
 	Transport string `json:"transport,omitempty"`
-	// Client 是第三方 UI/插件的自描述信息，只用于诊断。
+	// Client 是第三方 UI/插件的自描述信息；Capabilities 用于协商可选交互语义。
 	Client RuntimeClient `json:"client,omitempty"`
 }
 
 type RuntimeClient struct {
-	Name    string `json:"name,omitempty"`
-	Version string `json:"version,omitempty"`
-	Type    string `json:"type,omitempty"`
+	Name         string   `json:"name,omitempty"`
+	Version      string   `json:"version,omitempty"`
+	Type         string   `json:"type,omitempty"`
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 type RuntimeHelloResult struct {

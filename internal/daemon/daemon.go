@@ -45,10 +45,13 @@ type Daemon struct {
 	state     protocol.DaemonRuntimeState
 	mu        sync.Mutex
 	sinks     map[string]protocol.EventSink
-	cancelFn  context.CancelFunc
-	mcpMu     sync.Mutex
-	mcpQueue  []protocol.MCPUpdatedParams
-	mcpWakeup chan struct{}
+	// handoffClients 只记录显式声明 session.handoff 的公开 TCP 客户端；官方 TUI
+	// 未参与该能力协商，保持原有单端控制语义。
+	handoffClients sync.Map
+	cancelFn       context.CancelFunc
+	mcpMu          sync.Mutex
+	mcpQueue       []protocol.MCPUpdatedParams
+	mcpWakeup      chan struct{}
 }
 
 // New 创建 Daemon 实例。具体 transport 由入口层注入，daemon 只认识 protocol.Transport。
@@ -72,11 +75,12 @@ func New(cfg *config.Config, transports []protocol.Transport) (*Daemon, error) {
 			d.service.cancelPendingInteractions(sessionID)
 		}
 	}
-	d.sessions.onClientDetached = func(connID, sessionID string) {
+	d.sessions.onClientDetached = func(connID, sessionID, newOwner, runID string, runState protocol.AgentRunState, phase protocol.AgentRunPhase) {
 		if d.service != nil {
-			d.service.onClientDetached(context.Background(), connID, sessionID)
+			d.service.onClientDetached(context.Background(), connID, sessionID, newOwner, runID, runState, phase)
 		}
 	}
+	d.sessions.canTakeHandoff = d.supportsSessionHandoff
 	return d, nil
 }
 
@@ -210,9 +214,28 @@ func (d *Daemon) removeConnection(connID string) {
 	d.mu.Lock()
 	delete(d.sinks, connID)
 	d.mu.Unlock()
+	d.handoffClients.Delete(connID)
 	if detached.sessionID != "" {
 		d.broadcastSessionState(context.Background(), detached.sessionID)
 	}
+}
+
+func (d *Daemon) setClientCapabilities(connID string, capabilities []string) {
+	if connID == "" {
+		return
+	}
+	for _, capability := range capabilities {
+		if capability == protocol.FeatureSessionHandoff {
+			d.handoffClients.Store(connID, struct{}{})
+			return
+		}
+	}
+	d.handoffClients.Delete(connID)
+}
+
+func (d *Daemon) supportsSessionHandoff(connID string) bool {
+	_, ok := d.handoffClients.Load(connID)
+	return ok
 }
 
 func (d *Daemon) onMCPChange(info mcp.ServerInfo) {

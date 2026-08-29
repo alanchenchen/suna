@@ -118,3 +118,31 @@ func TestRuntimeHelloReturnsRuntimeCatalogWithoutVersionGate(t *testing.T) {
 		t.Fatalf("runtime.hello catalog = %#v", hello.Catalog)
 	}
 }
+
+func TestRuntimeHelloRecordsDeclaredSessionHandoffCapability(t *testing.T) {
+	d := &Daemon{state: protocol.DaemonRuntimeReady, sinks: map[string]protocol.EventSink{}}
+	svc := newService(d)
+	_, err := svc.Handle(context.Background(), protocol.Request{
+		Method: protocol.MethodRuntimeHello,
+		ConnID: "suna-app",
+		Params: protocol.RuntimeHelloParams{Client: protocol.RuntimeClient{Capabilities: []string{protocol.FeatureSessionHandoff}}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("runtime.hello error = %v", err)
+	}
+	if !d.supportsSessionHandoff("suna-app") {
+		t.Fatal("suna-app session handoff capability was not recorded")
+	}
+
+	_, err = svc.Handle(context.Background(), protocol.Request{
+		Method: protocol.MethodRuntimeHello,
+		ConnID: "tui",
+		Params: protocol.RuntimeHelloParams{Client: protocol.RuntimeClient{}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("runtime.hello without capabilities error = %v", err)
+	}
+	if d.supportsSessionHandoff("tui") {
+		t.Fatal("client without declared session handoff capability was recorded")
+	}
+}

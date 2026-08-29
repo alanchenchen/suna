@@ -225,6 +225,7 @@ func (s *service) handleRuntimeHello(req protocol.Request) (protocol.RuntimeHell
 	if err := decodeParams(req.Params, &params); err != nil {
 		return protocol.RuntimeHelloResult{}, protocol.InvalidRequest(err.Error())
 	}
+	s.daemon.setClientCapabilities(req.ConnID, params.Client.Capabilities)
 	transport := strings.TrimSpace(params.Transport)
 	if transport == "" {
 		transport = "unknown"
@@ -542,9 +543,12 @@ func (s *service) emitInteractionResolved(ctx context.Context, sessionID, id str
 	emit(ctx, sink, protocol.NotifyInteractionResolved, protocol.InteractionResolvedParams{ID: id, SessionID: sessionID})
 }
 
-func (s *service) onClientDetached(ctx context.Context, connID, sessionID string) {
+func (s *service) onClientDetached(ctx context.Context, connID, sessionID, newOwner, runID string, runState protocol.AgentRunState, phase protocol.AgentRunPhase) {
 	if sessionID == "" {
 		return
+	}
+	if newOwner != "" && runID != "" {
+		s.emitAgentRun(ctx, sessionID, newOwner, protocol.AgentRunParams{RunID: runID, State: runState, Phase: phase})
 	}
 	// owner 断开时，等待中的 ask/guard 会重新发给仍 attached 的客户端；daemon 只改变可回复权限，不引入 host/guest 概念。
 	s.pendingAsks.Range(func(key, value any) bool {

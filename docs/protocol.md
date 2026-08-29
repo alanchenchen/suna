@@ -75,7 +75,7 @@ TCP 客户端的限制：
 TCP client 连接后，第一条 request 必须是 `runtime.hello`。请求只需要携带客户端自身信息；daemon 返回 Git tag 来源的 Runtime 版本和公开功能清单。
 
 ```json
-{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"client":{"name":"my-ui","version":"1.0.0","type":"desktop"}}}
+{"jsonrpc":"2.0","id":1,"method":"runtime.hello","params":{"client":{"name":"my-ui","version":"1.0.0","type":"desktop","capabilities":["session.handoff"]}}}
 ```
 
 功能清单固定分为三组：
@@ -85,6 +85,8 @@ TCP client 连接后，第一条 request 必须是 `runtime.hello`。请求只�
 - `catalog.features`：不能只从 method / notification 名称推断的细粒度能力。
 
 客户端应按清单渐进启用功能，不应根据 `runtime_version` 推断能力。`runtime_version` 只用于展示和诊断。
+
+`client.capabilities` 是客户端主动声明自己能安全处理的可选交互语义。当前 `session.handoff` 只有在 Runtime catalog 同时包含该 feature，且连接主动声明该 capability 时才会生效；未声明的客户端保持原有的只观察行为。
 
 ### Methods
 
