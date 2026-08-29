@@ -15,8 +15,9 @@ const (
 )
 
 type streamBatcher struct {
-	kind protocol.AgentDeltaKind
-	buf  strings.Builder
+	runID string
+	kind  protocol.AgentDeltaKind
+	buf   strings.Builder
 }
 
 func (b *streamBatcher) addStream(ctx context.Context, sink protocol.EventSink, content string) bool {
@@ -44,7 +45,7 @@ func (b *streamBatcher) flush(ctx context.Context, sink protocol.EventSink) {
 	if b.kind == "" || b.buf.Len() == 0 {
 		return
 	}
-	emit(ctx, sink, protocol.NotifyAgentDelta, protocol.AgentDeltaParams{Kind: b.kind, Content: b.buf.String()})
+	emit(ctx, sink, protocol.NotifyAgentDelta, protocol.AgentDeltaParams{RunID: b.runID, Kind: b.kind, Content: b.buf.String()})
 	b.kind = ""
 	if b.buf.Cap() > maxRetainedStreamBufBytes {
 		b.buf = strings.Builder{}

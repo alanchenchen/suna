@@ -18,7 +18,7 @@ func (s *captureSink) Emit(ctx context.Context, event protocol.Event) error {
 
 func TestStreamBatcherMergesStream(t *testing.T) {
 	sink := &captureSink{}
-	b := &streamBatcher{}
+	b := &streamBatcher{runID: "run-1"}
 
 	if got := b.addStream(context.Background(), sink, "hel"); got {
 		t.Fatalf("addStream() = %v, want false before threshold", got)
@@ -40,6 +40,9 @@ func TestStreamBatcherMergesStream(t *testing.T) {
 	}
 	if got := params.Kind; got != protocol.AgentDeltaAssistant {
 		t.Fatalf("AgentDeltaParams.Kind = %q, want %q", got, protocol.AgentDeltaAssistant)
+	}
+	if got := params.RunID; got != "run-1" {
+		t.Fatalf("AgentDeltaParams.RunID = %q, want %q", got, "run-1")
 	}
 }
 

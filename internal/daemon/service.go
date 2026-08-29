@@ -307,7 +307,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 	started := time.Now()
 	compactFailed := false
 	logging.Info("agent", "run_start", logging.Event{"conn_id": connID, "input_chars": len(inputLabel)})
-	batcher := &streamBatcher{}
+	batcher := &streamBatcher{runID: runID}
 	ticker := time.NewTicker(streamBatchInterval)
 	defer ticker.Stop()
 	flush := func() {
