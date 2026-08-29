@@ -2,6 +2,7 @@ package guard
 
 import (
 	"context"
+	"runtime"
 	"testing"
 )
 
@@ -32,6 +33,8 @@ func TestExecReadOnlyGitConservative(t *testing.T) {
 }
 
 // 动态表达式内部命令：只有简单白名单（date）放行，git 等语义命令保守非只读。
+// Windows 无 AST 解析走 fallback 分词器，hasDynamicShellSyntax 对 $() 保守判非只读，
+// 因此 $(date) 在 Windows 上也是非只读（平台差异，期望值按平台区分）。
 func TestExecReadOnlyDynamicSubcommandSensitive(t *testing.T) {
 	g := NewGuardWithMode(nil, "test", ModeAsk)
 	cases := []struct {
@@ -39,7 +42,7 @@ func TestExecReadOnlyDynamicSubcommandSensitive(t *testing.T) {
 		command string
 		wantRO  bool
 	}{
-		{"date readonly", "echo $(date)", true},
+		{"date readonly", "echo $(date)", runtime.GOOS != "windows"},
 		{"git rev parse conservative", "echo $(git rev-parse HEAD)", false},
 		{"git commit conservative", "echo $(git commit -m x)", false},
 	}

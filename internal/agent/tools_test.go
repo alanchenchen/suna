@@ -411,7 +411,8 @@ func TestMainGuardGateMakesApprovedReceiptVisibleToNextReview(t *testing.T) {
 	call := func(id, path string) <-chan tools.Result {
 		result := make(chan tools.Result, 1)
 		go func() {
-			result <- a.executeTool(context.Background(), runner.ToolExecution{ID: id, Name: "exec", Params: map[string]any{"command": "touch " + path}, Intent: "apply the active related fix"}, events)
+			// 用 echo 重定向创建文件：bash/cmd 都支持，且路径带引号避免 Windows 反斜杠被转义。
+			result <- a.executeTool(context.Background(), runner.ToolExecution{ID: id, Name: "exec", Params: map[string]any{"command": "echo hi > \"" + path + "\""}, Intent: "apply the active related fix"}, events)
 		}()
 		return result
 	}
