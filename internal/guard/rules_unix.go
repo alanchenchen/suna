@@ -28,16 +28,3 @@ func platformBlockedRules() []blockRule {
 	}
 	return result
 }
-
-func platformReadOnlyCommands() []string {
-	return []string{
-		"ls", "cat", "head", "tail", "wc", "stat", "du",
-		"grep", "rg", "ag", "ack",
-		"find", "glob", "locate",
-		"which", "type", "where", "command",
-		"echo", "printf", "date", "whoami",
-		"git status", "git log", "git diff",
-		"git branch", "git show", "git stash list",
-		"env", "printenv", "uname", "hostname",
-	}
-}

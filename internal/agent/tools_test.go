@@ -139,22 +139,17 @@ func TestBuildGuardEvidenceIncludesBoundedSafeRecentFacts(t *testing.T) {
 		{Role: model.RoleTool, ToolCallID: "write-1", TextContent: "PRIVATE TOOL OUTPUT"},
 		model.NewTextMessage(model.RoleUser, "do not change protocol"),
 	}
-	summary := memory.BuildToolSummary([]memory.ToolSummaryItem{{Name: "writefile", Status: "error", Summary: "PRIVATE TOOL OUTPUT"}})
-	actions := recentGuardActions(messages, summary)
-	state := "## Active context\n- keep the current review flow\n## Completed work / topic ledger\n- unrelated history\n## User requirements and decisions\n- do not add retries\n## Tool facts\n- private fact"
-	got := buildGuardEvidence(messages, []string{"Rejected: tool=filesystem; risk=high; target=workspace"}, actions, state, "apply the bounded edit")
+	got := buildGuardEvidence(messages, "apply the bounded edit")
 	for _, want := range []string{
 		"Latest direct user message", "do not change protocol",
 		"Question: Which scope?; Answer: current file",
-		"Earlier recent user messages", "original task",
-		"Rejected: tool=filesystem", "writefile: failed; target=report.md",
-		"keep the current review flow", "do not add retries", "apply the bounded edit",
+		"apply the bounded edit",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("evidence missing %q:\n%s", want, got)
 		}
 	}
-	for _, unwanted := range []string{"PRIVATE TOOL OUTPUT", "private body", "unrelated history", "private fact"} {
+	for _, unwanted := range []string{"PRIVATE TOOL OUTPUT", "private body", "original task", "Earlier recent user messages", "Recent completed agent actions", "Session continuity constraints"} {
 		if strings.Contains(got, unwanted) {
 			t.Fatalf("evidence contains %q:\n%s", unwanted, got)
 		}
@@ -169,13 +164,11 @@ func TestBuildGuardEvidenceEnforcesSharedBudgetAndPriority(t *testing.T) {
 		{Role: model.RoleTool, ToolCallID: "ask-1", TextContent: `{"answer":"chosen scope"}`},
 		model.NewTextMessage(model.RoleUser, "LATEST-USER "+strings.Repeat("c", 300)),
 	}
-	risk := []string{"RISK-ONE " + strings.Repeat("r", 300), "RISK-TWO " + strings.Repeat("s", 300)}
-	actions := []string{"ACTION-ONE " + strings.Repeat("x", 300), "ACTION-TWO " + strings.Repeat("y", 300)}
-	got := buildGuardEvidence(messages, risk, actions, "## User requirements and decisions\n- SESSION-LOW "+strings.Repeat("z", 800), "RATIONALE-LOW "+strings.Repeat("q", 800))
+	got := buildGuardEvidence(messages, "RATIONALE-LOW "+strings.Repeat("q", 800))
 	if runes := len([]rune(got)); runes > guardEvidenceBudget {
 		t.Fatalf("evidence runes = %d, want <= %d", runes, guardEvidenceBudget)
 	}
-	for _, want := range []string{"LATEST-USER", "Question: choose scope; Answer: chosen scope", "RISK-ONE", "RISK-TWO"} {
+	for _, want := range []string{"LATEST-USER", "Question: choose scope; Answer: chosen scope"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("priority evidence missing %q:\n%s", want, got)
 		}
@@ -204,7 +197,7 @@ func TestGuardEvidenceIgnoresIncompleteAskUser(t *testing.T) {
 		model.NewTextMessage(model.RoleUser, "original task"),
 		{Role: model.RoleAssistant, ToolCalls: []model.ToolCall{{ID: "ask-1", Name: agenttools.ToolAskUser, Arguments: `{"question":"Which scope?"}`}}},
 	}
-	got := buildGuardEvidence(messages, nil, nil, "", "")
+	got := buildGuardEvidence(messages, "")
 	if strings.Contains(got, "Which scope?") || strings.Contains(got, "Resolved AskUser") {
 		t.Fatalf("incomplete AskUser entered evidence: %q", got)
 	}
@@ -233,14 +226,14 @@ func TestSubtaskGuardEventsUseNamespacedToolID(t *testing.T) {
 	}
 	a := &Agent{guard: guard.NewGuardWithMode(nil, "test", guard.ModeSmart), tools: mgr}
 	a.guard.SetLLMReviewer(func(ctx context.Context, req guard.ReviewRequest) (string, error) {
-		return `{"decision":"modify","reason":"too broad","suggestion":"narrow it"}`, nil
+		return `{"decision":"reject","reason":"not allowed"}`, nil
 	})
 	events := make(chan Event, 2)
-	executor := subtaskExecutor{agent: a, events: events, allowedTools: map[string]bool{"writefile": true}, spawnID: "spawn-1"}
+	executor := subtaskExecutor{agent: a, events: events, allowedTools: map[string]bool{"exec": true}, spawnID: "spawn-1"}
 
-	result := executor.ExecuteTool(context.Background(), runner.ToolExecution{ID: "call-1", Name: "writefile", Params: map[string]any{"path": "out.txt", "content": "hello"}})
+	result := executor.ExecuteTool(context.Background(), runner.ToolExecution{ID: "call-1", Name: "exec", Params: map[string]any{"command": "touch x"}})
 	if !result.IsError || result.Error == "" {
-		t.Fatalf("result = %#v, want modify error", result)
+		t.Fatalf("result = %#v, want reject error", result)
 	}
 	select {
 	case evt := <-events:
@@ -409,41 +402,22 @@ func TestMainGuardGateMakesApprovedReceiptVisibleToNextReview(t *testing.T) {
 	a := &Agent{guard: guard.NewGuardWithMode(nil, "test", guard.ModeSmart), tools: mgr}
 
 	var reviewCount int
-	var secondContext guard.ReviewContext
 	a.guard.SetLLMReviewer(func(ctx context.Context, req guard.ReviewRequest) (string, error) {
 		reviewCount++
-		if reviewCount == 1 {
-			return `{"decision":"confirm","reason":"need user confirmation","suggestion":""}`, nil
-		}
-		secondContext = req.Context
-		return `{"decision":"approve","reason":"approved continuation","suggestion":""}`, nil
+		return `{"decision":"approve","reason":"approved continuation"}`, nil
 	})
 
 	events := make(chan Event, 4)
 	call := func(id, path string) <-chan tools.Result {
 		result := make(chan tools.Result, 1)
 		go func() {
-			result <- a.executeTool(context.Background(), runner.ToolExecution{ID: id, Name: "writefile", Params: map[string]any{"path": path, "content": "updated"}, Intent: "apply the active related fix"}, events)
+			result <- a.executeTool(context.Background(), runner.ToolExecution{ID: id, Name: "exec", Params: map[string]any{"command": "touch " + path}, Intent: "apply the active related fix"}, events)
 		}()
 		return result
 	}
 	first := call("first", t.TempDir()+"/first.txt")
 	second := call("second", t.TempDir()+"/second.txt")
 
-	for {
-		select {
-		case event := <-events:
-			if event.Type != EventGuardConfirm {
-				continue
-			}
-			event.Reply <- "approve"
-			goto approved
-		case <-time.After(time.Second):
-			t.Fatal("first guard confirmation was not emitted")
-		}
-	}
-
-approved:
 	for _, result := range []<-chan tools.Result{first, second} {
 		select {
 		case got := <-result:
@@ -457,38 +431,6 @@ approved:
 	if reviewCount != 2 {
 		t.Fatalf("review count = %d, want 2", reviewCount)
 	}
-	if !strings.Contains(secondContext.Evidence, "Approved") || !strings.Contains(secondContext.Evidence, "writefile") {
-		t.Fatalf("second review evidence = %q, want approved receipt", secondContext.Evidence)
-	}
-}
-
-func TestGuardTaskCardKeepsOnlyRecentRiskDecisions(t *testing.T) {
-	a := &Agent{}
-	a.recordGuardTaskReceipt(runner.ToolExecution{Name: "editfile", Params: map[string]any{"path": "old.go"}}, &guard.GuardResult{Risk: guard.RiskMedium}, true)
-	a.recordGuardTaskReceipt(runner.ToolExecution{Name: "editfile", Params: map[string]any{"path": "gateway/bridge.go"}}, &guard.GuardResult{Risk: guard.RiskMedium}, true)
-	a.recordGuardTaskReceipt(runner.ToolExecution{Name: "filesystem", Params: map[string]any{"action": "remove", "path": "build"}}, &guard.GuardResult{Risk: guard.RiskHigh}, false)
-
-	decisions := strings.Join(a.recentGuardRiskDecisions(), "\n")
-	if strings.Contains(decisions, "old.go") || !strings.Contains(decisions, "gateway/bridge.go") || !strings.Contains(decisions, "Rejected") {
-		t.Fatalf("risk decisions = %q, want latest two receipts", decisions)
-	}
-}
-
-func TestGuardTaskCardRecordsSafeOperationReceipt(t *testing.T) {
-	a := &Agent{}
-	a.recordGuardTaskReceipt(runner.ToolExecution{
-		Name:   "editfile",
-		Params: map[string]any{"path": "gateway/bridge.go", "edits": []any{map[string]any{"old_string": "secret-old", "new_string": "secret-new"}}},
-		Intent: "fix reconnect lifecycle",
-	}, &guard.GuardResult{Risk: guard.RiskMedium}, true)
-
-	decisions := strings.Join(a.recentGuardRiskDecisions(), "\n")
-	if !strings.Contains(decisions, "gateway/bridge.go") || !strings.Contains(decisions, "editfile") {
-		t.Fatalf("risk decisions = %q, want safe target and tool", decisions)
-	}
-	if strings.Contains(decisions, "secret-old") || strings.Contains(decisions, "secret-new") || strings.Contains(decisions, "fix reconnect lifecycle") {
-		t.Fatalf("risk decisions = %q, must not expose edit contents or agent rationale", decisions)
-	}
 }
 
 func TestTrimForGuardMiddlePreservesUTF8(t *testing.T) {
@@ -500,13 +442,14 @@ func TestTrimForGuardMiddlePreservesUTF8(t *testing.T) {
 
 func TestBuildSubtaskGuardReviewContextDoesNotUseMainTaskCard(t *testing.T) {
 	a := &Agent{working: testWorkingMemory("main task")}
-	a.recordGuardTaskReceipt(runner.ToolExecution{Name: "editfile", Params: map[string]any{"path": "main.go"}, Intent: "main approval"}, &guard.GuardResult{Risk: guard.RiskMedium}, true)
 
+	// subtask 上下文第一条 user 消息就是任务描述本身（与注入文本同源），
+	// 前缀匹配去重后只保留一份；主任务内容不得进入 subtask Evidence。
 	ctx := a.buildSubtaskGuardReviewContext(runner.ToolExecution{
-		WorkingMessages: []model.Message{model.NewTextMessage(model.RoleUser, "delegated task")},
+		WorkingMessages: []model.Message{model.NewTextMessage(model.RoleUser, "subtask task description")},
 	}, "subtask task description")
-	if !strings.Contains(ctx.Evidence, "delegated task") {
-		t.Fatalf("subtask evidence = %q, want delegated task", ctx.Evidence)
+	if !strings.Contains(ctx.Evidence, "subtask task description") {
+		t.Fatalf("subtask evidence = %q, want subtask task description", ctx.Evidence)
 	}
 	for _, unwanted := range []string{"main task", "main.go", "main approval"} {
 		if strings.Contains(ctx.Evidence, unwanted) {

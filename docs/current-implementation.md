@@ -104,7 +104,7 @@ Runner 对主循环中的 model request 做内置 recovery：在尚未产生 ass
 | `readfile` | 感知 | 按行范围、tail 或 base64 读取本地文件。 |
 | `listdir` | 感知 | 列目录，支持递归、分页、include/exclude 和隐藏文件开关；`max_depth` 上限 3。 |
 | `search` | 感知 | 通用本地搜索工具。`path` 可指向文件或目录；`mode=auto` 同时返回路径、轻量结构入口和正文分组，也可指定 `content` / `path` / `symbol`；`symbol` 表示文档标题、配置段/key、常见定义/声明等轻量结构入口，不限于代码。支持 `context`(默认 1，最大 5)、`limit`(默认 100，最大 1000)、`depth`(默认 8，最大 20)、include/exclude、`match=literal/regex/glob`、`case=smart/insensitive/sensitive`、`scope=workspace/deps/all` 和 `word`。默认排除常见依赖/构建/缓存/VCS 目录和凭据文件，并通过扫描文件数、文件大小、输出大小限制保持有界；空结果或截断时只在正文追加诊断提示，不改变 TUI 依赖的 metadata contract。 |
-| `exec` | 行动 | 单一状态化 shell 工具：默认前台同步执行（默认总运行寿命 60 秒），持续任务必须显式 `background=true`；后台任务通过 `job_id` 执行 `status` / `stop`，支持 `run` / `session` 生命周期范围、cursor 增量输出、timeout、配额和自动回收。Guard 会把可证明只读的 run 归为 low risk；status 为只读，stop 为 medium risk。 |
+| `exec` | 行动 | 单一状态化 shell 工具：默认前台同步执行（默认总运行寿命 60 秒），持续任务必须显式 `background=true`；后台任务通过 `job_id` 执行 `status` / `stop`，支持 `run` / `session` 生命周期范围、cursor 增量输出、timeout、配额和自动回收。Guard 只放行可证明只读的简单命令（ls/cat/echo 等）；status 为只读，stop 为非只读。 |
 | `writefile` | 行动 | 创建、覆盖或追加文件，支持 `create_dirs=true` 自动创建父目录和写前 SHA-256 校验；创建新文件场景应优先使用本工具而不是先 `filesystem mkdir` 再写。 |
 | `editfile` | 行动 | 对单个文件原子应用一个或多个精确文本替换；默认要求 `old_string` 唯一匹配，`target="all"` 替换全部，`target="2"` 按 1-based 序号替换第 2 个匹配。 |
 | `filesystem` | 行动 | `stat` / `mkdir` / `move` / `copy` / `remove` 文件系统路径；`stat` 为只读低风险调用。创建新文件优先使用 `writefile create_dirs=true`，避免无意义的预先 `mkdir`。 |
@@ -125,9 +125,9 @@ Guard 由 Agent 统一处理，工具只声明自身 Guard policy。
 当前 Guard mode：
 
 - `readonly`：只允许只读操作。
-- `ask`：风险操作请求用户确认。
+- `ask`：非只读操作请求用户确认。
 - `auto`：除硬性拦截规则（结构性高危、内置/用户 blocked、Workspace 边界、敏感文件）外自动放行。
-- `smart`：中高风险操作由当前 session 绑定的模型做 Smart Review。Review 只判断安全、用户意图和权限边界；安全且合理的调用会放行，不确定时请求确认，明确危险时拒绝，只有当前调用不安全或明显过宽且有具体等价替代时才建议修改。
+- `smart`（默认）：只读调用放行；exec 调用由当前 session 绑定的模型做二元 Smart Review（approve/reject），只判断操作本身的风险，不猜用户意图；其他非只读工具静态放行。Review 不确定时按 approve 放行（硬拦截已兜底确定性危险），审核不可用（超时/网络/解析失败）时 fail-closed 拒绝。
 
 Workspace 是本地文件和明显 exec 路径的目录硬边界，不能被用户 allowed rule 绕过。它不是 OS sandbox，无法限制外部程序启动后自行访问的文件、网络或进程权限。exec 路径分析使用完整 shell AST 解析：`/dev/null` 等丢弃输出设备豁免，变量/命令替换路径不参与静态检查，引号内路径只在解释器场景（如 `sh -c`）拦截。
 

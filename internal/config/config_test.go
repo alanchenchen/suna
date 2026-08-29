@@ -23,6 +23,20 @@ func TestGuardWorkspaceNormalizesExistingDirectory(t *testing.T) {
 	}
 }
 
+// Guard mode 默认值：空或非法值按 smart 使用（Guard 重构后默认 smart，不再默认 ask）。
+func TestGuardModeOrDefaultDefaultsToSmart(t *testing.T) {
+	for _, mode := range []string{"", "unknown", "  "} {
+		if got := (GuardConfig{Mode: mode}).ModeOrDefault(); got != "smart" {
+			t.Fatalf("ModeOrDefault(%q) = %q, want smart", mode, got)
+		}
+	}
+	for _, mode := range []string{"readonly", "ask", "auto", "smart"} {
+		if got := (GuardConfig{Mode: mode}).ModeOrDefault(); got != mode {
+			t.Fatalf("ModeOrDefault(%q) = %q, want %q", mode, got, mode)
+		}
+	}
+}
+
 func TestGuardWorkspaceRejectsMissingDirectory(t *testing.T) {
 	cfg := &Config{Guard: GuardConfig{Workspace: filepath.Join(t.TempDir(), "missing")}}
 	if err := cfg.NormalizeGuard(); err == nil {

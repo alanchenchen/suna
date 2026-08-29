@@ -74,7 +74,6 @@ func (l *Loader) RenderGuardReview(data GuardReviewData) (string, error) {
 		"ToolParams":      data.ToolParams,
 		"ParamsTruncated": data.ParamsTruncated,
 		"Target":          data.Target,
-		"Risk":            data.Risk,
 		"Evidence":        data.Evidence,
 	})
 }
@@ -133,7 +132,6 @@ type GuardReviewData struct {
 	ToolParams      string
 	ParamsTruncated bool
 	Target          string
-	Risk            string
 	Evidence        string
 }
 

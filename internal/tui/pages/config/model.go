@@ -119,10 +119,10 @@ func ModelSummary(mc ModelConfig, _ bool, fmtTok func(int) string) string {
 
 func NormalizeGuardMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "readonly", "auto", "smart":
+	case "readonly", "ask", "auto", "smart":
 		return strings.ToLower(strings.TrimSpace(mode))
 	default:
-		return "ask"
+		return "smart"
 	}
 }
 

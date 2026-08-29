@@ -169,3 +169,72 @@ func TestMigrateSessionModelRefForExistingDatabase(t *testing.T) {
 		t.Fatalf("repeat migration error = %v", err)
 	}
 }
+
+// 存量库带 risk_level / risk_adjustment 列时，迁移应删除这两列（Guard 重构后
+// risk 三级退化为只读布尔，列不再写入）。新库建表本身不带这两列。
+func TestMigrateDropsLegacyGuardRiskColumns(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "memory.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite error = %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE audit_log (
+		id TEXT PRIMARY KEY,
+		timestamp DATETIME NOT NULL DEFAULT (datetime('now')),
+		session_id TEXT NOT NULL DEFAULT '',
+		tool TEXT NOT NULL,
+		params TEXT NOT NULL DEFAULT '{}',
+		risk_level TEXT NOT NULL DEFAULT '',
+		guard_decision TEXT NOT NULL DEFAULT '',
+		guard_reason TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		t.Fatalf("create legacy audit_log error = %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO audit_log (id, tool, risk_level, guard_decision) VALUES ('a-1', 'exec', 'high', 'confirm')`); err != nil {
+		t.Fatalf("insert legacy audit_log error = %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE trust_rules (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		pattern TEXT NOT NULL,
+		tool TEXT NOT NULL DEFAULT '',
+		risk_adjustment TEXT NOT NULL DEFAULT '',
+		reason TEXT NOT NULL DEFAULT '',
+		learned_from TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		t.Fatalf("create legacy trust_rules error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close legacy db error = %v", err)
+	}
+
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore error = %v", err)
+	}
+	defer store.Close()
+
+	for _, tc := range []struct{ table, column string }{
+		{"audit_log", "risk_level"},
+		{"trust_rules", "risk_adjustment"},
+	} {
+		exists, err := store.columnExists(tc.table, tc.column)
+		if err != nil {
+			t.Fatalf("columnExists(%s.%s) error = %v", tc.table, tc.column, err)
+		}
+		if exists {
+			t.Fatalf("%s.%s was not dropped by migration", tc.table, tc.column)
+		}
+	}
+	// 存量数据保留（只删列不删行）。
+	var decision string
+	if err := store.DB().QueryRow(`SELECT guard_decision FROM audit_log WHERE id = 'a-1'`).Scan(&decision); err != nil {
+		t.Fatalf("read migrated audit_log error = %v", err)
+	}
+	if decision != "confirm" {
+		t.Fatalf("migrated guard_decision = %q, want confirm", decision)
+	}
+
+	if err := store.migrateDropGuardRiskColumns(); err != nil {
+		t.Fatalf("repeat migration error = %v", err)
+	}
+}

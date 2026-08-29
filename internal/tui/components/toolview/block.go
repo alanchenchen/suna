@@ -98,7 +98,8 @@ func ShouldShowGuardSummary(info *GuardInfo) bool {
 	if info == nil {
 		return false
 	}
-	if strings.EqualFold(strings.TrimSpace(info.Risk), "low") && strings.EqualFold(strings.TrimSpace(info.Decision), "approve") {
+	// 只读放行不展示摘要（无摩擦）；非只读或非 approve 才展示。
+	if info.ReadOnly && strings.EqualFold(strings.TrimSpace(info.Decision), "approve") {
 		return false
 	}
 	return true

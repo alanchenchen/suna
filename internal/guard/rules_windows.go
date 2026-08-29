@@ -29,15 +29,3 @@ func platformBlockedRules() []blockRule {
 	}
 	return result
 }
-
-func platformReadOnlyCommands() []string {
-	return []string{
-		"dir", "type", "findstr", "where",
-		"Get-ChildItem", "Get-Content", "Get-Location",
-		"gci", "gc", "pwd",
-		"echo", "date", "whoami",
-		"git status", "git log", "git diff",
-		"git branch", "git show", "git stash list",
-		"set", "ver", "hostname",
-	}
-}

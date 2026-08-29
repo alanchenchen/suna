@@ -13,9 +13,8 @@ type ExecAnalysis struct {
 
 // ExecCommand 表示一个简单命令（AST CallExpr 或保守分词的近似）。
 type ExecCommand struct {
-	Name     string   // 命令名（AST 精确提取，引号内文本不是命令）
-	Args     []string // 参数（含路径候选）
-	ReadOnly bool     // 是否只读命令（git status 等）
+	Name string   // 命令名（AST 精确提取，引号内文本不是命令）
+	Args []string // 参数（含路径候选）
 }
 
 // ExecRedirect 表示一个重定向。

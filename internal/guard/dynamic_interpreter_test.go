@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// 动态表达式内部解释器危险调用：$(python -c 'os.system(...)') 应保守拦截，
-// 不能因 DynamicCmds 只提取命令名（无参数）而放行为 low。
-func TestExecRiskDynamicInterpreterDangerous(t *testing.T) {
+// 动态表达式内部解释器危险调用：$(python -c 'os.system(...)') 应保守判非只读，
+// 不能因 DynamicCmds 只提取命令名（无参数）而放行为只读。
+func TestExecReadOnlyDynamicInterpreterDangerous(t *testing.T) {
 	g := NewGuardWithMode(nil, "test", ModeAsk)
 	cases := []struct {
 		name    string
@@ -22,8 +22,8 @@ func TestExecRiskDynamicInterpreterDangerous(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			res := g.Check(context.Background(), "exec", map[string]any{"command": tc.command})
-			if res.Risk == RiskLow {
-				t.Fatalf("%q risk = low, want medium/high (dynamic interpreter is not provably read-only)", tc.command)
+			if res.ReadOnly {
+				t.Fatalf("%q readOnly = true, want false (dynamic interpreter is not provably read-only)", tc.command)
 			}
 		})
 	}

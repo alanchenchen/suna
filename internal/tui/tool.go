@@ -76,7 +76,7 @@ func (t *TUI) toolRenderDeps() toolview.RenderDeps {
 		},
 		Styles:             toolviewStyles(),
 		GuardDecisionLabel: t.guardDecisionLabel,
-		RiskLabel:          t.renderRiskBadge,
+		ReadOnlyLabel:      t.renderReadOnlyBadge,
 	}
 }
 
@@ -97,10 +97,9 @@ func (t *TUI) toolDetailDeps() toolview.DetailDeps {
 			Params:             t.tr("tui.tool.params"),
 			Guard:              t.tr("tui.tool.guard"),
 			GuardDecision:      t.tr("tui.tool.guard.decision"),
-			GuardRisk:          t.tr("tui.tool.guard.risk"),
+			GuardReadOnly:      t.tr("tui.tool.guard.readonly"),
 			GuardSource:        t.tr("tui.tool.guard.source"),
 			GuardReason:        t.tr("tui.tool.guard.reason"),
-			GuardSuggestion:    t.tr("tui.tool.guard.suggestion"),
 			Result:             t.tr("tui.tool.result"),
 			Bytes:              t.tr("tui.tool.bytes"),
 			Truncated:          t.tr("tui.tool.truncated"),
@@ -115,7 +114,7 @@ func (t *TUI) toolDetailDeps() toolview.DetailDeps {
 		Styles:             toolviewStyles(),
 		Box:                boxStyle,
 		GuardDecisionBadge: t.renderGuardDecisionBadge,
-		RiskBadge:          t.renderRiskBadge,
+		ReadOnlyBadge:      t.renderReadOnlyBadge,
 	}
 }
 
@@ -171,7 +170,7 @@ func (t *TUI) renderGuardDecisionBadge(info *guardInfo) string {
 	if decision == "reject" || strings.Contains(label, "blocked") || strings.Contains(label, "拒绝") || strings.Contains(label, "阻止") {
 		return styleGuardErr.Render(label)
 	}
-	if decision == "confirm" || decision == "modify" || source == "fallback" || (decision == "approve" && strings.ToLower(info.Risk) != "low" && source == "static") {
+	if decision == "confirm" || source == "fallback" || (decision == "approve" && !info.ReadOnly && source == "static") {
 		return styleGuardWarn.Render(label)
 	}
 	if decision == "approve" {
@@ -191,10 +190,6 @@ func (t *TUI) guardDecisionLabel(info *guardInfo) string {
 			return t.tr("tui.tool.guard.llm_approved")
 		case "reject":
 			return t.tr("tui.tool.guard.llm_blocked")
-		case "modify":
-			return t.tr("tui.tool.guard.llm_suggested")
-		case "confirm":
-			return t.tr("tui.tool.guard.llm_confirm")
 		}
 	case "user":
 		if info.Decision == "reject" {
@@ -217,17 +212,12 @@ func (t *TUI) guardDecisionLabel(info *guardInfo) string {
 	return info.Decision
 }
 
-func (t *TUI) renderRiskBadge(risk string) string {
-	switch risk {
-	case "high":
-		return styleGuardErr.Render(t.tr("tui.tool.guard.risk.high"))
-	case "medium":
-		return styleGuardWarn.Render(t.tr("tui.tool.guard.risk.medium"))
-	case "low":
-		return styleGuardOK.Render(t.tr("tui.tool.guard.risk.low"))
-	default:
-		return styleMetaPill.Render(risk)
+// renderReadOnlyBadge 展示只读/行动徽章：只读放行绿色，非只读黄色。
+func (t *TUI) renderReadOnlyBadge(readOnly bool) string {
+	if readOnly {
+		return styleGuardOK.Render(t.tr("tui.tool.guard.readonly_badge"))
 	}
+	return styleGuardWarn.Render(t.tr("tui.tool.guard.write_badge"))
 }
 
 func (t *TUI) renderToolDetailOverlay(width int) string {

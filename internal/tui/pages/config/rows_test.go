@@ -181,3 +181,21 @@ func TestModelRowsGroupsModelsByProvider(t *testing.T) {
 		t.Fatalf("group rows headers=%d providerAdds=%d finalAdds=%d rows=%#v", headers, providerAdds, finalAdds, rows)
 	}
 }
+
+// Guard mode 规范化：空或非法值按 smart 使用（Guard 重构后默认 smart）。
+func TestNormalizeGuardModeDefaultsToSmart(t *testing.T) {
+	if got := NormalizeGuardMode(""); got != "smart" {
+		t.Fatalf("NormalizeGuardMode(empty) = %q, want smart", got)
+	}
+	if got := NormalizeGuardMode("unknown"); got != "smart" {
+		t.Fatalf("NormalizeGuardMode(unknown) = %q, want smart", got)
+	}
+	if got := NormalizeGuardMode(" ASK "); got != "ask" {
+		t.Fatalf("NormalizeGuardMode( ASK ) = %q, want ask", got)
+	}
+	for _, mode := range []string{"readonly", "ask", "auto", "smart"} {
+		if got := NormalizeGuardMode(mode); got != mode {
+			t.Fatalf("NormalizeGuardMode(%q) = %q, want %q", mode, got, mode)
+		}
+	}
+}

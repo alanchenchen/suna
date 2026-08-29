@@ -18,7 +18,6 @@ const (
 	Approve Decision = "approve"
 	Reject  Decision = "reject"
 	Confirm Decision = "confirm"
-	Modify  Decision = "modify"
 )
 
 type Mode string
@@ -41,31 +40,21 @@ type ReviewRequest struct {
 	ParamsJSON      string
 	ParamsTruncated bool
 	Target          string
-	Risk            string
 	Context         ReviewContext
 }
 
-// LLMReviewer 用于 Guard Stage 3 LLM 审查。接收结构化操作上下文，返回 LLM 原始回复。
+// LLMReviewer 用于 smart mode 的 LLM 审查。接收结构化操作上下文，返回 LLM 原始回复。
 type LLMReviewer func(ctx context.Context, req ReviewRequest) (string, error)
 
 type GuardResult struct {
 	Decision      Decision
 	Reason        string
-	Risk          RiskLevel
-	Suggestion    string
+	ReadOnly      bool
 	Source        string
 	Audit         string
 	ReviewCode    string
 	ReviewMessage string
 }
-
-type RiskLevel int
-
-const (
-	RiskLow RiskLevel = iota
-	RiskMedium
-	RiskHigh
-)
 
 type Guard struct {
 	db           *sql.DB
@@ -73,7 +62,6 @@ type Guard struct {
 	blockedRules []blockRule
 	userBlocked  []blockRule
 	userAllowed  []allowedRule
-	allowedCmds  []string
 	workspace    string
 	sessionID    string
 	llmReviewer  LLMReviewer
@@ -91,28 +79,18 @@ type allowedRule struct {
 }
 
 func NewGuard(db *sql.DB, sessionID string) *Guard {
-	return NewGuardWithMode(db, sessionID, ModeAsk)
+	return NewGuardWithMode(db, sessionID, ModeSmart)
 }
 
 func NewGuardWithMode(db *sql.DB, sessionID string, mode Mode) *Guard {
 	g := &Guard{db: db, sessionID: sessionID, mode: NormalizeMode(string(mode))}
 	g.blockedRules = g.builtinBlockedRules()
-	g.allowedCmds = g.builtinAllowedCommands()
 	return g
-}
-
-func NewGuardWithConfig(db *sql.DB, sessionID string, blockedPatterns []string, blockedReasons []string, allowedPatterns []string, allowedTools []string) *Guard {
-	return NewGuardWithConfigAndMode(db, sessionID, ModeAsk, blockedPatterns, blockedReasons, allowedPatterns, allowedTools)
-}
-
-func NewGuardWithConfigAndMode(db *sql.DB, sessionID string, mode Mode, blockedPatterns []string, blockedReasons []string, allowedPatterns []string, allowedTools []string) *Guard {
-	return NewGuardWithConfigModeAndWorkspace(db, sessionID, mode, "", blockedPatterns, blockedReasons, allowedPatterns, allowedTools)
 }
 
 func NewGuardWithConfigModeAndWorkspace(db *sql.DB, sessionID string, mode Mode, workspace string, blockedPatterns []string, blockedReasons []string, allowedPatterns []string, allowedTools []string) *Guard {
 	g := &Guard{db: db, sessionID: sessionID, mode: NormalizeMode(string(mode))}
 	g.blockedRules = g.builtinBlockedRules()
-	g.allowedCmds = g.builtinAllowedCommands()
 	g.workspace = normalizeWorkspaceRoot(workspace)
 	for i, p := range blockedPatterns {
 		re, err := regexp.Compile(p)
@@ -143,18 +121,20 @@ func NormalizeMode(mode string) Mode {
 	switch Mode(strings.ToLower(strings.TrimSpace(mode))) {
 	case ModeReadonly:
 		return ModeReadonly
+	case ModeAsk:
+		return ModeAsk
 	case ModeAuto:
 		return ModeAuto
 	case ModeSmart:
 		return ModeSmart
 	default:
-		return ModeAsk
+		return ModeSmart
 	}
 }
 
 func (g *Guard) Mode() Mode {
 	if g == nil || g.mode == "" {
-		return ModeAsk
+		return ModeSmart
 	}
 	return g.mode
 }
@@ -172,8 +152,8 @@ func (g *Guard) SetLLMReviewer(reviewer LLMReviewer) {
 }
 
 func (g *Guard) Check(ctx context.Context, tool string, params map[string]any, reviewCtx ...ReviewContext) *GuardResult {
-	// exec run 命令只解析一次 AST，供结构性高危 / risk / workspace 三处消费，
-	// 避免同一命令多次解析（设计方案：一次解析两处消费）。
+	// exec run 命令只解析一次 AST，供结构性高危 / 只读判定 / workspace / sensitive 多处消费，
+	// 避免同一命令多次解析（设计方案：一次解析多处消费）。
 	var execAnalysis *ExecAnalysis
 	if tool == "exec" && execAction(params) == "run" {
 		if cmd, _ := params["command"].(string); strings.TrimSpace(cmd) != "" {
@@ -183,117 +163,122 @@ func (g *Guard) Check(ctx context.Context, tool string, params map[string]any, r
 			}
 		}
 	}
-	risk := g.assessRiskWithAnalysis(tool, params, execAnalysis)
 
 	// 硬拦截顺序：结构性高危（组合特征兑底）→ blocked（危险命令）→ workspace（路径边界）→ sensitive（敏感文件）。
 	// 结构性高危不依赖规则穷举，所有 mode 一致拦截；auto 模式也只被这一层兑底。
 	if tool == "exec" && execAction(params) == "run" {
 		if isSystemicallyHighRiskAnalysis(execAnalysis) {
-			g.audit(ctx, tool, params, risk, "structural_high_risk", "blocked: systemically dangerous command")
-			return &GuardResult{Decision: Reject, Reason: "blocked: systemically dangerous command", Risk: risk, Source: "rule", Audit: "structural_high_risk"}
+			g.audit(ctx, tool, params, "structural_high_risk", "blocked: systemically dangerous command")
+			return &GuardResult{Decision: Reject, Reason: "blocked: systemically dangerous command", Source: "rule", Audit: "structural_high_risk"}
 		}
 	}
 	if blocked, reason := g.checkBlocked(tool, params); blocked {
-		g.audit(ctx, tool, params, risk, "blocked", reason)
-		return &GuardResult{Decision: Reject, Reason: reason, Risk: risk, Source: "rule", Audit: "blocked"}
+		g.audit(ctx, tool, params, "blocked", reason)
+		return &GuardResult{Decision: Reject, Reason: reason, Source: "rule", Audit: "blocked"}
 	}
 	if blocked, reason, auditReason := g.checkWorkspaceWithAnalysis(ctx, tool, params, execAnalysis); blocked {
-		g.audit(ctx, tool, params, risk, "workspace_reject", auditReason)
-		return &GuardResult{Decision: Reject, Reason: reason, Risk: risk, Source: "rule", Audit: "workspace_reject"}
+		g.audit(ctx, tool, params, "workspace_reject", auditReason)
+		return &GuardResult{Decision: Reject, Reason: reason, Source: "rule", Audit: "workspace_reject"}
 	}
-	if blocked, reason := g.checkSensitive(tool, params); blocked {
-		g.audit(ctx, tool, params, risk, "sensitive_reject", reason)
-		return &GuardResult{Decision: Reject, Reason: reason, Risk: risk, Source: "rule", Audit: "sensitive_reject"}
+	if blocked, reason := g.checkSensitive(tool, params, execAnalysis); blocked {
+		g.audit(ctx, tool, params, "sensitive_reject", reason)
+		return &GuardResult{Decision: Reject, Reason: reason, Source: "rule", Audit: "sensitive_reject"}
 	}
 	if allowed, reason := g.checkAllowed(tool, params); allowed {
 		if reason == "" {
 			reason = "allowed rule"
 		}
-		g.audit(ctx, tool, params, risk, "allowed", reason)
-		return &GuardResult{Decision: Approve, Reason: reason, Risk: risk, Source: "rule", Audit: "allowed"}
+		g.audit(ctx, tool, params, "allowed", reason)
+		return &GuardResult{Decision: Approve, Reason: reason, Source: "rule", Audit: "allowed"}
 	}
+
+	// 只读判定：静态可证明无副作用（Perceive 工具或 Act 工具的只读调用）。
+	// 无法证明只读的一律非只读，交给 mode policy 处置（readonly 拒 / ask 问 / smart 审 exec）。
+	readOnly := g.isReadOnlyCall(tool, params, execAnalysis)
 
 	if g.Mode() == ModeReadonly {
-		if risk == RiskLow && isReadOnlyCall(tool, params) {
-			g.audit(ctx, tool, params, risk, "auto_approve", "readonly low risk")
-			return &GuardResult{Decision: Approve, Reason: "readonly low risk", Risk: risk, Source: "static", Audit: "auto_approve"}
+		if readOnly {
+			g.audit(ctx, tool, params, "auto_approve", "readonly call")
+			return &GuardResult{Decision: Approve, Reason: "readonly call", ReadOnly: true, Source: "static", Audit: "auto_approve"}
 		}
-		g.audit(ctx, tool, params, risk, "readonly_reject", "readonly mode blocks this operation")
-		return &GuardResult{Decision: Reject, Reason: "readonly mode blocks this operation", Risk: risk, Source: "static", Audit: "readonly_reject"}
+		g.audit(ctx, tool, params, "readonly_reject", "readonly mode blocks this operation")
+		return &GuardResult{Decision: Reject, Reason: "readonly mode blocks this operation", Source: "static", Audit: "readonly_reject"}
 	}
-	if risk == RiskLow {
-		g.audit(ctx, tool, params, risk, "auto_approve", "low_risk")
-		return &GuardResult{Decision: Approve, Reason: "low risk", Risk: risk, Source: "static", Audit: "auto_approve"}
+	if readOnly {
+		g.audit(ctx, tool, params, "auto_approve", "readonly call")
+		return &GuardResult{Decision: Approve, Reason: "readonly call", ReadOnly: true, Source: "static", Audit: "auto_approve"}
 	}
 	if g.Mode() == ModeAuto {
-		g.audit(ctx, tool, params, risk, "auto_approve", fmt.Sprintf("auto mode risk=%s", RiskString(risk)))
-		return &GuardResult{Decision: Approve, Reason: "auto mode", Risk: risk, Source: "static", Audit: "auto_approve"}
+		g.audit(ctx, tool, params, "auto_approve", "auto mode")
+		return &GuardResult{Decision: Approve, Reason: "auto mode", Source: "static", Audit: "auto_approve"}
 	}
 	if g.Mode() == ModeAsk {
-		g.audit(ctx, tool, params, risk, "confirm", fmt.Sprintf("ask mode risk=%s", RiskString(risk)))
-		return &GuardResult{Decision: Confirm, Reason: "confirm risky operation", Risk: risk, Source: "user", Audit: "confirm"}
+		g.audit(ctx, tool, params, "confirm", "ask mode")
+		return &GuardResult{Decision: Confirm, Reason: "confirm risky operation", Source: "user", Audit: "confirm"}
 	}
 
-	// smart mode: medium/high 由 LLM 结合任务意图判断；失败或不确定才转人工确认。
+	// smart mode：只审 exec（Act 中最危险的一类）；其他非只读工具静态放行。
+	// 写文件本身不执行，危险在后续执行时，而执行必走 exec 被 LLM 审，链路闭合。
+	if tool != "exec" {
+		g.audit(ctx, tool, params, "auto_approve", "smart mode non-exec write")
+		return &GuardResult{Decision: Approve, Reason: "smart mode", Source: "static", Audit: "auto_approve"}
+	}
 	if g.llmReviewer == nil {
-		return g.reviewFallback(ctx, tool, params, risk, "review_unavailable", "Smart Guard reviewer is unavailable")
+		return g.reviewFallback(ctx, tool, params, "review_unavailable", "Smart Guard reviewer is unavailable")
 	}
 	ctxForReview := ReviewContext{}
 	if len(reviewCtx) > 0 {
 		ctxForReview = reviewCtx[0]
 	}
-	return g.llmReview(ctx, tool, params, risk, ctxForReview)
+	return g.llmReview(ctx, tool, params, ctxForReview)
 }
 
-// llmReview 调用 LLM 进行安全审查。LLM 可以 approve/reject/confirm/modify。
-func (g *Guard) llmReview(ctx context.Context, toolName string, params map[string]any, risk RiskLevel, reviewCtx ReviewContext) *GuardResult {
+// llmReview 调用 LLM 进行安全审查。LLM 只做二元决策：approve / reject。
+// 审风险不审意图：意图对齐归 Agent（有完整上下文），Guard 只判断操作本身是否危险。
+func (g *Guard) llmReview(ctx context.Context, toolName string, params map[string]any, reviewCtx ReviewContext) *GuardResult {
 	target := guardTarget(toolName, params)
 	paramsJSON, paramsTruncated := marshalReviewParams(params)
-	resp, err := g.llmReviewer(ctx, ReviewRequest{ToolName: toolName, ParamsJSON: paramsJSON, ParamsTruncated: paramsTruncated, Target: target, Risk: RiskString(risk), Context: reviewCtx})
+	resp, err := g.llmReviewer(ctx, ReviewRequest{ToolName: toolName, ParamsJSON: paramsJSON, ParamsTruncated: paramsTruncated, Target: target, Context: reviewCtx})
 	if err != nil {
 		code, msg := classifyReviewError(err)
-		return g.reviewFallback(ctx, toolName, params, risk, code, msg)
+		return g.reviewFallback(ctx, toolName, params, code, msg)
 	}
 	jsonText := extractJSON(resp)
 	if strings.TrimSpace(jsonText) == "" {
-		return g.reviewFallback(ctx, toolName, params, risk, "review_empty_response", "Smart Guard review returned an empty response")
+		return g.reviewFallback(ctx, toolName, params, "review_empty_response", "Smart Guard review returned an empty response")
 	}
 	var decision struct {
-		Decision   string `json:"decision"`
-		Reason     string `json:"reason"`
-		Suggestion string `json:"suggestion"`
+		Decision string `json:"decision"`
+		Reason   string `json:"reason"`
 	}
 	if err := json.Unmarshal([]byte(jsonText), &decision); err != nil {
-		return g.reviewFallback(ctx, toolName, params, risk, "review_parse_failed", "Smart Guard review returned invalid JSON")
+		return g.reviewFallback(ctx, toolName, params, "review_parse_failed", "Smart Guard review returned invalid JSON")
 	}
 	decision.Decision = strings.ToLower(strings.TrimSpace(decision.Decision))
 	switch decision.Decision {
 	case "reject":
-		g.audit(ctx, toolName, params, risk, "llm_reject", decision.Reason)
-		return &GuardResult{Decision: Reject, Reason: decision.Reason, Risk: risk, Source: "llm", Audit: "llm_reject"}
-	case "confirm":
-		g.audit(ctx, toolName, params, risk, "llm_confirm", decision.Reason)
-		return &GuardResult{Decision: Confirm, Reason: decision.Reason, Risk: risk, Suggestion: decision.Suggestion, Source: "llm", Audit: "llm_confirm"}
-	case "modify":
-		g.audit(ctx, toolName, params, risk, "llm_modify", decision.Reason)
-		return &GuardResult{Decision: Modify, Reason: decision.Reason, Risk: risk, Suggestion: decision.Suggestion, Source: "llm", Audit: "llm_modify"}
+		g.audit(ctx, toolName, params, "llm_reject", decision.Reason)
+		return &GuardResult{Decision: Reject, Reason: decision.Reason, Source: "llm", Audit: "llm_reject"}
 	case "approve":
-		g.audit(ctx, toolName, params, risk, "llm_approve", decision.Reason)
-		return &GuardResult{Decision: Approve, Reason: decision.Reason, Risk: risk, Source: "llm", Audit: "llm_approve"}
+		g.audit(ctx, toolName, params, "llm_approve", decision.Reason)
+		return &GuardResult{Decision: Approve, Reason: decision.Reason, Source: "llm", Audit: "llm_approve"}
 	default:
-		return g.reviewFallback(ctx, toolName, params, risk, "review_invalid_decision", "Smart Guard review returned an invalid decision")
+		// LLM 表达不确定或返回未知决策：硬拦截已兜底确定性危险，按 approve 放行并留痕。
+		g.audit(ctx, toolName, params, "llm_approve_uncertain", decision.Reason)
+		return &GuardResult{Decision: Approve, Reason: "smart guard: " + decision.Reason, Source: "llm", Audit: "llm_approve_uncertain"}
 	}
 }
 
-func (g *Guard) reviewFallback(ctx context.Context, tool string, params map[string]any, risk RiskLevel, code, message string) *GuardResult {
+// reviewFallback 在 LLM 审核不可用时 fail-closed：审核能力缺失不放行。
+func (g *Guard) reviewFallback(ctx context.Context, tool string, params map[string]any, code, message string) *GuardResult {
 	if strings.TrimSpace(code) == "" {
 		code = "review_unavailable"
 	}
 	if strings.TrimSpace(message) == "" {
 		message = "Smart Guard review failed"
 	}
-	g.audit(ctx, tool, params, risk, code, message)
-	return &GuardResult{Decision: Confirm, Reason: message, Risk: risk, Source: "fallback", Audit: code, ReviewCode: code, ReviewMessage: message}
+	g.audit(ctx, tool, params, code, message)
+	return &GuardResult{Decision: Reject, Reason: message, Source: "fallback", Audit: code, ReviewCode: code, ReviewMessage: message}
 }
 
 func classifyReviewError(err error) (string, string) {
@@ -344,10 +329,13 @@ func (g *Guard) checkBlocked(tool string, params map[string]any) (bool, string) 
 	return false, ""
 }
 
-// checkSensitive 是硬拦截层的一部分：敏感文件读/写一律拒绝，所有 mode 一致。
+// checkSensitive 是硬拦截层的一部分：敏感文件读/写一律拒绝，所有 mode 一致，
+// 与 workspace 无关（敏感数据永远在 guard 层拒绝）。
 // 敏感路径规则由 IsSensitivePath 维护（凭证、密钥、SSH 目录等），此处只做调用位置提升，
 // 让 guard 审计能看到"敏感文件拦截"，而不是在 agent 层静默拦截。
-func (g *Guard) checkSensitive(tool string, params map[string]any) (bool, string) {
+// exec 是敏感检查的绕过口（readfile 拦截但 exec cat 放行），这里复用 Check 已解析的
+// ExecAnalysis（一次解析多处消费），避免同一命令重复 AST 解析。
+func (g *Guard) checkSensitive(tool string, params map[string]any, analysis *ExecAnalysis) (bool, string) {
 	var paths []string
 	switch tool {
 	case "readfile", "writefile", "editfile", "listdir", "search":
@@ -361,6 +349,8 @@ func (g *Guard) checkSensitive(tool string, params map[string]any) (bool, string
 		if d, _ := params["destination"].(string); d != "" {
 			paths = append(paths, d)
 		}
+	case "exec":
+		paths = g.execSensitivePaths(params, analysis)
 	}
 	for _, p := range paths {
 		if sensitive, reason := IsSensitivePath(p); sensitive {
@@ -441,25 +431,19 @@ func execTarget(params map[string]any, safe bool) string {
 	}
 }
 
-func (g *Guard) audit(ctx context.Context, tool string, params map[string]any, risk RiskLevel, decision, reason string) {
+func (g *Guard) audit(ctx context.Context, tool string, params map[string]any, decision, reason string) {
 	if g.db == nil {
 		return
 	}
 	id := uuid.New().String()
-	riskStr := "low"
-	if risk == RiskMedium {
-		riskStr = "medium"
-	} else if risk == RiskHigh {
-		riskStr = "high"
-	}
 	paramsStr := "{}"
 	if b, err := marshalParams(params); err == nil {
 		paramsStr = b
 	}
 	g.db.ExecContext(ctx, `
-		INSERT INTO audit_log (id, session_id, tool, params, risk_level, guard_decision, guard_reason)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		id, g.sessionID, tool, paramsStr, riskStr, decision, reason,
+		INSERT INTO audit_log (id, session_id, tool, params, guard_decision, guard_reason)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		id, g.sessionID, tool, paramsStr, decision, reason,
 	)
 }
 
@@ -477,76 +461,34 @@ func (g *Guard) builtinBlockedRules() []blockRule {
 	return rules
 }
 
-func (g *Guard) builtinAllowedCommands() []string {
-	return platformReadOnlyCommands()
-}
-
-func (g *Guard) assessRisk(tool string, params map[string]any) RiskLevel {
-	return g.assessRiskWithAnalysis(tool, params, nil)
-}
-
-// assessRiskWithAnalysis 支持复用已解析的 ExecAnalysis（Check 主流程传 analysis，
-// 避免同一命令多次 AST 解析）；analysis 为 nil 时自行解析（独立调用入口）。
-func (g *Guard) assessRiskWithAnalysis(tool string, params map[string]any, analysis *ExecAnalysis) RiskLevel {
+// isReadOnlyCall 静态判定调用是否可证明无副作用（只读）。
+// 唯一规则：无法证明只读 → 非只读，没有中间态，绝不猜测放行。
+// 只读判定必须精准：它是 mode policy 的输入，判错就是严重 bug。
+func (g *Guard) isReadOnlyCall(tool string, params map[string]any, analysis *ExecAnalysis) bool {
 	switch tool {
+	case "readfile", "listdir", "search":
+		// Perceive 工具：只读。
+		return true
 	case "exec":
 		switch execAction(params) {
 		case "status":
 			// 受管任务状态查询只读取已有输出，不执行新命令。
-			return RiskLow
+			return true
 		case "stop":
-			// 停止精确任务会改变进程状态，保留 medium 以进入正常的 Smart Review。
-			return RiskMedium
+			// 停止精确任务会改变进程状态，非只读。
+			return false
 		default:
 			cmd, _ := params["command"].(string)
 			shell, _ := params["shell"].(string)
 			if analysis == nil {
 				// 优先用 ExecAnalysis（AST 精确）；解析失败 fallback 旧分词器（能力不降级）。
 				if a, ok := newExecAnalyzer().Analyze(cmd, shell); ok {
-					return analyzeExecRisk(&a, g.allowedCmds)
+					return analyzeExecReadOnly(&a)
 				}
-				return analyzeExecCommand(cmd, shell, g.allowedCmds)
+				return analyzeExecCommandReadOnly(cmd, shell)
 			}
-			return analyzeExecRisk(analysis, g.allowedCmds)
+			return analyzeExecReadOnly(analysis)
 		}
-	case "writefile":
-		path, _ := params["path"].(string)
-		return assessFileWriteRisk(path)
-	case "editfile":
-		path, _ := params["path"].(string)
-		if isHighRiskFilePath(path) {
-			return RiskHigh
-		}
-		return RiskMedium
-	case "filesystem":
-		return assessFilesystemRisk(params)
-	case "http":
-		return assessHTTPRisk(params)
-	case "readfile", "listdir":
-		return RiskLow
-	case "search":
-		return assessSearchRisk(params)
-	default:
-		// Unknown Act tools are never safe-by-default. New external tools must be explicitly classified.
-		return RiskMedium
-	}
-}
-
-func RiskString(risk RiskLevel) string {
-	switch risk {
-	case RiskMedium:
-		return "medium"
-	case RiskHigh:
-		return "high"
-	default:
-		return "low"
-	}
-}
-
-func isReadOnlyCall(tool string, params map[string]any) bool {
-	switch tool {
-	case "readfile", "listdir", "search", "exec":
-		return true
 	case "filesystem":
 		action, _ := params["action"].(string)
 		return action == "stat"
@@ -555,16 +497,7 @@ func isReadOnlyCall(tool string, params map[string]any) bool {
 		method = strings.ToUpper(strings.TrimSpace(method))
 		return method == "" || method == "GET" || method == "HEAD"
 	default:
+		// 未知工具不默认只读：新外部工具必须显式分类。
 		return false
 	}
-}
-
-func compileRegexps(patterns []string) []*regexp.Regexp {
-	compiled := make([]*regexp.Regexp, 0, len(patterns))
-	for _, pattern := range patterns {
-		if re, err := regexp.Compile(pattern); err == nil {
-			compiled = append(compiled, re)
-		}
-	}
-	return compiled
 }

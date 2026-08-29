@@ -11,27 +11,27 @@ import (
 	"github.com/alanchenchen/suna/internal/tools"
 )
 
-func TestGuardRiskLowOnlyForStrictReadOnlyExec(t *testing.T) {
-	g := NewGuard(nil, "test")
+func TestGuardReadOnlyOnlyForStrictReadOnlyExec(t *testing.T) {
+	g := NewGuardWithMode(nil, "test", ModeAsk)
 
 	tests := []struct {
 		name     string
 		command  string
 		shell    string
 		decision Decision
-		risk     RiskLevel
+		readOnly bool
 	}{
-		{name: "simple readonly", command: platformSimpleReadOnlyCommand(), decision: Approve, risk: RiskLow},
-		{name: "readonly pipeline", command: platformReadOnlyPipelineCommand(), decision: Approve, risk: RiskLow},
-		{name: "bash compound write", command: "ls && rm -rf important", decision: Confirm, risk: RiskHigh},
-		{name: "cmd compound write", command: "dir & del /s /q C:\\Users\\me", shell: "cmd", decision: Confirm, risk: RiskHigh},
-		{name: "powershell compound write", command: "Get-ChildItem; Remove-Item -Recurse -Force C:\\Users\\me", shell: "powershell", decision: platformPowerShellWriteDecision(), risk: RiskHigh},
-		{name: "redirection is not readonly", command: "echo hi > file.txt", decision: Confirm, risk: RiskMedium},
-		{name: "find delete is not readonly", command: "find . -delete", decision: Confirm, risk: RiskMedium},
-		{name: "nested shell is not readonly", command: "bash -c 'ls'", decision: Confirm, risk: RiskMedium},
-		{name: "powershell encoded command is not readonly", command: "powershell -EncodedCommand SQBFAFgA", shell: "cmd", decision: Confirm, risk: RiskMedium},
-		{name: "generic interpreter dynamic execution is not readonly", command: "node -e 'console.log(1)'", decision: Confirm, risk: RiskMedium},
-		{name: "python process execution is high risk", command: "python -c 'import os; os.system(\"rm -rf x\")'", decision: Confirm, risk: RiskHigh},
+		{name: "simple readonly", command: platformSimpleReadOnlyCommand(), decision: Approve, readOnly: true},
+		{name: "readonly pipeline", command: platformReadOnlyPipelineCommand(), decision: Approve, readOnly: true},
+		{name: "bash compound write", command: "ls && rm -rf important", decision: Confirm, readOnly: false},
+		{name: "cmd compound write", command: "dir & del /s /q C:\\Users\\me", shell: "cmd", decision: Confirm, readOnly: false},
+		{name: "powershell compound write", command: "Get-ChildItem; Remove-Item -Recurse -Force C:\\Users\\me", shell: "powershell", decision: platformPowerShellWriteDecision(), readOnly: false},
+		{name: "redirection is not readonly", command: "echo hi > file.txt", decision: Confirm, readOnly: false},
+		{name: "find delete is not readonly", command: "find . -delete", decision: Confirm, readOnly: false},
+		{name: "nested shell is not readonly", command: "bash -c 'ls'", decision: Confirm, readOnly: false},
+		{name: "powershell encoded command is not readonly", command: "powershell -EncodedCommand SQBFAFgA", shell: "cmd", decision: Confirm, readOnly: false},
+		{name: "generic interpreter dynamic execution is not readonly", command: "node -e 'console.log(1)'", decision: Confirm, readOnly: false},
+		{name: "python process execution is not readonly", command: "python -c 'import os; os.system(\"rm -rf x\")'", decision: Confirm, readOnly: false},
 	}
 
 	for _, tt := range tests {
@@ -42,8 +42,8 @@ func TestGuardRiskLowOnlyForStrictReadOnlyExec(t *testing.T) {
 				params["shell"] = tt.shell
 			}
 			result := g.Check(context.Background(), "exec", params)
-			if result.Decision != tt.decision || result.Risk != tt.risk {
-				t.Fatalf("Check(%q) decision/risk = %s/%s, want %s/%s", tt.command, result.Decision, RiskString(result.Risk), tt.decision, RiskString(tt.risk))
+			if result.Decision != tt.decision || result.ReadOnly != tt.readOnly {
+				t.Fatalf("Check(%q) decision/readOnly = %s/%v, want %s/%v", tt.command, result.Decision, result.ReadOnly, tt.decision, tt.readOnly)
 			}
 		})
 	}
@@ -58,9 +58,9 @@ func platformSimpleReadOnlyCommand() string {
 
 func platformReadOnlyPipelineCommand() string {
 	if runtime.GOOS == "windows" {
-		return "git status | findstr modified"
+		return "dir | findstr modified"
 	}
-	return "git status | grep modified"
+	return "ls -la | grep modified"
 }
 
 func platformPowerShellWriteDecision() Decision {
@@ -71,27 +71,27 @@ func platformPowerShellWriteDecision() Decision {
 	return Confirm
 }
 
-func TestGuardNewStructuredToolRisks(t *testing.T) {
-	g := NewGuard(nil, "test")
+func TestGuardNewStructuredToolReadOnly(t *testing.T) {
+	g := NewGuardWithMode(nil, "test", ModeAsk)
 
 	tests := []struct {
-		name   string
-		tool   string
-		params map[string]any
-		risk   RiskLevel
+		name     string
+		tool     string
+		params   map[string]any
+		readOnly bool
 	}{
-		{name: "filesystem stat", tool: "filesystem", params: map[string]any{"action": "stat", "path": "out.txt"}, risk: RiskLow},
-		{name: "filesystem recursive remove", tool: "filesystem", params: map[string]any{"action": "remove", "path": "dist", "recursive": true}, risk: RiskHigh},
-		{name: "http delete", tool: "http", params: map[string]any{"method": "DELETE", "url": "https://example.com/item"}, risk: RiskHigh},
-		{name: "http localhost get", tool: "http", params: map[string]any{"url": "http://127.0.0.1:8080/status"}, risk: RiskMedium},
-		{name: "broad content search", tool: "search", params: map[string]any{"path": "/", "query": "secret"}, risk: RiskMedium},
+		{name: "filesystem stat", tool: "filesystem", params: map[string]any{"action": "stat", "path": "out.txt"}, readOnly: true},
+		{name: "filesystem recursive remove", tool: "filesystem", params: map[string]any{"action": "remove", "path": "dist", "recursive": true}, readOnly: false},
+		{name: "http delete", tool: "http", params: map[string]any{"method": "DELETE", "url": "https://example.com/item"}, readOnly: false},
+		{name: "http get", tool: "http", params: map[string]any{"url": "https://example.com/status"}, readOnly: true},
+		{name: "search", tool: "search", params: map[string]any{"path": "/", "query": "secret"}, readOnly: true},
 	}
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			result := g.Check(context.Background(), tt.tool, tt.params)
-			if result.Risk != tt.risk {
-				t.Fatalf("risk = %s, want %s; decision=%s reason=%q", RiskString(result.Risk), RiskString(tt.risk), result.Decision, result.Reason)
+			if result.ReadOnly != tt.readOnly {
+				t.Fatalf("readOnly = %v, want %v; decision=%s reason=%q", result.ReadOnly, tt.readOnly, result.Decision, result.Reason)
 			}
 		})
 	}
@@ -112,28 +112,30 @@ func TestReadonlyAllowsStructuredReadOnlyCalls(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result := g.Check(context.Background(), tt.tool, tt.params)
 			if result.Decision != Approve {
-				t.Fatalf("decision = %s, want approve; risk=%s reason=%q", result.Decision, RiskString(result.Risk), result.Reason)
+				t.Fatalf("decision = %s, want approve; readOnly=%v reason=%q", result.Decision, result.ReadOnly, result.Reason)
 			}
 		})
 	}
 }
 
 func TestGuardConservativeFallbacks(t *testing.T) {
-	g := NewGuard(nil, "test")
+	g := NewGuardWithMode(nil, "test", ModeAsk)
 
+	// 未知工具不默认只读：ask 下确认。
 	unknown := g.Check(context.Background(), "dangerous_future_tool", map[string]any{"path": "x"})
-	if unknown.Decision != Confirm || unknown.Risk != RiskMedium {
-		t.Fatalf("unknown Act fallback = %s/%s, want confirm/medium", unknown.Decision, RiskString(unknown.Risk))
+	if unknown.Decision != Confirm || unknown.ReadOnly {
+		t.Fatalf("unknown Act fallback = %s/%v, want confirm/non-readonly", unknown.Decision, unknown.ReadOnly)
 	}
 
+	// writefile 非只读：ask 下确认（不再按路径分级）。
 	write := g.Check(context.Background(), "writefile", map[string]any{"path": "new-file.txt", "content": "hello"})
-	if write.Decision != Confirm || write.Risk != RiskMedium {
-		t.Fatalf("writefile new file = %s/%s, want confirm/medium", write.Decision, RiskString(write.Risk))
+	if write.Decision != Confirm || write.ReadOnly {
+		t.Fatalf("writefile new file = %s/%v, want confirm/non-readonly", write.Decision, write.ReadOnly)
 	}
 
 	hook := g.Check(context.Background(), "writefile", map[string]any{"path": ".git/hooks/pre-commit", "content": "#!/bin/sh"})
-	if hook.Decision != Confirm || hook.Risk != RiskHigh {
-		t.Fatalf("writefile hook = %s/%s, want confirm/high", hook.Decision, RiskString(hook.Risk))
+	if hook.Decision != Confirm || hook.ReadOnly {
+		t.Fatalf("writefile hook = %s/%v, want confirm/non-readonly", hook.Decision, hook.ReadOnly)
 	}
 }
 
@@ -167,8 +169,8 @@ func TestMarshalParamsEscapesAndMasks(t *testing.T) {
 func TestWorkspaceEmptyDoesNotBlock(t *testing.T) {
 	g := NewGuardWithConfigModeAndWorkspace(nil, "test", ModeAuto, "", nil, nil, nil, nil)
 	result := g.Check(context.Background(), "readfile", map[string]any{"path": "/definitely/outside"})
-	if result.Decision != Approve || result.Risk != RiskLow {
-		t.Fatalf("empty workspace readfile = %s/%s, want approve/low", result.Decision, RiskString(result.Risk))
+	if result.Decision != Approve || !result.ReadOnly {
+		t.Fatalf("empty workspace readfile = %s/%v, want approve/readonly", result.Decision, result.ReadOnly)
 	}
 }
 
@@ -430,28 +432,58 @@ func TestSmartReviewReceivesIntentContext(t *testing.T) {
 	var got ReviewRequest
 	g.SetLLMReviewer(func(ctx context.Context, req ReviewRequest) (string, error) {
 		got = req
-		return `{"decision":"approve","reason":"aligned","suggestion":""}`, nil
+		return `{"decision":"approve","reason":"aligned"}`, nil
 	})
-	ctx := ReviewContext{Evidence: "Latest direct user message:\n- prepare a report\n\nRecent resolved risk decisions:\n- Approved: tool=writefile"}
-	result := g.Check(context.Background(), "writefile", map[string]any{"path": "report.md", "content": "hello"}, ctx)
+	ctx := ReviewContext{Evidence: "Latest direct user message:\n- prepare a report"}
+	result := g.Check(context.Background(), "exec", map[string]any{"command": "rm -rf dist"}, ctx)
 	if result.Decision != Approve || result.Source != "llm" {
 		t.Fatalf("smart review decision/source = %s/%s, want approve/llm", result.Decision, result.Source)
 	}
 	if got.Context.Evidence != ctx.Evidence {
 		t.Fatalf("review request context = %#v, want %#v", got.Context, ctx)
 	}
-	if got.Risk != "medium" || got.ToolName != "writefile" || got.Target != "report.md" {
+	if got.ToolName != "exec" || got.Target != "rm -rf dist" {
 		t.Fatalf("review request metadata = %#v", got)
 	}
 }
 
-func TestSmartReviewModifyIsDecision(t *testing.T) {
+// smart 只审 exec：writefile 非只读但静态放行，不触发 LLM。
+func TestSmartReviewSkipsNonExecWrites(t *testing.T) {
 	g := NewGuardWithMode(nil, "test", ModeSmart)
+	called := false
 	g.SetLLMReviewer(func(ctx context.Context, req ReviewRequest) (string, error) {
-		return `{"decision":"modify","reason":"too broad","suggestion":"use a narrower operation"}`, nil
+		called = true
+		return `{"decision":"approve","reason":"aligned"}`, nil
 	})
-	result := g.Check(context.Background(), "writefile", map[string]any{"path": "out.txt", "content": "hello"}, ReviewContext{Evidence: "Latest direct user message:\n- create output"})
-	if result.Decision != Modify || result.Suggestion != "use a narrower operation" {
-		t.Fatalf("Check() result = %#v, want modify with suggestion", result)
+	result := g.Check(context.Background(), "writefile", map[string]any{"path": "report.md", "content": "hello"})
+	if result.Decision != Approve || result.Source != "static" || called {
+		t.Fatalf("smart writefile result = %#v, reviewer called = %v; want static approve without LLM", result, called)
 	}
 }
+
+// smart 二元决策：LLM 返回未知决策时按不确定处理，approve 并留痕（硬拦截已兜底）。
+func TestSmartReviewUncertainDecisionApproves(t *testing.T) {
+	g := NewGuardWithMode(nil, "test", ModeSmart)
+	g.SetLLMReviewer(func(ctx context.Context, req ReviewRequest) (string, error) {
+		return `{"decision":"maybe","reason":"not sure"}`, nil
+	})
+	result := g.Check(context.Background(), "exec", map[string]any{"command": "touch x"})
+	if result.Decision != Approve || result.Audit != "llm_approve_uncertain" {
+		t.Fatalf("uncertain result = %#v, want approve with llm_approve_uncertain audit", result)
+	}
+}
+
+// smart fail-closed：LLM 审核不可用时拒绝（不放行）。
+func TestSmartReviewFailureRejects(t *testing.T) {
+	g := NewGuardWithMode(nil, "test", ModeSmart)
+	g.SetLLMReviewer(func(ctx context.Context, req ReviewRequest) (string, error) {
+		return "", context.DeadlineExceeded
+	})
+	result := g.Check(context.Background(), "exec", map[string]any{"command": "touch x"})
+	if result.Decision != Reject || result.Source != "fallback" || result.ReviewCode != "review_timeout" {
+		t.Fatalf("timeout result = %#v, want reject with review_timeout", result)
+	}
+}
+
+// exec 敏感检查的跨平台路径：POSIX AST 路径由 guard_restructure_test.go 覆盖，
+// Windows 保守解析（AST 失败走正则 fallback）由 sensitive_exec_windows_test.go 覆盖。

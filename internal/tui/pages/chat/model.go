@@ -100,9 +100,8 @@ type GuardConfirmView struct {
 	ToolCallID    string
 	Tool          string
 	Params        map[string]any
-	Risk          string
+	ReadOnly      bool
 	Reason        string
-	Suggestion    string
 	ReviewCode    string
 	ReviewMessage string
 }

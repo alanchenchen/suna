@@ -52,8 +52,6 @@ type Agent struct {
 	cwd           string
 	modelRef      string
 	turnCount     int
-	guardTask     *guardTaskCard
-	guardTaskMu   sync.Mutex
 	guardGate     sync.Mutex
 	sessionState  string
 	toolSummary   memory.ToolSummary

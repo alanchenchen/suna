@@ -1,18 +1,17 @@
 package chat
 
 type GuardOverlayLabels struct {
-	Title      string
-	Tool       string
-	Risk       string
-	Review     string
-	Reason     string
-	Suggestion string
-	Params     string
-	Approve    string
-	Reject     string
-	Help       string
-	Hidden     string
-	Scroll     string
+	Title    string
+	Tool     string
+	ReadOnly string
+	Review   string
+	Reason   string
+	Params   string
+	Approve  string
+	Reject   string
+	Help     string
+	Hidden   string
+	Scroll   string
 }
 
 type GuardOverlayView struct {

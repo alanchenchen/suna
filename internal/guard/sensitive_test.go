@@ -22,6 +22,10 @@ func TestIsSensitivePath(t *testing.T) {
 		{name: "pem file", path: "/tmp/.pem", sensitive: true},
 		{name: "netrc", path: "~/.netrc", sensitive: true},
 		{name: "kube config", path: "~/.kube/config", sensitive: true},
+		{name: "ssh dir itself", path: "~/.ssh", sensitive: true},
+		{name: "ssh dir abs", path: "/home/user/.ssh", sensitive: true},
+		{name: "gnupg dir", path: "~/.gnupg", sensitive: true},
+		{name: "ssh-like file", path: "/home/user/foo.ssh", sensitive: false},
 	}
 
 	for _, tt := range tests {

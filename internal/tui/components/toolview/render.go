@@ -85,7 +85,7 @@ type RenderDeps struct {
 	Styles  RenderStyles
 
 	GuardDecisionLabel func(*GuardInfo) string
-	RiskLabel          func(string) string
+	ReadOnlyLabel      func(bool) string
 }
 
 func (d RenderDeps) width() int {
@@ -345,13 +345,13 @@ func renderGuardSummary(info *GuardInfo, prefix string, deps RenderDeps) string 
 	if deps.GuardDecisionLabel != nil {
 		decision = deps.GuardDecisionLabel(info)
 	}
-	risk := ""
-	if deps.RiskLabel != nil && info != nil {
-		risk = deps.RiskLabel(info.Risk)
+	readOnlyLabel := ""
+	if deps.ReadOnlyLabel != nil && info != nil {
+		readOnlyLabel = deps.ReadOnlyLabel(info.ReadOnly)
 	}
 	parts := []string{s.Dim.Render(deps.Labels.GuardBadge), renderGuardDecisionBadge(info, decision, s)}
-	if risk != "" {
-		parts = append(parts, risk)
+	if readOnlyLabel != "" {
+		parts = append(parts, readOnlyLabel)
 	}
 	if reason := shortGuardReason(info.Reason); reason != "" {
 		parts = append(parts, s.ToolDim.Render(reason))
@@ -368,7 +368,7 @@ func renderGuardDecisionBadge(info *GuardInfo, label string, s RenderStyles) str
 	if decision == "reject" || strings.Contains(label, "blocked") || strings.Contains(label, "拒绝") || strings.Contains(label, "阻止") {
 		return s.GuardErr.Render(label)
 	}
-	if decision == "confirm" || decision == "modify" || source == "fallback" || (decision == "approve" && strings.ToLower(info.Risk) != "low" && source == "static") {
+	if decision == "confirm" || source == "fallback" || (decision == "approve" && !info.ReadOnly && source == "static") {
 		return s.GuardWarn.Render(label)
 	}
 	if decision == "approve" {

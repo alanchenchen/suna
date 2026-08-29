@@ -1,6 +1,6 @@
 # Suna 文档
 
-这里存放 Suna 当前代码实际支持的设计、架构、配置和维护文档。根目录 `README.md` 是英文项目门面，突出 isolated subtasks、intent-aware Guard、runtime-first architecture、快速开始和常用功能；`README.zh-CN.md` 是中文项目门面；`docs/` 面向希望深入理解 Suna 的读者，目前以中文为主。
+这里存放 Suna 当前代码实际支持的设计、架构、配置和维护文档。根目录 `README.md` 是英文项目门面，突出 isolated subtasks、layered Guard、runtime-first architecture、快速开始和常用功能；`README.zh-CN.md` 是中文项目门面；`docs/` 面向希望深入理解 Suna 的读者，目前以中文为主。
 
 `plans/` 保留规划、调研和历史设计，可能已经滞后，也可能包含未实现能力；理解当前行为时不要以 `plans/` 为准。
 

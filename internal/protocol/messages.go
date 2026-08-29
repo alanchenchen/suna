@@ -309,11 +309,10 @@ type ToolEndParams struct {
 type ToolGuardParams struct {
 	ToolCallID    string `json:"tool_call_id"`
 	Tool          string `json:"tool"`
-	Risk          string `json:"risk"`
+	ReadOnly      bool   `json:"readonly"`
 	Decision      string `json:"decision"`
 	Source        string `json:"source"`
 	Reason        string `json:"reason,omitempty"`
-	Suggestion    string `json:"suggestion,omitempty"`
 	ReviewCode    string `json:"review_code,omitempty"`
 	ReviewMessage string `json:"review_message,omitempty"`
 }
@@ -332,9 +331,8 @@ type GuardConfirmParams struct {
 	ToolCallID    string         `json:"tool_call_id,omitempty"`
 	Tool          string         `json:"tool"`
 	Params        map[string]any `json:"params"`
-	Risk          string         `json:"risk"`
+	ReadOnly      bool           `json:"readonly"`
 	Reason        string         `json:"reason"`
-	Suggestion    string         `json:"suggestion,omitempty"`
 	ReviewCode    string         `json:"review_code,omitempty"`
 	ReviewMessage string         `json:"review_message,omitempty"`
 	SessionID     string         `json:"session_id,omitempty"`

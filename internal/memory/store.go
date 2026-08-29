@@ -157,7 +157,6 @@ func (s *Store) migrate() error {
 			session_id TEXT NOT NULL DEFAULT '',
 			tool TEXT NOT NULL,
 			params TEXT NOT NULL DEFAULT '{}',
-			risk_level TEXT NOT NULL DEFAULT '',
 			guard_decision TEXT NOT NULL DEFAULT '',
 			guard_reason TEXT NOT NULL DEFAULT '',
 			result TEXT NOT NULL DEFAULT '',
@@ -181,7 +180,6 @@ func (s *Store) migrate() error {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			pattern TEXT NOT NULL,
 			tool TEXT NOT NULL DEFAULT '',
-			risk_adjustment TEXT NOT NULL DEFAULT '',
 			reason TEXT NOT NULL DEFAULT '',
 			learned_from TEXT NOT NULL DEFAULT ''
 		)`,
@@ -210,6 +208,32 @@ func (s *Store) migrate() error {
 	}
 	if err := s.migrateLegacyConversationState(); err != nil {
 		return err
+	}
+	if err := s.migrateDropGuardRiskColumns(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// migrateDropGuardRiskColumns 删除已废弃的 risk 分级列：
+// Guard 重构后 risk 三级（low/medium/high）退化为只读布尔，audit_log.risk_level 与
+// trust_rules.risk_adjustment 不再写入。SQLite 3.35+ 支持 DROP COLUMN；
+// 旧库检测到列存在时删除，新库建表已不带这两列。
+func (s *Store) migrateDropGuardRiskColumns() error {
+	for _, tc := range []struct{ table, column string }{
+		{"audit_log", "risk_level"},
+		{"trust_rules", "risk_adjustment"},
+	} {
+		exists, err := s.columnExists(tc.table, tc.column)
+		if err != nil {
+			return fmt.Errorf("check %s.%s: %w", tc.table, tc.column, err)
+		}
+		if !exists {
+			continue
+		}
+		if _, err := s.db.Exec(`ALTER TABLE ` + tc.table + ` DROP COLUMN ` + tc.column); err != nil {
+			return fmt.Errorf("drop %s.%s: %w", tc.table, tc.column, err)
+		}
 	}
 	return nil
 }

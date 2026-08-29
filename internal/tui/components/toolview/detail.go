@@ -19,10 +19,9 @@ type DetailLabels struct {
 	Params             string
 	Guard              string
 	GuardDecision      string
-	GuardRisk          string
+	GuardReadOnly      string
 	GuardSource        string
 	GuardReason        string
-	GuardSuggestion    string
 	Result             string
 	Bytes              string
 	Truncated          string
@@ -47,7 +46,7 @@ type DetailDeps struct {
 	Box              lipgloss.Style
 
 	GuardDecisionBadge func(*GuardInfo) string
-	RiskBadge          func(string) string
+	ReadOnlyBadge      func(bool) string
 }
 
 func (d DetailDeps) width() int {
@@ -128,21 +127,17 @@ func BuildDetailLineSource(te *Entry, inner int, deps DetailDeps) scroll.LineSou
 			decision = deps.GuardDecisionBadge(te.Guard)
 		}
 		appendLines(deps.Styles.Dim.Render(labels.GuardDecision) + " " + decision)
-		risk := ""
-		if deps.RiskBadge != nil {
-			risk = deps.RiskBadge(te.Guard.Risk)
+		readOnly := ""
+		if deps.ReadOnlyBadge != nil {
+			readOnly = deps.ReadOnlyBadge(te.Guard.ReadOnly)
 		}
-		appendLines(deps.Styles.Dim.Render(labels.GuardRisk) + " " + risk)
+		appendLines(deps.Styles.Dim.Render(labels.GuardReadOnly) + " " + readOnly)
 		if te.Guard.Source != "" {
 			appendLines(deps.Styles.Dim.Render(labels.GuardSource) + " " + deps.Styles.ToolDim.Render(te.Guard.Source))
 		}
 		if strings.TrimSpace(te.Guard.Reason) != "" {
 			appendLines(deps.Styles.Dim.Render(labels.GuardReason))
 			appendWrapped(te.Guard.Reason)
-		}
-		if strings.TrimSpace(te.Guard.Suggestion) != "" {
-			appendLines(deps.Styles.Dim.Render(labels.GuardSuggestion))
-			appendWrapped(te.Guard.Suggestion)
 		}
 	}
 	if te.Result != "" {
