@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/alanchenchen/suna/internal/agent"
 	"github.com/alanchenchen/suna/internal/protocol"
@@ -155,15 +156,37 @@ func TestHandleCompactBroadcastsCatalogStateToUnattachedObserver(t *testing.T) {
 	if !receivedSessionStatus(observerSink.Events(), snapshot.Session.ID, protocol.SessionStatusCompacting, 1) {
 		t.Fatalf("unattached observer did not receive compacting catalog state: %#v", observerSink.Events())
 	}
+	// 异步化后结果由独立 goroutine 发送；轮询等待终态，避免竞态断言。
+	if !waitForCompactResult(t, ownerSink) {
+		t.Fatalf("attached owner did not receive compact result: %#v", ownerSink.Events())
+	}
 	if !receivedSessionStatus(observerSink.Events(), snapshot.Session.ID, protocol.SessionStatusIdle, 1) {
 		t.Fatalf("unattached observer did not receive compact idle state: %#v", observerSink.Events())
 	}
 	if receivedMethod(observerSink.Events(), protocol.NotifyCompactResult) {
 		t.Fatalf("unattached observer received compact details: %#v", observerSink.Events())
 	}
-	if !receivedMethod(ownerSink.Events(), protocol.NotifyCompactResult) {
-		t.Fatalf("attached owner did not receive compact result: %#v", ownerSink.Events())
+}
+
+// waitForCompactResult 轮询等待 owner sink 收到带 Running=false 的 NotifyCompactResult；
+// 同步发出的 Running=true 通知不能算完成。测试 session 消息太少时 Compact 短路返回，
+// 不发网络请求，轮询很快完成。
+func waitForCompactResult(t *testing.T, sink *captureEventSink) bool {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, event := range sink.Events() {
+			if event.Method != protocol.NotifyCompactResult {
+				continue
+			}
+			params, ok := event.Params.(protocol.CompactResult)
+			if ok && params.Running != nil && !*params.Running {
+				return true
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+	return false
 }
 
 func receivedSessionStatus(events []protocol.Event, sessionID string, want protocol.SessionStatus, clientCount int) bool {

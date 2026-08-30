@@ -63,6 +63,30 @@ func TestSessionManagerBeginRunAllowsSingleWriter(t *testing.T) {
 	}
 }
 
+func TestSetStatusIfCurrentRunIgnoresStaleRunID(t *testing.T) {
+	ctx := context.Background()
+	m := newTestSessionManager(t)
+	snap, err := m.create(ctx, "client-a", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+	var runID string
+	if _, _, id, err := m.beginRun("client-a"); err != nil {
+		t.Fatalf("beginRun error = %v", err)
+	} else {
+		runID = id
+	}
+	// 过期 runID 的收尾必须被忽略，不能把当前 run 状态改回 idle。
+	m.setStatusIfCurrentRun(snap.Session.ID, "stale-run-id", sessionIdle)
+	if got := m.runtime[snap.Session.ID].status; got != sessionRunning {
+		t.Fatalf("status after stale setStatusIfCurrentRun = %v, want %v", got, sessionRunning)
+	}
+	m.setStatusIfCurrentRun(snap.Session.ID, runID, sessionIdle)
+	if got := m.runtime[snap.Session.ID].status; got != sessionIdle {
+		t.Fatalf("status after current setStatusIfCurrentRun = %v, want %v", got, sessionIdle)
+	}
+}
+
 func TestSessionManagerActiveAttachReturnsCurrentRunView(t *testing.T) {
 	ctx := context.Background()
 	m := newTestSessionManager(t)

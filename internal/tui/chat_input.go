@@ -219,7 +219,6 @@ func (t *TUI) discardDraft() {
 func (t *TUI) resetPhase() {
 	t.finishStreamingMessages()
 	t.chat.Compacting = false
-	t.compactAuto = false
 	t.compactStartedAt = time.Time{}
 	t.chat.ResetPhase()
 	_ = t.syncInputFocus()

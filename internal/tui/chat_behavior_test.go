@@ -317,7 +317,7 @@ func TestCompactLocksInputWithoutCancelHint(t *testing.T) {
 		t.Fatalf("inputLocked() = false during compact, want true")
 	}
 	view := stripANSIForTest(tui.renderInputArea())
-	if !strings.Contains(view, "正在压缩上下文") {
+	if !strings.Contains(view, "上下文压缩中") {
 		t.Fatalf("renderInputArea() = %q, want compact running placeholder", view)
 	}
 	if strings.Contains(view, "Esc") || strings.Contains(view, "取消") {
@@ -344,11 +344,11 @@ func TestAutoCompactNotificationShowsRunning(t *testing.T) {
 	}
 	tui.syncContent()
 	view := stripANSIForTest(tui.chat.Viewport.View())
-	if strings.Contains(view, "正在自动压缩上下文") {
+	if strings.Contains(view, "上下文压缩中") {
 		t.Fatalf("compact status line = %q, should not duplicate bottom loading status", view)
 	}
 	input := stripANSIForTest(tui.renderInputArea())
-	if !strings.Contains(input, "正在自动压缩上下文") || !strings.Contains(input, "完成后模型会自动继续") {
+	if !strings.Contains(input, "上下文压缩中") {
 		t.Fatalf("renderInputArea() = %q, want compact loading", input)
 	}
 }
@@ -364,6 +364,24 @@ func TestAutoCompactRunningFalseClearsLoading(t *testing.T) {
 	}
 	if len(tui.chat.Messages) != 0 {
 		t.Fatalf("messages = %d after compact running false, want no transient message", len(tui.chat.Messages))
+	}
+}
+
+func TestCompactCancelRunningFalseClearsCancelling(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
+	tui.initChatComponents()
+	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: []byte(`{"running":true}`)})
+	tui.enterCancelling()
+
+	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: []byte(`{"running":false}`)})
+	if tui.cancelling {
+		t.Fatalf("cancelling = true after compact cancel running false, want false")
+	}
+	if tui.chat.Compacting || tui.chat.Loading {
+		t.Fatalf("compacting/loading = %v/%v after compact cancel, want false/false", tui.chat.Compacting, tui.chat.Loading)
+	}
+	if tui.inputLocked() {
+		t.Fatalf("inputLocked() = true after compact cancel, want false")
 	}
 }
 
@@ -416,11 +434,11 @@ func TestManualCompactCommandShowsLoadingBeforeDeferredRequest(t *testing.T) {
 	}
 	tui.syncContent()
 	view := stripANSIForTest(tui.chat.Viewport.View())
-	if strings.Contains(view, "正在压缩上下文") {
+	if strings.Contains(view, "上下文压缩中") {
 		t.Fatalf("viewport = %q, should not duplicate bottom loading status", view)
 	}
 	input := stripANSIForTest(tui.renderInputArea())
-	if !strings.Contains(input, "正在压缩上下文") {
+	if !strings.Contains(input, "上下文压缩中") {
 		t.Fatalf("renderInputArea() = %q, want manual compact loading before result", input)
 	}
 }

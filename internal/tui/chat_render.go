@@ -160,9 +160,6 @@ func (t *TUI) renderSkillReviewMessage(p protocol.SkillReviewParams) string {
 	return textutil.IndentLines(boxStyle.BorderForeground(ColorBrand).Width(width).Padding(1, 2).Render(content), "  ")
 }
 func (t *TUI) compactRunningLabel() string {
-	if t.compactAuto {
-		return t.tr("compact.auto_running")
-	}
 	return t.tr("compact.running")
 }
 func (t *TUI) currentInputStatusLabel() string {

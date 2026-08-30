@@ -287,7 +287,6 @@ func steeringMessageText(message protocol.SteeringMessage) string {
 
 func (t *TUI) handleAgentDeltaNotification(p protocol.AgentDeltaParams) {
 	t.chat.Compacting = false
-	t.compactAuto = false
 	t.compactStartedAt = time.Time{}
 	t.chat.ResumeAvailable = false
 	t.lastTextStreamAt = time.Now()
@@ -429,7 +428,6 @@ func (t *TUI) handleToolStartNotification(p protocol.ToolStartParams) {
 	t.runHadToolCall = true
 	t.finishStreamingMessages()
 	t.chat.Compacting = false
-	t.compactAuto = false
 	t.compactStartedAt = time.Time{}
 	_ = t.syncInputFocus()
 	id := p.ID
@@ -476,7 +474,6 @@ func (t *TUI) handleCompactResultNotification(p protocol.CompactResult) {
 	if p.Running != nil {
 		if *p.Running {
 			t.finishStreamingMessages()
-			t.compactAuto = true
 			t.compactStartedAt = time.Now()
 			t.chat.Compacting = true
 			t.chat.Loading = true
@@ -487,19 +484,35 @@ func (t *TUI) handleCompactResultNotification(p protocol.CompactResult) {
 			_ = t.syncInputFocus()
 			return
 		}
-		t.chat.Compacting = false
-		t.compactAuto = false
 		t.compactStartedAt = time.Time{}
+		if t.cancelling {
+			// 手动取消：清全部状态恢复可输入；daemon 侧取消静默不发 Error。
+			t.cancelling = false
+			t.resetPhase()
+			_ = t.syncInputFocus()
+			return
+		}
 		if strings.TrimSpace(p.Error) != "" {
 			t.resetPhase()
 			t.appendNonToolMessage(chatMsg{Role: "error", Content: p.Error})
+			_ = t.syncInputFocus()
+			return
 		}
+		if p.BeforeTokens > 0 || p.Noop {
+			// 手动完成：清状态并展示结果面板；结果字段是手动/自动的天然区分信号。
+			t.resetPhase()
+			t.applyContextStats(p.AfterTokens, p.ContextWindow)
+			t.appendNonToolMessage(chatMsg{Role: "panel", Content: t.renderCompactPanel(p)})
+			_ = t.syncInputFocus()
+			return
+		}
+		// 自动完成：只清 Compacting，保持 Loading（loop 继续，马上有 delta 和 usage）。
+		t.chat.Compacting = false
 		_ = t.syncInputFocus()
 		return
 	}
 	if strings.TrimSpace(p.Error) != "" {
 		t.chat.Compacting = false
-		t.compactAuto = false
 		t.compactStartedAt = time.Time{}
 		t.appendNonToolMessage(chatMsg{Role: "error", Content: p.Error})
 		_ = t.syncInputFocus()
@@ -629,7 +642,6 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) bool {
 	}
 	t.cancelling = false
 	t.chat.Compacting = false
-	t.compactAuto = false
 	t.compactStartedAt = time.Time{}
 	t.chat.Messages = nil
 	t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}
@@ -656,7 +668,6 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) bool {
 			if currentRun.Status == protocol.SessionStatusCompacting {
 				// attach 只能从当前时刻估算 Compact 耗时；状态仍应按 daemon 快照还原，不能退化成普通模型等待。
 				t.chat.Compacting = true
-				t.compactAuto = true
 				t.compactStartedAt = now
 			}
 		}
@@ -797,7 +808,6 @@ func (t *TUI) handleAttachmentStatusNotification(p protocol.AttachmentStatusResu
 func (t *TUI) handleRequestErrorNotification(p requestErrorMsg) {
 	if p.Scope == notifyCompactError {
 		t.chat.Compacting = false
-		t.compactAuto = false
 		t.resetPhase()
 		t.appendNonToolMessage(chatMsg{Role: "error", Content: p.Message})
 		_ = t.syncInputFocus()

@@ -596,23 +596,42 @@ func (m *sessionManager) currentRunID(sessionID string) string {
 func (m *sessionManager) setStatus(sessionID string, status sessionStatus) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if rt := m.runtime[sessionID]; rt != nil {
-		rt.status = status
-		if status != sessionWaiting {
-			rt.waitingType = ""
-		}
-		if status == sessionIdle {
-			rt.runOwner = ""
-			rt.runID = ""
-			rt.runState = ""
-			rt.waitingType = ""
-			rt.phase = ""
-			rt.assistant.Reset()
-			rt.reasoning.Reset()
-			m.scheduleRuntimeUnloadNoLock(sessionID)
-		} else {
-			m.invalidateRuntimeUnloadNoLock(sessionID)
-		}
+	m.setStatusLocked(sessionID, status)
+}
+
+// setStatusIfCurrentRun 仅在 runID 仍匹配时恢复状态，避免异步 compact 的收尾
+// 覆盖用户取消后立即发起的新 run；检查与设置必须在同一把锁内完成，防止 TOCTOU。
+func (m *sessionManager) setStatusIfCurrentRun(sessionID, runID string, status sessionStatus) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	rt := m.runtime[sessionID]
+	if rt == nil || rt.runID != runID {
+		return
+	}
+	m.setStatusLocked(sessionID, status)
+}
+
+// setStatusLocked 在锁内设置 session 状态；调用方必须持有 m.mu。
+func (m *sessionManager) setStatusLocked(sessionID string, status sessionStatus) {
+	rt := m.runtime[sessionID]
+	if rt == nil {
+		return
+	}
+	rt.status = status
+	if status != sessionWaiting {
+		rt.waitingType = ""
+	}
+	if status == sessionIdle {
+		rt.runOwner = ""
+		rt.runID = ""
+		rt.runState = ""
+		rt.waitingType = ""
+		rt.phase = ""
+		rt.assistant.Reset()
+		rt.reasoning.Reset()
+		m.scheduleRuntimeUnloadNoLock(sessionID)
+	} else {
+		m.invalidateRuntimeUnloadNoLock(sessionID)
 	}
 }
 

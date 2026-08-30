@@ -96,8 +96,7 @@ type TUI struct {
 	// Help overlay 状态。
 	showHelp bool
 
-	// Compact UI mode: auto compact should say model will continue; manual /compact should not.
-	compactAuto      bool
+	// Compact 计时，只用于压缩阶段的状态行展示。
 	compactStartedAt time.Time
 
 	// Usage/context 统计，只用于状态栏展示。

@@ -19,7 +19,9 @@ func (r *Runner) Compact(ctx context.Context, binding *model.ModelBinding, invoc
 		return 0, 0, 0, 0, "", fmt.Errorf("compressor not initialized")
 	}
 	msgs := working.Messages()
-	before = working.EstimatedTokens()
+	// before/after 与 usage 的 ContextTokens 口径对齐：模型实际看到的上下文 = working 消息 + SessionState。
+	// 只算 working 会让压缩 summary 的 token 完全不可见，用户看到 after 很小但真实请求很大。
+	before = working.EstimatedTokens() + model.EstimateTokens(sessionState)
 	if len(msgs) <= 1 {
 		return before, before, 0, 0, sessionState, nil
 	}
@@ -35,7 +37,7 @@ func (r *Runner) Compact(ctx context.Context, binding *model.ModelBinding, invoc
 	}
 	turnsCompressed = folded
 	working.SetMessages(compressed)
-	after = working.EstimatedTokens()
+	after = working.EstimatedTokens() + model.EstimateTokens(state)
 	truncated = countLargeToolOutputs(msgs)
 	return before, after, turnsCompressed, truncated, state, nil
 }

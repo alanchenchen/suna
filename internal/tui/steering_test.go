@@ -247,7 +247,7 @@ func TestCancellingComposerKeepsSpinnerStatusWithoutSecondCancelHint(t *testing.
 	}
 }
 
-func TestCompactingRunSnapshotRestoresAutomaticCompactComposer(t *testing.T) {
+func TestCompactingRunSnapshotRestoresCompactComposer(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 90, height: 24, currentSession: protocol.SessionInfo{ID: "session-1"}}
 	tui.initChatComponents()
 	snapshot := protocol.SessionSnapshot{
@@ -255,12 +255,12 @@ func TestCompactingRunSnapshotRestoresAutomaticCompactComposer(t *testing.T) {
 		CurrentRun: &protocol.CurrentRunView{RunID: "run-1", State: protocol.AgentRunRunning, Status: protocol.SessionStatusCompacting, CanControl: true},
 	}
 	tui.applySessionSnapshot(snapshot)
-	if !tui.chat.Compacting || !tui.compactAuto || tui.compactStartedAt.IsZero() || tui.inputLocked() {
-		t.Fatalf("compact snapshot state = compacting %v, auto %v, started %v, locked %v", tui.chat.Compacting, tui.compactAuto, tui.compactStartedAt, tui.inputLocked())
+	if !tui.chat.Compacting || tui.compactStartedAt.IsZero() || tui.inputLocked() {
+		t.Fatalf("compact snapshot state = compacting %v, started %v, locked %v", tui.chat.Compacting, tui.compactStartedAt, tui.inputLocked())
 	}
 	view := stripANSIForTest(tui.renderInputArea())
-	if !strings.Contains(view, "自动压缩上下文") || !strings.Contains(view, strings.TrimSpace(stripANSIForTest(tui.chat.Spinner.View()))) {
-		t.Fatalf("compact snapshot composer = %q, want automatic compact spinner status", view)
+	if !strings.Contains(view, "上下文压缩中") || !strings.Contains(view, strings.TrimSpace(stripANSIForTest(tui.chat.Spinner.View()))) {
+		t.Fatalf("compact snapshot composer = %q, want compact spinner status", view)
 	}
 }
 
@@ -287,7 +287,7 @@ func TestAutomaticCompactUsesIndependentElapsedTimeAndKeepsComposerEditable(t *t
 	if !strings.Contains(view, strings.TrimSpace(stripANSIForTest(tui.chat.Spinner.View()))) {
 		t.Fatalf("compact composer = %q, want spinner in editable compact status", view)
 	}
-	if !strings.Contains(view, "压缩上下文") || !strings.Contains(view, "1m1s") || strings.Contains(view, "5m") {
+	if !strings.Contains(view, "上下文压缩中") || !strings.Contains(view, "1m1s") || strings.Contains(view, "5m") {
 		t.Fatalf("compact composer = %q, want independent compact duration", view)
 	}
 }

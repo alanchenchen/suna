@@ -704,7 +704,7 @@ func toolSummaryPayload(summary memory.ToolSummary) *protocol.ToolSummaryPayload
 }
 
 func (s *service) handleCompact(ctx context.Context, req protocol.Request, sink protocol.EventSink) (any, error) {
-	rt, sessionID, _, err := s.daemon.sessions.beginRun(req.ConnID)
+	rt, sessionID, runID, err := s.daemon.sessions.beginRun(req.ConnID)
 	if err != nil {
 		return nil, requestErrorForState(err)
 	}
@@ -712,17 +712,54 @@ func (s *service) handleCompact(ctx context.Context, req protocol.Request, sink 
 	s.daemon.sessions.setPhase(sessionID, protocol.AgentRunPhaseCompact)
 	s.daemon.sessions.setStatus(sessionID, sessionCompacting)
 	s.daemon.broadcastSessionState(ctx, sessionID)
+	// 先发 running 通知，所有客户端立即进入压缩展示；模型调用在独立 goroutine 执行，
+	// 不阻塞 ServeConn 的 Receive 循环，保证断开检测和 cancel 请求始终可达。
+	running := true
+	emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running})
+	go s.runCompact(ctx, sessionID, runID, rt, sink)
+	return map[string]string{"status": "processing"}, nil
+}
+
+// runCompact 在独立 goroutine 执行手动压缩，完成后通过 NotifyCompactResult 通知发起者。
+// 结果只发给发起者，避免跨 session 误展示；状态恢复必须先于通知，防止用户收到通知后
+// 立刻发新消息时撞上尚未切回 idle 的 session_busy。
+func (s *service) runCompact(ctx context.Context, sessionID, runID string, rt *sessionRuntime, sink protocol.EventSink) {
 	defer func() {
-		s.daemon.sessions.setStatus(sessionID, sessionIdle)
-		s.daemon.broadcastSessionState(ctx, sessionID)
+		// goroutine 内 panic 不能带崩 daemon；记日志、恢复状态并通知 TUI，
+		// 保证 session 不残留 compacting、输入区不卡在压缩展示。
+		// panic 可能发生在 ctx 已取消之后，通知统一用无取消 ctx 保证可达。
+		if r := recover(); r != nil {
+			logging.Error("memory", "session_compact_panic", fmt.Errorf("%v", r), logging.Event{"session_id": sessionID})
+			notifyCtx := context.WithoutCancel(ctx)
+			s.daemon.sessions.setStatusIfCurrentRun(sessionID, runID, sessionIdle)
+			s.daemon.broadcastSessionState(notifyCtx, sessionID)
+			running := false
+			emit(notifyCtx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running, Error: "compact panic"})
+		}
 	}()
 	before, after, contextWindow, turnsCompressed, truncated, err := rt.agent.Compact(ctx)
+	// 先恢复状态再发通知：通知到达时 session 已 idle，用户可立即发起新 run。
+	s.daemon.sessions.setStatusIfCurrentRun(sessionID, runID, sessionIdle)
 	if err != nil {
-		return nil, protocol.InternalError(err.Error())
+		if ctx.Err() != nil {
+			// 取消：手动 compact 不走 runAgentEvents，没有 AgentRunCancelled 终态，
+			// 必须用无取消 ctx 发 Running=false 和 idle 广播，TUI 才能清 cancelling 恢复输入。
+			notifyCtx := context.WithoutCancel(ctx)
+			s.daemon.broadcastSessionState(notifyCtx, sessionID)
+			running := false
+			emit(notifyCtx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running})
+			return
+		}
+		s.daemon.broadcastSessionState(ctx, sessionID)
+		running := false
+		emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running, Error: err.Error()})
+		return
 	}
+	s.daemon.broadcastSessionState(ctx, sessionID)
 	result := protocol.CompactResult{BeforeTokens: before, AfterTokens: after, ContextWindow: contextWindow, TurnsCompressed: turnsCompressed, SummaryTokens: (before - after) / 2, TruncatedOutputs: truncated, Noop: turnsCompressed == 0}
+	running := false
+	result.Running = &running
 	emit(ctx, sink, protocol.NotifyCompactResult, result)
-	return map[string]string{"status": "ok"}, nil
 }
 
 func (s *service) handleUsage(ctx context.Context) protocol.UsageResult {
