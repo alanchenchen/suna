@@ -1,8 +1,12 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -25,6 +29,38 @@ type llmRequestStreamStats struct {
 	usageReceived  bool
 	finish         *FinishInfo
 	lastChunkAt    time.Time
+}
+
+const llmDebugTextLimit = 4000
+
+type llmDebugMessage struct {
+	Index      int                `json:"index"`
+	Role       string             `json:"role"`
+	Text       string             `json:"text,omitempty"`
+	Content    []llmDebugContent  `json:"content,omitempty"`
+	ToolCalls  []llmDebugToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string             `json:"tool_call_id,omitempty"`
+	TextBytes  int                `json:"text_bytes,omitempty"`
+	Truncated  bool               `json:"truncated,omitempty"`
+}
+
+type llmDebugContent struct {
+	Type      string `json:"type"`
+	Text      string `json:"text,omitempty"`
+	TextBytes int    `json:"text_bytes,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+	MediaKind string `json:"media_kind,omitempty"`
+	MediaName string `json:"media_name,omitempty"`
+	MediaMime string `json:"media_mime,omitempty"`
+	MediaSize int64  `json:"media_size,omitempty"`
+}
+
+type llmDebugToolCall struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Arguments     string `json:"arguments,omitempty"`
+	ArgumentBytes int    `json:"argument_bytes,omitempty"`
+	ArgsTruncated bool   `json:"args_truncated,omitempty"`
 }
 
 func ensureRequestID(req *CompletionRequest) string {
@@ -227,6 +263,7 @@ func logLLMRequest(level string, req *CompletionRequest, route llmRoute, status 
 			fields["temperature"] = *req.Temperature
 		}
 	}
+	logLLMDebugRequest(req, route, fields["request_id"])
 	if level == "ERROR" {
 		logging.Error("llm", "request", err, fields)
 		return
@@ -235,4 +272,119 @@ func logLLMRequest(level string, req *CompletionRequest, route llmRoute, status 
 		fields["err"] = fmt.Sprintf("%v", err)
 	}
 	logging.Info("llm", "request", fields)
+}
+
+func logLLMDebugRequest(req *CompletionRequest, route llmRoute, requestID any) {
+	if !llmDebugEnabled() || req == nil {
+		return
+	}
+	messages, err := json.Marshal(llmDebugMessages(req.Messages))
+	if err != nil {
+		messages = []byte(`[]`)
+	}
+	fields := logging.Event{
+		"request_id":          fmt.Sprintf("%v", requestID),
+		"purpose":             purpose(req),
+		"model_ref":           route.ModelRef,
+		"model":               route.Model,
+		"system_chars":        len(req.System),
+		"session_state_chars": len(req.SessionState),
+		"messages_json":       string(messages),
+		"tool_names":          strings.Join(llmToolNames(req.Tools), ","),
+	}
+	if req.Temperature != nil {
+		fields["temperature"] = *req.Temperature
+	}
+	logging.Info("llm", "debug_request", fields)
+}
+
+func llmDebugEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("SUNA_LLM_DEBUG"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+func llmDebugMessages(messages []Message) []llmDebugMessage {
+	out := make([]llmDebugMessage, 0, len(messages))
+	for i, msg := range messages {
+		text, textTruncated := truncateLLMDebugText(msg.Text(), llmDebugTextLimit)
+		item := llmDebugMessage{
+			Index:      i,
+			Role:       string(msg.Role),
+			Text:       text,
+			ToolCallID: msg.ToolCallID,
+			TextBytes:  len(msg.Text()),
+			Truncated:  textTruncated,
+		}
+		if len(msg.Content) > 0 {
+			item.Content = llmDebugContentBlocks(msg.Content)
+		}
+		if len(msg.ToolCalls) > 0 {
+			item.ToolCalls = llmDebugToolCalls(msg.ToolCalls)
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func llmDebugContentBlocks(blocks []ContentBlock) []llmDebugContent {
+	out := make([]llmDebugContent, 0, len(blocks))
+	for _, block := range blocks {
+		item := llmDebugContent{Type: string(block.Type)}
+		if block.Type == ContentText {
+			item.Text, item.Truncated = truncateLLMDebugText(block.Text, llmDebugTextLimit)
+			item.TextBytes = len(block.Text)
+		}
+		if block.Media != nil {
+			item.MediaKind = string(block.Media.Kind)
+			item.MediaName = block.Media.Name
+			item.MediaMime = block.Media.MimeType
+			item.MediaSize = block.Media.Size
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func llmDebugToolCalls(calls []ToolCall) []llmDebugToolCall {
+	out := make([]llmDebugToolCall, 0, len(calls))
+	for _, call := range calls {
+		args, truncated := truncateLLMDebugText(call.Arguments, llmDebugTextLimit)
+		out = append(out, llmDebugToolCall{
+			ID:            call.ID,
+			Name:          call.Name,
+			Arguments:     args,
+			ArgumentBytes: len(call.Arguments),
+			ArgsTruncated: truncated,
+		})
+	}
+	return out
+}
+
+func llmToolNames(tools []ToolDef) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		if strings.TrimSpace(tool.Name) != "" {
+			names = append(names, tool.Name)
+		}
+	}
+	return names
+}
+
+func truncateLLMDebugText(text string, limit int) (string, bool) {
+	if limit <= 0 || len(text) <= limit {
+		return text, false
+	}
+	end := 0
+	for end < len(text) {
+		_, size := utf8.DecodeRuneInString(text[end:])
+		if end+size > limit {
+			break
+		}
+		end += size
+	}
+	return text[:end] + "...[truncated]", true
 }
