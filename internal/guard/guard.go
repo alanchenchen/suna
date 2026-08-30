@@ -210,7 +210,8 @@ func (g *Guard) Check(ctx context.Context, tool string, params map[string]any, r
 	}
 	if g.Mode() == ModeAuto {
 		g.audit(ctx, tool, params, "auto_approve", "auto mode")
-		return &GuardResult{Decision: Approve, Reason: "auto mode", Source: "static", Audit: "auto_approve"}
+		// Reason 留空：mode 名是内部审计语义，展示层已有决策 badge，不需要重复展示。
+		return &GuardResult{Decision: Approve, Reason: "", Source: "static", Audit: "auto_approve"}
 	}
 	if g.Mode() == ModeAsk {
 		g.audit(ctx, tool, params, "confirm", "ask mode")
@@ -221,7 +222,8 @@ func (g *Guard) Check(ctx context.Context, tool string, params map[string]any, r
 	// 写文件本身不执行，危险在后续执行时，而执行必走 exec 被 LLM 审，链路闭合。
 	if tool != "exec" {
 		g.audit(ctx, tool, params, "auto_approve", "smart mode non-exec write")
-		return &GuardResult{Decision: Approve, Reason: "smart mode", Source: "static", Audit: "auto_approve"}
+		// Reason 留空：mode 名是内部审计语义，展示层已有决策 badge，不需要重复展示。
+		return &GuardResult{Decision: Approve, Reason: "", Source: "static", Audit: "auto_approve"}
 	}
 	if g.llmReviewer == nil {
 		return g.reviewFallback(ctx, tool, params, "review_unavailable", "Smart Guard reviewer is unavailable")

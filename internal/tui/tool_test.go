@@ -217,7 +217,7 @@ func TestRenderToolEntryShowsGuardSummary(t *testing.T) {
 
 	rendered := tui.renderToolEntry(te, false)
 	plain := stripANSIForTest(rendered)
-	for _, want := range []string{"Guard", "LLM approved", "write", "matches requested edit"} {
+	for _, want := range []string{"Guard", "LLM approved", "action", "matches requested edit"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("renderToolEntry() = %q, want guard summary substring %q", plain, want)
 		}

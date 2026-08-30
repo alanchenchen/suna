@@ -213,6 +213,7 @@ func (t *TUI) guardDecisionLabel(info *guardInfo) string {
 }
 
 // renderReadOnlyBadge 展示只读/行动徽章：只读放行绿色，非只读黄色。
+// 非只读不代表写入（可能是执行/网络/子进程），统一用“行动”表达有副作用。
 func (t *TUI) renderReadOnlyBadge(readOnly bool) string {
 	if readOnly {
 		return styleGuardOK.Render(t.tr("tui.tool.guard.readonly_badge"))
