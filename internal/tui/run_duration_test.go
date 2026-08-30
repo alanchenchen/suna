@@ -93,6 +93,44 @@ func TestInlineRunStatusUsesCompactFallbackAtNarrowWidth(t *testing.T) {
 	}
 }
 
+func TestRunDoneForcesScrollToBottomWhenNotManuallyPaused(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 18}
+	tui.initChatComponents()
+	for i := 0; i < 40; i++ {
+		tui.appendNonToolMessage(chatMsg{Role: "system", Content: "历史消息"})
+	}
+	tui.syncContent()
+	tui.chat.Viewport.SetYOffset(0)
+	tui.chat.FollowBottom = false
+	tui.chat.ManualScrollPaused = false
+	tui.runStartedAt = time.Now().Add(-2 * time.Second)
+	tui.runHadToolCall = true
+
+	tui.handleAgentRunNotification(protocol.AgentRunParams{RunID: "run-1", State: protocol.AgentRunDone})
+	if !tui.chat.FollowBottom && !tui.chat.ForceBottom {
+		t.Fatalf("follow/force = %v/%v after run done, want scroll to bottom", tui.chat.FollowBottom, tui.chat.ForceBottom)
+	}
+}
+
+func TestRunDoneKeepsManualScrollPosition(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 18}
+	tui.initChatComponents()
+	for i := 0; i < 40; i++ {
+		tui.appendNonToolMessage(chatMsg{Role: "system", Content: "历史消息"})
+	}
+	tui.syncContent()
+	tui.chat.SetTranscriptYOffset(10)
+	tui.chat.FollowBottom = false
+	tui.chat.ManualScrollPaused = true
+	tui.runStartedAt = time.Now().Add(-2 * time.Second)
+	tui.runHadToolCall = true
+
+	tui.handleAgentRunNotification(protocol.AgentRunParams{RunID: "run-1", State: protocol.AgentRunDone})
+	if tui.chat.FollowBottom || tui.chat.ForceBottom {
+		t.Fatalf("follow/force = %v/%v after run done while paused, want keep position", tui.chat.FollowBottom, tui.chat.ForceBottom)
+	}
+}
+
 func lineContainsAll(text string, values ...string) bool {
 	for _, line := range strings.Split(text, "\n") {
 		matched := true

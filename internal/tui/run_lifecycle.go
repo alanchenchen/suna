@@ -85,6 +85,11 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 		// run 成功完成后短暂显示开心眼奖励帧（约 1.6 秒），再回到 idle。
 		t.petHappyUntil = time.Now().Add(petHappyDuration)
 		t.resetPhase()
+		// worked for 消息追加后总行数变化；用户未手动滚动时强制跟随到底部，
+		// 否则视图停在回复末尾、worked for 行不可见，且 Home 跳转长回复顶部失效。
+		if !t.chat.ManualScrollPaused {
+			t.forceScrollToBottomOnNextSync()
+		}
 	case protocol.AgentRunRunning:
 		if t.cancelling {
 			return
