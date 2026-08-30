@@ -121,6 +121,8 @@ func TestSessionManagerOrphansActiveRuntimeOnLastDetach(t *testing.T) {
 		t.Fatalf("beginRun error = %v", err)
 	}
 
+	// 正在执行的 run 不因最后一个客户端离开而取消：detach 只是退出观察，
+	// run 继续跑，runtime 保持常驻，attach 回来可看结果。
 	detached := m.detach("client-a")
 	if !detached.orphaned {
 		t.Fatal("detach orphaned = false, want true")
@@ -128,12 +130,46 @@ func TestSessionManagerOrphansActiveRuntimeOnLastDetach(t *testing.T) {
 	if detached.idle {
 		t.Fatal("detach idle = true, want false for active runtime")
 	}
-	if detached.agent == nil {
-		t.Fatal("detach agent = nil, want active agent to cancel")
+	if detached.agent != nil {
+		t.Fatal("detach agent != nil, want nil for running run (not cancelled)")
+	}
+	if runtimeForSession(t, m, snap.Session.ID) == nil {
+		t.Fatal("running session runtime was unloaded on detach")
 	}
 
 	m.setStatus(snap.Session.ID, sessionIdle)
 	waitForRuntimeUnloaded(t, m, snap.Session.ID)
+}
+
+func TestSessionManagerCancelsWaitingRunOnLastDetach(t *testing.T) {
+	ctx := context.Background()
+	m := newTestSessionManager(t)
+	m.runtimeUnloadDelay = 10 * time.Millisecond
+
+	snap, err := m.create(ctx, "client-a", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+	if err := m.store.SetMessageCount(ctx, snap.Session.ID, 1); err != nil {
+		t.Fatalf("SetMessageCount error = %v", err)
+	}
+	if _, _, _, err := m.beginRun("client-a"); err != nil {
+		t.Fatalf("beginRun error = %v", err)
+	}
+	m.setStatus(snap.Session.ID, sessionWaiting)
+
+	// 等待 ask/guard 交互时最后一个客户端离开，无人能回复，run 无法继续：
+	// 必须取消，否则 run 永远卡在 waiting、daemon 因 hasActiveRun 永不退出。
+	detached := m.detach("client-a")
+	if !detached.orphaned {
+		t.Fatal("detach orphaned = false, want true")
+	}
+	if !detached.waiting {
+		t.Fatal("detach waiting = false, want true for waiting run")
+	}
+	if detached.agent == nil {
+		t.Fatal("detach agent = nil, want agent to cancel waiting run")
+	}
 }
 
 func runtimeForSession(t *testing.T, m *sessionManager, sessionID string) *sessionRuntime {

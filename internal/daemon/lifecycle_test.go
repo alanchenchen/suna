@@ -81,3 +81,38 @@ func TestLifecycleKeepsPersistentTransport(t *testing.T) {
 	case <-time.After(200 * time.Millisecond):
 	}
 }
+
+func TestLifecycleKeepsDaemonWhileRunActive(t *testing.T) {
+	ctx := context.Background()
+	manager := newTestSessionManager(t)
+	snap, err := manager.create(ctx, "client-a", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+	if _, _, _, err := manager.beginRun("client-a"); err != nil {
+		t.Fatalf("beginRun error = %v", err)
+	}
+
+	stopCtx, stopCancel := context.WithCancel(context.Background())
+	watchCtx, watchCancel := context.WithCancel(context.Background())
+	defer watchCancel()
+
+	d := &Daemon{sessions: manager, sinks: make(map[string]protocol.EventSink), cancelFn: stopCancel, transports: []protocol.Transport{lifecycleTestTransport{info: protocol.TransportInfo{Retention: protocol.RetentionIdleExit, IdleTimeout: 20 * time.Millisecond}}}}
+	go NewLifecycle(d).Watch(watchCtx)
+
+	// run 在跑时，即使所有 transport 断开，daemon 也必须常驻：
+	// detach 不取消 run，run 跑完前退出会丢失任务结果。
+	select {
+	case <-stopCtx.Done():
+		t.Fatal("daemon stopped while a run was active")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// run 结束后，daemon 在宽限期后正常退出。
+	manager.setStatus(snap.Session.ID, sessionIdle)
+	select {
+	case <-stopCtx.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("daemon did not stop after run finished")
+	}
+}

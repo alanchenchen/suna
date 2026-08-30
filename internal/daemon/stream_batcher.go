@@ -15,8 +15,10 @@ const (
 )
 
 type streamBatcher struct {
-	kind protocol.AgentDeltaKind
-	buf  strings.Builder
+	// sessionID 随每条 delta 通知携带，供多 session 并存的客户端区分事件归属。
+	sessionID string
+	kind      protocol.AgentDeltaKind
+	buf       strings.Builder
 }
 
 func (b *streamBatcher) addStream(ctx context.Context, sink protocol.EventSink, content string) bool {
@@ -44,7 +46,7 @@ func (b *streamBatcher) flush(ctx context.Context, sink protocol.EventSink) {
 	if b.kind == "" || b.buf.Len() == 0 {
 		return
 	}
-	emit(ctx, sink, protocol.NotifyAgentDelta, protocol.AgentDeltaParams{Kind: b.kind, Content: b.buf.String()})
+	emit(ctx, sink, protocol.NotifyAgentDelta, protocol.AgentDeltaParams{SessionID: b.sessionID, Kind: b.kind, Content: b.buf.String()})
 	b.kind = ""
 	if b.buf.Cap() > maxRetainedStreamBufBytes {
 		b.buf = strings.Builder{}

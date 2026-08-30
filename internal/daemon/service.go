@@ -141,7 +141,7 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 		newlyMarked, err := s.daemon.sessions.markCancelling(req.ConnID, func(current *sessionRuntime, sessionID, runID string, phase protocol.AgentRunPhase) {
 			rt = current
 			// cancelling 在状态通知锁内广播，确保极快终态也不能抢先到达客户端。
-			s.emitAgentRun(ctx, sessionID, req.ConnID, protocol.AgentRunParams{RunID: runID, State: protocol.AgentRunCancelling, Phase: phase})
+			s.emitAgentRun(ctx, sessionID, req.ConnID, protocol.AgentRunParams{SessionID: sessionID, RunID: runID, State: protocol.AgentRunCancelling, Phase: phase})
 		})
 		if err != nil {
 			return nil, requestErrorForState(err)
@@ -270,7 +270,7 @@ func (s *service) beginAgentRun(ctx context.Context, connID string) (*sessionRun
 	rt, sessionID, runID, err := s.daemon.sessions.beginRunWithNotification(connID, func(current *sessionRuntime, id, idRun string) {
 		current.agent.PrepareSteering(idRun)
 		// 初始 lifecycle 必须留在通知临界区，确保并发 cancel 不能先于 running。
-		s.emitAgentRun(ctx, id, connID, protocol.AgentRunParams{RunID: idRun, State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
+		s.emitAgentRun(ctx, id, connID, protocol.AgentRunParams{SessionID: id, RunID: idRun, State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
 	})
 	if err != nil {
 		return nil, "", "", err
@@ -287,7 +287,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 		// 某些取消路径可能只关闭 event stream；在切 idle 前补齐唯一 cancelled 终态。
 		s.daemon.sessions.finishCancelling(sessionID, runID, func() {
 			sink = multiSink(s.daemon.sessions.sinksForSession(s.daemon, sessionID))
-			emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{RunID: runID, State: protocol.AgentRunCancelled})
+			emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{SessionID: sessionID, RunID: runID, State: protocol.AgentRunCancelled})
 		})
 		// run 可能在最后一个连接离开时被取消；无论结束原因如何，都不能让
 		// AskUser / GuardConfirm 的协议交互继续保留 session runtime 的引用。
@@ -299,7 +299,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 	started := time.Now()
 	compactFailed := false
 	logging.Info("agent", "run_start", logging.Event{"conn_id": connID, "input_chars": len(inputLabel)})
-	batcher := &streamBatcher{}
+	batcher := &streamBatcher{sessionID: sessionID}
 	ticker := time.NewTicker(streamBatchInterval)
 	defer ticker.Stop()
 	flush := func() {
@@ -331,22 +331,22 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 				if evt.OutputTokens > 0 && evt.DurationMs > 0 {
 					speed = float64(evt.OutputTokens) / (float64(evt.DurationMs) / 1000)
 				}
-				emit(ctx, sink, protocol.NotifyUsage, protocol.UsageParams{InputTokens: evt.InputTokens, OutputTokens: evt.OutputTokens, CacheReadTokens: evt.CacheReadTokens, CacheCreationTokens: evt.CacheCreationTokens, ContextTokens: evt.ContextTokens, EstimatedContextTokens: evt.EstimatedContextTokens, ContextWindow: evt.ContextWindow, DurationMs: evt.DurationMs, TokensPerSec: speed})
+				emit(ctx, sink, protocol.NotifyUsage, protocol.UsageParams{SessionID: sessionID, InputTokens: evt.InputTokens, OutputTokens: evt.OutputTokens, CacheReadTokens: evt.CacheReadTokens, CacheCreationTokens: evt.CacheCreationTokens, ContextTokens: evt.ContextTokens, EstimatedContextTokens: evt.EstimatedContextTokens, ContextWindow: evt.ContextWindow, DurationMs: evt.DurationMs, TokensPerSec: speed})
 			case agent.EventToolCall:
 				flush()
 				s.daemon.sessions.setPhase(sessionID, protocol.AgentRunPhaseTool)
 				logging.Info("agent", "tool_call", logging.Event{"conn_id": connID, "tool": evt.ToolName})
-				emit(ctx, sink, protocol.NotifyToolStart, protocol.ToolStartParams{ID: evt.ToolCallID, Tool: evt.ToolName, Params: evt.ToolParams, Intent: evt.ToolIntent})
+				emit(ctx, sink, protocol.NotifyToolStart, protocol.ToolStartParams{SessionID: sessionID, ID: evt.ToolCallID, Tool: evt.ToolName, Params: evt.ToolParams, Intent: evt.ToolIntent})
 			case agent.EventToolGuard:
 				flush()
-				emit(ctx, sink, protocol.NotifyToolGuard, protocol.ToolGuardParams{ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, ReadOnly: evt.GuardReadOnly, Decision: evt.GuardDecision, Source: evt.GuardSource, Reason: evt.GuardReason, ReviewCode: evt.GuardReviewCode, ReviewMessage: evt.GuardReviewMsg})
+				emit(ctx, sink, protocol.NotifyToolGuard, protocol.ToolGuardParams{SessionID: sessionID, ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, ReadOnly: evt.GuardReadOnly, Decision: evt.GuardDecision, Source: evt.GuardSource, Reason: evt.GuardReason, ReviewCode: evt.GuardReviewCode, ReviewMessage: evt.GuardReviewMsg})
 			case agent.EventToolResult:
 				flush()
 				display := limitToolResult(evt.ToolResult)
 				fields := logging.Event{"conn_id": connID, "tool": evt.ToolName, "tool_error": evt.ToolError, "result_chars": len(evt.ToolResult), "display_truncated": display.truncated}
 				appendExecToolLogFields(fields, evt.ToolMetadata)
 				logging.Info("agent", "tool_result", fields)
-				emit(ctx, sink, protocol.NotifyToolEnd, protocol.ToolEndParams{ID: evt.ToolCallID, Tool: evt.ToolName, Result: display.text, Error: evt.ToolError, ResultTruncated: display.truncated, ResultBytes: display.bytes, Metadata: evt.ToolMetadata})
+				emit(ctx, sink, protocol.NotifyToolEnd, protocol.ToolEndParams{SessionID: sessionID, ID: evt.ToolCallID, Tool: evt.ToolName, Result: display.text, Error: evt.ToolError, ResultTruncated: display.truncated, ResultBytes: display.bytes, Metadata: evt.ToolMetadata})
 			case agent.EventSkillLoad:
 				flush()
 				emit(ctx, sink, protocol.NotifySkillLoad, protocol.SkillLoadParams{Name: evt.SkillName, Status: evt.SkillLoadStatus})
@@ -398,13 +398,13 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 					s.daemon.sessions.setStatus(sessionID, sessionCompacting)
 					s.daemon.broadcastSessionState(ctx, sessionID)
 					running := true
-					emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running})
+					emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{SessionID: sessionID, Running: &running})
 				case agent.StatusCompactDone:
 					running := false
-					emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running})
+					emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{SessionID: sessionID, Running: &running})
 				case agent.StatusCompactError:
 					running := false
-					emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running, Error: evt.Content})
+					emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{SessionID: sessionID, Running: &running, Error: evt.Content})
 					// 压缩错误已有专用通知；仍需继续消费 events，等状态保存完成后再转 idle。
 					compactFailed = true
 					continue
@@ -416,7 +416,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 						if ownerID == "" {
 							ownerID = connID
 						}
-						s.emitAgentRun(ctx, sessionID, ownerID, protocol.AgentRunParams{RunID: runID, State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
+						s.emitAgentRun(ctx, sessionID, ownerID, protocol.AgentRunParams{SessionID: sessionID, RunID: runID, State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
 					})
 					if !accepted {
 						continue
@@ -424,12 +424,12 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 					s.daemon.broadcastSessionState(ctx, sessionID)
 				case agent.StatusLLMRetrying:
 					s.daemon.sessions.transitionRunState(sessionID, runID, protocol.AgentRunRetrying, func(state protocol.AgentRunState) {
-						emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{RunID: runID, State: state, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Attempt: evt.Attempt, MaxAttempts: evt.MaxAttempts, DelayMs: evt.DelayMs, Error: protocolModelError(evt.ModelError)})
+						emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{SessionID: sessionID, RunID: runID, State: state, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Attempt: evt.Attempt, MaxAttempts: evt.MaxAttempts, DelayMs: evt.DelayMs, Error: protocolModelError(evt.ModelError)})
 					})
 				case agent.StatusDone:
 					s.daemon.sessions.transitionRunState(sessionID, runID, protocol.AgentRunDone, func(state protocol.AgentRunState) {
 						logging.Info("agent", "run_done", logging.Event{"conn_id": connID, "duration_ms": time.Since(started).Milliseconds()})
-						emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{RunID: runID, State: state})
+						emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{SessionID: sessionID, RunID: runID, State: state})
 						emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx, true))
 					})
 				default:
@@ -454,7 +454,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 							state = protocol.AgentRunCancelled
 						}
 						s.daemon.sessions.transitionRunState(sessionID, runID, state, func(finalState protocol.AgentRunState) {
-							emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{RunID: runID, State: finalState, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Error: protocolModelError(evt.ModelError), RunError: protocolRunError(evt.RunError), ResumeAvailable: resumeAvailable && finalState == protocol.AgentRunFailed})
+							emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{SessionID: sessionID, RunID: runID, State: finalState, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Error: protocolModelError(evt.ModelError), RunError: protocolRunError(evt.RunError), ResumeAvailable: resumeAvailable && finalState == protocol.AgentRunFailed})
 							emit(ctx, sink, protocol.NotifyDaemonFullStatus, s.buildDaemonStatus(ctx, true))
 						})
 					}
@@ -715,7 +715,7 @@ func (s *service) handleCompact(ctx context.Context, req protocol.Request, sink 
 	// 先发 running 通知，所有客户端立即进入压缩展示；模型调用在独立 goroutine 执行，
 	// 不阻塞 ServeConn 的 Receive 循环，保证断开检测和 cancel 请求始终可达。
 	running := true
-	emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running})
+	emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{SessionID: sessionID, Running: &running})
 	go s.runCompact(ctx, sessionID, runID, rt, sink)
 	return map[string]string{"status": "processing"}, nil
 }
@@ -734,7 +734,7 @@ func (s *service) runCompact(ctx context.Context, sessionID, runID string, rt *s
 			s.daemon.sessions.setStatusIfCurrentRun(sessionID, runID, sessionIdle)
 			s.daemon.broadcastSessionState(notifyCtx, sessionID)
 			running := false
-			emit(notifyCtx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running, Error: "compact panic"})
+			emit(notifyCtx, sink, protocol.NotifyCompactResult, protocol.CompactResult{SessionID: sessionID, Running: &running, Error: "compact panic"})
 		}
 	}()
 	before, after, contextWindow, turnsCompressed, truncated, err := rt.agent.Compact(ctx)
@@ -747,16 +747,16 @@ func (s *service) runCompact(ctx context.Context, sessionID, runID string, rt *s
 			notifyCtx := context.WithoutCancel(ctx)
 			s.daemon.broadcastSessionState(notifyCtx, sessionID)
 			running := false
-			emit(notifyCtx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running})
+			emit(notifyCtx, sink, protocol.NotifyCompactResult, protocol.CompactResult{SessionID: sessionID, Running: &running})
 			return
 		}
 		s.daemon.broadcastSessionState(ctx, sessionID)
 		running := false
-		emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{Running: &running, Error: err.Error()})
+		emit(ctx, sink, protocol.NotifyCompactResult, protocol.CompactResult{SessionID: sessionID, Running: &running, Error: err.Error()})
 		return
 	}
 	s.daemon.broadcastSessionState(ctx, sessionID)
-	result := protocol.CompactResult{BeforeTokens: before, AfterTokens: after, ContextWindow: contextWindow, TurnsCompressed: turnsCompressed, SummaryTokens: (before - after) / 2, TruncatedOutputs: truncated, Noop: turnsCompressed == 0}
+	result := protocol.CompactResult{SessionID: sessionID, BeforeTokens: before, AfterTokens: after, ContextWindow: contextWindow, TurnsCompressed: turnsCompressed, SummaryTokens: (before - after) / 2, TruncatedOutputs: truncated, Noop: turnsCompressed == 0}
 	running := false
 	result.Running = &running
 	emit(ctx, sink, protocol.NotifyCompactResult, result)

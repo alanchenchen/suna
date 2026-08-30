@@ -28,12 +28,11 @@ func (s *captureEventSink) Events() []protocol.Event {
 	return append([]protocol.Event(nil), s.events...)
 }
 
-func TestServiceClearsPendingInteractionsWhenRuntimeBecomesOrphaned(t *testing.T) {
+func TestServiceKeepsPendingInteractionsWhenRuntimeDetached(t *testing.T) {
 	ctx := context.Background()
 	manager := newTestSessionManager(t)
 	d := &Daemon{sessions: manager, sinks: map[string]protocol.EventSink{}}
 	svc := newService(d)
-	manager.onOrphan = svc.cancelPendingInteractions
 
 	snapshot, err := manager.create(ctx, "client-a", t.TempDir(), "")
 	if err != nil {
@@ -44,21 +43,15 @@ func TestServiceClearsPendingInteractionsWhenRuntimeBecomesOrphaned(t *testing.T
 	}
 	svc.pendingAsks.Store("ask", pendingInteraction{sessionID: snapshot.Session.ID, reply: make(chan string, 1)})
 	svc.pendingGuards.Store("guard", pendingInteraction{sessionID: snapshot.Session.ID, reply: make(chan string, 1)})
-	svc.pendingAsks.Store("other-ask", pendingInteraction{sessionID: "other", reply: make(chan string, 1)})
-	svc.pendingGuards.Store("other-guard", pendingInteraction{sessionID: "other", reply: make(chan string, 1)})
 
+	// detach 不取消正在执行的 run，等待中的 ask/guard 交互必须保留：
+	// attach 回来的客户端仍可回复，run 才能继续；清理发生在 run 结束路径。
 	manager.detach("client-a")
-	if _, ok := svc.pendingAsks.Load("ask"); ok {
-		t.Fatal("orphan pending ask still exists")
+	if _, ok := svc.pendingAsks.Load("ask"); !ok {
+		t.Fatal("pending ask was removed on detach, want kept for resumed client")
 	}
-	if _, ok := svc.pendingGuards.Load("guard"); ok {
-		t.Fatal("orphan pending guard still exists")
-	}
-	if _, ok := svc.pendingAsks.Load("other-ask"); !ok {
-		t.Fatal("other session pending ask was removed")
-	}
-	if _, ok := svc.pendingGuards.Load("other-guard"); !ok {
-		t.Fatal("other session pending guard was removed")
+	if _, ok := svc.pendingGuards.Load("guard"); !ok {
+		t.Fatal("pending guard was removed on detach, want kept for resumed client")
 	}
 }
 

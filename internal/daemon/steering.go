@@ -99,6 +99,7 @@ func steeringMessage(item agent.SteeringItem, runID string, canControl bool) pro
 func (s *service) emitSteering(ctx context.Context, sessionID, ownerID string, message protocol.SteeringMessage) {
 	for _, targetConnID := range s.daemon.sessions.connIDsForSession(sessionID) {
 		p := message
+		p.SessionID = sessionID
 		p.CanControl = targetConnID == ownerID
 		emit(ctx, s.daemon.sinkFor(targetConnID, nil), protocol.NotifySteering, p)
 	}

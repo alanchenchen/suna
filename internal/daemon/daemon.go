@@ -67,11 +67,6 @@ func New(cfg *config.Config, transports []protocol.Transport) (*Daemon, error) {
 		state:      protocol.DaemonRuntimeStarting,
 		mcpWakeup:  make(chan struct{}, 1),
 	}
-	d.sessions.onOrphan = func(sessionID string) {
-		if d.service != nil {
-			d.service.cancelPendingInteractions(sessionID)
-		}
-	}
 	d.sessions.onClientDetached = func(connID, sessionID string) {
 		if d.service != nil {
 			d.service.onClientDetached(context.Background(), connID, sessionID)

@@ -52,6 +52,9 @@ func TestRunAgentEventsOrdersAppliedSteeringAfterToolResult(t *testing.T) {
 	if applied.State != protocol.SteeringApplied || applied.Sequence != 4 {
 		t.Fatalf("applied steering = %#v", applied)
 	}
+	if applied.SessionID != snapshot.Session.ID {
+		t.Fatalf("applied steering session_id = %q, want %q", applied.SessionID, snapshot.Session.ID)
+	}
 }
 
 func indexMethod(methods []string, method string) int {

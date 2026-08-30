@@ -54,6 +54,8 @@ const (
 )
 
 type SteeringMessage struct {
+	// SessionID 标识事件所属 session，供多 session 并存的客户端区分事件归属。
+	SessionID   string        `json:"session_id,omitempty"`
 	ID          string        `json:"id"`
 	RunID       string        `json:"run_id"`
 	ClientMsgID string        `json:"client_msg_id,omitempty"`
@@ -75,9 +77,11 @@ const (
 )
 
 type AgentDeltaParams struct {
-	RunID   string         `json:"run_id,omitempty"`
-	Kind    AgentDeltaKind `json:"kind"`
-	Content string         `json:"content"`
+	// SessionID 标识事件所属 session，供多 session 并存的客户端区分事件归属。
+	SessionID string         `json:"session_id,omitempty"`
+	RunID     string         `json:"run_id,omitempty"`
+	Kind      AgentDeltaKind `json:"kind"`
+	Content   string         `json:"content"`
 }
 
 type AgentRunState string
@@ -137,9 +141,11 @@ type RunError struct {
 }
 
 type AgentRunParams struct {
-	RunID string        `json:"run_id,omitempty"`
-	State AgentRunState `json:"state"`
-	Phase AgentRunPhase `json:"phase,omitempty"`
+	// SessionID 标识事件所属 session，供多 session 并存的客户端区分事件归属。
+	SessionID string        `json:"session_id,omitempty"`
+	RunID     string        `json:"run_id,omitempty"`
+	State     AgentRunState `json:"state"`
+	Phase     AgentRunPhase `json:"phase,omitempty"`
 	// CanControl 表示接收该通知的 client 是否拥有当前 run 的控制权。
 	CanControl bool `json:"can_control"`
 
@@ -277,6 +283,8 @@ type ToolSummaryItem struct {
 }
 
 type UsageParams struct {
+	// SessionID 标识事件所属 session，供多 session 并存的客户端区分事件归属。
+	SessionID              string  `json:"session_id,omitempty"`
 	RunID                  string  `json:"run_id,omitempty"`
 	InputTokens            int     `json:"input_tokens"`
 	OutputTokens           int     `json:"output_tokens"`
@@ -290,13 +298,17 @@ type UsageParams struct {
 }
 
 type ToolStartParams struct {
-	ID     string         `json:"id"`
-	Tool   string         `json:"tool"`
-	Params map[string]any `json:"params"`
-	Intent string         `json:"intent,omitempty"`
+	// SessionID 标识事件所属 session，供多 session 并存的客户端区分事件归属。
+	SessionID string         `json:"session_id,omitempty"`
+	ID        string         `json:"id"`
+	Tool      string         `json:"tool"`
+	Params    map[string]any `json:"params"`
+	Intent    string         `json:"intent,omitempty"`
 }
 
 type ToolEndParams struct {
+	// SessionID 标识事件所属 session，供多 session 并存的客户端区分事件归属。
+	SessionID       string         `json:"session_id,omitempty"`
 	ID              string         `json:"id"`
 	Tool            string         `json:"tool"`
 	Result          string         `json:"result"`
@@ -307,6 +319,8 @@ type ToolEndParams struct {
 }
 
 type ToolGuardParams struct {
+	// SessionID 标识事件所属 session，供多 session 并存的客户端区分事件归属。
+	SessionID     string `json:"session_id,omitempty"`
 	ToolCallID    string `json:"tool_call_id"`
 	Tool          string `json:"tool"`
 	ReadOnly      bool   `json:"readonly"`
@@ -479,6 +493,8 @@ type UsagePeriod struct {
 }
 
 type CompactResult struct {
+	// SessionID 标识事件所属 session，供多 session 并存的客户端区分事件归属。
+	SessionID        string `json:"session_id,omitempty"`
 	BeforeTokens     int    `json:"before_tokens"`
 	AfterTokens      int    `json:"after_tokens"`
 	ContextWindow    int    `json:"context_window"`

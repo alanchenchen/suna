@@ -45,9 +45,14 @@ type sessionRuntime struct {
 
 type detachResult struct {
 	sessionID string
-	orphaned  bool
-	idle      bool
-	agent     *agent.Agent
+	// orphaned 表示最后一个客户端已离开该 session 的 runtime。
+	orphaned bool
+	// idle 表示离开时 run 已结束，可安排内存 runtime 卸载。
+	idle bool
+	// waiting 表示离开时 run 正等待 ask/guard 交互；无人能回复，必须取消。
+	waiting bool
+	// agent 只在 waiting 时赋值，用于取消无法继续的等待 run。
+	agent *agent.Agent
 }
 
 type sessionManager struct {
@@ -65,9 +70,6 @@ type sessionManager struct {
 	beforeAttachStateLoad func()
 	// beforeBeginRunNotifyLock 仅供并发测试在获取 lifecycle 通知锁前建立确定性屏障。
 	beforeBeginRunNotifyLock func()
-	// onOrphan 在最后一个连接离开活动 runtime 后清理 daemon 侧的交互引用。
-	// 回调在 sessionManager 锁外执行，不能重入 sessionManager 锁。
-	onOrphan func(sessionID string)
 	// onClientDetached 在仍有其他连接使用同一 runtime 时交接等待中的交互。
 	// 回调在 sessionManager 锁外执行。
 	onClientDetached func(connID, sessionID string)
@@ -257,6 +259,11 @@ func (m *sessionManager) attach(ctx context.Context, connID, sessionID string, r
 	}
 	rt.clients[connID] = true
 	m.attached[connID] = sessionID
+	// 原 runOwner 已不在线时，attach 的客户端接管 run 控制权；
+	// 否则切回 session 后 Esc 取消会因 runOwner 校验失败而无效。
+	if rt.runOwner != "" && !rt.clients[rt.runOwner] && rt.status != sessionIdle && rt.runState != protocol.AgentRunCancelling {
+		rt.runOwner = connID
+	}
 	delete(m.creating, sessionID)
 	if rt.stateOps > 0 {
 		rt.stateOps--
@@ -324,6 +331,20 @@ func (m *sessionManager) currentSessionID(connID string) string {
 	return m.attached[connID]
 }
 
+// hasActiveRun 返回是否有任何 session 的 run 仍在执行（running/waiting/compacting）。
+// 用于 Lifecycle：所有 transport 断开后，run 未跑完时 daemon 必须常驻，
+// 否则 detach 不取消 run 的语义会被 daemon 退出时的 cancelAllRuns 破坏。
+func (m *sessionManager) hasActiveRun() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, rt := range m.runtime {
+		if rt != nil && rt.status != sessionIdle {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *sessionManager) detachConnNoLock(connID string) detachResult {
 	id := m.attached[connID]
 	delete(m.attached, connID)
@@ -339,27 +360,29 @@ func (m *sessionManager) detachConnNoLock(connID string) detachResult {
 		return detachResult{sessionID: id}
 	}
 	result := detachResult{sessionID: id, orphaned: true, idle: rt.status == sessionIdle}
-	if !result.idle {
+	if rt.status == sessionWaiting {
+		// 等待 ask/guard 交互时最后一个客户端离开，无人能回复，run 无法继续。
+		result.waiting = true
 		result.agent = rt.agent
 	}
 	return result
 }
 
 // finishDetach 在锁外收敛连接离开后的 runtime。仍有连接时交接交互；最后一个
-// 连接离开时，活动 run 必须由 Agent 自行结束并将状态切回 idle，不能伪造 idle 状态。
+// 连接离开时，正在执行的 run 继续跑（detach 只是退出观察），只有等待 ask/guard
+// 交互的 run 因无人能回复而取消；run 结束后由 Agent 自行将状态切回 idle。
 func (m *sessionManager) finishDetach(connID string, result detachResult) {
 	if result.sessionID == "" {
 		return
 	}
 	if result.orphaned {
-		if m.onOrphan != nil {
-			m.onOrphan(result.sessionID)
+		// 最后一个客户端离开：run 继续执行，不取消（A1）。
+		// 等待 ask/guard 交互时无人能回复，取消 run（A2'）。
+		if result.waiting && result.agent != nil {
+			result.agent.CancelCurrentRun()
 		}
 	} else if m.onClientDetached != nil {
 		m.onClientDetached(connID, result.sessionID)
-	}
-	if result.agent != nil {
-		result.agent.CancelCurrentRun()
 	}
 	if result.idle {
 		m.handleDetachedSession(result.sessionID, true)

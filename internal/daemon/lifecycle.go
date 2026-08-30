@@ -95,6 +95,11 @@ func (l *Lifecycle) evaluate(noClientSince time.Time) lifecycleDecision {
 	if l.daemon.hasActiveConnection() {
 		return lifecycleDecision{keep: true}
 	}
+	// 所有 transport 断开后，仍有 run 在执行时 daemon 必须常驻：
+	// detach 不取消 run，run 跑完前退出会丢失任务结果。
+	if l.daemon.sessions != nil && l.daemon.sessions.hasActiveRun() {
+		return lifecycleDecision{keep: true}
+	}
 	for _, info := range infos {
 		if info.Retention == protocol.RetentionClientBound {
 			return lifecycleDecision{stop: true, reason: "client_bound_disconnected"}

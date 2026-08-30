@@ -123,19 +123,19 @@ daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 
 
 | Notification | 语义 |
 |---|---|
-| `agent.delta` | assistant / reasoning 文本增量。 |
-| `agent.run` | run 生命周期、retry、失败、取消和恢复能力。 |
-| `agent.steering` | 运行中消息的 queued / applied / removed / rejected 状态；客户端按 `id` 幂等合并。 |
-| `agent.usage` | token、context、耗时和速度统计。 |
-| `agent.tool_start` | 工具开始执行。 |
-| `agent.tool_guard` | 工具执行前 Guard 决策状态。 |
-| `agent.tool_end` | 工具执行结束；`result` 是 UI 展示内容，可能被截断。 |
+| `agent.delta` | assistant / reasoning 文本增量；带 `session_id` 标识归属。 |
+| `agent.run` | run 生命周期、retry、失败、取消和恢复能力；带 `session_id` 标识归属。 |
+| `agent.steering` | 运行中消息的 queued / applied / removed / rejected 状态；客户端按 `id` 幂等合并；带 `session_id` 标识归属。 |
+| `agent.usage` | token、context、耗时和速度统计；带 `session_id` 标识归属。 |
+| `agent.tool_start` | 工具开始执行；带 `session_id` 标识归属。 |
+| `agent.tool_guard` | 工具执行前 Guard 决策状态；带 `session_id` 标识归属。 |
+| `agent.tool_end` | 工具执行结束；`result` 是 UI 展示内容，可能被截断；带 `session_id` 标识归属。 |
 | `agent.ask_user` | agent 请求用户输入；带 `can_reply`。 |
 | `agent.guard_confirm` | 非只读工具操作请求用户确认；带 `can_reply`。 |
 | `agent.interaction_resolved` | ask/guard 已处理，其他 UI 应关闭残留交互。 |
 | `session.user_message` | 同 session 新增的正式 user turn；运行中消息只有在 applied 后才通过该通知出现。 |
 | `session.updated` | 全局轻量 Session Catalog 增量；session metadata/status/client_count 变化时向所有已连接且完成握手的客户端广播。 |
-| `session.compact_result` | compact running / done / error / result 状态。 |
+| `session.compact_result` | compact running / done / error / result 状态；带 `session_id` 标识归属。 |
 | `config.state` | 配置变更后的主动状态通知。 |
 | `memory.state` | memory 变更后的主动状态通知。 |
 | `mcp.updated` | 单个 MCP server 的完整状态增量；按 `server.id` 覆盖本地快照。 |
@@ -143,6 +143,8 @@ daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 
 | `skill.review` | Skill review 生命周期通知。 |
 
 客户端必须忽略自己不认识的 notification，不能因此关闭连接。Catalog 用于提前初始化功能，但实际接收端仍应保持宽松。
+
+`agent.delta`、`agent.run`、`agent.steering`、`agent.usage`、`agent.tool_start`、`agent.tool_guard`、`agent.tool_end` 与 `session.compact_result` 均携带 `session_id` 字段。单 session 客户端可忽略该字段；多 session 并存的客户端用它区分事件归属，避免把不同 session 的事件路由到错误视图。
 
 `mcp.list` 与 `mcp.updated` 采用相同的 snapshot + delta 语义。MCP server 的 `state` 只能是 `disabled / starting / active / error`；daemon core ready 不等待 MCP，只有 `active` server 的工具进入模型 Tool Catalog。多个 server 短时间完成时，Agent 会合并刷新目录，并在目录发布完成后再发送 `active` 增量。
 

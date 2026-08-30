@@ -249,6 +249,8 @@ Attach response 中的 `current_run`、`run_id`、`assistant_buffer` 与 `reason
 | `session.updated` | 合并全局 Session Catalog 中的 metadata、`status` 与 `client_count`；该通知会发送给所有已完成握手的客户端，包括未 attach 目标 session 的客户端。 |
 | `session.user_message` | 追加正式 user turn；运行中消息只有在 `applied` 后才由此进入 transcript。 |
 
+`agent.run`、`agent.delta`、`agent.steering`、`agent.usage`、`agent.tool_start`、`agent.tool_guard`、`agent.tool_end` 与 `session.compact_result` 均携带 `session_id` 字段。单 session 客户端可忽略；多 session 并存的客户端用它区分事件归属。
+
 ### 5.6 运行中发送消息
 
 如果 `runtime.hello.catalog.features` 包含 `agent.steer.text`，current run owner 可以在运行期间排队文本消息：
@@ -294,7 +296,7 @@ queued / applied / removed / rejected
 
 持久化 history 不会被删除。
 
-当最后一个 attached client 离开正在 running/waiting 的 session 时，daemon 会取消 run、清理 pending interaction，并在 runtime 变为 idle 后卸载其内存状态。后续 attach 仍可从持久化数据恢复 session。
+当最后一个 attached client 离开时，正在执行的 run 不会被打断：detach 只是退出观察，run 继续在 daemon 后台执行，runtime 保持常驻；重新 attach 可恢复展示并接管控制权。只有 run 正等待 ask/guard 交互（无人能回复）时，daemon 才会取消 run。run 结束后 runtime 变为 idle，无客户端时卸载内存状态；后续 attach 仍可从持久化数据恢复 session。
 
 ---
 

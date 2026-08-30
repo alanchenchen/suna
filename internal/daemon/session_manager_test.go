@@ -345,6 +345,77 @@ func TestSessionManagerAttachSwitchHandsOffRemainingClients(t *testing.T) {
 	}
 }
 
+func TestSessionManagerAttachTakesOverRunOwnerWhenOriginalGone(t *testing.T) {
+	ctx := context.Background()
+	m := newTestSessionManager(t)
+	snap, err := m.create(ctx, "owner", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+	if _, _, _, err := m.beginRun("owner"); err != nil {
+		t.Fatalf("beginRun error = %v", err)
+	}
+	// owner 断开（detach 不取消 run），run 继续跑，runOwner 残留为已离线的 owner。
+	m.detach("owner")
+
+	// 新客户端 attach 时接管 run 控制权，否则 Esc 取消会因 runOwner 校验失败而无效。
+	if _, err := m.attach(ctx, "joiner", snap.Session.ID, false); err != nil {
+		t.Fatalf("attach joiner error = %v", err)
+	}
+	if got := m.runOwner(snap.Session.ID); got != "joiner" {
+		t.Fatalf("run owner = %q, want %q", got, "joiner")
+	}
+}
+
+func TestSessionManagerAttachKeepsRunOwnerWhenOriginalStillOnline(t *testing.T) {
+	ctx := context.Background()
+	m := newTestSessionManager(t)
+	snap, err := m.create(ctx, "owner", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+	if _, _, _, err := m.beginRun("owner"); err != nil {
+		t.Fatalf("beginRun error = %v", err)
+	}
+
+	// 原 owner 仍在线时，join 的客户端不接管控制权（guest 语义）。
+	if _, err := m.attach(ctx, "joiner", snap.Session.ID, false); err != nil {
+		t.Fatalf("attach joiner error = %v", err)
+	}
+	if got := m.runOwner(snap.Session.ID); got != "owner" {
+		t.Fatalf("run owner = %q, want %q", got, "owner")
+	}
+}
+
+func TestSessionManagerHasActiveRun(t *testing.T) {
+	ctx := context.Background()
+	m := newTestSessionManager(t)
+	snap, err := m.create(ctx, "client-a", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create error = %v", err)
+	}
+	if m.hasActiveRun() {
+		t.Fatal("hasActiveRun = true for idle session, want false")
+	}
+
+	if _, _, _, err := m.beginRun("client-a"); err != nil {
+		t.Fatalf("beginRun error = %v", err)
+	}
+	if !m.hasActiveRun() {
+		t.Fatal("hasActiveRun = false for running session, want true")
+	}
+
+	m.setStatus(snap.Session.ID, sessionWaiting)
+	if !m.hasActiveRun() {
+		t.Fatal("hasActiveRun = false for waiting session, want true")
+	}
+
+	m.setStatus(snap.Session.ID, sessionIdle)
+	if m.hasActiveRun() {
+		t.Fatal("hasActiveRun = true after idle, want false")
+	}
+}
+
 func TestSessionManagerModelUpdateDoesNotCommitWhenSnapshotReadFails(t *testing.T) {
 	ctx := context.Background()
 	m := newTestSessionManager(t)
