@@ -57,6 +57,18 @@ func IsSensitivePath(path string) (bool, string) {
 			}
 			return true, rule.reason
 		}
+		// 目录规则（.ssh/、.gnupg/ 等带尾斜杠）也匹配目录本身：
+		// ~/.ssh 展开后无尾斜杠，Contains 不命中，导致 listdir/search 可列出敏感目录。
+		// 要求路径段边界（前一个字符是 / 或路径就是目录本身），避免 foo.ssh 文件误判。
+		if strings.HasSuffix(strings.ToLower(rule.pattern), "/") {
+			base := strings.TrimSuffix(strings.ToLower(rule.pattern), "/")
+			if idx := strings.LastIndex(lower, base); idx >= 0 {
+				end := idx + len(base)
+				if end == len(lower) && (idx == 0 || lower[idx-1] == '/') {
+					return true, rule.reason
+				}
+			}
+		}
 	}
 
 	return false, ""

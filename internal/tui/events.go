@@ -411,7 +411,7 @@ func (t *TUI) handleGuardConfirmNotification(p protocol.GuardConfirmParams) {
 		t.resetPhase()
 		return
 	}
-	t.enqueueGuardConfirm(&guardConfirmView{ID: p.ID, ToolCallID: p.ToolCallID, Tool: p.Tool, Params: p.Params, Risk: p.Risk, Reason: p.Reason, Suggestion: p.Suggestion, ReviewCode: p.ReviewCode, ReviewMessage: p.ReviewMessage})
+	t.enqueueGuardConfirm(&guardConfirmView{ID: p.ID, ToolCallID: p.ToolCallID, Tool: p.Tool, Params: p.Params, ReadOnly: p.ReadOnly, Reason: p.Reason, ReviewCode: p.ReviewCode, ReviewMessage: p.ReviewMessage})
 }
 
 func (t *TUI) handleInteractionResolvedNotification(p protocol.InteractionResolvedParams) {
@@ -700,7 +700,7 @@ func (t *TUI) handleConfigStateNotification(p protocol.ConfigParams) {
 		t.setTheme(t.configState.Theme)
 	}
 	if t.configState.GuardMode == "" {
-		t.configState.GuardMode = "ask"
+		t.configState.GuardMode = "smart"
 	}
 	if t.config.DeleteConfirm != "" {
 		t.config.DeleteConfirm = ""

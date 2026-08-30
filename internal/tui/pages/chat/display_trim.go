@@ -155,8 +155,8 @@ func estimateToolBlockBytes(block *toolview.Block) int {
 		total += len(entry.ID) + len(entry.LocalID) + len(entry.ParentID) + len(entry.Name) + len(entry.RawName)
 		total += len(entry.Intent) + len(entry.Params) + len(entry.Summary) + len(entry.Result)
 		if entry.Guard != nil {
-			total += len(entry.Guard.Risk) + len(entry.Guard.Decision) + len(entry.Guard.Source)
-			total += len(entry.Guard.Reason) + len(entry.Guard.Suggestion) + len(entry.Guard.ReviewCode) + len(entry.Guard.ReviewMessage)
+			total += len(entry.Guard.Decision) + len(entry.Guard.Source)
+			total += len(entry.Guard.Reason) + len(entry.Guard.ReviewCode) + len(entry.Guard.ReviewMessage)
 		}
 		for k, v := range entry.Metadata {
 			total += len(k) + estimateContentBytes(v)

@@ -2,13 +2,13 @@
 
 [![Go](https://img.shields.io/badge/Go-1.26-blue)](https://go.dev) [![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue)](LICENSE) [![Release](https://img.shields.io/github/v/release/alanchenchen/suna)](https://github.com/alanchenchen/suna/releases)
 
-> Local-first agent runtime with isolated subtasks, intent-aware Guard, memory, Skills, MCP, and a terminal UI.
+> Local-first agent runtime with isolated subtasks, layered Guard, memory, Skills, MCP, and a terminal UI.
 
 Suna is released under the [PolyForm Noncommercial License](LICENSE) — free for personal and non-commercial use.
 
 [中文 README](README.zh-CN.md) · [Documentation](docs/README.md) · [Subtasks](docs/subtask.md)
 
-Suna is not just another terminal chat agent. It is a local agent runtime where a main agent can delegate work to **isolated subtasks** with different models, explicit context, selected images, and a per-task tool whitelist — while risky actions still go through an **intent-aware Guard**.
+Suna is not just another terminal chat agent. It is a local agent runtime where a main agent can delegate work to **isolated subtasks** with different models, explicit context, selected images, and a per-task tool whitelist — while risky actions still go through a **layered Guard**.
 
 The built-in TUI is the default client. Third-party desktop apps, IDE extensions, local web UIs, or scripts can connect to the same daemon through TCP JSON-RPC/NDJSON after `suna serve --json`.
 
@@ -40,9 +40,9 @@ This makes delegation explainable and auditable instead of becoming an uncontrol
 
 > An isolated subtask keeps its task timeline, tool activity, and result visible to the main session.
 
-### Intent-aware Guard
+### Guard: hard rules + mode policy
 
-Suna's Guard is not just an approve/deny popup. In `smart` mode, hard safety rules and workspace boundaries stay enforced, while an LLM review can judge whether a medium/high-risk action is safe and aligned with the user's intent. If the review is unavailable or uncertain, Suna falls back to user confirmation.
+Suna's Guard is a static safety layer with three layers. Hard rules (systemically dangerous commands, blocked patterns, workspace boundaries, sensitive files) are always enforced in every mode. A precise read-only analysis then decides what needs review: `smart` mode lets an LLM review exec calls as a binary approve/reject gate (it judges the operation's own risk, not user intent), `ask` mode asks the user for every non-read-only action, `auto` trusts the model beyond hard rules, and `readonly` rejects anything that changes state.
 
 ### Runtime-first architecture
 
@@ -97,7 +97,7 @@ Use Suna to:
 | Subagent context | Shared or implicit | Explicit, isolated context only |
 | Tool permissions | Usually global | Per-subtask tool whitelist |
 | User memory | Often mixed into the whole context | Lightweight profile memory near the latest user input |
-| Safety | Confirm, auto, or coarse allowlist | Intent-aware Guard plus hard workspace/sensitive-path rules |
+| Safety | Confirm, auto, or coarse allowlist | Hard rules + read-only analysis + mode policy (smart/ask/auto/readonly) |
 | Skill lifecycle | Prompt/file injection | Static check, optional LLM review, then user confirmation |
 | UI architecture | CLI/TUI app | Local daemon/runtime plus protocol plus TUI client |
 | Third-party UI | Usually not a stable boundary | `suna serve --json` with JSON-RPC/NDJSON |
@@ -270,8 +270,8 @@ Unknown `/text` input is sent as a normal message.
 Guard modes:
 
 ```text
-ask       Ask for confirmation on risky actions
-smart     Use LLM review for intent-aware safety, then confirm/reject/fallback when needed
+smart     Default. Read-only calls pass; exec calls are reviewed by an LLM (approve/reject); other writes pass
+ask       Read-only calls pass; every non-read-only action asks for confirmation
 auto      Allow actions except hard-blocked ones
 readonly  Only allow read-only actions
 ```

@@ -63,11 +63,10 @@ type Event struct {
 	GuardToolCallID string
 	GuardTool       string
 	GuardParams     map[string]any
-	GuardRisk       string
+	GuardReadOnly   bool
 	GuardDecision   string
 	GuardSource     string
 	GuardReason     string
-	GuardSuggestion string
 	GuardReviewCode string
 	GuardReviewMsg  string
 

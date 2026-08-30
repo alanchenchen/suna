@@ -14,12 +14,12 @@ const (
 )
 
 // GuardInfo 是工具调用的安全审核展示数据。
+// ReadOnly 表示静态判定为只读（无副作用）；非只读操作按 mode 处置。
 type GuardInfo struct {
-	Risk          string
+	ReadOnly      bool
 	Decision      string
 	Source        string
 	Reason        string
-	Suggestion    string
 	ReviewCode    string
 	ReviewMessage string
 }

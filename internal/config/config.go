@@ -172,7 +172,7 @@ func (g GuardConfig) ModeOrDefault() string {
 	case "readonly", "ask", "auto", "smart":
 		return strings.ToLower(strings.TrimSpace(g.Mode))
 	default:
-		return "ask"
+		return "smart"
 	}
 }
 

@@ -98,9 +98,3 @@ func SafeTarget(tool string, params map[string]any) string {
 		return ""
 	}
 }
-
-// SafeOperationSummary 返回用于任务回执的安全参数摘要。
-func SafeOperationSummary(tool string, params map[string]any) string {
-	encoded, _ := marshalReviewParams(params)
-	return encoded
-}

@@ -2,13 +2,13 @@
 
 [![Go](https://img.shields.io/badge/Go-1.26-blue)](https://go.dev) [![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue)](LICENSE) [![Release](https://img.shields.io/github/v/release/alanchenchen/suna)](https://github.com/alanchenchen/suna/releases)
 
-> Local-first Agent Runtime：隔离 Subtask、意图感知 Guard、本地记忆、Skill、MCP，以及内置终端 TUI。
+> Local-first Agent Runtime：隔离 Subtask、分层 Guard、本地记忆、Skill、MCP，以及内置终端 TUI。
 
 Suna 以 [PolyForm Noncommercial License](LICENSE) 发布——个人与非商业用途免费。
 
 [English README](README.md) · [文档索引](docs/README.md) · [TCP 客户端接入](docs/tcp-client.md) · [Subtask 设计](docs/subtask.md)
 
-Suna 不只是“又一个终端聊天 Agent”。它更像一个运行在本地的 Agent Runtime：主 Agent 可以把任务委派给**隔离的 Subtask**，为每个子任务单独指定模型、上下文、图片和工具权限；高风险操作仍然经过**意图感知 Guard** 审查。
+Suna 不只是“又一个终端聊天 Agent”。它更像一个运行在本地的 Agent Runtime：主 Agent 可以把任务委派给**隔离的 Subtask**，为每个子任务单独指定模型、上下文、图片和工具权限；高风险操作仍然经过**分层 Guard** 审查。
 
 “Suna” 来自 śūnya，意为“空”：出厂无形，遇缘则生。这个名字也对应 Suna 的设计取向：轻量、克制，不预设复杂工作流，而是在本地 runtime、工具链路、记忆和 Skill 中逐渐贴合你的使用方式。
 
@@ -42,11 +42,9 @@ Suna 不只是“又一个终端聊天 Agent”。它更像一个运行在本地
 
 > 隔离 Subtask 的任务时间线、工具活动和结果会清晰回流主会话。
 
-### 意图感知 Guard
+### Guard：硬规则 + 模式策略
 
-Suna 的 Guard 不只是简单的确认弹窗。`smart` 模式下，硬性安全规则和 Workspace 边界仍然生效；中高风险操作可以交给 LLM Review 判断是否安全、是否符合用户意图。如果审查不可用或不确定，Suna 会回退到用户确认。
-
-它的目标不是消灭确认，而是在不放松高危边界的前提下，减少无意义打断。
+Suna 的 Guard 是静态安全层，分三层。硬规则（结构性高危命令、blocked 模式、Workspace 边界、敏感文件）在所有模式下始终生效。精确的只读分析决定哪些操作需要审查：`smart` 模式让 LLM 以二元 approve/reject 门审查 exec 调用（只判断操作本身的风险，不猜用户意图）；`ask` 模式对每个非只读操作请求用户确认；`auto` 模式在硬规则之外完全信任模型；`readonly` 拒绝任何改变状态的操作。
 
 ### Runtime-first 架构
 
@@ -101,7 +99,7 @@ Suna 适合希望在本地使用 AI 处理文件、文档、代码、命令、AP
 | 子任务上下文 | 常常共享或隐式继承 | 只接收主 Agent 显式传入的上下文 |
 | 工具权限 | 通常是全局工具集 | 每个 Subtask 单独设置工具白名单 |
 | 用户记忆 | 容易混进整段上下文 | 轻量用户画像，靠近最新输入注入 |
-| 安全审查 | 确认、自动或粗粒度 allowlist | 意图感知 Guard + Workspace / 敏感路径硬规则 |
+| 安全审查 | 确认、自动或粗粒度 allowlist | 硬规则 + 只读分析 + 模式策略（smart/ask/auto/readonly） |
 | Skill 生命周期 | Prompt 或文件注入 | 静态检查、可选 LLM Review、用户确认后启用 |
 | UI 架构 | CLI/TUI 应用本身 | 本地 daemon/runtime + protocol + TUI 客户端 |
 | 第三方 UI | 通常不是稳定边界 | `suna serve --json` + JSON-RPC/NDJSON |
@@ -232,7 +230,7 @@ Suna 不是纯 coding agent，但它适合处理本地资料、代码、文档�
 | 行动 | `writefile` | 创建、覆盖或追加文件 |
 | 行动 | `editfile` | 对单个文件原子应用精确文本替换 |
 | 行动 | `filesystem` | `stat` / `mkdir` / `move` / `copy` / `remove` 文件系统路径 |
-| 行动 | `http` | 发送 HTTP 请求；读方法风险较低，写方法按风险审查 |
+| 行动 | `http` | 发送 HTTP 请求；GET/HEAD 只读放行，写方法按模式处置 |
 
 工具通过统一 Provider 暴露。Guard 决策由 Agent 统一处理，不塞进 UI 或零散工具 wrapper。
 
@@ -278,8 +276,8 @@ Ctrl+C             退出
 Guard Mode 可在 `/config` 中切换：
 
 ```text
-ask       风险操作请求确认
-smart     用 LLM Review 做意图感知安全审查，必要时确认、拒绝或回退
+smart     默认。只读调用放行；exec 调用由 LLM 审核（approve/reject）；其他写操作放行
+ask       只读调用放行；每个非只读操作请求确认
 auto      除硬性拦截规则外自动放行
 readonly  只允许只读操作
 ```

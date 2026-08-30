@@ -54,11 +54,8 @@ func (a *Agent) executeTool(ctx context.Context, call runner.ToolExecution, even
 		allowed := true
 		if result.Decision == guard.Reject {
 			allowed = false
-		} else if result.Decision == guard.Modify {
-			a.guardGate.Unlock()
-			return guardModifyResult(result)
 		} else if result.Decision == guard.Confirm {
-			allowed = a.confirmGuard(ctx, id, call, result, events, true)
+			allowed = a.confirmGuard(ctx, id, call, result, events)
 		}
 		a.guardGate.Unlock()
 		if !allowed {
@@ -97,26 +94,15 @@ func (a *Agent) executeTool(ctx context.Context, call runner.ToolExecution, even
 	return result
 }
 
-func guardModifyResult(result *guard.GuardResult) tools.Result {
-	msg := "guard requested a safer modified tool call"
-	if strings.TrimSpace(result.Reason) != "" {
-		msg += ": " + result.Reason
-	}
-	if strings.TrimSpace(result.Suggestion) != "" {
-		msg += "\nsuggestion: " + result.Suggestion
-	}
-	return tools.ErrorResult(msg)
-}
-
 func (a *Agent) emitToolGuard(events chan<- Event, id string, name string, result *guard.GuardResult) {
 	if events == nil || result == nil {
 		return
 	}
 	// Guard 决策是工具执行前的安全来源，单独发事件，避免混入工具执行结果 metadata。
-	events <- Event{Type: EventToolGuard, GuardToolCallID: id, GuardTool: name, GuardRisk: guard.RiskString(result.Risk), GuardDecision: string(result.Decision), GuardSource: result.Source, GuardReason: result.Reason, GuardSuggestion: result.Suggestion, GuardReviewCode: result.ReviewCode, GuardReviewMsg: result.ReviewMessage}
+	events <- Event{Type: EventToolGuard, GuardToolCallID: id, GuardTool: name, GuardReadOnly: result.ReadOnly, GuardDecision: string(result.Decision), GuardSource: result.Source, GuardReason: result.Reason, GuardReviewCode: result.ReviewCode, GuardReviewMsg: result.ReviewMessage}
 }
 
-func (a *Agent) confirmGuard(ctx context.Context, id string, call runner.ToolExecution, result *guard.GuardResult, events chan<- Event, recordTaskDecision bool) bool {
+func (a *Agent) confirmGuard(ctx context.Context, id string, call runner.ToolExecution, result *guard.GuardResult, events chan<- Event) bool {
 	name, params := call.Name, call.Params
 	if events == nil {
 		return false
@@ -125,7 +111,7 @@ func (a *Agent) confirmGuard(ctx context.Context, id string, call runner.ToolExe
 	runID := runIDFromContext(ctx)
 	a.SetSteeringInteractionPending(runID, true)
 	defer a.SetSteeringInteractionPending(runID, false)
-	events <- Event{Type: EventGuardConfirm, GuardToolCallID: id, GuardTool: name, GuardParams: params, GuardRisk: guard.RiskString(result.Risk), GuardReason: result.Reason, GuardSuggestion: result.Suggestion, GuardReviewCode: result.ReviewCode, GuardReviewMsg: result.ReviewMessage, Reply: replyCh}
+	events <- Event{Type: EventGuardConfirm, GuardToolCallID: id, GuardTool: name, GuardParams: params, GuardReadOnly: result.ReadOnly, GuardReason: result.Reason, GuardReviewCode: result.ReviewCode, GuardReviewMsg: result.ReviewMessage, Reply: replyCh}
 	select {
 	case <-ctx.Done():
 		return false
@@ -137,11 +123,8 @@ func (a *Agent) confirmGuard(ctx context.Context, id string, call runner.ToolExe
 			finalDecision = guard.Approve
 			finalReason = result.Reason
 		}
-		if recordTaskDecision {
-			a.recordGuardTaskReceipt(call, result, approved)
-		}
 		// 用户确认会覆盖前置 LLM/兜底 Guard 行，让历史工具块记录最终批准来源。
-		events <- Event{Type: EventToolGuard, GuardToolCallID: id, GuardTool: name, GuardRisk: guard.RiskString(result.Risk), GuardDecision: string(finalDecision), GuardSource: "user", GuardReason: finalReason, GuardSuggestion: result.Suggestion}
+		events <- Event{Type: EventToolGuard, GuardToolCallID: id, GuardTool: name, GuardReadOnly: result.ReadOnly, GuardDecision: string(finalDecision), GuardSource: "user", GuardReason: finalReason}
 		return approved
 	}
 }
@@ -326,11 +309,8 @@ func (e subtaskExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecut
 		allowed := true
 		if result.Decision == guard.Reject {
 			allowed = false
-		} else if result.Decision == guard.Modify {
-			e.agent.guardGate.Unlock()
-			return guardModifyResult(result)
 		} else if result.Decision == guard.Confirm {
-			allowed = e.agent.confirmGuard(ctx, eventID, call, result, e.events, false)
+			allowed = e.agent.confirmGuard(ctx, eventID, call, result, e.events)
 		}
 		e.agent.guardGate.Unlock()
 		if !allowed {
@@ -362,14 +342,13 @@ func (a *Agent) buildGuardReviewContext(call runner.ToolExecution) guard.ReviewC
 	if len(messages) == 0 && a.working != nil {
 		messages = a.working.Messages()
 	}
-	actions := recentGuardActions(messages, a.toolSummary)
-	return guard.ReviewContext{Evidence: buildGuardEvidence(messages, a.recentGuardRiskDecisions(), actions, a.sessionState, guardExecutionRationale(call))}
+	return guard.ReviewContext{Evidence: buildGuardEvidence(messages, guardExecutionRationale(call))}
 }
 
 func (a *Agent) buildSubtaskGuardReviewContext(call runner.ToolExecution, task string) guard.ReviewContext {
 	// subtask 任务描述作为注入的用户意图：长任务（>64 条消息）时任务描述会被
-	// Evidence 扫描窗口挤出，导致 Guard review 看不到用户意图而保守 modify。
-	return guard.ReviewContext{Evidence: buildGuardEvidence(call.WorkingMessages, nil, nil, "", guardExecutionRationale(call), task)}
+	// Evidence 扫描窗口挤出，导致 Guard review 看不到用户意图而保守误判。
+	return guard.ReviewContext{Evidence: buildGuardEvidence(call.WorkingMessages, guardExecutionRationale(call), task)}
 }
 
 func guardExecutionRationale(call runner.ToolExecution) string {
@@ -619,7 +598,6 @@ func (a *Agent) guardLLMReview(ctx context.Context, req guard.ReviewRequest) (st
 		ToolParams:      params,
 		ParamsTruncated: paramsTruncated,
 		Target:          req.Target,
-		Risk:            req.Risk,
 		Evidence:        req.Context.Evidence,
 	})
 	if err != nil {
@@ -638,7 +616,7 @@ func (a *Agent) guardLLMReview(ctx context.Context, req guard.ReviewRequest) (st
 }
 
 func readGuardReviewStream(ctx context.Context, ch <-chan model.Chunk, timeout time.Duration) (string, error) {
-	// Guard review 只需要短 JSON；长时间无响应时回退到人工确认，不能阻塞工具执行链路。
+	// Guard review 只需要短 JSON；长时间无响应时 fail-closed 拒绝，不能阻塞工具执行链路。
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	resetTimer := func() {

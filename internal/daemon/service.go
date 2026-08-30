@@ -362,7 +362,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 				emit(ctx, sink, protocol.NotifyToolStart, protocol.ToolStartParams{ID: evt.ToolCallID, Tool: evt.ToolName, Params: evt.ToolParams, Intent: evt.ToolIntent})
 			case agent.EventToolGuard:
 				flush()
-				emit(ctx, sink, protocol.NotifyToolGuard, protocol.ToolGuardParams{ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, Risk: evt.GuardRisk, Decision: evt.GuardDecision, Source: evt.GuardSource, Reason: evt.GuardReason, Suggestion: evt.GuardSuggestion, ReviewCode: evt.GuardReviewCode, ReviewMessage: evt.GuardReviewMsg})
+				emit(ctx, sink, protocol.NotifyToolGuard, protocol.ToolGuardParams{ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, ReadOnly: evt.GuardReadOnly, Decision: evt.GuardDecision, Source: evt.GuardSource, Reason: evt.GuardReason, ReviewCode: evt.GuardReviewCode, ReviewMessage: evt.GuardReviewMsg})
 			case agent.EventToolResult:
 				flush()
 				display := limitToolResult(evt.ToolResult)
@@ -395,7 +395,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 				s.daemon.sessions.setWaiting(sessionID, protocol.RunWaitingGuard)
 				// Guard 确认 ID 同样是公开协议字段，只能作为 opaque token 使用。
 				guardID := uuid.NewString()
-				params := protocol.GuardConfirmParams{ID: guardID, ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, Params: evt.GuardParams, Risk: evt.GuardRisk, Reason: evt.GuardReason, Suggestion: evt.GuardSuggestion, ReviewCode: evt.GuardReviewCode, ReviewMessage: evt.GuardReviewMsg, SessionID: sessionID}
+				params := protocol.GuardConfirmParams{ID: guardID, ToolCallID: evt.GuardToolCallID, Tool: evt.GuardTool, Params: evt.GuardParams, ReadOnly: evt.GuardReadOnly, Reason: evt.GuardReason, ReviewCode: evt.GuardReviewCode, ReviewMessage: evt.GuardReviewMsg, SessionID: sessionID}
 				if evt.Reply != nil {
 					s.daemon.sessions.withAttachedClients(sessionID, func() {
 						s.pendingGuards.Store(guardID, pendingInteraction{sessionID: sessionID, ownerID: connID, reply: evt.Reply, guard: &params})

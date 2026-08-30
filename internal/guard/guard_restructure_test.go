@@ -113,6 +113,33 @@ func TestSensitiveFileBlockedInGuardLayer(t *testing.T) {
 	}
 }
 
+// exec 是敏感文件检查的绕过口：exec cat ~/.ssh/id_rsa 必须与 readfile 一样拦截，
+// 敏感数据与 workspace 无关，所有 mode 一致。
+func TestSensitiveFileBlockedViaExec(t *testing.T) {
+	g := NewGuardWithMode(nil, "test", ModeAuto)
+	cases := []struct {
+		name    string
+		command string
+	}{
+		{"cat ssh key", "cat ~/.ssh/id_rsa"},
+		{"cat env", "cat .env"},
+		{"cat aws creds", "cat ~/.aws/credentials"},
+		{"sh -c quoted", `sh -c "cat ~/.ssh/id_rsa"`},
+		{"python open", `python -c 'print(open("/home/user/.env").read())'`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := g.Check(context.Background(), "exec", map[string]any{"command": tc.command})
+			if res.Decision != Reject {
+				t.Fatalf("%q decision = %s, want reject", tc.command, res.Decision)
+			}
+			if res.Audit != "sensitive_reject" {
+				t.Fatalf("%q audit = %q, want sensitive_reject", tc.command, res.Audit)
+			}
+		})
+	}
+}
+
 // extractJSON：多对象/正文含 {} 时只取第一个完整对象。
 func TestExtractJSONTakesFirstCompleteObject(t *testing.T) {
 	cases := []struct {

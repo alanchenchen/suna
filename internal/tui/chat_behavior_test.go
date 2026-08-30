@@ -89,7 +89,7 @@ func TestEscEntersCancellingWithoutPrematureNotice(t *testing.T) {
 func TestGuardVisibleInFinalChatViewAndLocksComposer(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 100, height: 30}
 	tui.initChatComponents()
-	tui.chat.EnqueueGuardConfirm(&chatpage.GuardConfirmView{ID: "guard-1", Tool: "writefile", Risk: "high", Reason: "needs confirmation"})
+	tui.chat.EnqueueGuardConfirm(&chatpage.GuardConfirmView{ID: "guard-1", Tool: "writefile", ReadOnly: false, Reason: "needs confirmation"})
 	_ = tui.syncInputFocus()
 
 	view := stripANSIForTest(tui.viewChat())

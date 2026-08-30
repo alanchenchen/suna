@@ -131,9 +131,14 @@ func TestRenderGuardReviewShowsStructuredParameterVisibility(t *testing.T) {
 	if action, evidenceIndex := strings.Index(got, "Current action:"), strings.Index(got, evidence); action < 0 || evidenceIndex < 0 || action > evidenceIndex {
 		t.Fatalf("rendered prompt does not keep current action before dynamic evidence: %q", got)
 	}
-	for _, want := range []string{"Never use confirm to resolve task-fit uncertainty", "Use modify only for a clear intent conflict", "confirm only when the material risk is concrete", "Prefer approve for normal, aligned"} {
+	for _, want := range []string{"Prefer approve for normal, local", "Reject hard boundary violations", "binary gate: approve or reject", "Do not suggest modified calls"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rendered prompt missing %q", want)
+		}
+	}
+	for _, unwanted := range []string{"confirm", "modify"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("rendered prompt contains %q, want binary decision only", unwanted)
 		}
 	}
 }

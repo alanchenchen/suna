@@ -824,18 +824,17 @@ func (t *TUI) advanceGuardQueue()                      { t.chat.AdvanceGuardQueu
 
 func (t *TUI) renderGuardOverlay(width int) string {
 	view := t.chat.GuardOverlayView(width, t.overlayMaxHeight(), chatpage.GuardOverlayLabels{
-		Title:      t.tr("tui.guard.title"),
-		Tool:       t.tr("tui.guard.tool"),
-		Risk:       t.tr("tui.guard.risk"),
-		Review:     t.tr("tui.guard.review"),
-		Reason:     t.tr("tui.guard.reason"),
-		Suggestion: t.tr("tui.guard.suggestion"),
-		Params:     t.tr("tui.tool.params"),
-		Approve:    t.tr("tui.guard.approve"),
-		Reject:     t.tr("tui.guard.reject"),
-		Help:       t.tr("tui.guard.help"),
-		Hidden:     t.tr("tui.overlay.content_hidden"),
-		Scroll:     t.tr("tui.overlay.scroll"),
+		Title:    t.tr("tui.guard.title"),
+		Tool:     t.tr("tui.guard.tool"),
+		ReadOnly: t.tr("tui.guard.readonly_label"),
+		Review:   t.tr("tui.guard.review"),
+		Reason:   t.tr("tui.guard.reason"),
+		Params:   t.tr("tui.tool.params"),
+		Approve:  t.tr("tui.guard.approve"),
+		Reject:   t.tr("tui.guard.reject"),
+		Help:     t.tr("tui.guard.help"),
+		Hidden:   t.tr("tui.overlay.content_hidden"),
+		Scroll:   t.tr("tui.overlay.scroll"),
 	})
 	g := view.Guard
 	if g == nil {
@@ -848,7 +847,7 @@ func (t *TUI) renderGuardOverlay(width int) string {
 	lines = append(lines, styleError.Render("⚠ "+view.Labels.Title))
 	lines = append(lines, "")
 	lines = append(lines, styleDim.Render(view.Labels.Tool)+" "+styleTool.Render(g.Tool))
-	lines = append(lines, styleDim.Render(view.Labels.Risk)+" "+t.guardRiskStyle(g.Risk).Render(g.Risk))
+	lines = append(lines, styleDim.Render(view.Labels.ReadOnly)+" "+t.guardReadOnlyLabel(g.ReadOnly))
 	if len(body) > 0 {
 		lines = append(lines, "")
 		lines = append(lines, body...)
@@ -884,13 +883,6 @@ func (t *TUI) guardOverlayBodyLines(view chatpage.GuardOverlayView) []string {
 		body = append(body, styleDim.Render(view.Labels.Reason))
 		body = append(body, splitWrapped(g.Reason, view.Inner, 0)...)
 	}
-	if strings.TrimSpace(g.Suggestion) != "" {
-		if len(body) > 0 {
-			body = append(body, "")
-		}
-		body = append(body, styleDim.Render(view.Labels.Suggestion))
-		body = append(body, splitWrapped(g.Suggestion, view.Inner, 0)...)
-	}
 	params := chatpage.GuardBodyParams(g)
 	if params != "" {
 		if len(body) > 0 {
@@ -921,15 +913,12 @@ func (t *TUI) guardButton(idx int, label string) string {
 	return styleDim.Render("  " + label)
 }
 
-func (t *TUI) guardRiskStyle(risk string) lipgloss.Style {
-	switch strings.ToLower(risk) {
-	case "high":
-		return styleError
-	case "medium":
-		return styleTool
-	default:
-		return styleAgent
+// guardReadOnlyLabel 展示只读/行动标签：只读绿色，非只读黄色。
+func (t *TUI) guardReadOnlyLabel(readOnly bool) string {
+	if readOnly {
+		return styleAgent.Render(t.tr("tui.guard.readonly"))
 	}
+	return styleTool.Render(t.tr("tui.guard.write"))
 }
 
 func (t *TUI) overlayMaxHeight() int {

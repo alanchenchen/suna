@@ -134,7 +134,7 @@ daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 
 | `agent.tool_guard` | 工具执行前 Guard 决策状态。 |
 | `agent.tool_end` | 工具执行结束；`result` 是 UI 展示内容，可能被截断。 |
 | `agent.ask_user` | agent 请求用户输入；带 `can_reply`。 |
-| `agent.guard_confirm` | 高风险工具操作请求用户确认；带 `can_reply`。 |
+| `agent.guard_confirm` | 非只读工具操作请求用户确认；带 `can_reply`。 |
 | `agent.interaction_resolved` | ask/guard 已处理，其他 UI 应关闭残留交互。 |
 | `session.user_message` | 同 session 新增的正式 user turn；运行中消息只有在 applied 后才通过该通知出现。 |
 | `session.updated` | 全局轻量 Session Catalog 增量；session metadata/status/client_count 变化时向所有已连接且完成握手的客户端广播。 |
@@ -228,7 +228,7 @@ Method response 与 notification 共用连接，可能因并发先后到达。�
 
 - `agent.tool_start` / `agent.tool_guard` / `agent.tool_end` 用于工具展示和 Guard 状态。
 - `agent.ask_user` 表示 Agent 需要用户输入；客户端必须调用 `agent.askReply` 回复。
-- `agent.guard_confirm` 表示高风险工具操作需要用户确认；客户端必须调用 `agent.guardReply` 回复。
+- `agent.guard_confirm` 表示非只读工具操作需要用户确认；客户端必须调用 `agent.guardReply` 回复。
 
 ---
 

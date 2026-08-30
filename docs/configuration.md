@@ -114,7 +114,7 @@ strengths = ["multimodal", "long context"]
 reasoning = { thinking = { type = "enabled" } }
 
 [guard]
-mode = "smart"                              # readonly | ask | auto | smart；空或非法时按 ask 使用
+mode = "smart"                              # readonly | ask | auto | smart；空或非法时按 smart 使用
 workspace = "~/Documents/project"           # 空表示不启用 workspace 边界；非空必须是存在目录
 
 [[guard.blocked]]
@@ -219,12 +219,12 @@ api_key = "<API_KEY>"
 | `models.strengths` | string[] | 否 | 空 | 模型能力描述，会给主 Agent 参考，用于选择 subtask 模型。 |
 | `models.subtask_for` | string[] | 否 | 空 | 子任务候选可见性过滤器；留空表示所有主 session 模型可用，非空时当前 session model ref 匹配任一 glob 才展示，模型始终可作为自己的子任务模型。`*` 不跨 `/`，`**` 可跨 `/`。 |
 | `models.reasoning` | object | 否 | 空 | 透传到 provider 请求体的额外 reasoning/thinking 字段；Suna 不理解 preset，是否有效取决于上游。 |
-| `[guard].mode` | string | 否 | `ask` | `readonly` / `ask` / `auto` / `smart`。空或非法值按 `ask` 使用；`smart` 会对中高风险调用进行安全审查，而不是做普通 tool-call 优化。 |
+| `[guard].mode` | string | 否 | `smart` | `readonly` / `ask` / `auto` / `smart`。空或非法值按 `smart` 使用；`smart` 只对 exec 调用做二元安全审查，其他非只读工具静态放行。 |
 | `[guard].workspace` | string | 否 | 空 | 本地文件和 exec 的目录硬边界；非空时必须是存在目录，会展开 `~/` 并规范化为绝对路径。 |
 | `[[guard.blocked]]` | array | 否 | 空 | 用户自定义硬拦截规则，追加到内置 blocked rules 后。 |
 | `guard.blocked.pattern` | string | 是 | 无 | Go regexp，匹配命令、路径或 URL。 |
 | `guard.blocked.reason` | string | 否 | 空 | 拦截原因。 |
-| `[[guard.allowed]]` | array | 否 | 空 | 用户自定义允许规则，优先于 mode/risk，低于 workspace、内置 blocked 和用户 blocked。 |
+| `[[guard.allowed]]` | array | 否 | 空 | 用户自定义允许规则，优先于 mode，低于 workspace、内置 blocked 和用户 blocked。 |
 | `guard.allowed.pattern` | string | 是 | 无 | Go regexp，匹配命令、路径或 URL。 |
 | `guard.allowed.tool` | string | 否 | 空 | 限定工具名；为空表示匹配所有 guard target。建议显式填写。 |
 | `guard.allowed.reason` | string | 否 | 空 | 放行原因，当前主要用于配置可读性和持久化。 |
@@ -384,7 +384,7 @@ reasoning = { model = "other-model" }
 | `filesystem` | `action path`；`move` / `copy` 带 destination 时为 `action path -> destination` |
 | `http` | `METHOD url`，未传 method 时默认为 `GET` |
 
-例如，`exec` 的自定义规则若只希望匹配命令，应限定在实际 command 形式；状态化操作的 target 分别类似 `status <job_id>` 和 `stop <job_id>`。`status` 是只读 low risk，`stop` 是改变受管进程状态的 medium risk。
+例如，`exec` 的自定义规则若只希望匹配命令，应限定在实际 command 形式；状态化操作的 target 分别类似 `status <job_id>` 和 `stop <job_id>`。`status` 是只读操作，`stop` 是改变受管进程状态的非只读操作。
 
 `http` 的 target 可能是 `GET https://example.com` 或 `DELETE https://api.example.com/items/1`。旧的 `readhttp` / `writehttp` 已合并为 `http`，如果规则依赖 URL 开头匹配，需要考虑 method 前缀。
 
@@ -394,7 +394,7 @@ Workspace 启用后是最高优先级硬边界：workspace 外本地文件路径
 
 exec 命令使用完整 shell AST 解析：`/dev/null` 等丢弃输出设备豁免（不再误拦 `2>/dev/null`），变量/命令替换路径不参与静态检查，动态表达式内部的高危命令（如 `$(rm -rf /)`）会被结构性高危兜底拦截，引号内路径只在解释器场景（如 `sh -c`）拦截。
 
-`smart` mode 的 LLM Review 只负责安全、用户意图和权限边界判断：安全且合理的中高风险调用可以直接放行；不确定或影响较大时请求确认；明确危险时拒绝；只有当前调用不安全或明显过宽，并且有具体等价的更安全调用时才返回修改建议。它不用于修正普通参数风格、代码风格或常规 tool-call 优化。
+`smart` mode 的 LLM Review 只负责 exec 调用的二元安全判断（approve/reject），不猜用户意图：安全且合理的调用放行；明确危险时拒绝；不确定时按 approve 放行（硬拦截已兜底确定性危险）；审核不可用（超时/网络/解析失败）时 fail-closed 拒绝。它不用于修正普通参数风格、代码风格或常规 tool-call 优化。
 
 ## MCP 配置细节
 

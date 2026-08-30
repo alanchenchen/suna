@@ -5,43 +5,28 @@ import (
 	"strings"
 )
 
-// analyzeExecCommand 是轻量 shell analyzer，不尝试完整解释 shell 语言。
-// 安全原则：只有所有片段都能证明为只读命令才返回 low；明确危险返回 high；其他复杂/未知情况返回 medium。
-func analyzeExecCommand(command string, shell string, readOnly []string) RiskLevel {
+// analyzeExecCommandReadOnly 是轻量 shell analyzer，不尝试完整解释 shell 语言。
+// 安全原则：只有所有片段都能证明为只读命令才返回 true；其他复杂/未知情况返回 false（非只读）。
+// 只放行无参数语义的简单命令（ls/cat/echo 等），git/find 等语义命令保守非只读。
+func analyzeExecCommandReadOnly(command string, shell string) bool {
 	trimmed := strings.TrimSpace(command)
 	if trimmed == "" {
-		return RiskMedium
-	}
-	if isHighRiskCommand(trimmed) {
-		return RiskHigh
+		return false
 	}
 	if hasDynamicShellSyntax(trimmed, shell) {
-		return RiskMedium
+		return false
 	}
 
 	segments, ok := splitShellSegments(trimmed, shell)
 	if !ok || len(segments) == 0 {
-		return RiskMedium
-	}
-	for _, segment := range segments {
-		if !isReadOnlySegment(segment, readOnly) {
-			return RiskMedium
-		}
-	}
-	return RiskLow
-}
-
-func isHighRiskCommand(cmd string) bool {
-	trimmed := strings.TrimSpace(cmd)
-	if trimmed == "" {
 		return false
 	}
-	for _, pattern := range highRiskCommandPatterns {
-		if pattern.MatchString(trimmed) {
-			return true
+	for _, segment := range segments {
+		if !isReadOnlySegment(segment) {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func hasDynamicShellSyntax(cmd string, shell string) bool {
@@ -138,7 +123,7 @@ func isShellSeparator(ch byte) bool {
 	return ch == '\n' || ch == ';' || ch == '|' || ch == '&'
 }
 
-func isReadOnlySegment(segment string, readOnly []string) bool {
+func isReadOnlySegment(segment string) bool {
 	tokens, ok := shellFields(segment)
 	if !ok || len(tokens) == 0 {
 		return false
@@ -147,21 +132,8 @@ func isReadOnlySegment(segment string, readOnly []string) bool {
 	if strings.Contains(cmd, "=") || cmd == "sudo" || cmd == "su" || cmd == "doas" || cmd == "runas" {
 		return false
 	}
-	if cmd == "git" {
-		return isReadOnlyGitCommand(tokens)
-	}
-	if cmd == "find" {
-		return isReadOnlyFindCommand(tokens)
-	}
-	if cmd == "command" {
-		return len(tokens) >= 2 && (tokens[1] == "-v" || tokens[1] == "-V")
-	}
-	for _, ro := range readOnly {
-		if readOnlyCommandMatches(tokens, ro) {
-			return true
-		}
-	}
-	return false
+	// 只放行无参数语义的简单命令；git/find/command 等语义命令保守非只读。
+	return isSimpleReadOnlyCommand(cmd)
 }
 
 func shellFields(s string) ([]string, bool) {
@@ -206,63 +178,6 @@ func shellFields(s string) ([]string, bool) {
 	}
 	return fields, true
 }
-
-func readOnlyCommandMatches(tokens []string, command string) bool {
-	roTokens := strings.Fields(strings.ToLower(command))
-	if len(roTokens) == 0 || len(tokens) < len(roTokens) {
-		return false
-	}
-	for i, token := range roTokens {
-		if strings.ToLower(tokens[i]) != token {
-			return false
-		}
-	}
-	return true
-}
-
-func isReadOnlyGitCommand(tokens []string) bool {
-	if len(tokens) < 2 {
-		return false
-	}
-	sub := strings.ToLower(tokens[1])
-	switch sub {
-	case "status", "log", "diff", "show":
-		return true
-	case "stash":
-		return len(tokens) >= 3 && strings.EqualFold(tokens[2], "list")
-	case "branch":
-		return len(tokens) == 2
-	default:
-		return false
-	}
-}
-
-func isReadOnlyFindCommand(tokens []string) bool {
-	for _, token := range tokens[1:] {
-		switch strings.ToLower(token) {
-		case "-delete", "-exec", "-execdir", "-ok", "-okdir":
-			return false
-		}
-	}
-	return true
-}
-
-var highRiskCommandPatterns = compileRegexps([]string{
-	`(?i)\b(rm|rmdir|unlink|shred)\b.*\s-(?:[^\s]*r|[^\s]*f|rf|fr)\b`,
-	`(?i)\b(del|erase|rd|rmdir)\b.*\s/[sq]\b`,
-	`(?i)\b(remove-item|rm|ri|del|erase)\b.*\b(recurse|force|r|fo)\b`,
-	`(?i)\b(format|mkfs|diskpart|bcdedit)\b`,
-	`(?i)\bdd\b.*\bof=/dev/`,
-	`(?i)\b(vssadmin\s+delete|wbadmin\s+delete|cipher\s+/w)\b`,
-	`(?i)\b(reg\s+(add|delete)|sc\s+(delete|config|stop)|schtasks\s+/(create|delete)|takeown|icacls)\b`,
-	`(?i)\brobocopy\b.*\s/mir\b`,
-	`(?i)\b(chmod|chown)\b.*\s-r\b`,
-	`(?i)\bset-executionpolicy\b`,
-	`(?i)\bstart-process\b.*\b-verb\s+runas\b`,
-	`(?i)\b(iex|invoke-expression)\b`,
-	`(?i)\b(iwr|irm|invoke-webrequest|invoke-restmethod|curl|wget)\b.*\|\s*(sh|bash|zsh|fish|iex|invoke-expression|powershell|pwsh)\b`,
-	`(?i)\bpython\b.*\s-c\s+.*(urlopen|requests\.|subprocess|os\.system)`,
-})
 
 var nestedShellPattern = regexp.MustCompile(`(?i)\b(bash|sh|zsh|fish|cmd|powershell|pwsh)\b\s+(-c|/c|-command)\b`)
 var interpreterDynamicPattern = regexp.MustCompile(`(?i)\b(python|python3|node|ruby|perl|php)\b\s+(-c|-e)\b`)

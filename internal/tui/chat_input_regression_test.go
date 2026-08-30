@@ -40,7 +40,7 @@ func TestChatPrintableKeyUpdatesCommandSuggestions(t *testing.T) {
 func TestGuardKeyBindingsRouteWithKeyPressMessages(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24}
 	tui.initChatComponents()
-	tui.chat.EnqueueGuardConfirm(&chatpage.GuardConfirmView{ID: "guard-1", Tool: "writefile", Risk: "high"})
+	tui.chat.EnqueueGuardConfirm(&chatpage.GuardConfirmView{ID: "guard-1", Tool: "writefile", ReadOnly: false})
 
 	_, _ = tui.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyLeft}))
 	if tui.chat.GuardCursor != 0 {
@@ -59,7 +59,7 @@ func TestGuardKeyBindingsRouteWithKeyPressMessages(t *testing.T) {
 func TestGuardLocksComposer(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24}
 	tui.initChatComponents()
-	tui.chat.EnqueueGuardConfirm(&chatpage.GuardConfirmView{ID: "guard-1", Tool: "writefile", Risk: "high"})
+	tui.chat.EnqueueGuardConfirm(&chatpage.GuardConfirmView{ID: "guard-1", Tool: "writefile", ReadOnly: false})
 	_ = tui.syncInputFocus()
 
 	if !tui.inputLocked() {
@@ -91,7 +91,7 @@ func TestGuardNotificationBlursTextarea(t *testing.T) {
 func TestGuardDecisionRestoresFocusForQueuedCustomAsk(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24}
 	tui.initChatComponents()
-	tui.chat.EnqueueGuardConfirm(&chatpage.GuardConfirmView{ID: "guard-1", Tool: "writefile", Risk: "high"})
+	tui.chat.EnqueueGuardConfirm(&chatpage.GuardConfirmView{ID: "guard-1", Tool: "writefile", ReadOnly: false})
 	tui.chat.EnqueueAskUser(protocol.AskUserParams{ID: "ask-1", Question: "continue?", AllowCustom: true})
 	tui.chat.Textarea.Blur()
 
@@ -107,7 +107,7 @@ func TestGuardDecisionRestoresFocusForQueuedCustomAsk(t *testing.T) {
 func TestInteractionResolvedRestoresFocusForQueuedCustomAsk(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, ready: true, width: 80, height: 24}
 	tui.initChatComponents()
-	tui.chat.EnqueueGuardConfirm(&chatpage.GuardConfirmView{ID: "guard-1", Tool: "writefile", Risk: "high"})
+	tui.chat.EnqueueGuardConfirm(&chatpage.GuardConfirmView{ID: "guard-1", Tool: "writefile", ReadOnly: false})
 	tui.chat.EnqueueAskUser(protocol.AskUserParams{ID: "ask-1", Question: "continue?", AllowCustom: true})
 	tui.chat.Textarea.Blur()
 
