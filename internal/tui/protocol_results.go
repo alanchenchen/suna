@@ -95,6 +95,9 @@ func (t *TUI) handleProtocolResultMsg(msg tea.Msg) tea.Cmd {
 			cmds = append(cmds, t.listMCPCmd())
 		}
 		return tea.Batch(cmds...)
+	case sessionAttachErrorMsg:
+		t.handleSessionAttachError(m)
+		schedule = true
 	case sessionMetadataResultMsg:
 		t.handleSessionStateNotification(protocol.SessionStateParams{Session: m.Session})
 	case sessionTitleUpdateResultMsg:

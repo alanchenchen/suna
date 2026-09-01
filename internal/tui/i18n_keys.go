@@ -59,6 +59,7 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"tui.sessions.cannot_delete_current": {LocaleEN: "Cannot delete the session currently opened in this window.", LocaleZH: "不能删除当前窗口打开的会话。"},
 		"tui.sessions.cannot_delete_active":  {LocaleEN: "Active sessions cannot be deleted. Close other windows or wait until it is idle.", LocaleZH: "不能删除活跃会话。请先关闭其他窗口，或等待运行结束。"},
 		"tui.sessions.delete_failed":         {LocaleEN: "Delete failed: {}", LocaleZH: "删除失败：{}"},
+		"tui.session.attach_failed":          {LocaleEN: "Failed to open session: {}", LocaleZH: "打开会话失败：{}"},
 		"tui.sessions.delete_confirm_title":  {LocaleEN: "Delete this session?", LocaleZH: "删除这个会话？"},
 		"tui.sessions.delete_confirm_help":   {LocaleEN: "Enter delete · Esc cancel", LocaleZH: "Enter 删除 · Esc 取消"},
 		"tui.memory.clear_item":              {LocaleEN: "Clear all memories...", LocaleZH: "清空所有记忆..."},

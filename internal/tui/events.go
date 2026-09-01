@@ -52,6 +52,13 @@ type sessionListResultMsg struct{ Params protocol.SessionListResult }
 type sessionErrorMsg struct{ Message string }
 type sessionSnapshotResultMsg struct{ Params protocol.SessionSnapshot }
 
+// sessionAttachErrorMsg 表示 session.attach RPC 失败；由 TUI 按当前页面决定反馈方式，
+// 避免错误被写进不可见页面（Welcome Resume/Join 已先切 Chat 并清空 transcript）。
+type sessionAttachErrorMsg struct {
+	SessionID string
+	Message   string
+}
+
 // newSessionResultMsg 保留新会话快照；旧会话删除失败时仍必须切换到已创建的新会话。
 type newSessionResultMsg struct {
 	Params    protocol.SessionSnapshot
@@ -289,6 +296,11 @@ func steeringMessageText(message protocol.SteeringMessage) string {
 }
 
 func (t *TUI) handleAgentDeltaNotification(p protocol.AgentDeltaParams) {
+	// attach 快照与在途 delta 无顺序保障：快照应用前到达的其它会话 delta 必须丢弃，
+	// 否则会被 applySessionSnapshot 的 Messages=nil 重建抹掉或混入未附着状态。
+	if p.SessionID != "" && t.currentSession.ID != "" && p.SessionID != t.currentSession.ID {
+		return
+	}
 	t.chat.Compacting = false
 	t.compactStartedAt = time.Time{}
 	t.chat.ResumeAvailable = false
@@ -333,6 +345,10 @@ func userMessageContentFromParts(parts []protocol.MessagePart) (string, []attach
 }
 
 func (t *TUI) handleUsageNotification(p protocol.UsageParams) {
+	// 其它会话的 token 统计不能污染本页上下文窗口显示。
+	if p.SessionID != "" && t.currentSession.ID != "" && p.SessionID != t.currentSession.ID {
+		return
+	}
 	t.hasUsage = true
 	t.lastInputTok = p.InputTokens
 	t.lastOutputTok = p.OutputTokens
@@ -428,6 +444,10 @@ func (t *TUI) handleInteractionResolvedNotification(p protocol.InteractionResolv
 }
 
 func (t *TUI) handleToolStartNotification(p protocol.ToolStartParams) {
+	// 其它会话的工具事件不进入本页 transcript（attach 在途窗口期可能串扰）。
+	if p.SessionID != "" && t.currentSession.ID != "" && p.SessionID != t.currentSession.ID {
+		return
+	}
 	t.runHadToolCall = true
 	t.finishStreamingMessages()
 	t.chat.Compacting = false
@@ -450,6 +470,10 @@ func (t *TUI) handleToolGuardNotification(p protocol.ToolGuardParams) {
 }
 
 func (t *TUI) handleToolEndNotification(p protocol.ToolEndParams) {
+	// 与 tool.start 对称：其它会话的工具结束事件同样丢弃。
+	if p.SessionID != "" && t.currentSession.ID != "" && p.SessionID != t.currentSession.ID {
+		return
+	}
 	id := p.ID
 	if id == "" {
 		id = fmt.Sprintf("%s_%d", p.Tool, time.Now().UnixNano())
@@ -536,6 +560,25 @@ func (t *TUI) handleMemoryListNotification(p protocol.MemoryListResult) {
 			t.appendNonToolMessage(chatMsg{Role: "panel", Content: t.renderMemoryList(p.Memories)})
 		}
 	}
+}
+
+// handleSessionAttachError 处理 session.attach RPC 失败：Welcome Resume/Join 路径
+// 已先切 Chat 并清空 transcript，失败时不能留在白屏 Chat 页零反馈。
+// - 尚未真正附着会话（currentSession 为空）：退回 Welcome 并提示。
+// - overlay 内 join 失败（已有附着会话）：在 transcript 写错误消息，会话状态不变。
+func (t *TUI) handleSessionAttachError(m sessionAttachErrorMsg) {
+	message := t.i18n.Tf("tui.session.attach_failed", m.Message)
+	if t.currentSession.ID == "" {
+		if t.mode == uipage.Chat {
+			t.mode = uipage.Welcome
+			t.initWelcomeList()
+		}
+		t.chat.SessionsError = message
+		t.chat.SessionsLoading = false
+		return
+	}
+	t.appendNonToolMessage(chatMsg{Role: "error", Content: message})
+	_ = t.syncInputFocus()
 }
 
 func (t *TUI) handleSessionStateNotification(p protocol.SessionStateParams) {

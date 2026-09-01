@@ -152,6 +152,78 @@ func TestWelcomeDropsLateChatRuntimeNotifications(t *testing.T) {
 	}
 }
 
+func TestForeignSessionRuntimeNotificationsAreDropped(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat}
+	tui.initChatComponents()
+	tui.currentSession = protocol.SessionInfo{ID: "session-a"}
+
+	// attach 快照与在途事件无顺序保障：其它会话的流事件必须被丢弃，
+	// 否则会被 applySessionSnapshot 的 Messages=nil 重建抹掉或污染本页。
+	tui.handleNotificationMsg(agentDeltaMsg{Params: protocol.AgentDeltaParams{SessionID: "session-b", Content: "foreign delta"}})
+	tui.handleNotificationMsg(agentRunMsg{Params: protocol.AgentRunParams{SessionID: "session-b", RunID: "run-b", State: protocol.AgentRunRunning}})
+	tui.handleNotificationMsg(toolStartMsg{Params: protocol.ToolStartParams{SessionID: "session-b", ID: "tool-foreign", Tool: "exec"}})
+	tui.handleNotificationMsg(toolEndMsg{Params: protocol.ToolEndParams{SessionID: "session-b", ID: "tool-foreign", Tool: "exec"}})
+	tui.handleNotificationMsg(usageMsg{Params: protocol.UsageParams{SessionID: "session-b", OutputTokens: 99}})
+
+	if len(tui.chat.Messages) != 0 {
+		t.Fatalf("messages = %d, want foreign session delta dropped", len(tui.chat.Messages))
+	}
+	if len(tui.chat.ActiveTools) != 0 {
+		t.Fatalf("active tools = %d, want foreign tool events dropped", len(tui.chat.ActiveTools))
+	}
+	if tui.activeRunID != "" {
+		t.Fatalf("activeRunID = %q, want foreign run lifecycle ignored", tui.activeRunID)
+	}
+	if tui.hasUsage {
+		t.Fatal("hasUsage = true, want foreign usage dropped")
+	}
+
+	// 本会话事件不受过滤影响。
+	tui.handleNotificationMsg(agentDeltaMsg{Params: protocol.AgentDeltaParams{SessionID: "session-a", Content: "own delta"}})
+	if len(tui.chat.Messages) == 0 {
+		t.Fatal("own session delta was dropped, want appended")
+	}
+}
+
+func TestSessionAttachErrorShowsFeedbackNotBlankChat(t *testing.T) {
+	t.Run("welcome resume failure returns to welcome with error", func(t *testing.T) {
+		tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, width: 80, height: 24}
+		tui.initChatComponents()
+		// Welcome Resume 路径已先切 Chat 并清空 transcript，尚未附着任何会话。
+		tui.handleProtocolResultMsg(sessionAttachErrorMsg{SessionID: "gone", Message: "session is no longer active"})
+
+		if tui.mode != uipage.Welcome {
+			t.Fatalf("mode = %q, want welcome after attach failure without attached session", tui.mode)
+		}
+		if tui.chat.SessionsError == "" {
+			t.Fatal("SessionsError empty, want attach failure feedback")
+		}
+	})
+
+	t.Run("overlay join failure keeps chat and shows error", func(t *testing.T) {
+		tui := &TUI{i18n: newTranslator(LocaleZH), mode: uipage.Chat, width: 80, height: 24}
+		tui.initChatComponents()
+		tui.currentSession = protocol.SessionInfo{ID: "session-a"}
+		tui.handleProtocolResultMsg(sessionAttachErrorMsg{SessionID: "session-b", Message: "session is no longer active"})
+
+		if tui.mode != uipage.Chat {
+			t.Fatalf("mode = %q, want chat preserved after overlay join failure", tui.mode)
+		}
+		if tui.currentSession.ID != "session-a" {
+			t.Fatalf("current session = %q, want unchanged", tui.currentSession.ID)
+		}
+		found := false
+		for _, msg := range tui.chat.Messages {
+			if msg.Role == "error" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("no error message appended, want attach failure visible in transcript")
+		}
+	})
+}
+
 func TestThinkingBoxCollapsedShowsAdaptivePreviewAndStopsElapsed(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100}
 	started := time.Now().Add(-2 * time.Second)

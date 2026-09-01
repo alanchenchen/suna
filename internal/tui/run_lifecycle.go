@@ -11,6 +11,10 @@ import (
 )
 
 func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
+	// 其它会话的 run lifecycle 不能影响本页 Composer 状态（attach 在途窗口期可能串扰）。
+	if p.SessionID != "" && t.currentSession.ID != "" && p.SessionID != t.currentSession.ID {
+		return
+	}
 	if p.RunID != "" && p.RunID == t.completedRunID {
 		return
 	}

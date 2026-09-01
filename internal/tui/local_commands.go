@@ -222,11 +222,13 @@ func (t *TUI) newSessionCmd(replaceSessionIDs ...string) tea.Cmd {
 func (t *TUI) attachSessionCmd(sessionID string, requireActive bool) tea.Cmd {
 	return func() tea.Msg {
 		if t.localCli == nil {
-			return ipcErrorNotification(notifyConfigError, fmt.Errorf("%s", t.tr("error.not_connected")))
+			return sessionAttachErrorMsg{SessionID: sessionID, Message: t.tr("error.not_connected")}
 		}
 		result, err := t.localCli.AttachSession(sessionID, requireActive)
 		if err != nil {
-			return ipcErrorNotification(notifyConfigError, err)
+			// attach 失败必须用专用结果消息：Welcome 路径已先切到 Chat 并清空 transcript，
+			// 走 ipcErrorNotification 会把错误写进 Config 页字段，Chat 页零反馈变白屏。
+			return sessionAttachErrorMsg{SessionID: sessionID, Message: err.Error()}
 		}
 		return sessionSnapshotResultMsg{Params: result}
 	}
