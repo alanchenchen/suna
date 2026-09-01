@@ -17,6 +17,13 @@ func (m *Model) OpenModelPicker(rows []ModelPickerRow, activeRef string) {
 	m.ModelList.SelectKey(activeRef)
 }
 
+// SetModelPickerModels 刷新浮层模型列表，保留当前过滤输入状态。
+// 异步拉取结果到达时使用：用户可能已在浮层内输入过滤文本，
+// Reset 会清掉输入，SetItems 则保留 Filtering 状态。
+func (m *Model) SetModelPickerModels(rows []ModelPickerRow) {
+	m.ModelList.SetItems(modelItems(rows))
+}
+
 func (m *Model) CloseModelPicker() { m.ModelPickerOpen = false }
 
 func (m *Model) UpdateModelPicker(msg tea.Msg) tea.Cmd { return m.UpdateModelList(msg) }

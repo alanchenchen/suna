@@ -251,6 +251,15 @@ func (c *Client) ConfigSet(params protocol.ConfigSetParams) (protocol.ConfigPara
 	return result, c.Invoke(ctx, protocol.MethodConfigSet, params, &result)
 }
 
+// DiscoverModels 请求 daemon 拉取指定 provider 的模型列表；同步响应只表示已受理，
+// 结果通过 config.models_result 通知异步回传。
+func (c *Client) DiscoverModels(provider string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout(protocol.MethodConfigDiscoverModels))
+	defer cancel()
+	var result protocol.ConfigDiscoverModelsResult
+	return c.Invoke(ctx, protocol.MethodConfigDiscoverModels, protocol.ConfigDiscoverModelsParams{Provider: provider}, &result)
+}
+
 func (c *Client) AttachmentStatus() (protocol.AttachmentStatusResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout(protocol.MethodAttachmentStatus))
 	defer cancel()

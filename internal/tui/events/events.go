@@ -46,6 +46,9 @@ type CompactResultMsg struct{ Params protocol.CompactResult }
 type MemoryListMsg struct{ Params protocol.MemoryListResult }
 type DaemonFullStatusMsg struct{ Params protocol.DaemonStatusParams }
 type ConfigStateMsg struct{ Params protocol.ConfigParams }
+type ConfigModelsResultMsg struct {
+	Params protocol.ConfigModelsResultParams
+}
 type SkillListMsg struct{ Params protocol.SkillListResult }
 type MCPListMsg struct{ Params protocol.MCPListResult }
 type MCPUpdatedMsg struct{ Params protocol.MCPUpdatedParams }
@@ -77,6 +80,7 @@ func (CompactResultMsg) isNotificationMsg()       {}
 func (MemoryListMsg) isNotificationMsg()          {}
 func (DaemonFullStatusMsg) isNotificationMsg()    {}
 func (ConfigStateMsg) isNotificationMsg()         {}
+func (ConfigModelsResultMsg) isNotificationMsg()  {}
 func (SkillListMsg) isNotificationMsg()           {}
 func (MCPListMsg) isNotificationMsg()             {}
 func (MCPUpdatedMsg) isNotificationMsg()          {}
@@ -130,6 +134,8 @@ func Decode(notif Notification) tea.Msg {
 		return decodeParams[protocol.DaemonStatusParams](notif, func(p protocol.DaemonStatusParams) tea.Msg { return DaemonFullStatusMsg{Params: p} })
 	case protocol.NotifyConfigState:
 		return decodeParams[protocol.ConfigParams](notif, func(p protocol.ConfigParams) tea.Msg { return ConfigStateMsg{Params: p} })
+	case protocol.NotifyConfigModelsResult:
+		return decodeParams[protocol.ConfigModelsResultParams](notif, func(p protocol.ConfigModelsResultParams) tea.Msg { return ConfigModelsResultMsg{Params: p} })
 	case protocol.NotifySkillLoad:
 		return decodeParams[protocol.SkillLoadParams](notif, func(p protocol.SkillLoadParams) tea.Msg { return SkillLoadMsg{Params: p} })
 	case protocol.NotifySkillReview:

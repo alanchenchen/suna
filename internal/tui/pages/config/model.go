@@ -12,6 +12,7 @@ import (
 
 type Model struct {
 	Cursor          int
+	Scroll          int
 	SetupMode       bool
 	FormOpen        bool
 	WorkspaceOpen   bool
@@ -80,6 +81,8 @@ type ModelConfig struct {
 	SubtaskFor      []string
 	Reasoning       map[string]any
 	HasAPIKey       bool
+	// APIKeyHint 是 daemon 返回的脱敏 key 提示（如 sk-••••abcd），只用于展示。
+	APIKeyHint string
 }
 
 func (m ModelConfig) Ref() string { return m.Provider + "/" + m.Model }

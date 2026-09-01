@@ -32,6 +32,7 @@ type compactResultMsg = tuievents.CompactResultMsg
 type memoryListMsg = tuievents.MemoryListMsg
 type daemonFullStatusMsg = tuievents.DaemonFullStatusMsg
 type configStateMsg = tuievents.ConfigStateMsg
+type configModelsResultMsg = tuievents.ConfigModelsResultMsg
 type skillListMsg = tuievents.SkillListMsg
 type mcpListMsg = tuievents.MCPListMsg
 type mcpUpdatedMsg = tuievents.MCPUpdatedMsg
@@ -138,6 +139,8 @@ func (t *TUI) handleNotificationMsg(msg notificationMsg) {
 		t.handleDaemonFullStatusNotification(m.Params)
 	case configStateMsg:
 		t.handleConfigStateNotification(m.Params)
+	case configModelsResultMsg:
+		t.handleConfigModelsResultNotification(m.Params)
 	case skillListMsg:
 		t.handleSkillListNotification(m.Params)
 	case mcpListMsg:
@@ -739,6 +742,40 @@ func (t *TUI) handleConfigStateNotification(p protocol.ConfigParams) {
 	}
 }
 
+// handleConfigModelsResultNotification 处理模型列表拉取的异步结果：
+// 无论浮层是否仍打开都写入缓存（用户下次打开直接命中）；
+// 浮层打开时才刷新候选，并保留用户正在输入的筛选文本。
+func (t *TUI) handleConfigModelsResultNotification(p protocol.ConfigModelsResultParams) {
+	// 只处理当前浮层对应 provider 的结果；跨 provider 的陈旧结果
+	// （快速切换 provider 时迟到）不能提前灭掉加载指示或错误提示。
+	if t.modelPickerProvider != p.Provider {
+		// 仍写入缓存：结果本身有效，下次打开同 provider 直接命中。
+		if p.ErrorMessage == "" {
+			if t.modelsCache == nil {
+				t.modelsCache = map[string][]string{}
+			}
+			t.modelsCache[p.Provider] = p.Models
+		}
+		return
+	}
+	t.modelPickerLoading = false
+	if p.ErrorMessage != "" {
+		t.modelPickerError = p.ErrorMessage
+		return
+	}
+	if t.modelsCache == nil {
+		t.modelsCache = map[string][]string{}
+	}
+	t.modelsCache[p.Provider] = p.Models
+	if !t.modelPickerOpen {
+		// 浮层已关闭：只写缓存，不刷新候选。
+		return
+	}
+	t.modelPickerError = ""
+	// 只刷新候选，保留用户正在输入的筛选文本。
+	t.modelCombobox.SetItems(p.Models)
+}
+
 func (t *TUI) afterConfigFormSaved() {
 	if !t.config.FormOpen {
 		return
@@ -753,6 +790,8 @@ func (t *TUI) afterConfigFormSaved() {
 	t.config.FormOpen = false
 	t.config.WorkspaceOpen = false
 	t.config.EditingName = ""
+	// 表单覆盖在列表之上，关闭后 rows 集合重新渲染，残留 Scroll 会裁掉首个 provider。
+	t.config.Scroll = 0
 	if wasWorkspace {
 		t.config.Page = "home"
 	} else if editingRef != "" {
@@ -815,6 +854,13 @@ func (t *TUI) handleRequestErrorNotification(p requestErrorMsg) {
 	}
 	if p.Scope == notifyMCPError {
 		t.chat.SetMCPError(p.Message)
+		return
+	}
+	// 模型选择浮层正在等待拉取结果时，请求级错误（未连接、超时等）直接展示在
+	// 浮层内并清除加载态；否则会写到浮层背后的表单上，加载指示永远卡住。
+	if t.modelPickerOpen && t.modelPickerLoading {
+		t.modelPickerLoading = false
+		t.modelPickerError = p.Message
 		return
 	}
 	t.pendingConfigNotice = ""

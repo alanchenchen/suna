@@ -425,6 +425,26 @@ type ConfigSetParams struct {
 	Workspace    *string     `json:"workspace,omitempty"`
 }
 
+// ConfigDiscoverModelsParams 请求拉取指定 provider 的可用模型列表。
+// 只传 provider：key 按 provider 存储，base_url/protocol 同 provider 一致。
+type ConfigDiscoverModelsParams struct {
+	Provider string `json:"provider"`
+}
+
+// ConfigDiscoverModelsResult 是 discoverModels 的同步响应；实际拉取异步进行，
+// 结果通过 NotifyConfigModelsResult 通知回传，避免阻塞连接循环。
+type ConfigDiscoverModelsResult struct {
+	Status string `json:"status"`
+}
+
+// ConfigModelsResultParams 是模型列表拉取的异步结果通知。
+// 只返回模型 ID，不返回 API Key；错误信息已脱敏。
+type ConfigModelsResultParams struct {
+	Provider     string   `json:"provider"`
+	Models       []string `json:"models,omitempty"`
+	ErrorMessage string   `json:"error_message,omitempty"`
+}
+
 type MemoryStats struct {
 	Active int `json:"active"`
 	Core   int `json:"core"`

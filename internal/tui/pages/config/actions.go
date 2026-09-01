@@ -6,6 +6,8 @@ func (m *Model) OpenDetail(ref string, defaultCursor int) {
 	m.DetailRef = ref
 	m.Page = "detail"
 	m.Cursor = defaultCursor
+	// models → detail 的 rows 集合不同，残留 Scroll 会把详情页顶部裁掉。
+	m.Scroll = 0
 }
 
 // ReturnToModels 在详情 ref 失效或删除后回到模型列表。
@@ -13,6 +15,7 @@ func (m *Model) ReturnToModels(cursor int) {
 	m.Page = "models"
 	m.DetailRef = ""
 	m.Cursor = cursor
+	m.Scroll = 0
 }
 
 func (m *Model) BeginDelete(ref string) {

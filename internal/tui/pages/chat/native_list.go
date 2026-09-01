@@ -60,6 +60,8 @@ type ListText struct {
 	Tools        string
 	Up           string
 	Down         string
+	PrevPage     string
+	NextPage     string
 	FilterHelp   string
 	ClearFilter  string
 	Cancel       string
@@ -228,6 +230,8 @@ func (m *Model) InitNativeLists(dark bool, styles ListStyles, text ListText) {
 		listModel.SetShowPagination(false)
 		listModel.SetShowHelp(false)
 		listModel.KeyMap = nativeListKeyMap(text)
+		// 列表项多于一页时允许循环滚动：顶部继续上翻回到末尾，底部继续下翻回到开头。
+		listModel.InfiniteScrolling = true
 		// KeyMap 会覆盖 New 时禁用的默认退出键，必须再次禁用，避免 q 退出整个 TUI。
 		listModel.DisableQuitKeybindings()
 		listModel.Styles = nativeListStyles(dark, styles)
@@ -258,8 +262,8 @@ func nativeListKeyMap(text ListText) list.KeyMap {
 	return list.KeyMap{
 		CursorUp:             key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", text.Up)),
 		CursorDown:           key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", text.Down)),
-		PrevPage:             key.NewBinding(),
-		NextPage:             key.NewBinding(),
+		PrevPage:             key.NewBinding(key.WithKeys("pgup"), key.WithHelp("pgup", text.PrevPage)),
+		NextPage:             key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdown", text.NextPage)),
 		GoToStart:            key.NewBinding(),
 		GoToEnd:              key.NewBinding(),
 		Filter:               key.NewBinding(key.WithKeys("/"), key.WithHelp("/", text.FilterHelp)),

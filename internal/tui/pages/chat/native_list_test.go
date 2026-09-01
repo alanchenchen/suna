@@ -146,9 +146,15 @@ func TestNativeListKeyMapUsesArrowNavigationOnly(t *testing.T) {
 	if got, want := strings.Join(keys.CursorDown.Keys(), ","), "down"; got != want {
 		t.Fatalf("CursorDown keys = %q, want %q", got, want)
 	}
+	if got, want := strings.Join(keys.PrevPage.Keys(), ","), "pgup"; got != want {
+		t.Fatalf("PrevPage keys = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(keys.NextPage.Keys(), ","), "pgdown"; got != want {
+		t.Fatalf("NextPage keys = %q, want %q", got, want)
+	}
 	for name, binding := range map[string]key.Binding{
-		"PrevPage": keys.PrevPage, "NextPage": keys.NextPage, "GoToStart": keys.GoToStart,
-		"GoToEnd": keys.GoToEnd, "ShowFullHelp": keys.ShowFullHelp, "CloseFullHelp": keys.CloseFullHelp,
+		"GoToStart": keys.GoToStart,
+		"GoToEnd":   keys.GoToEnd, "ShowFullHelp": keys.ShowFullHelp, "CloseFullHelp": keys.CloseFullHelp,
 	} {
 		if binding.Enabled() {
 			t.Fatalf("%s must be disabled", name)

@@ -108,6 +108,7 @@ TCP client 连接后，第一条 request 必须是 `runtime.hello`。请求只�
 | `session.usage` | 查询用量摘要。 |
 | `config.get` | 读取配置。 |
 | `config.set` | 更新配置。 |
+| `config.discoverModels` | 用指定 provider 已保存的凭据拉取可用模型列表；只返回模型 ID，不返回 API Key。 |
 | `daemon.status` | 查询 Runtime 状态、当前模型、连接数和可选详细统计。 |
 | `memory.list` / `memory.delete` / `memory.clear` | 查询、删除或清空 memory。 |
 | `skill.list` / `skill.set` | 查询、启用或禁用 Skill。 |
@@ -163,6 +164,10 @@ daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 
 Feature 名称一经公开，其语义保持不变。新增能力增加新的稳定名称，不为普通增量功能维护重复的代际编号。
 
 `config.set` 的 `upsert_model` 使用字段 presence 更新已有模型：`model` 中缺失的可选字段保持原值，显式值才会覆盖。`auth_mode="default"` 恢复协议默认；`strengths=[]`、`subtask_for=[]` 和 `reasoning={}` 分别显式清空对应配置。创建新模型时，必填字段仍按现有规则校验，缺失的可选字段使用 Runtime 默认值。客户端不应为了修改单个字段而回写自己不理解的默认值。
+
+`config.get` 返回的每个模型条目包含 `has_api_key` 和 `api_key_hint`；`api_key_hint` 是脱敏提示（如 `sk-••••abcd`），只用于展示，不是可用凭据，客户端不得回写。
+
+`config.discoverModels` 是异步拉取：请求只传 `provider`，同步响应 `{"status":"processing"}` 表示已受理；结果通过 `config.models_result` 通知回传 `{provider, models, error_message}`。模型列表由 SDK 按协议拼接路径（OpenAI: `{base_url}/models`，Anthropic: `{base_url}/v1/models`），与模型请求的 base_url 语义一致。错误信息已脱敏，不包含 API Key。
 
 ---
 

@@ -53,6 +53,8 @@ func (t *TUI) nativeListText() chatpage.ListText {
 		Tools:        t.tr("tui.list.tools"),
 		Up:           t.tr("tui.list.key.up"),
 		Down:         t.tr("tui.list.key.down"),
+		PrevPage:     t.tr("tui.list.key.prev_page"),
+		NextPage:     t.tr("tui.list.key.next_page"),
 		FilterHelp:   t.tr("tui.list.key.filter"),
 		ClearFilter:  t.tr("tui.list.key.clear_filter"),
 		Cancel:       t.tr("tui.list.key.cancel"),

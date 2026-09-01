@@ -171,6 +171,11 @@ func (m *Model) MoveCursor(delta int) {
 	}
 }
 
+// PageUp/PageDown 在实时筛选时翻页。Bubbles 在 Filtering 态会禁用翻页键，
+// 但浮层打开即进入 Filtering 态，需要手动翻页浏览匹配项。
+func (m *Model) PageUp()   { m.list.PrevPage() }
+func (m *Model) PageDown() { m.list.NextPage() }
+
 // PageItem 是当前 Bubbles 分页中的一项。分页、筛选、游标仍完全由 list.Model
 // 持有；调用方只接管可见布局，不能再维护第二套滚动状态。
 type PageItem struct {

@@ -9,6 +9,8 @@ import (
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 	welcomepage "github.com/alanchenchen/suna/internal/tui/pages/welcome"
 
+	"github.com/alanchenchen/suna/internal/tui/components/combobox"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/alanchenchen/suna/internal/protocol"
@@ -92,6 +94,21 @@ type TUI struct {
 	config tuiconfig.Model
 	// 等待 daemon 确认配置写入后展示的一次性配置提示，避免保存失败时提前提示。
 	pendingConfigNotice string
+	// modelPickerProvider 记录模型选择浮层正在拉取列表的 provider；
+	// 收到 config.models_result 通知时按 provider 匹配，避免跨 provider 误填充。
+	modelPickerProvider string
+	// modelPickerOpen 表示 provider 表单的模型选择浮层是否打开。
+	// 独立于 chat 页的 ModelPickerOpen（chat 页浮层仍是 Bubbles list）。
+	modelPickerOpen bool
+	// modelPickerLoading 表示模型选择浮层正在等待 daemon 拉取列表。
+	modelPickerLoading bool
+	// modelPickerError 是模型列表拉取失败的错误提示，展示在浮层内。
+	modelPickerError string
+	// modelCombobox 是 provider 表单 model 字段的同步选择器：输入即过滤，
+	// 无异步消息链路；候选为空时输入值即自定义模型名。
+	modelCombobox combobox.Model
+	// modelsCache 缓存 provider 的模型列表，避免同一 provider 重复拉取。
+	modelsCache map[string][]string
 
 	// Help overlay 状态。
 	showHelp bool

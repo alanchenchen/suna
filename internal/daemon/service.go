@@ -194,6 +194,8 @@ func (s *service) Handle(ctx context.Context, req protocol.Request, sink protoco
 		return configToParams(s.daemon.agent.Config()), nil
 	case protocol.MethodConfigSet:
 		return s.handleConfigSet(ctx, req, sink)
+	case protocol.MethodConfigDiscoverModels:
+		return s.handleConfigDiscoverModels(ctx, req, sink)
 	case protocol.MethodDaemonStop:
 		go func() {
 			time.Sleep(100 * time.Millisecond)
@@ -889,7 +891,7 @@ func periodFromSummary(sum *memory.UsageSummary) protocol.UsagePeriod {
 func configToParams(cfg *config.Config) protocol.ConfigParams {
 	out := protocol.ConfigParams{ActiveModel: cfg.ActiveModel, Locale: cfg.UI.Locale, Theme: cfg.UI.Theme, GuardMode: cfg.Guard.ModeOrDefault(), Workspace: cfg.Guard.Workspace}
 	for _, mc := range cfg.Models {
-		out.Models = append(out.Models, protocol.ConfigModel{Provider: mc.Provider, Protocol: string(mc.ProtocolOrDefault()), AuthMode: string(mc.AuthMode), Model: mc.Model, BaseURL: mc.BaseURL, ContextWindow: mc.ContextWindow, MaxOutputTokens: mc.MaxOutputTokens, Strengths: mc.Strengths, SubtaskFor: mc.SubtaskFor, Reasoning: mc.Reasoning, HasAPIKey: mc.APIKey != ""})
+		out.Models = append(out.Models, protocol.ConfigModel{Provider: mc.Provider, Protocol: string(mc.ProtocolOrDefault()), AuthMode: string(mc.AuthMode), Model: mc.Model, BaseURL: mc.BaseURL, ContextWindow: mc.ContextWindow, MaxOutputTokens: mc.MaxOutputTokens, Strengths: mc.Strengths, SubtaskFor: mc.SubtaskFor, Reasoning: mc.Reasoning, HasAPIKey: mc.APIKey != "", APIKeyHint: mc.APIKeyHint()})
 	}
 	return out
 }

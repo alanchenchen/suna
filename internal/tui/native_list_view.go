@@ -74,6 +74,10 @@ func (t *TUI) nativeListFooter(model overlaylist.Model, action string, actionabl
 	text := t.nativeListText()
 	canAct := len(actionable) == 0 || actionable[0]
 	parts := []string{styleCursor.Render("↑↓") + " " + styleDim.Render(t.tr("tui.list.key.move"))}
+	// 多于一页时提示翻页键；单页列表不显示，避免噪音。
+	if model.List().Paginator.TotalPages > 1 {
+		parts = append(parts, styleCursor.Render("PgUp/PgDn")+" "+styleDim.Render(t.tr("tui.list.key.page")))
+	}
 	if model.Filtering() {
 		if canAct {
 			parts = append(parts, styleCursor.Render("Enter")+" "+styleDim.Render(action))

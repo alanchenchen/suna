@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
@@ -8,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	coreconfig "github.com/alanchenchen/suna/internal/config"
+	"github.com/alanchenchen/suna/internal/tui/components/combobox"
 	"github.com/alanchenchen/suna/internal/tui/components/selection"
 	tuiconfig "github.com/alanchenchen/suna/internal/tui/pages/config"
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
@@ -51,6 +53,11 @@ func (t *TUI) updateProviderForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return t, nil
 		case "enter":
+			// model 字段 enter 打开模型选择浮层：用户在浮层内选择或输入；
+			// 其他字段 enter 保持原有导航语义。
+			if t.config.InputFocus == tuiconfig.ProviderFormModelIndex {
+				return t, t.openModelPickerForForm()
+			}
 			if t.config.InputFocus == len(t.config.Inputs)-1 {
 				return t, t.saveProviderForm()
 			}
@@ -70,7 +77,8 @@ func (t *TUI) updateProviderForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, nil
 		}
 	}
-	if t.config.InputFocus == tuiconfig.ProviderFormProtocolIndex || t.config.InputFocus == tuiconfig.ProviderFormAuthModeIndex {
+	if t.config.InputFocus == tuiconfig.ProviderFormProtocolIndex || t.config.InputFocus == tuiconfig.ProviderFormAuthModeIndex || t.config.InputFocus == tuiconfig.ProviderFormModelIndex {
+		// 选择行（protocol/auth_mode/model）不接收字符输入；model 的 enter 已在上方处理。
 		return t, nil
 	}
 	var cmd tea.Cmd
@@ -151,7 +159,7 @@ func (t *TUI) focusConfigInputWithDelta(idx, delta int) tea.Cmd {
 	var cmds []tea.Cmd
 	for i := range t.config.Inputs {
 		if i == t.config.InputFocus {
-			if i != tuiconfig.ProviderFormProtocolIndex && i != tuiconfig.ProviderFormAuthModeIndex {
+			if i != tuiconfig.ProviderFormProtocolIndex && i != tuiconfig.ProviderFormAuthModeIndex && i != tuiconfig.ProviderFormModelIndex {
 				cmds = append(cmds, t.config.Inputs[i].Focus())
 			}
 		} else {
@@ -472,6 +480,131 @@ func (t *TUI) matchReasoningLabel(mc tuiconfig.ModelConfig) (string, bool) {
 
 func sameJSON(a, b map[string]any) bool {
 	return tuiconfig.SameJSON(a, b)
+}
+
+// openModelPickerForForm 在模型表单的 model 字段 enter 时打开同步选择浮层：
+// 缓存命中直接填充候选；未命中则异步拉取（daemon 不阻塞连接循环），
+// 结果通过 config.models_result 通知回填。选择器输入即过滤；
+// 拉取失败或列表为空时，输入值直接作为自定义模型名。
+func (t *TUI) openModelPickerForForm() tea.Cmd {
+	if len(t.config.Inputs) <= tuiconfig.ProviderFormModelIndex {
+		return nil
+	}
+	provider := strings.TrimSpace(t.config.Inputs[tuiconfig.ProviderFormProviderIndex].Value())
+	if provider == "" {
+		t.config.Error = t.tr("tui.config.provider.required")
+		return nil
+	}
+	// 同步选择器：输入框即筛选框，无异步过滤链路；每次打开重置为空输入。
+	t.modelCombobox = combobox.New(t.tr("tui.config.picker.placeholder"))
+	t.modelCombobox.SetPrompt(t.tr("tui.config.picker.filter") + " ")
+	t.modelCombobox.SetEmptyHint(t.tr("tui.config.provider.models_empty"))
+	t.modelCombobox.SetSize(min(max(36, t.width-16), 60), 8)
+	t.modelCombobox.SetCurrent(strings.TrimSpace(t.config.Inputs[tuiconfig.ProviderFormModelIndex].Value()))
+	// 不 Blur chat 输入框：浮层打开时 mode 是 Config，按键不会到达 chat 输入框；
+	// Blur 会在回到 chat 后留下失焦状态，表现为输入框无法输入。
+	t.modelPickerOpen = true
+	t.modelPickerProvider = provider
+	t.modelPickerError = ""
+	if models, ok := t.modelsCache[provider]; ok {
+		t.modelPickerLoading = false
+		t.modelCombobox.SetItems(models)
+		return t.modelCombobox.Focus()
+	}
+	t.modelPickerLoading = true
+	return tea.Batch(t.modelCombobox.Focus(), func() tea.Msg {
+		if t.localCli == nil {
+			return ipcErrorNotification(notifyConfigError, fmt.Errorf("%s", t.tr("error.not_connected")))
+		}
+		if err := t.localCli.DiscoverModels(provider); err != nil {
+			return ipcErrorNotification(notifyConfigError, err)
+		}
+		return nil
+	})
+}
+
+// updateProviderModelPicker 处理 Config 页模型选择浮层的按键与滚轮。
+// 浮层是同步选择器：输入即过滤，enter 确认光标所在候选（无输入时）
+// 或输入值（自定义名）；esc 直接关闭。滚轮逐行移动光标。
+func (t *TUI) updateProviderModelPicker(key string, msg tea.Msg) (tea.Model, tea.Cmd) {
+	// 窗口尺寸更新必须继续生效：浮层渲染宽度依赖 t.width。
+	if ws, ok := msg.(tea.WindowSizeMsg); ok {
+		t.width, t.height = ws.Width, ws.Height
+		return t, nil
+	}
+	// 滚轮：候选行逐行滚动，不循环。
+	if mm, ok := any(msg).(tea.MouseWheelMsg); ok {
+		switch mm.Mouse().Button {
+		case tea.MouseWheelUp:
+			t.modelCombobox.MoveCursor(-1)
+		case tea.MouseWheelDown:
+			t.modelCombobox.MoveCursor(1)
+		}
+		return t, nil
+	}
+	switch key {
+	case "ctrl+c":
+		t.doQuit()
+		return t, tea.Quit
+	case "up", "ctrl+p":
+		t.modelCombobox.MoveCursor(-1)
+		return t, nil
+	case "down", "ctrl+n":
+		t.modelCombobox.MoveCursor(1)
+		return t, nil
+	case "pgup":
+		t.modelCombobox.PageUp()
+		return t, nil
+	case "pgdown":
+		t.modelCombobox.PageDown()
+		return t, nil
+	case "enter":
+		return t, t.applyProviderPickerSelection()
+	case "esc":
+		return t, t.closeProviderPicker()
+	}
+	// 其余按键（字符、退格、粘贴等）转给输入框，过滤结果同步重算。
+	return t, t.modelCombobox.UpdateInput(msg)
+}
+
+// applyProviderPickerSelection 确认选择。规则与主流 combobox 一致：
+//   - 能筛出候选：enter 选高亮项（筛选是选择手段，不是输入目的）；
+//   - 筛不出候选（拉取失败、列表外自定义名）：enter 选输入值。
+//
+// 输入值无条件优先会让“筛选后 enter”拿到筛选词而不是高亮候选。
+func (t *TUI) applyProviderPickerSelection() tea.Cmd {
+	if name, ok := t.modelCombobox.Selected(); ok {
+		return t.applyProviderPickerModel(name)
+	}
+	if value := t.modelCombobox.InputValue(); value != "" {
+		return t.applyProviderPickerModel(value)
+	}
+	return nil
+}
+
+// closeProviderPicker 关闭模型选择浮层并聚焦表单 model 字段。
+func (t *TUI) closeProviderPicker() tea.Cmd {
+	t.modelPickerOpen = false
+	t.modelPickerProvider = ""
+	t.modelPickerLoading = false
+	t.modelPickerError = ""
+	return t.focusConfigInput(tuiconfig.ProviderFormModelIndex)
+}
+
+// applyProviderPickerModel 用选中的模型名填充表单 model 字段并关闭浮层。
+func (t *TUI) applyProviderPickerModel(model string) tea.Cmd {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return nil
+	}
+	if len(t.config.Inputs) > tuiconfig.ProviderFormModelIndex {
+		t.config.Inputs[tuiconfig.ProviderFormModelIndex].SetValue(model)
+	}
+	t.modelPickerOpen = false
+	t.modelPickerProvider = ""
+	t.modelPickerLoading = false
+	t.modelPickerError = ""
+	return t.focusConfigInput(tuiconfig.ProviderFormModelIndex)
 }
 
 func (t *TUI) cycleProviderProtocol(delta int) {

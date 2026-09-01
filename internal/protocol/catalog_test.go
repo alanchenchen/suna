@@ -36,6 +36,32 @@ func TestRuntimeCatalogIsStableAndContainsPublicCapabilities(t *testing.T) {
 	}
 }
 
+// TestRuntimeCatalogCoversAllPublicNotifications 防止新增通知常量时漏注册到 catalog：
+// 第三方客户端只能通过 catalog 发现通知，漏注册会导致能力不可见。
+func TestRuntimeCatalogCoversAllPublicNotifications(t *testing.T) {
+	catalog := CurrentRuntimeCatalog()
+	// 内部/保留通知不对外暴露，其余通知常量必须全部在 catalog 中。
+	internal := map[string]bool{
+		NotifyDaemonState:      true,
+		NotifyDaemonFullStatus: true,
+		NotifyPerception:       true,
+	}
+	for _, notification := range []string{
+		NotifyAgentDelta, NotifyAgentRun, NotifySteering, NotifySessionUserMessage,
+		NotifySessionUpdated, NotifyUsage, NotifyToolStart, NotifyToolGuard,
+		NotifyToolEnd, NotifyAskUser, NotifyGuardConfirm, NotifyInteractionResolved,
+		NotifyDaemonState, NotifyMCPUpdated, NotifyConfigState, NotifyConfigModelsResult,
+		NotifyCompactResult, NotifyMemoryState, NotifySkillLoad, NotifySkillReview,
+	} {
+		if internal[notification] {
+			continue
+		}
+		if !slices.Contains(catalog.Notifications, notification) {
+			t.Fatalf("catalog notifications missing public notification %q", notification)
+		}
+	}
+}
+
 func TestRuntimeCatalogReturnsIndependentSlices(t *testing.T) {
 	first := CurrentRuntimeCatalog()
 	first.Methods[0] = "changed"

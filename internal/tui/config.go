@@ -9,11 +9,36 @@ import (
 
 	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/protocol"
+	"github.com/alanchenchen/suna/internal/tui/components/overlaylist"
+	chatpage "github.com/alanchenchen/suna/internal/tui/pages/chat"
 	tuiconfig "github.com/alanchenchen/suna/internal/tui/pages/config"
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 )
 
 func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Bubbles 列表的异步消息（过滤结果、光标闪烁等）经 overlaylist 按 owner 包装
+	// 送回；Config 页打开的浮层必须在这里路由给对应列表，否则实时过滤结果
+	// 永远不会更新（Chat 页在 updateChat 中有同样的路由）。
+	switch m := msg.(type) {
+	case overlaylist.BatchMessage:
+		return t, tea.Batch(m.Commands...)
+	case overlaylist.Message:
+		switch m.Owner {
+		case chatpage.NativeListSkills:
+			if t.chat.SkillsOverlayOpen {
+				return t, t.chat.UpdateSkillsList(m.Inner)
+			}
+		case chatpage.NativeListMCP:
+			if t.chat.MCPOverlayOpen {
+				return t, t.chat.UpdateMCPList(m.Inner)
+			}
+		case chatpage.NativeListModels:
+			if t.chat.ModelPickerOpen {
+				return t, t.chat.UpdateModelPicker(m.Inner)
+			}
+		}
+		return t, nil
+	}
 	if t.config.ReasoningOpen {
 		return t.updateReasoning(msg)
 	}
@@ -21,6 +46,16 @@ func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t.updateWorkspaceForm(msg)
 	}
 	if t.config.FormOpen {
+		// 模型选择浮层打开时优先转发按键给浮层（浮层在表单之上），
+		// 否则 enter 打开浮层后按键仍走表单导航，浮层会"隐形"。
+		if t.modelPickerOpen {
+			ks := ""
+			if m, ok := msg.(tea.KeyPressMsg); ok {
+				ks = m.String()
+			}
+			_, cmd := t.updateProviderModelPicker(ks, msg)
+			return t, cmd
+		}
 		return t.updateProviderForm(msg)
 	}
 	if t.config.Page == "" {
@@ -34,7 +69,7 @@ func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.config.Notice = ""
 		// Config 页打开 chat overlay（管理分组）时，按键转发给对应 overlay；
 		// esc 关闭 overlay 后回到 Config 页，不退出配置。
-		if t.chat.SkillsOverlayOpen || t.chat.MCPOverlayOpen || t.chat.MemoryOverlayOpen {
+		if t.chat.SkillsOverlayOpen || t.chat.MCPOverlayOpen || t.chat.MemoryOverlayOpen || t.chat.ModelPickerOpen {
 			ks := m.String()
 			var cmd tea.Cmd
 			switch {
@@ -44,9 +79,11 @@ func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_, cmd = t.updateMCPOverlay(ks, m)
 			case t.chat.MemoryOverlayOpen:
 				_, cmd = t.updateMemoryOverlay(ks)
+			case t.chat.ModelPickerOpen:
+				_, cmd = t.updateModelPicker(ks, m)
 			}
 			// overlay 关闭后回到 Config 页；丢弃 chat 场景的 syncInputFocus，避免焦点漂移。
-			if !t.chat.SkillsOverlayOpen && !t.chat.MCPOverlayOpen && !t.chat.MemoryOverlayOpen {
+			if !t.chat.SkillsOverlayOpen && !t.chat.MCPOverlayOpen && !t.chat.MemoryOverlayOpen && !t.chat.ModelPickerOpen {
 				return t, nil
 			}
 			return t, cmd
@@ -336,6 +373,8 @@ func (t *TUI) handleConfigAction(rows []tuiconfig.Row) tea.Cmd {
 	case "section":
 		t.config.Page = row.Name
 		t.config.Cursor = 0
+		// rows 集合切换必须重置滚动，否则残留的 Scroll 会把新页面顶部裁掉。
+		t.config.Scroll = 0
 	case "manage_skills":
 		t.ensureNativeLists()
 		t.chat.OpenSkillsOverlay()
@@ -447,6 +486,8 @@ func (t *TUI) leaveConfig() tea.Cmd {
 	if detailRef != "" && t.config.Page == "models" {
 		t.config.Cursor = t.configModelCursorForRef(detailRef)
 	}
+	// detail/models/home 之间切换后 rows 集合不同，残留 Scroll 会裁掉顶部。
+	t.config.Scroll = 0
 	if target != uipage.None {
 		t.mode = target
 	}

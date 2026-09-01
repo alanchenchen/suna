@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/lipgloss/v2"
 
+	"github.com/alanchenchen/suna/internal/tui/components/combobox"
 	"github.com/alanchenchen/suna/internal/tui/components/overlay"
 	"github.com/alanchenchen/suna/internal/tui/components/selection"
 	tuiconfig "github.com/alanchenchen/suna/internal/tui/pages/config"
@@ -21,6 +22,10 @@ func (t *TUI) viewConfig() string {
 		return t.viewWorkspaceForm()
 	}
 	if t.config.FormOpen {
+		// 模型选择浮层打开时渲染在表单之上；否则浮层状态已打开但画面仍是表单。
+		if t.modelPickerOpen {
+			return overlay.OverlayBlock(t.viewProviderForm(), t.renderModelPickerOverlay(t.width))
+		}
 		return t.viewProviderForm()
 	}
 	base := t.viewConfigPage()
@@ -40,39 +45,129 @@ func (t *TUI) viewConfig() string {
 	return base
 }
 
+// renderModelPickerOverlay 渲染 provider 表单的模型选择浮层：
+// 同步选择器（输入即过滤）+ 状态行（加载中/拉取失败）+ 键位提示。
+func (t *TUI) renderModelPickerOverlay(width int) string {
+	panelWidth := nativeListWidth(width, 60)
+	innerWidth := max(1, panelWidth-6)
+	t.modelCombobox.SetSize(innerWidth, 8)
+
+	var lines []string
+	lines = append(lines, styleHL.Render(t.tr("tui.config.picker.title")))
+	lines = append(lines, styleDim.Render(strings.Repeat("─", innerWidth)))
+	lines = append(lines, t.modelCombobox.View(combobox.Styles{
+		Cursor: styleCursor,
+		Value:  styleHL,
+		Dim:    styleDim,
+	}))
+	if t.modelPickerLoading {
+		lines = append(lines, "", styleDim.Render("• "+t.tr("tui.config.provider.models_loading")))
+	}
+	if detail := nativeListError(t.modelPickerError, innerWidth); detail != "" {
+		lines = append(lines, detail)
+	}
+	lines = append(lines, "", t.modelPickerFooter())
+	return boxStyle.Width(panelWidth).Padding(1, 2).Render(strings.Join(lines, "\n"))
+}
+
+// modelPickerFooter 按当前选择器状态显示最小键位集：
+// 有候选时提示选择，输入非空时提示可直接确认自定义名。
+func (t *TUI) modelPickerFooter() string {
+	parts := []string{
+		styleCursor.Render("↑↓") + " " + styleDim.Render(t.tr("tui.list.key.move")),
+	}
+	if t.modelCombobox.Count() > 0 {
+		parts = append(parts, styleCursor.Render("Enter")+" "+styleDim.Render(t.tr("tui.config.picker.select")))
+	}
+	if t.modelCombobox.InputValue() != "" {
+		parts = append(parts, styleCursor.Render("Enter")+" "+styleDim.Render(t.tr("tui.config.picker.use_input")))
+	}
+	parts = append(parts, styleCursor.Render("Esc")+" "+styleDim.Render(t.tr("tui.list.close")))
+	return strings.Join(parts, styleDim.Render("  ·  "))
+}
+
 func (t *TUI) viewConfigPage() string {
 	rows := t.configRows()
-	var sb strings.Builder
 	title := t.configTitle()
-	sb.WriteString(renderHeader(title, "[Esc] "+t.tr("tui.key.back"), t.width))
-	sb.WriteString("\n\n")
+	header := renderHeader(title, "[Esc] "+t.tr("tui.key.back"), t.width)
+
+	// 逐行收集渲染结果：每个 row 渲染到独立 builder 后拆行，
+	// 这样能精确记录 cursor 所在行号，滚动截取时 cursor 自动跟随。
+	var lines []string
+	lines = append(lines, "")
+	cursorLine := -1
+	// cursorHeaderLine 记录 cursor 所属 provider 分组头的行号（-1 表示无），
+	// 在同一循环内同步记录，避免重复渲染换算行号。
+	cursorHeaderLine := -1
+	lastHeaderLine := -1
 	for i, row := range rows {
+		var sb strings.Builder
 		if row.Kind == "label" {
-			sb.WriteString("    " + styleDim.Render(row.Label) + "\n")
-			continue
-		}
-		if row.Kind == "info" {
+			sb.WriteString("    " + styleDim.Render(row.Label))
+		} else if row.Kind == "info" {
 			t.renderConfigInfoRow(&sb, row.Label, row.Value)
-			continue
+		} else {
+			t.renderConfigRow(&sb, i, row)
+			if row.Kind == "model" || row.Kind == "provider_end" || row.Kind == "add_provider_model" {
+				sb.WriteString("\n")
+			}
 		}
-		t.renderConfigRow(&sb, i, row)
-		if row.Kind == "model" || row.Kind == "provider_end" || row.Kind == "add_provider_model" {
-			sb.WriteString("\n")
+		rowLines := strings.Split(sb.String(), "\n")
+		// 渲染函数以 \n 结尾，Split 会产生尾部空元素（行尾而非空行），去掉。
+		if n := len(rowLines); n > 0 && rowLines[n-1] == "" {
+			rowLines = rowLines[:n-1]
 		}
+		if row.Kind == "provider_header" {
+			lastHeaderLine = len(lines)
+		}
+		if i == t.config.Cursor {
+			cursorLine = len(lines)
+			cursorHeaderLine = lastHeaderLine
+		}
+		lines = append(lines, rowLines...)
 	}
 	if t.config.Error != "" {
-		sb.WriteString("\n" + styleError.Render("  ✗ "+t.config.Error) + "\n")
+		lines = append(lines, "", styleError.Render("  ✗ "+t.config.Error))
 	}
 	if t.config.Notice != "" {
-		sb.WriteString("\n" + styleDim.Render("  • "+t.config.Notice) + "\n")
+		lines = append(lines, "", styleDim.Render("  • "+t.config.Notice))
 	}
 	if t.config.DeleteConfirm != "" {
-		sb.WriteString("\n" + t.renderConfigDeleteConfirm() + "\n")
+		lines = append(lines, "", t.renderConfigDeleteConfirm())
 	}
 	if help := t.configHelp(rows); help != "" {
-		sb.WriteString("\n" + styleDim.Render("  "+help) + "\n")
+		lines = append(lines, "", styleDim.Render("  "+help))
 	}
-	return sb.String()
+
+	// 可用高度 = 终端高度 - header 两行；底部留一行给滚动提示。
+	avail := max(1, t.height-3)
+	// cursor 行不可见时自动滚动到可见（最小滚动：贴底滚一行，贴顶滚一行）。
+	if cursorLine >= 0 {
+		if cursorLine < t.config.Scroll {
+			t.config.Scroll = cursorLine
+		} else if cursorLine >= t.config.Scroll+avail {
+			t.config.Scroll = cursorLine - avail + 1
+		}
+		// cursor 所属 provider 的分组头保持可见：在某个 provider 的模型间移动时，
+		// 头行留在视口外会让用户失去"当前在哪个 provider"的上下文。
+		// 仅在头部与 cursor 能同时放进视口时生效；分组高超过视口时 cursor 可见性优先。
+		if h := cursorHeaderLine; h >= 0 && h < cursorLine && cursorLine-h < avail {
+			t.config.Scroll = min(t.config.Scroll, h)
+		}
+	}
+	maxScroll := max(0, len(lines)-avail)
+	if t.config.Scroll > maxScroll {
+		t.config.Scroll = maxScroll
+	}
+	if t.config.Scroll < 0 {
+		t.config.Scroll = 0
+	}
+	visible := lines[t.config.Scroll:min(len(lines), t.config.Scroll+avail)]
+	out := header + "\n" + strings.Join(visible, "\n")
+	if t.config.Scroll < maxScroll {
+		out += "\n" + styleDim.Render("  ↓ "+t.tr("tui.config.scroll_more"))
+	}
+	return out
 }
 
 func (t *TUI) configTitle() string {
@@ -103,7 +198,7 @@ func (t *TUI) configHelp(rows []tuiconfig.Row) string {
 }
 
 func (t *TUI) viewProviderForm() string {
-	view := t.config.ProviderFormView(t.tr(t.config.FormTitle), t.tr("tui.config.setup_title"), t.tr("tui.config.form_help"), min(max(48, t.width-8), 72))
+	view := t.config.ProviderFormView(t.tr(t.config.FormTitle), t.tr("tui.config.setup_title"), t.providerFormHelp(), min(max(48, t.width-8), 72))
 	var lines []string
 	for i, in := range t.config.Inputs {
 		if t.config.FormProvider != "" && i == tuiconfig.ProviderFormProviderIndex {
@@ -112,6 +207,10 @@ func (t *TUI) viewProviderForm() string {
 		}
 		if t.config.FormProvider != "" && i == tuiconfig.ProviderFormAPIKeyIndex {
 			lines = append(lines, styleDim.Render(t.tr("tui.config.provider.api_key")+": ")+styleDim.Render(t.i18n.Tf("tui.config.api_key_reused", t.config.FormProvider)))
+			continue
+		}
+		if i == tuiconfig.ProviderFormModelIndex {
+			lines = append(lines, t.providerModelChoiceView(in))
 			continue
 		}
 		if i == tuiconfig.ProviderFormProtocolIndex {
@@ -135,6 +234,28 @@ func (t *TUI) viewProviderForm() string {
 	lines = append(lines, "", styleDim.Render(view.Help))
 	body := strings.Join(lines, "\n")
 	return boxStyle.Width(view.Width).Padding(1, 2).Render(styleHL.Render(view.Title) + "\n\n" + body)
+}
+
+// providerFormHelp 返回表单底部说明：焦点字段的短动态提示一行 + 固定键位
+// 一行。动态提示只讲"Enter 在这个字段是什么意思"（选模型/切换选项/输入），
+// 固定行只保留全局导航键位，不重复 Enter 语义，避免窄终端折行。
+func (t *TUI) providerFormHelp() string {
+	parts := []string{styleDim.Render("  " + t.providerFieldHint(t.config.InputFocus))}
+	parts = append(parts, styleDim.Render("  "+t.tr("tui.config.form_help")))
+	return strings.Join(parts, "\n")
+}
+
+// providerFieldHint 返回焦点字段的 Enter 语义短提示。
+func (t *TUI) providerFieldHint(idx int) string {
+	switch idx {
+	case tuiconfig.ProviderFormModelIndex:
+		return t.tr("tui.config.hint.model")
+	case tuiconfig.ProviderFormProtocolIndex:
+		return t.tr("tui.config.hint.protocol")
+	case tuiconfig.ProviderFormAuthModeIndex:
+		return t.tr("tui.config.hint.auth_mode")
+	}
+	return t.tr("tui.config.hint.input")
 }
 
 func (t *TUI) viewWorkspaceForm() string {
@@ -358,6 +479,30 @@ func (t *TUI) renderConfigInfoRow(sb *strings.Builder, label, value string) {
 		return
 	}
 	sb.WriteString("    " + styleDim.Render(fmt.Sprintf("%-12s", label)) + " " + value + "\n")
+}
+
+// providerModelChoiceView 将 model 字段渲染为纯值行，不用 ‹ › 箭头：
+// 那是 protocol/auth_mode 循环切换的语义，model 字段用 Enter 打开选择浮层，
+// 箭头会误导用户以为可以左右切换。未设置时显示提示文案。
+func (t *TUI) providerModelChoiceView(in textinput.Model) string {
+	value := strings.TrimSpace(in.Value())
+	prompt := in.Prompt
+	focused := t.config.InputFocus == tuiconfig.ProviderFormModelIndex
+	if focused {
+		prompt = styleBrand.Render(prompt)
+	}
+	if value == "" {
+		value = t.tr("tui.config.provider.model_unset")
+		if focused {
+			return prompt + styleHL.Render(value)
+		}
+		return prompt + styleDim.Render(value)
+	}
+	style := styleDim
+	if focused {
+		style = styleHL
+	}
+	return prompt + style.Render(value)
 }
 
 func (t *TUI) providerProtocolInputView(in textinput.Model) string {
