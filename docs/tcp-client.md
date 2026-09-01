@@ -476,10 +476,12 @@ try {
 - `config.model.auth_mode.bearer`：可使用 `bearer`；
 - `config.model.auth_mode.both`：可使用 `both`。
 
-Feature 缺失时隐藏对应 UI。`config.set/upsert_model` 编辑已有模型时使用字段 presence 语义：缺失字段保持原值，显式字段才覆盖；`auth_mode="default"` 恢复默认，`strengths=[]`、`subtask_for=[]`、`reasoning={}` 显式清空。创建新模型时，必填字段仍按现有规则校验，缺失的可选字段使用 Runtime 默认值。
+Feature 缺失时隐藏对应 UI。`config.set/upsert_model` 编辑已有模型时使用字段 presence 语义：缺失字段保持原值，显式字段才覆盖；`auth_mode="default"` 恢复默认，`strengths=[]`、`subtask_for=[]`、`reasoning={}` 显式清空。创建新模型时，必填字段仍按现有规则校验，缺失的可选字段使用 Runtime 默认值。`config.get` 返回的模型条目含 `has_api_key` 与脱敏的 `api_key_hint`（如 `sk-••••abcd`），提示只用于展示，客户端不得回写。
+
+`config.discoverModels` 异步拉取 provider 的可用模型：请求只传 `provider`，同步响应 `{"status":"processing"}`，结果通过 `config.models_result` 通知回传 `{provider, models, error_message}`。路径由 SDK 按协议拼接（OpenAI: `{base_url}/models`，Anthropic: `{base_url}/v1/models`），与模型请求的 base_url 语义一致。错误脱敏，不返回 API Key。
 
 ```json
-{"provider":"example-provider","protocol":"anthropic","auth_mode":"bearer","model":"example-model","base_url":"https://api.example.com","context_window":200000,"max_output_tokens":8192}
+{"provider":"example-provider","protocol":"anthropic","auth_mode":"bearer","model":"example-model","base_url":"https://api.example.com","context_window":200000,"max_output_tokens":8192,"has_api_key":true,"api_key_hint":"sk-••••abcd"}
 ```
 
 ---

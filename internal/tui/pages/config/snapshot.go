@@ -20,6 +20,7 @@ func SnapshotFromProtocol(p protocol.ConfigParams) []ModelConfig {
 			Strengths:       cm.Strengths,
 			SubtaskFor:      cm.SubtaskFor,
 			Reasoning:       cm.Reasoning,
+			APIKeyHint:      cm.APIKeyHint,
 			HasAPIKey:       cm.HasAPIKey,
 		})
 	}

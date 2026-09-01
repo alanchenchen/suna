@@ -133,7 +133,12 @@ func (m *Model) DetailRows(deps RowsDeps) []Row {
 	}
 	apiKey := deps.Tr("tui.config.missing")
 	if mc.HasAPIKey {
+		// 有脱敏提示时展示提示（sk-••••abcd），让用户能辨认用的是哪个 key；
+		// 旧 daemon 未返回提示时保持“已配置”。
 		apiKey = deps.Tr("tui.config.configured")
+		if mc.APIKeyHint != "" {
+			apiKey = mc.APIKeyHint
+		}
 	}
 	rows := []Row{
 		{"info", "", deps.Tr("tui.config.status"), status},

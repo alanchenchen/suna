@@ -99,6 +99,43 @@ func TestModelSummaryOmitsSubtaskFor(t *testing.T) {
 	}
 }
 
+// 详情页 API Key 行：有脱敏提示时显示提示本身，让用户能辨认用的是哪个 key；
+// 无提示（旧 daemon）时回退到“已配置”。
+func TestDetailRowsShowsAPIKeyHint(t *testing.T) {
+	newDeps := func(models []ModelConfig) RowsDeps {
+		return RowsDeps{
+			Tr:               func(key string) string { return key },
+			Models:           models,
+			DisplayEndpoint:  func(string) string { return "" },
+			ContextDisplay:   func(ModelConfig) string { return "" },
+			MaxOutputDisplay: func(ModelConfig) string { return "" },
+			ReasoningDisplay: func(ModelConfig) string { return "" },
+		}
+	}
+	findAPIKey := func(rows []Row) string {
+		for _, row := range rows {
+			if row.Label == "tui.config.provider.api_key" {
+				return row.Value
+			}
+		}
+		return ""
+	}
+	run := func(models []ModelConfig) string {
+		m := &Model{Page: "detail", DetailRef: models[0].Ref()}
+		return findAPIKey(m.DetailRows(newDeps(models)))
+	}
+
+	if got := run([]ModelConfig{{Provider: "openai", Model: "gpt", HasAPIKey: true, APIKeyHint: "sk-****abcd"}}); got != "sk-****abcd" {
+		t.Fatalf("api key row = %q, want hint", got)
+	}
+	if got := run([]ModelConfig{{Provider: "openai", Model: "gpt", HasAPIKey: true}}); got != "tui.config.configured" {
+		t.Fatalf("api key row = %q, want configured fallback", got)
+	}
+	if got := run([]ModelConfig{{Provider: "openai", Model: "gpt"}}); got != "tui.config.missing" {
+		t.Fatalf("api key row = %q, want missing", got)
+	}
+}
+
 func TestDetailRowsShowsSubtaskFor(t *testing.T) {
 	m := &Model{Page: "detail", DetailRef: "anthropic/claude-3-5-sonnet-latest"}
 	rows := m.DetailRows(RowsDeps{

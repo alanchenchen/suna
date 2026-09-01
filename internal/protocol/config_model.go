@@ -40,8 +40,11 @@ type ConfigModel struct {
 	SubtaskFor      []string       `json:"subtask_for"`
 	Reasoning       map[string]any `json:"reasoning"`
 	HasAPIKey       bool           `json:"has_api_key,omitempty"`
-	present         ConfigModelField
-	decoded         bool
+	// APIKeyHint 是脱敏后的 key 提示（如 sk-••••abcd），只用于展示；
+	// 响应专有字段，不参与 upsert_model 的 presence 语义，客户端不应回写。
+	APIKeyHint string `json:"api_key_hint,omitempty"`
+	present    ConfigModelField
+	decoded    bool
 }
 
 func (m ConfigModel) MarshalJSON() ([]byte, error) {

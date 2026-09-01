@@ -31,6 +31,26 @@ func TestConfigModelDistinguishesMissingAndExplicitEmptyFields(t *testing.T) {
 	}
 }
 
+// api_key_hint 是脱敏展示字段：非空时序列化输出，空时省略；
+// 反序列化不能把它当作用户输入（presence 不记录它，回写不会覆盖配置）。
+func TestConfigModelAPIKeyHintWireSemantics(t *testing.T) {
+	encoded, err := json.Marshal(ConfigModel{Provider: "provider-a", Model: "model-a", APIKeyHint: "sk-****abcd"})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if !strings.Contains(string(encoded), `"api_key_hint":"sk-****abcd"`) {
+		t.Fatalf("Marshal() = %s, want api_key_hint field", encoded)
+	}
+
+	encoded, err = json.Marshal(ConfigModel{Provider: "provider-a", Model: "model-a"})
+	if err != nil {
+		t.Fatalf("Marshal() empty hint error = %v", err)
+	}
+	if strings.Contains(string(encoded), "api_key_hint") {
+		t.Fatalf("Marshal() = %s, want empty hint omitted", encoded)
+	}
+}
+
 func TestConfigModelMarshalIncludesExplicitEmptyValues(t *testing.T) {
 	encoded, err := json.Marshal(ConfigModel{Provider: "provider-a", Protocol: "anthropic", Model: "model-a"})
 	if err != nil {

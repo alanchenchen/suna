@@ -143,5 +143,27 @@ func (mc ModelConfig) ResolveAPIKey() (string, error) {
 	return mc.APIKey, nil
 }
 
+// APIKeyHint 返回适合展示的脱敏 API Key：保留前缀标识（如 sk-）和末尾 4 位，
+// 中间用固定长度的 • 打码。key 过短时只保留末尾 4 位，避免前缀+尾段
+// 覆盖整个 key 造成信息泄漏。空 key 返回空串。
+// 只用于 UI 展示；提示本身绝不能当作凭据回传。
+func (mc ModelConfig) APIKeyHint() string {
+	key := strings.TrimSpace(mc.APIKey)
+	if key == "" {
+		return ""
+	}
+	const tail = 4
+	const maskMinLen = tail + 4 // 少于 8 位时前缀+尾段会覆盖大半 key，只显示尾段
+	if len(key) < maskMinLen {
+		return "••••" + key[len(key)-tail:]
+	}
+	prefixLen := 0
+	if strings.HasPrefix(key, "sk-") {
+		prefixLen = 3
+	}
+	masked := strings.Repeat("•", min(8, len(key)-prefixLen-tail))
+	return key[:prefixLen] + masked + key[len(key)-tail:]
+}
+
 func (mc ModelConfig) IsAnthropic() bool { return mc.ProtocolOrDefault() == ModelProtocolAnthropic }
 func (mc ModelConfig) IsOpenAI() bool    { return mc.ProtocolOrDefault() == ModelProtocolOpenAIResponses }
