@@ -17,7 +17,8 @@ func (m *Model) HandleStreamStart(now time.Time) {
 }
 
 func (m *Model) HandleReasoningStart(now time.Time) {
-	m.ExpandedReasoningID = 0
+	// 不重置 ExpandedReasoningID：多步 run 中用户展开的历史思考链保持展开，
+	// 新思考块自行折叠流式（ReasoningMode 对 Streaming 恒返回 collapsed）。
 	m.ClearStatusLabel()
 	m.LastWaitingTool = ""
 	if m.Phase == PhaseFirstLLM || m.Phase == PhaseLLM || m.Phase == PhaseWaitingAfterTool {

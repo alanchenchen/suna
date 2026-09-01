@@ -68,13 +68,19 @@ func TestSelectionDragFlow(t *testing.T) {
 		t.Fatal("selection.Active = false after down, want true")
 	}
 
-	// 拖动到内容行 2
+	// 拖动到内容行 2：Motion 走帧门同步，不直接重建 transcript
 	motion := tea.MouseMotionMsg(tea.Mouse{X: 10, Y: startY + 2, Button: tea.MouseLeft})
-	if consumed, _ := tui.handleSelectionMouse(motion); !consumed {
+	consumed, cmd := tui.handleSelectionMouse(motion)
+	if !consumed {
 		t.Fatal("handleSelectionMouse(motion) = false, want consumed")
 	}
 	if tui.selection.EndLine != 2 {
 		t.Fatalf("selection.EndLine = %d, want 2", tui.selection.EndLine)
+	}
+	// 拖动必须调度帧门同步而不是直接 syncContent：Motion 事件频率不受控
+	// （可达 1000Hz），直接同步会对每个事件做全量 transcript 重建。
+	if cmd == nil || !tui.transcriptSyncScheduled {
+		t.Fatal("motion did not schedule transcript sync, want frame-gated sync")
 	}
 
 	// 释放：拖动过，选区定格

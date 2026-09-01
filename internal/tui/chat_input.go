@@ -406,7 +406,8 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, nil
 		}
 	case ks == "ctrl+r":
-		if t.chat.Compacting || t.chat.HasStreamingReasoning() {
+		if t.chat.Compacting {
+			// 压缩中 transcript 正在重建，展开锚点会失效。
 			return t, nil
 		}
 		anchor, changed := t.chat.ToggleVisibleReasoningDetail()

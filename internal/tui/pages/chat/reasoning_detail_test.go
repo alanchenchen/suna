@@ -1,6 +1,47 @@
 package chat
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+func TestToggleVisibleReasoningDetailSkipsStreamingBlock(t *testing.T) {
+	var m Model
+	m.InitComponents(ComponentDeps{})
+	m.Viewport.SetHeight(12)
+	m.AppendMessage(Msg{Role: "reasoning", Content: "history"})
+	m.AppendMessage(Msg{Role: "reasoning", Content: "streaming now", Streaming: true})
+	m.TranscriptBlocks = []transcriptBlock{
+		{MsgIndex: 0, LineCount: 4},
+		{MsgIndex: 1, LineCount: 4},
+	}
+	m.TranscriptTotalLines = 8
+
+	// run 进行中（有思考块流式）仍可展开历史思考链：流式块被跳过。
+	anchor, changed := m.ToggleVisibleReasoningDetail()
+	if !changed {
+		t.Fatal("ToggleVisibleReasoningDetail() changed = false during streaming, want true")
+	}
+	if got, want := m.ExpandedReasoningID, m.Messages[0].ID; got != want {
+		t.Fatalf("ExpandedReasoningID = %d, want historical reasoning %d", got, want)
+	}
+	if anchor.MessageID != m.Messages[0].ID {
+		t.Fatalf("anchor.MessageID = %d, want %d", anchor.MessageID, m.Messages[0].ID)
+	}
+}
+
+func TestReasoningStartKeepsExpandedID(t *testing.T) {
+	var m Model
+	m.AppendMessage(Msg{Role: "reasoning", Content: "history"})
+	m.ensureMessageIDs()
+	m.ExpandedReasoningID = m.Messages[0].ID
+
+	// 多步 run 中下一个思考块开始时，不应强制折叠用户展开的历史思考链。
+	m.HandleReasoningStart(time.Now())
+	if got, want := m.ExpandedReasoningID, m.Messages[0].ID; got != want {
+		t.Fatalf("ExpandedReasoningID = %d, want preserved %d after reasoning start", got, want)
+	}
+}
 
 func TestToggleVisibleReasoningDetailSelectsClosestCompletedBlock(t *testing.T) {
 	var m Model

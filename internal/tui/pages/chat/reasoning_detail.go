@@ -14,6 +14,8 @@ func (m Model) ReasoningMode(msg *Msg) string {
 	return "reasoning_collapsed"
 }
 
+// HasStreamingReasoning 已废弃：流式期间允许展开历史思考链，
+// 单展开与折叠约束由 ExpandedReasoningID + ReasoningMode 保证。
 func (m Model) HasStreamingReasoning() bool {
 	for i := range m.Messages {
 		if m.Messages[i].Role == "reasoning" && m.Messages[i].Streaming {
@@ -27,8 +29,11 @@ func (m Model) HasStreamingReasoning() bool {
 // 交互语义：按 Ctrl+R 直接展开视窗内最相关的块，同时自动折叠旧的展开块
 // （单展开约束，避免多块展开撑高 transcript）；只有视窗内最相关的块就是
 // 当前展开的块时才折叠（toggle 关闭）。
+// 流式 run 期间允许展开历史思考链：单展开由唯一 ExpandedReasoningID 保证，
+// 流式块永远折叠（ReasoningMode 对 Streaming 恒返回 collapsed），展开后
+// RestoreTranscriptAnchor 会暂停自动跟随，与手动上滚看历史同一套机制。
 func (m *Model) ToggleVisibleReasoningDetail() (TranscriptAnchor, bool) {
-	if m == nil || m.HasStreamingReasoning() {
+	if m == nil {
 		return TranscriptAnchor{}, false
 	}
 	m.ensureMessageIDs()

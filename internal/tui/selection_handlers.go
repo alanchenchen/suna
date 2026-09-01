@@ -119,7 +119,10 @@ func (t *TUI) handleSelectionMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 			// 移出边缘区：立即停止自动滚动（浏览器/编辑器行为）。
 			t.stopSelectionEdgeScroll()
 		}
-		t.syncContent()
+		// 拖动高亮走帧门同步：Motion 事件频率取决于终端报告速率（可达 1000Hz），
+		// 直接 syncContent 会对每次事件做全量 transcript 重建，长历史下 CPU 饱和；
+		// 帧门后与流式渲染同 cadence（16ms），高亮延迟一帧无感。
+		cmd = tea.Batch(cmd, t.scheduleTranscriptSync())
 		return true, cmd
 	default:
 		// 按下（MouseClickMsg 或其它）：左键开始拖动，其它按钮忽略。
@@ -204,8 +207,8 @@ func (t *TUI) handleInputSelectionMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 		}
 		line := min(max(msg.Mouse().Y-startY, 0), inputAreaH-1)
 		t.selection.Extend(line, inputAreaH)
-		t.syncContent()
-		return true, nil
+		// 输入区选区同样走帧门：syncContent 会同步整个 transcript，拖动事件频率不受控。
+		return true, t.scheduleTranscriptSync()
 	default:
 		m := msg.Mouse()
 		if m.Button != tea.MouseLeft || t.selection.Active {
