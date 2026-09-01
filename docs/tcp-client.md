@@ -134,6 +134,16 @@ TCP 是一条长期连接，framing 为 **NDJSON**：
 
 特别注意：`agent.sendMessage` 的 response 只表示消息已接收；模型文本、工具状态与 run 结果全部来自后续 notification。
 
+### 3.4 顺序保证
+
+response 由连接的请求处理路径写出，notification 由后台事件路径写出，两者共用同一条 socket 但来自不同 goroutine，**相互之间没有顺序保证**：
+
+- response 只按 `id` 与发起的 request 关联，不保证先于或后于任何 notification；
+- notification 之间按 daemon 发出顺序到达；
+- 客户端不得假设"先发 request 就先收到它的 response"（其它 request 可能插队），也不得假设"response 一定先于该操作触发的 notification"。
+
+正确做法：按 `id` 匹配 response，按 `method` 路由 notification，两者独立处理。
+
 ---
 
 ## 4. 第一条 request：`runtime.hello`
@@ -251,6 +261,15 @@ Attach response 中的 `current_run`、`run_id`、`assistant_buffer` 与 `reason
 
 `agent.run`、`agent.delta`、`agent.steering`、`agent.usage`、`agent.tool_start`、`agent.tool_guard`、`agent.tool_end` 与 `session.compact_result` 均携带 `session_id` 字段。单 session 客户端可忽略；多 session 并存的客户端用它区分事件归属。
 
+各通知的关键可选字段（未列出的字段一律忽略）：
+
+- `agent.run`：`error` 是 `ModelError`（`kind/message/status_code/code/type/provider/model`），`run_error` 是 `{kind, model_ref}`；两者语义不同，见 protocol.md 错误模型。`attempt/max_attempts/delay_ms` 仅 `retrying` 时出现。
+- `agent.usage`：`context_tokens` 是最近一次请求的实际上下文，`estimated_context_tokens` 是估算值；两者都缺省时不要自行推算。`cache_read_tokens`/`cache_creation_tokens` 已包含在 `input_tokens` 内，汇总时不得重复相加。
+- `agent.tool_start`：`params` 是工具入参对象，`intent` 是可选意图描述。
+- `agent.tool_end`：`result` 是展示用文本（可能被截断），`result_truncated=true` 时 `result_bytes` 给出原始字节数；`error=true` 表示工具执行失败。
+- `agent.ask_user`：`allow_custom=true` 表示除 `options` 外还接受自定义文本回答；`can_reply=false` 时本客户端只展示不回复。
+- `session.user_message`：`message_id`/`client_msg_id` 用于与 steering 消息关联；普通消息可能只有 `parts`。
+
 ### 5.6 运行中发送消息
 
 如果 `runtime.hello.catalog.features` 包含 `agent.steer.text`，current run owner 可以在运行期间排队文本消息：
@@ -300,7 +319,148 @@ queued / applied / removed / rejected
 
 ---
 
-## 6. 多客户端与 handoff
+## 6. Method 参数与结果参考
+
+本节覆盖 catalog 中所有 method 的 params/result 字段。第 5 节已有完整 JSON 示例的方法不再重复；未列出的字段一律忽略（向前兼容约定）。
+
+### agent.cancel / agent.resumeRun
+
+两者都不接受 params（传 `{}` 或省略），成功时 result 为空对象。`agent.cancel` 请求取消当前 run；进入 `cancelling` 后重复取消幂等。`agent.resumeRun` 只在最近一次 `agent.run` 携带 `resume_available=true` 后可用，否则返回 `session_busy`。
+
+### session.update
+
+更新当前 attached session 的 title 或模型选择：
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `session_id` | string | 是 | 当前 attached session 的 ID。 |
+| `title` | string? | 否 | 新标题。字段缺失表示不修改。 |
+| `model_ref` | string? | 否 | 新模型引用。字段缺失表示不修改；更新时 session 必须 idle，否则返回 `session_busy`。 |
+
+presence 语义：`title`/`model_ref` 字段缺失与显式 `null`/空串不同，只有字段出现才会覆盖。返回更新后的 `SessionSnapshot`（结构同 `session.attach` result）。
+
+### session.delete
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `session_id` | string | 是 | 要删除的 session ID。 |
+
+约束：不能删除当前连接 attached 的 session、active session 或仍有 client attached 的 session。成功返回 `{"deleted":true}`。
+
+### session.usage
+
+无 params。返回当前 daemon 进程的用量摘要：
+
+```json
+{"today":{"input_tokens":100,"output_tokens":50,"requests":2},"week":{...},"month":{...}}
+```
+
+三个周期字段结构相同（`input_tokens` / `output_tokens` / `requests`）。
+
+### daemon.status
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `detail` | bool | 否 | 传 `true` 返回 memory/sessions/usage 统计。 |
+
+result 字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `state` | string | `starting / ready / stopping`。 |
+| `pid` / `uptime` / `connections` | int/string/int | 进程信息。 |
+| `tcp_endpoint` | string? | TCP transport 的实际 endpoint。 |
+| `agent_status` | string | 当前 agent 状态。 |
+| `provider` / `model` | string? | 默认模型信息。 |
+| `context_tokens` / `context_window` | int? | 默认模型的上下文统计。 |
+| `memory` / `sessions` / `usage_today` | object? | 仅 `detail=true` 时出现。 |
+
+### config.get
+
+无 params。返回完整配置：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `models` | array | 模型条目数组，字段见第 8 节 `config.get` 模型对象。 |
+| `active_model` | string | 当前激活模型的 `model_ref`。 |
+| `locale` / `theme` / `guard_mode` / `workspace` | string? | 通用配置。 |
+
+### config.set
+
+通过 `action` 字段选择操作：
+
+| action | 必填 params | 语义 |
+|---|---|---|
+| `upsert_model` | `model`（见第 8 节模型对象） | 创建或更新模型；`model_ref` 指定更新目标，缺省表示新建。 |
+| `delete_model` | `model_ref` | 删除指定模型；若它是激活模型，daemon 自动切换到剩余第一个模型。 |
+| `activate_model` | `active_model` | 切换默认模型；模型必须存在。 |
+| `update_general` | `locale` / `theme` / `guard_mode` / `workspace` 中至少一项 | 更新通用配置；字段缺失表示不修改。 |
+
+与凭证相关的可选字段：
+
+- `api_key`：配合 `upsert_model` 使用，为 `model.provider` 对应的 provider 写入 API Key；Key 按 provider 存储并共享给同 provider 的所有模型。
+- `delete_api_key`：配合 `delete_model` 使用，删除该 provider 的 API Key；仅当删除后没有其他模型仍引用该 provider 时生效。
+
+所有 action 成功后都返回更新后的完整配置（同 `config.get` result），并向所有客户端广播 `config.state`。
+
+### config.discoverModels
+
+```json
+{"jsonrpc":"2.0","id":9,"method":"config.discoverModels","params":{"provider":"example-provider"}}
+```
+
+同步响应 `{"status":"processing"}` 只表示已受理；结果通过 `config.models_result` 通知回传 `{provider, models, error_message}`。详见第 8 节。
+
+### memory.list / memory.delete / memory.clear
+
+`memory.list` 无 params，返回 `{"memories":[...]}`；每个条目：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` | string | memory ID，删除时使用。 |
+| `content` | string | 记忆内容。 |
+| `kind` | string | 记忆类别。 |
+| `tags` | string[]? | 标签。 |
+| `priority` | int | 优先级。 |
+| `is_core` | bool | 是否核心记忆。 |
+
+`memory.delete` 传 `{"id":"MEMORY_ID"}`，返回 `{"deleted":bool}`。`memory.clear` 无 params，返回 `{"deleted_count":int}`。
+
+### skill.list / skill.set
+
+`skill.list` 无 params，返回 `{"skills":[...]}`；每个条目：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `name` | string | Skill 名称。 |
+| `description` | string? | 描述。 |
+| `scope` | string | `global` 或 `project`。 |
+| `can_toggle` | bool | 是否允许启用/禁用（project scope 恒为 false）。 |
+| `enabled` | bool | 当前是否启用。 |
+| `valid` | bool | Skill 是否有效。 |
+| `reasons` | string[]? | 无效或禁用原因。 |
+| `path` | string? | project Skill 的精确路径。 |
+| `error` | string? | 加载错误。 |
+
+`skill.set` 传 `{"name":"NAME","scope":"global","enabled":false}`；`scope` 缺省为 `global`。project scope 不允许 toggle，会被拒绝。
+
+### mcp.list / mcp.toggle / mcp.reload
+
+`mcp.list` 无 params，返回 `{"servers":[...]}`；每个条目：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` / `name` | string | server 标识与显示名。 |
+| `transport` / `command` | string? | 传输类型与启动命令。 |
+| `state` | string | `disabled / starting / active / error`。 |
+| `tool_count` | int | 已注册工具数。 |
+| `error` | string? | 最近一次错误。 |
+
+`mcp.toggle` 传 `{"name":"NAME","active":bool}`；`mcp.reload` 传 `{"name":"NAME"}`。两者都返回 `{"status":"ok"}` 形态的确认，实际状态变化通过 `mcp.updated` 通知推送。
+
+---
+
+## 7. 多客户端与 handoff
 
 多个客户端可以 attach 到同一个 session：
 
@@ -335,7 +495,7 @@ Client B（IDE）attach 同一 session
 
 ---
 
-## 7. 可直接复用的 Node.js 最小客户端
+## 8. 可直接复用的 Node.js 最小客户端
 
 下面的示例负责：启动/发现 daemon、TCP 连接、NDJSON 分帧、request/response 匹配、notification 分发与握手。
 
@@ -486,7 +646,7 @@ Feature 缺失时隐藏对应 UI。`config.set/upsert_model` 编辑已有模型�
 
 ---
 
-## 8. 交给 AI 编码代理的最小任务描述
+## 9. 交给 AI 编码代理的最小任务描述
 
 如果要让 AI agent 实现一个 Suna client，可直接提供以下约束：
 
@@ -500,8 +660,9 @@ Feature 缺失时隐藏对应 UI。`config.set/upsert_model` 编辑已有模型�
 6. 只调用 catalog.methods 中存在的方法，按 catalog.features 渐进启用可选 UI；
 7. 先 session.list，再 session.create 或 session.attach；
 8. agent.sendMessage 的 response 只表示 accepted；真实输出来自 agent.delta / agent.run；
-9. UI 离开 session 时调用 session.detach；断线后重新 serve 并重连；
-10. 不要访问 Suna 内部文件、SQLite、Agent 或 Go 包；所有业务交互走 protocol。
+9. 每个 method 的 params/result 字段表见第 6 节；未列出的字段一律忽略；
+10. UI 离开 session 时调用 session.detach；断线后重新 serve 并重连；
+11. 不要访问 Suna 内部文件、SQLite、Agent 或 Go 包；所有业务交互走 protocol。
 ```
 
 协议字段、完整方法与错误语义请见 [protocol.md](protocol.md)。

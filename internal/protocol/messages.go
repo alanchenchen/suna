@@ -363,17 +363,6 @@ type GuardReplyParams struct {
 	Decision string `json:"decision"`
 }
 
-type DaemonStateParams struct {
-	SessionID    string `json:"session_id"`
-	AgentStatus  string `json:"agent_status"`
-	CurrentTask  string `json:"current_task,omitempty"`
-	PID          int    `json:"pid"`
-	Uptime       string `json:"uptime"`
-	Connections  int    `json:"connections"`
-	ProviderName string `json:"provider_name,omitempty"`
-	ModelName    string `json:"model_name,omitempty"`
-}
-
 type DaemonRuntimeState string
 
 const (

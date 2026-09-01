@@ -42,7 +42,6 @@ func TestRuntimeCatalogCoversAllPublicNotifications(t *testing.T) {
 	catalog := CurrentRuntimeCatalog()
 	// 内部/保留通知不对外暴露，其余通知常量必须全部在 catalog 中。
 	internal := map[string]bool{
-		NotifyDaemonState:      true,
 		NotifyDaemonFullStatus: true,
 		NotifyPerception:       true,
 	}
@@ -50,7 +49,7 @@ func TestRuntimeCatalogCoversAllPublicNotifications(t *testing.T) {
 		NotifyAgentDelta, NotifyAgentRun, NotifySteering, NotifySessionUserMessage,
 		NotifySessionUpdated, NotifyUsage, NotifyToolStart, NotifyToolGuard,
 		NotifyToolEnd, NotifyAskUser, NotifyGuardConfirm, NotifyInteractionResolved,
-		NotifyDaemonState, NotifyMCPUpdated, NotifyConfigState, NotifyConfigModelsResult,
+		NotifyMCPUpdated, NotifyConfigState, NotifyConfigModelsResult,
 		NotifyCompactResult, NotifyMemoryState, NotifySkillLoad, NotifySkillReview,
 	} {
 		if internal[notification] {

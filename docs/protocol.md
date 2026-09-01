@@ -163,9 +163,11 @@ daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 
 
 Feature 名称一经公开，其语义保持不变。新增能力增加新的稳定名称，不为普通增量功能维护重复的代际编号。
 
-`config.set` 的 `upsert_model` 使用字段 presence 更新已有模型：`model` 中缺失的可选字段保持原值，显式值才会覆盖。`auth_mode="default"` 恢复协议默认；`strengths=[]`、`subtask_for=[]` 和 `reasoning={}` 分别显式清空对应配置。创建新模型时，必填字段仍按现有规则校验，缺失的可选字段使用 Runtime 默认值。客户端不应为了修改单个字段而回写自己不理解的默认值。
+`config.set` 通过 `action` 字段选择操作：`upsert_model`（创建或更新模型）、`delete_model`（删除模型）、`activate_model`（切换默认模型）、`update_general`（更新 locale/theme/guard_mode/workspace）。
 
-`config.get` 返回的每个模型条目包含 `has_api_key` 和 `api_key_hint`；`api_key_hint` 是脱敏提示（如 `sk-••••abcd`），只用于展示，不是可用凭据，客户端不得回写。
+`upsert_model` 使用字段 presence 更新已有模型：`model` 中缺失的可选字段保持原值，显式值才会覆盖。`auth_mode="default"` 恢复协议默认；`strengths=[]`、`subtask_for=[]` 和 `reasoning={}` 分别显式清空对应配置。创建新模型时，必填字段仍按现有规则校验，缺失的可选字段使用 Runtime 默认值。客户端不应为了修改单个字段而回写自己不理解的默认值。
+
+与凭证相关的可选字段：`api_key` 配合 `upsert_model` 为 `model.provider` 写入 API Key（Key 按 provider 存储并共享给同 provider 的所有模型）；`delete_api_key` 配合 `delete_model` 删除该 provider 的 API Key，仅当删除后没有其他模型仍引用该 provider 时生效。`config.get` 返回的每个模型条目包含 `has_api_key` 和 `api_key_hint`；`api_key_hint` 是脱敏提示（如 `sk-••••abcd`），只用于展示，不是可用凭据，客户端不得回写。
 
 `config.discoverModels` 是异步拉取：请求只传 `provider`，同步响应 `{"status":"processing"}` 表示已受理；结果通过 `config.models_result` 通知回传 `{provider, models, error_message}`。模型列表由 SDK 按协议拼接路径（OpenAI: `{base_url}/models`，Anthropic: `{base_url}/v1/models`），与模型请求的 base_url 语义一致。错误信息已脱敏，不包含 API Key。
 
@@ -362,7 +364,7 @@ agent.run state=failed
 - `messages`：最近可见 user/assistant 文本消息。
 - `compacted`：较早上下文是否已压缩为 Session State。
 - `tool_summary`：上一轮有界工具摘要，仅供 UI 展示。
-- `current_run`：Join running session 时的轻量当前 run 视图，含稳定 `run_id`、`state` 和实时 `can_control`；`state=cancelling` 时 `can_control=false`。客户端应避免让同一 `run_id` 的迟到快照重新激活已终态运行。
+- `current_run`：Join running session 时的轻量当前 run 视图，含稳定 `run_id`、`state` 和实时 `can_control`；`state=cancelling` 时 `can_control=false`。客户端应避免让同一 `run_id` 的迟到快照重新激活已终态运行。`assistant_buffer`/`reasoning_buffer` 是 attach 时刻的流式缓冲快照；`waiting_type`（`ask`/`guard`）表示 run 正在等待的交互类型。
 
 `session.attach.require_active=true` 只用于 Join Active 的陈旧 UI 防护；Resume 应传 false 或省略。
 
@@ -401,10 +403,11 @@ TUI 的“本会话 / 已加入 / 观察中”是 UI 根据 attach 方式、clie
 以下接口偏官方 TUI / local 管理用途，不进入公开 Catalog：
 
 - `daemon.stop`；
-- `daemon.full_status`；
 - `attachment.status` / `attachment.clear`；
 - `debug.*`；
 - local transport endpoint、PID 文件、Named Pipe / Unix socket 细节。
+
+关于 `daemon.full_status`：它不在公开 Catalog 中，schema 不承诺稳定；但 daemon 当前会在 run 生命周期结束、config 变更等时机向所有已连接客户端广播它（携带与 `daemon.status detail=true` 相同的结构）。第三方客户端可以监听它刷新状态，但必须按"忽略未知字段"原则处理，且不应将业务逻辑绑定在它必然到达的假设上；公开的替代是主动调用 `daemon.status`。
 
 ---
 

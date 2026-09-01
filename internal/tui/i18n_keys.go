@@ -13,7 +13,6 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"status.skill_reviewing":             {LocaleEN: "Running Skill LLM review for {}...", LocaleZH: "正在运行 Skill LLM review：{}..."},
 		"status.cancelled":                   {LocaleEN: "Cancelled", LocaleZH: "已取消"},
 		"status.cancelling":                  {LocaleEN: "Cancelling...", LocaleZH: "正在取消..."},
-		"status.daemon_connected":            {LocaleEN: "Connected to daemon (pid {})", LocaleZH: "已连接到守护进程 (pid {})"},
 		"handoff.waiting_owner":              {LocaleEN: "Waiting for the window that started this run to respond.", LocaleZH: "正在等待发起这轮运行的窗口处理。"},
 		"handoff.shared":                     {LocaleEN: "Shared", LocaleZH: "共享中"},
 		"handoff.joined":                     {LocaleEN: "Joined", LocaleZH: "已加入"},

@@ -83,7 +83,6 @@ const (
 )
 
 const (
-	NotifyDaemonState      = "daemon.state"
 	NotifyDaemonFullStatus = "daemon.full_status"
 	NotifyMCPUpdated       = "mcp.updated"
 )

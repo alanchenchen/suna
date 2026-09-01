@@ -27,7 +27,6 @@ type interactionResolvedMsg = tuievents.InteractionResolvedMsg
 type toolStartMsg = tuievents.ToolStartMsg
 type toolGuardMsg = tuievents.ToolGuardMsg
 type toolEndMsg = tuievents.ToolEndMsg
-type daemonStateMsg = tuievents.DaemonStateMsg
 type compactResultMsg = tuievents.CompactResultMsg
 type memoryListMsg = tuievents.MemoryListMsg
 type daemonFullStatusMsg = tuievents.DaemonFullStatusMsg
@@ -136,8 +135,6 @@ func (t *TUI) handleNotificationMsg(msg notificationMsg) {
 		t.handleGuardConfirmNotification(m.Params)
 	case interactionResolvedMsg:
 		t.handleInteractionResolvedNotification(m.Params)
-	case daemonStateMsg:
-		t.handleDaemonStateNotification(m.Params)
 	case compactResultMsg:
 		t.handleCompactResultNotification(m.Params)
 	case memoryListMsg:
@@ -483,18 +480,6 @@ func (t *TUI) handleToolEndNotification(p protocol.ToolEndParams) {
 		return
 	}
 	t.chat.EndTool(p, id, now)
-}
-
-func (t *TUI) handleDaemonStateNotification(p protocol.DaemonStateParams) {
-	if p.ProviderName != "" {
-		t.providerName = p.ProviderName
-	}
-	if p.ModelName != "" {
-		t.modelName = p.ModelName
-	}
-	if t.mode == uipage.Chat && len(t.chat.Messages) == 0 {
-		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.i18n.Tf("status.daemon_connected", p.PID)})
-	}
 }
 
 func (t *TUI) handleCompactResultNotification(p protocol.CompactResult) {
