@@ -71,9 +71,6 @@ type Agent struct {
 	runMu          sync.Mutex
 	steeringMu     sync.RWMutex
 	steering       *steeringMailbox
-	// currentInputBlocks 只在单次 Agent.Run 内保存当前用户消息的轻量媒体引用，供 spawn.input_images 显式转交给 subtask。
-	// 这里不能保存到跨轮状态；Run 结束必须清空，避免附件引用被误当作历史上下文继续使用。
-	currentInputBlocks []model.ContentBlock
 
 	cancelMu sync.Mutex
 	cancelFn context.CancelFunc
@@ -219,11 +216,10 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 		}
 
 		a.working.AddMessage(userMessage)
-		a.currentInputBlocks = cloneContentBlocks(userMessage.Content)
 		// 多模态 raw media 只允许参与当前 agent run；run 结束后立即替换为轻量 metadata，避免进入下一轮上下文或会话快照。
 		defer func() {
-			a.currentInputBlocks = nil
 			a.replaceRunInputMessage(userMessage, storedUserMessage)
+			a.replaceToolImagesWithSummaries()
 			a.saveConversationState(runCtx)
 		}()
 		a.turnCount++

@@ -243,9 +243,9 @@ tools/call
   ↓
 根据任务性质、模型能力和上下文窗口选择 model
   ↓
-编写自包含 task，裁剪 context，选择 input_images
+编写自包含 task（需要读图时从历史摘要提取 source 并说明）
   ↓
-按最小权限选择 tools 白名单
+按最小权限选择 tools 白名单（需要读图时包含 read_image）
   ↓
 spawn 调用 internal/agent.ExecuteSpawnTool
   ↓

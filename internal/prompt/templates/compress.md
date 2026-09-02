@@ -13,6 +13,7 @@ Rules:
 - Write in the conversation's primary language.
 - Be concise but specific. Prefer bullets.
 - Do not invent facts.
+- Preserve media reference summaries verbatim (lines like `[image: ...]` with a `source=` value); keep them in the ledger or active context so the agent can re-read the original media later. Do not summarize or drop them.
 - Do not include raw tool logs or raw file contents unless an exact short snippet is essential.
 - Merge with the previous Session State; do not append duplicate summaries.
 - Keep the output bounded. Older completed work may become a one-line ledger item, but should not disappear if it may help recall the session.

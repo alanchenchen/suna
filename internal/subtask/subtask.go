@@ -15,7 +15,6 @@ import (
 type Request struct {
 	ID         string
 	Task       string
-	Input      []model.ContentBlock
 	Binding    *model.ModelBinding
 	Invocation model.Invocation
 	System     string
@@ -84,11 +83,7 @@ func (s *Subtask) Run(ctx context.Context, r *runner.Runner) (Result, error) {
 	ctx = model.WithBinding(ctx, s.req.Binding)
 
 	working := memory.NewWorkingMemory()
-	blocks := s.req.Input
-	if len(blocks) == 0 {
-		blocks = []model.ContentBlock{{Type: model.ContentText, Text: s.req.Task}}
-	}
-	working.AddMessage(model.Message{Role: model.RoleUser, TextContent: s.req.Task, Content: blocks})
+	working.AddMessage(model.Message{Role: model.RoleUser, TextContent: s.req.Task, Content: []model.ContentBlock{{Type: model.ContentText, Text: s.req.Task}}})
 	res, err := r.Run(ctx, runner.Request{
 		Binding:       s.req.Binding,
 		Purpose:       "subtask",

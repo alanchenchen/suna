@@ -468,8 +468,8 @@ func (g *Guard) builtinBlockedRules() []blockRule {
 // 只读判定必须精准：它是 mode policy 的输入，判错就是严重 bug。
 func (g *Guard) isReadOnlyCall(tool string, params map[string]any, analysis *ExecAnalysis) bool {
 	switch tool {
-	case "readfile", "listdir", "search":
-		// Perceive 工具：只读。
+	case "readfile", "listdir", "search", "read_image":
+		// Perceive 工具：只读。read_image 只读图片并返回内容块，无副作用。
 		return true
 	case "exec":
 		switch execAction(params) {

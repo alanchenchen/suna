@@ -25,10 +25,21 @@ func EstimateTokens(text string) int {
 	return asciiCount/4 + nonASCIICount + 1
 }
 
+// imageTokensPerImage 是单张图片的固定 token 估算（OpenAI tile 制约 765-1105，Anthropic 约 1000-1600）。
+// 图片 token 是离散大块，固定值偏差由 TokenCalibrator 按整体系数自动吸收，不需要精确。
+const imageTokensPerImage = 1000
+
 func EstimateMessagesTokens(msgs []Message) int {
 	total := 0
 	for _, m := range msgs {
 		total += EstimateTokens(m.Text())
+		// 图片块按固定值计入估算，使压缩判断在图片参与请求时（图片块只活一轮）
+		// 能把图片 token 算进预算，避免"图片撑爆上下文但估算无反应"的静默风险。
+		for _, b := range m.Content {
+			if b.Type == ContentImage && b.Media != nil {
+				total += imageTokensPerImage
+			}
+		}
 		for _, tc := range m.ToolCalls {
 			total += EstimateTokens(tc.Name) + EstimateTokens(tc.Arguments)
 		}

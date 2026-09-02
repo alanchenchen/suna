@@ -341,7 +341,7 @@ func TestBuildToolDefsStableAndIncludesAgentTools(t *testing.T) {
 	for _, def := range defs {
 		names = append(names, def.Name)
 	}
-	want := []string{"askuser", "editfile", "exec", "filesystem", "http", "listdir", "readfile", "search", "spawn", "writefile"}
+	want := []string{"askuser", "editfile", "exec", "filesystem", "http", "listdir", "read_image", "readfile", "search", "spawn", "writefile"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("tool schema order = %#v, want %#v", names, want)
 	}

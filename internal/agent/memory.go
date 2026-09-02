@@ -2,10 +2,12 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/alanchenchen/suna/internal/logging"
+	"github.com/alanchenchen/suna/internal/media"
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/tools"
@@ -34,6 +36,67 @@ func (a *Agent) replaceRunInputMessage(original, replacement model.Message) {
 			return
 		}
 	}
+}
+
+// replaceToolImagesWithSummaries 把 working 中所有带图片块的 user 消息替换为纯文本摘要，
+// 覆盖用户传图（含多图）与 read_image 注入的图片消息。图片块只参与当前 run，
+// 摘要文本（带 source）作为历史引用保留，供后续轮次通过 read_image 读回。
+func (a *Agent) replaceToolImagesWithSummaries() {
+	msgs := a.working.Messages()
+	changed := false
+	for i := range msgs {
+		if msgs[i].Role != model.RoleUser || !messageHasImage(msgs[i]) {
+			continue
+		}
+		// 保留原有文本（如用户输入），图片块替换为摘要文本；无文本时摘要直接作为消息内容。
+		text := strings.TrimSpace(msgs[i].Text())
+		summaries := imageSummaries(msgs[i].Content)
+		if len(summaries) > 0 {
+			if text != "" {
+				text += "\n"
+			}
+			text += strings.Join(summaries, "\n")
+		}
+		msgs[i] = model.NewTextMessage(model.RoleUser, text)
+		changed = true
+	}
+	if changed {
+		a.working.SetMessages(msgs)
+	}
+}
+
+// imageSummaries 把图片块转换为带 source 的摘要文本，格式与 daemon 端 attachmentSummary 一致。
+func imageSummaries(blocks []model.ContentBlock) []string {
+	var out []string
+	for _, b := range blocks {
+		if b.Type != model.ContentImage || b.Media == nil {
+			continue
+		}
+		ref := b.Media
+		parts := []string{fmt.Sprintf("[image: %s", ref.Name)}
+		if ref.MimeType != "" {
+			parts = append(parts, ref.MimeType)
+		}
+		if ref.Size > 0 {
+			parts = append(parts, media.FormatSize(ref.Size))
+		}
+		switch ref.Kind {
+		case model.MediaAttachment:
+			if ref.Name != "" {
+				parts = append(parts, "source=attachment:"+ref.Name)
+			}
+		case model.MediaPath:
+			if ref.Path != "" {
+				parts = append(parts, "source="+ref.Path)
+			}
+		case model.MediaURL:
+			if ref.URL != "" {
+				parts = append(parts, "source="+ref.URL)
+			}
+		}
+		out = append(out, strings.Join(parts, ", ")+"]")
+	}
+	return out
 }
 
 func messageHasImage(msg model.Message) bool {

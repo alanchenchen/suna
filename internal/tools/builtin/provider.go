@@ -22,6 +22,7 @@ func NewProvider(extra ...Tool) *Provider {
 		HTTP{},
 		ListDir{},
 		ReadFile{},
+		ReadImage{},
 		Search{},
 		WriteFile{},
 	}

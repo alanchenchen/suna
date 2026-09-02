@@ -38,7 +38,6 @@ Subtask 通过 Agent runtime 工具 `spawn` 暴露给主 Agent。
 | `task` | 必填。自包含的子任务描述。应说明目标、输出要求和判断标准。 |
 | `context` | 可选。主 Agent 选择性传入的额外上下文。不会自动包含主对话历史。 |
 | `tools` | 必填。允许子任务使用的工具名列表。`[]` 表示纯模型任务。 |
-| `input_images` | 可选。当前用户消息中图片附件的索引列表，例如 `[0]`。不传则子任务看不到图片。 |
 
 设计上要求 `model` 和 `tools` 必须显式提供，是为了让模型选择和工具权限成为主 Agent 的有意识决策，而不是默认继承。
 
@@ -76,11 +75,11 @@ spawn 到强推理模型，tools=[]，只做独立分析
 ```text
 用户上传图片并要求分析
   ↓
-主 Agent 发现另一个模型具备多模态能力
+主 Agent 在对话历史中看到 [image: ...] 摘要（含 source）
   ↓
-spawn(model=多模态模型, input_images=[0], tools=[])
+spawn(model=多模态模型, tools=[read_image])
   ↓
-子任务只看这张图片和明确任务，不看主会话其它附件
+子任务通过 read_image 读取图片并完成分析
 ```
 
 当前实现不是“全局自动路由所有请求”。主对话仍有 active model；Subtask 是主 Agent 在任务中主动发起的动态模型分配。这种方式更可解释，也更容易和权限边界结合。
@@ -136,11 +135,9 @@ Subtask 同时受两层边界保护：
   ↓
 选择模型 model
   ↓
-编写自包含 task
+编写自包含 task（需要读图时从历史摘要提取 source 并说明）
   ↓
-裁剪 context，选择 input_images
-  ↓
-选择 tools 白名单
+选择 tools 白名单（需要读图时包含 read_image）
   ↓
 调用 spawn
   ↓

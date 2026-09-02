@@ -1,6 +1,10 @@
 package tools
 
-import "context"
+import (
+	"context"
+
+	"github.com/alanchenchen/suna/internal/model"
+)
 
 // Category 表示工具行为类别，供 Guard、UI 和权限策略区分感知类/行动类工具。
 type Category int
@@ -12,12 +16,15 @@ const (
 
 // Result 是工具执行结果。Content 会进入 LLM 上下文；Metadata 只给 UI/API 展示使用。
 // IsError 必须准确反映工具是否失败，避免 Agent 误判执行状态。
+// Images 是工具产出的图片块（如 read_image），由 Runner 统一注入为独立的 user 消息，
+// 不进入 Content 文本；图片块只参与当前 run，run 结束后由 Agent 层替换为摘要文本。
 type Result struct {
-	Content   string         `json:"content"`
-	Error     string         `json:"error,omitempty"`
-	IsError   bool           `json:"is_error"`
-	Truncated bool           `json:"truncated,omitempty"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
+	Content   string               `json:"content"`
+	Error     string               `json:"error,omitempty"`
+	IsError   bool                 `json:"is_error"`
+	Truncated bool                 `json:"truncated,omitempty"`
+	Metadata  map[string]any       `json:"metadata,omitempty"`
+	Images    []model.ContentBlock `json:"images,omitempty"`
 }
 
 func TextResult(content string) Result { return Result{Content: content} }

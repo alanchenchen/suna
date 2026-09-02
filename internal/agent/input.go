@@ -15,15 +15,6 @@ func TextInput(text string) Input {
 	return Input{Blocks: []model.ContentBlock{{Type: model.ContentText, Text: text}}}
 }
 
-func cloneContentBlocks(blocks []model.ContentBlock) []model.ContentBlock {
-	if len(blocks) == 0 {
-		return nil
-	}
-	out := make([]model.ContentBlock, len(blocks))
-	copy(out, blocks)
-	return out
-}
-
 func (in Input) Message(role model.Role) model.Message {
 	blocks := normalizeInputBlocks(in.Blocks)
 	return model.Message{

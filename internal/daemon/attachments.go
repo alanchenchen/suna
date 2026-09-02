@@ -44,30 +44,34 @@ func normalizeImageAttachment(store *media.Store, ref protocol.AttachmentRef) (m
 	if err != nil {
 		return model.ContentBlock{}, "", err
 	}
-	summary := attachmentSummary("image", validated.Name, validated.MimeType, validated.Size, string(validated.Kind))
+	summary := attachmentSummary("image", validated.Name, validated.MimeType, validated.Size, string(validated.Kind), validated.Path, validated.URL)
 	return model.ContentBlock{Type: model.ContentImage, Media: &validated}, summary, nil
 }
 
-func attachmentSummary(kind, name, mimeType string, size int64, sourceKind string) string {
-	parts := []string{fmt.Sprintf("[uploaded %s: %s", kind, name)}
+// attachmentSummary 生成历史对话中的媒体引用摘要。source 内联在摘要里，
+// 模型可提取 source 后通过 read_image 读回原图；格式未来可扩展视频等媒体类型。
+func attachmentSummary(kind, name, mimeType string, size int64, sourceKind, path, url string) string {
+	parts := []string{fmt.Sprintf("[%s: %s", kind, name)}
 	if mimeType != "" {
 		parts = append(parts, mimeType)
 	}
 	if size > 0 {
-		parts = append(parts, formatBytes(size))
+		parts = append(parts, media.FormatSize(size))
 	}
-	if sourceKind != "" {
-		parts = append(parts, "source="+sourceKind)
+	// source 是 read_image 的可读回引用：attachment 类型用文件名，path/url 类型用原始位置。
+	switch sourceKind {
+	case "attachment":
+		if name != "" {
+			parts = append(parts, "source=attachment:"+name)
+		}
+	case "path":
+		if path != "" {
+			parts = append(parts, "source="+path)
+		}
+	case "url":
+		if url != "" {
+			parts = append(parts, "source="+url)
+		}
 	}
 	return strings.Join(parts, ", ") + "]"
-}
-
-func formatBytes(n int64) string {
-	if n < 1024 {
-		return fmt.Sprintf("%dB", n)
-	}
-	if n < 1024*1024 {
-		return fmt.Sprintf("%.1fKB", float64(n)/1024)
-	}
-	return fmt.Sprintf("%.1fMB", float64(n)/(1024*1024))
 }

@@ -236,10 +236,15 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 				TextContent: toolText,
 				Content:     []model.ContentBlock{{Type: model.ContentText, Text: toolText}},
 			})
+			// 收集工具产出的图片块，稍后统一注入 user 消息。
+			r.toolImages = append(r.toolImages, execResult.result.Images...)
 			if r.Hooks.OnToolResult != nil {
 				r.Hooks.OnToolResult(execResult.tc.Name, execResult.result)
 			}
 		}
+		// 工具产出的图片（如 read_image）统一注入为一条 user 消息，图片块只参与当前 run；
+		// 注入前按 MediaRef 去重，避免同一图片在上下文里重复累积。
+		r.injectToolImages(req.Working)
 		if req.MaxTurns <= 0 || turns < req.MaxTurns {
 			r.applySteering(ctx, req, false)
 		}
@@ -495,6 +500,112 @@ func cloneMessages(msgs []model.Message) []model.Message {
 	cp := make([]model.Message, len(msgs))
 	copy(cp, msgs)
 	return cp
+}
+
+// injectToolImages 把本轮工具产出的图片块合并注入为一条 user 消息。
+// 注入前按 MediaRef 去重：同一图片已存在于 working（图片块或历史摘要中的 source）则跳过，
+// 避免模型反复读同一张图导致上下文重复累积。
+func (r *Runner) injectToolImages(working *memory.WorkingMemory) {
+	if working == nil {
+		return
+	}
+	images := collectResultImages(r.toolImages)
+	if len(images) == 0 {
+		return
+	}
+	r.toolImages = r.toolImages[:0]
+	existing := working.Messages()
+	unique := images[:0]
+	for _, img := range images {
+		// 同批次内重复也要去重：unique 是尚未注入 working 的候选，检查范围需包含它。
+		if !imageAlreadyInContext(existing, img) && !imageBlockInBlocks(unique, img) {
+			unique = append(unique, img)
+		}
+	}
+	if len(unique) == 0 {
+		return
+	}
+	working.AddMessage(model.Message{
+		Role:    model.RoleUser,
+		Content: unique,
+	})
+}
+
+// collectResultImages 收集本轮工具结果中的图片块；同一结果里的图片保持顺序。
+func collectResultImages(images []model.ContentBlock) []model.ContentBlock {
+	out := make([]model.ContentBlock, 0, len(images))
+	for _, img := range images {
+		if img.Type == model.ContentImage && img.Media != nil {
+			out = append(out, img)
+		}
+	}
+	return out
+}
+
+// imageAlreadyInContext 判断图片是否已存在于 working：图片块直接按 MediaRef 比较，
+// 历史摘要按 source 字符串包含检查（read_image 工具描述引导模型从摘要提取 source）。
+func imageAlreadyInContext(msgs []model.Message, img model.ContentBlock) bool {
+	if img.Media == nil {
+		return true
+	}
+	for _, m := range msgs {
+		if imageBlockInBlocks(m.Content, img) {
+			return true
+		}
+		if source := mediaSourceOf(img.Media); source != "" && strings.Contains(m.Text(), source) {
+			return true
+		}
+	}
+	return false
+}
+
+// imageBlockInBlocks 判断图片块是否已存在于一组内容块中（按 MediaRef 比较）。
+func imageBlockInBlocks(blocks []model.ContentBlock, img model.ContentBlock) bool {
+	if img.Media == nil {
+		return true
+	}
+	for _, b := range blocks {
+		if b.Type == model.ContentImage && b.Media != nil && sameMediaRef(*b.Media, *img.Media) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameMediaRef(a, b model.MediaRef) bool {
+	if a.Kind != b.Kind {
+		return false
+	}
+	switch a.Kind {
+	case model.MediaURL:
+		return a.URL == b.URL
+	case model.MediaPath, model.MediaAttachment:
+		return a.Path == b.Path
+	default:
+		return false
+	}
+}
+
+// mediaSourceOf 生成图片的摘要 source 引用，与 daemon 摘要格式保持一致。
+func mediaSourceOf(ref *model.MediaRef) string {
+	if ref == nil {
+		return ""
+	}
+	switch ref.Kind {
+	case model.MediaAttachment:
+		if ref.Name != "" {
+			return "source=attachment:" + ref.Name
+		}
+	case model.MediaPath:
+		if ref.Path != "" {
+			return "source=" + ref.Path
+		}
+	case model.MediaURL:
+		if ref.URL != "" {
+			return "source=" + ref.URL
+		}
+	}
+	return ""
 }
 
 // calibrationCoefficient 读取指定模型的 token 估算校准系数；calibrator 未注入时返回 1.0（等价未校准）。

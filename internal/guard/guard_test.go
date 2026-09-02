@@ -107,6 +107,9 @@ func TestReadonlyAllowsStructuredReadOnlyCalls(t *testing.T) {
 	}{
 		{name: "filesystem stat", tool: "filesystem", params: map[string]any{"action": "stat", "path": "out.txt"}},
 		{name: "http get", tool: "http", params: map[string]any{"method": "GET", "url": "https://example.com"}},
+		{name: "read_image path", tool: "read_image", params: map[string]any{"source": "/workspace/shot.png"}},
+		{name: "read_image attachment", tool: "read_image", params: map[string]any{"source": "attachment:sha256-abc.png"}},
+		{name: "read_image url", tool: "read_image", params: map[string]any{"source": "https://example.com/img.png"}},
 	} {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {

@@ -291,7 +291,17 @@ func (p *AnthropicAdapter) buildMessages(ctx context.Context, req *CompletionReq
 			if err != nil {
 				return nil, err
 			}
-			msgs = append(msgs, anthropic.NewUserMessage(blocks...))
+			// Anthropic 协议要求相邻 user 消息合并为一条（如 read_image 注入的图片消息紧跟 tool result）；
+			// 后续 user 消息的块追加到上一条，避免出现连续 user 消息导致请求被拒。
+			// SessionState 注入的消息是内部上下文，不与历史第一条 user 合并，保持状态块独立。
+			stateOnly := req.SessionState != "" && len(msgs) == 1
+			if len(msgs) > 0 && msgs[len(msgs)-1].Role == anthropic.MessageParamRoleUser && !stateOnly {
+				last := msgs[len(msgs)-1]
+				merged := append(last.Content, blocks...)
+				msgs[len(msgs)-1] = anthropic.MessageParam{Role: last.Role, Content: merged}
+			} else {
+				msgs = append(msgs, anthropic.NewUserMessage(blocks...))
+			}
 		case RoleAssistant:
 			blocks, err := p.buildAssistantBlocks(ctx, m)
 			if err != nil {

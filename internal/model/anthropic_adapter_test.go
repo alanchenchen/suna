@@ -28,7 +28,9 @@ func TestAnthropicBuildMessagesGroupsConsecutiveToolResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildMessages() error = %v", err)
 	}
-	if got, want := len(msgs), 4; got != want {
+	// 旧行为 4 条：assistant / tool results / user / tool result。
+	// 连续 user 合并后 3 条：assistant / tool results / user(continue + call_c 合并)。
+	if got, want := len(msgs), 3; got != want {
 		t.Fatalf("len(msgs) = %d, want %d", got, want)
 	}
 
@@ -44,7 +46,8 @@ func TestAnthropicBuildMessagesGroupsConsecutiveToolResults(t *testing.T) {
 		t.Fatalf("first tool result message = %s, should not include non-consecutive call_c", first)
 	}
 
-	secondToolResultsBytes, err := msgs[3].MarshalJSON()
+	// 合并后 msgs[2] 是 user 消息（continue + call_c 的 tool result），call_c 应在其中。
+	secondToolResultsBytes, err := msgs[2].MarshalJSON()
 	if err != nil {
 		t.Fatalf("MarshalJSON(second tool results) error = %v", err)
 	}

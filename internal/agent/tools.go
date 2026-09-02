@@ -198,10 +198,6 @@ func (a *Agent) ExecuteSpawnTool(ctx context.Context, id string, params map[stri
 		return errResult
 	}
 	toolDefs := a.buildSubtaskToolDefs(allowedTools)
-	inputBlocks, errResult := a.buildSubtaskInput(task, params["input_images"])
-	if errResult.IsError {
-		return errResult
-	}
 
 	extraCtx, _ := params["context"].(string)
 	env := getEnvInfoForWorkDir(a.cwd)
@@ -225,7 +221,7 @@ func (a *Agent) ExecuteSpawnTool(ctx context.Context, id string, params map[stri
 	ctx = model.WithBinding(ctx, binding)
 	ctx = tools.MergeExecutionContext(ctx, tools.ExecutionContext{BoundaryID: "spawn:" + spawnID})
 	r := a.newSubtaskRunner(events, spawnID, allowedTools, task)
-	st := subtask.New(subtask.Request{ID: spawnID, Task: task, Input: inputBlocks, Binding: binding, Invocation: model.Invocation{SessionScope: model.SessionScope(a.sessionID)}, System: subtaskPrompt, ToolDefs: toolDefs})
+	st := subtask.New(subtask.Request{ID: spawnID, Task: task, Binding: binding, Invocation: model.Invocation{SessionScope: model.SessionScope(a.sessionID)}, System: subtaskPrompt, ToolDefs: toolDefs})
 	res, err := st.Run(ctx, r)
 	if execCtx, ok := tools.ExecutionContextFrom(ctx); ok && a.tools != nil {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -380,12 +376,24 @@ func (a *Agent) shouldGuardTool(name string) bool {
 }
 
 func sensitiveReadError(name string, params map[string]any) string {
-	if name != "readfile" || params == nil {
+	if params == nil {
 		return ""
 	}
-	path, _ := params["path"].(string)
-	if sensitive, reason := guard.IsSensitivePath(path); sensitive {
-		return fmt.Sprintf("blocked: sensitive file (%s). Reading credential/secret files is not allowed.", reason)
+	switch name {
+	case "readfile":
+		path, _ := params["path"].(string)
+		if sensitive, reason := guard.IsSensitivePath(path); sensitive {
+			return fmt.Sprintf("blocked: sensitive file (%s). Reading credential/secret files is not allowed.", reason)
+		}
+	case "read_image":
+		// read_image 的本地路径分支同样受敏感路径规则约束；URL 与 attachment 引用不受影响。
+		source, _ := params["source"].(string)
+		if strings.HasPrefix(source, "attachment:") || strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+			return ""
+		}
+		if sensitive, reason := guard.IsSensitivePath(source); sensitive {
+			return fmt.Sprintf("blocked: sensitive file (%s). Reading credential/secret files is not allowed.", reason)
+		}
 	}
 	return ""
 }
@@ -444,68 +452,6 @@ func (a *Agent) buildSubtaskToolDefs(allowed map[string]bool) []model.ToolDef {
 		}
 	}
 	return defs
-}
-
-func (a *Agent) buildSubtaskInput(task string, value any) ([]model.ContentBlock, tools.Result) {
-	blocks := []model.ContentBlock{{Type: model.ContentText, Text: task}}
-	indexes, err := parseImageIndexes(value)
-	if err != nil {
-		return nil, tools.ErrorResult(err.Error())
-	}
-	if len(indexes) == 0 {
-		return blocks, tools.Result{}
-	}
-	images := a.currentInputImages()
-	for _, idx := range indexes {
-		if idx < 0 || idx >= len(images) {
-			return nil, tools.ErrorResult(fmt.Sprintf("invalid input image index %d; current user message has %d image(s)", idx, len(images)))
-		}
-		blocks = append(blocks, images[idx])
-	}
-	return blocks, tools.Result{}
-}
-
-func (a *Agent) currentInputImages() []model.ContentBlock {
-	images := make([]model.ContentBlock, 0)
-	for _, block := range a.currentInputBlocks {
-		if block.Type == model.ContentImage && block.Media != nil {
-			images = append(images, block)
-		}
-	}
-	return images
-}
-
-func parseImageIndexes(value any) ([]int, error) {
-	switch v := value.(type) {
-	case nil:
-		return nil, nil
-	case []any:
-		indexes := make([]int, 0, len(v))
-		for _, item := range v {
-			idx, ok := numericIndex(item)
-			if !ok {
-				return nil, fmt.Errorf("input_images must contain integer indexes")
-			}
-			indexes = append(indexes, idx)
-		}
-		return indexes, nil
-	case []int:
-		return append([]int(nil), v...), nil
-	default:
-		return nil, fmt.Errorf("input_images must be an array of image indexes")
-	}
-}
-
-func numericIndex(v any) (int, bool) {
-	switch n := v.(type) {
-	case int:
-		return n, true
-	case float64:
-		idx := int(n)
-		return idx, n == float64(idx)
-	default:
-		return 0, false
-	}
 }
 
 func (a *Agent) cleanToolParams(name string, params map[string]any) (map[string]any, string) {

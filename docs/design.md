@@ -230,7 +230,7 @@ Subtask 是 Suna 当前智能模型路由的主要体现。它不是普通子对
 - 只能使用主 Agent 显式授权的工具。
 - 不能继续 spawn 子任务。
 - 不能使用 askuser。
-- 图片只通过 `input_images` 显式传递当前用户消息中的附件。
+- 图片读取通过 `read_image` 工具按需进行：主 Agent 从历史 `[image: ...]` 摘要提取 source，在 task 中说明并授权 read_image 工具。
 
 即使工具被授权给 Subtask，行动类调用仍会经过 Guard、Workspace 和敏感路径规则。因此 Subtask 是“按任务最小授权的受控执行器”，不是另一个拥有完整权限的 Agent。
 
