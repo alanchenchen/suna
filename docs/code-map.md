@@ -249,7 +249,7 @@ tools/call
   ↓
 spawn 调用 internal/agent.ExecuteSpawnTool
   ↓
-校验模型存在、工具可授权、图片索引有效
+校验模型存在、工具可授权
   ↓
 internal/subtask 创建新的 working memory
   ↓

@@ -86,6 +86,18 @@ Suna 把“业务编排”和“模型调用循环”分开：
 - 新工具优先作为 Provider 接入，不在 Agent 或 Runner 中手动拼 schema。
 - 工具 schema 顺序和内容应尽量稳定，减少模型前缀缓存失效。
 
+### 图片读取（read_image）
+
+`read_image` 是内置工具，让多模态模型主动读图，而不只依赖用户手动传图。
+
+- **三源输入**：本地路径、http(s) URL、历史附件引用（`attachment:<文件名>`）。内部统一走 `media.Store.ValidateImage`（MIME 白名单、10MB 上限、attachment 目录约束、symlink 拒绝），并复用敏感路径检查，与 `readfile` 同级安全。
+- **产物与用户传图同构**：工具返回文本结果 + 图片块（`tools.Result.Images`），runner 在工具结果后统一注入为一条 user 消息（纯图片块，无文本），与用户传图走同一套 adapter 渲染。
+- **生命周期**：图片块只活一轮，run 结束时由 agent 层统一替换为确定性摘要文本（`[image: 名称, MIME, 大小, source=...]`），与用户传图的摘要化同机制；摘要落库后模型可从历史对话提取 source 再次读回。
+- **去重**：注入前检查 working 中是否已有同 source 的图片块或摘要，重复读图不重复注入，上下文不膨胀。
+- **历史可达**：摘要中的 `source` 是 read_image 的可读回引用（attachment 用文件名、path/url 用原始位置）；恢复会话时 daemon 按前缀识别摘要并标记 `kind=media`，UI 展示为友好样式（图片图标 + 文件名），模型侧摘要文本不变。
+- **subtask**：`read_image` 是 builtin，`CanGrantToSubtask` 自动放行；主 Agent 在 task 中写明 source 并授权工具，子任务即可自行读图。
+- **Guard**：默认走 Guard（与全部 builtin 一致），`isReadOnlyCall` 已收录为只读操作，readonly 模式自动放行。
+
 ## Guard 和 Workspace
 
 Suna 的工具能力比较强，因此 Guard 是核心设计。它不是单一的“弹窗确认”，而是多层安全边界组合：

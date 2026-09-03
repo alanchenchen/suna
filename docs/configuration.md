@@ -381,6 +381,7 @@ reasoning = { model = "other-model" }
 |---|---|
 | `exec` | `run` 匹配 `command`；`status` / `stop` 匹配 `action job_id` |
 | `readfile` / `listdir` / `writefile` / `editfile` / `search` | `path` |
+| `read_image` | `source`（本地路径时匹配；URL / attachment 引用不匹配本地路径规则） |
 | `filesystem` | `action path`；`move` / `copy` 带 destination 时为 `action path -> destination` |
 | `http` | `METHOD url`，未传 method 时默认为 `GET` |
 

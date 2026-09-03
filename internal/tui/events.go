@@ -677,9 +677,15 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) bool {
 	t.chat.Messages = nil
 	t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}
 	for _, m := range p.Messages {
-		if m.Content != "" {
-			t.appendNonToolMessage(chatMsg{Role: m.Role, Content: m.Content})
+		if m.Content == "" {
+			continue
 		}
+		if m.Kind == protocol.SnapshotMessageKindMedia {
+			// 媒体引用摘要：文本含 source 供模型读回，UI 展示为友好样式而非技术性摘要原文。
+			t.appendNonToolMessage(chatMsg{Role: m.Role, Content: t.renderMediaSummary(m.Content)})
+			continue
+		}
+		t.appendNonToolMessage(chatMsg{Role: m.Role, Content: m.Content})
 	}
 	if p.ToolSummary != nil {
 		if content := t.renderSessionRestoreToolSummary(*p.ToolSummary); content != "" {

@@ -12,6 +12,7 @@ import (
 	"github.com/alanchenchen/suna/internal/agent"
 	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/memory"
+	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/protocol"
 	"github.com/alanchenchen/suna/internal/skill"
 )
@@ -716,7 +717,7 @@ func (m *sessionManager) snapshotForConn(connID string, meta memory.SessionMeta,
 		if text == "" {
 			continue
 		}
-		messages = append(messages, protocol.SnapshotMessage{Role: string(msg.Role), Content: text})
+		messages = append(messages, protocol.SnapshotMessage{Role: string(msg.Role), Content: text, Kind: snapshotMessageKind(msg.Role, text)})
 	}
 	out := protocol.SessionSnapshot{Session: m.infoFor(meta), Messages: messages, Compacted: snap.Compacted}
 	if summary := toolSummaryPayload(snap.ToolSummary); summary != nil {
@@ -744,6 +745,30 @@ func (m *sessionManager) snapshotForConn(connID string, meta memory.SessionMeta,
 	}
 	m.mu.RUnlock()
 	return out
+}
+
+// snapshotMessageKind 按消息角色与文本形态标记展示语义。媒体引用摘要是系统确定性生成的
+// （[image: ...] / [uploaded image: ...]，未来可扩展 [video: ...]），前缀识别可靠，不依赖模型。
+// Kind 与 Role 正交：assistant 恒为 text，user 按是否媒体摘要区分 text/media。
+func snapshotMessageKind(role model.Role, text string) protocol.SnapshotMessageKind {
+	if role == model.RoleAssistant {
+		return protocol.SnapshotMessageKindText
+	}
+	if isMediaSummaryText(text) {
+		return protocol.SnapshotMessageKindMedia
+	}
+	return protocol.SnapshotMessageKindText
+}
+
+// isMediaSummaryText 识别媒体引用摘要文本。格式由 daemon/agent 两侧确定性生成，
+// 且必然携带 source= 引用（三种来源都生成，ValidateImage 保证 name/path/url 非空）；
+// 同时要求前缀与 source= 是为了避免用户手动输入以 [image: 开头的普通文本被误判。
+// 新增媒体类型（如视频）时只需扩展前缀列表。
+func isMediaSummaryText(text string) bool {
+	if !strings.HasPrefix(text, "[image:") && !strings.HasPrefix(text, "[uploaded image:") {
+		return false
+	}
+	return strings.Contains(text, "source=")
 }
 
 func (m *sessionManager) cancelAllRuns() {

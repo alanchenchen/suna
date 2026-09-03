@@ -361,7 +361,7 @@ agent.run state=failed
 `session.attach` 是 Resume 和 Join Active 的共同原语，method response 直接返回 snapshot：
 
 - `session`：session metadata，包括 cwd、`model_ref`、status、client_count 和 message_count。
-- `messages`：最近可见 user/assistant 文本消息。
+- `messages`：最近可见 user/assistant 文本消息。每条含 `role`（user/assistant）、`content`（文本）与 `kind`（展示语义：`text`/`media`）。`kind=media` 表示媒体引用摘要（如 `[image: ...]`），文本含 `source` 供模型通过 `read_image` 工具读回原图，UI 应展示为媒体样式（如图片图标 + 文件名）而非普通对话文本；`role` 表达对话结构（谁说的），`kind` 表达消息性质（普通文本还是媒体摘要），两者正交，`assistant` 消息恒为 `text`。
 - `compacted`：较早上下文是否已压缩为 Session State。
 - `tool_summary`：上一轮有界工具摘要，仅供 UI 展示。
 - `current_run`：Join running session 时的轻量当前 run 视图，含稳定 `run_id`、`state` 和实时 `can_control`；`state=cancelling` 时 `can_control=false`。客户端应避免让同一 `run_id` 的迟到快照重新激活已终态运行。`assistant_buffer`/`reasoning_buffer` 是 attach 时刻的流式缓冲快照；`waiting_type`（`ask`/`guard`）表示 run 正在等待的交互类型。

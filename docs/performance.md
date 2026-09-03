@@ -175,6 +175,7 @@ user profile memory 不保存完整对话，也不保存项目任务日志。主
 - `exec` timeout、cancel、stop 和生命周期 cleanup 都使用固定有界的进程树终止、Wait 与 pipe drain 窗口，避免后代持有管道导致工具无限等待。
 - `http` 默认限制响应 body，可通过 `max_body_bytes` 调整。
 - `readfile` / tail 相关逻辑按行范围、tail 或块读取，避免无意读取超大内容。
+- `read_image` 受 `media.Store.ValidateImage` 约束（MIME 白名单、10MB 上限、attachment 目录约束、symlink 拒绝）；base64 只在模型请求阶段生成并立即回收，图片块只活一轮，run 结束时替换为摘要文本，重复读图不重复注入。
 - `search` 支持目录和单文件搜索，`auto` 模式按 path / symbol / content 分组返回少量上下文；其中 symbol 是文档标题、配置段/key、常见定义/声明等轻量结构入口，不限于代码。仍默认排除常见依赖、构建、缓存和敏感文件，并限制单文件大小、扫描文件数、结果数和输出字节数。空结果或截断诊断写入正文，不破坏 TUI metadata contract。
 
 相关代码：
@@ -187,6 +188,7 @@ user profile memory 不保存完整对话，也不保存项目任务日志。主
 - `internal/tools/builtin/process_windows.go`
 - `internal/tools/builtin/http.go`
 - `internal/tools/builtin/readfile.go`
+- `internal/tools/builtin/read_image.go`
 - `internal/tools/builtin/readtail.go`
 - `internal/tools/builtin/search.go`
 - `internal/tools/builtin/search_format.go`

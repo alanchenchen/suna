@@ -240,3 +240,46 @@ func formatAttachmentSize(n int64) string { return attachmentmodel.FormatSize(n)
 func truncateMiddle(s string, maxWidth int) string {
 	return attachmentmodel.TruncateMiddle(s, maxWidth)
 }
+
+// renderMediaSummary 把媒体引用摘要（如 [image: name.png, image/png, 1.2MB, source=...]）
+// 渲染为对用户友好的展示内容。摘要文本对模型始终可见（含 source 供 read_image 读回），
+// 这里只做展示层转换：提取名称与大小，丢弃技术性 source 细节。
+// 注意：● 点前缀与缩进由 renderInlineUserMessage 统一添加（media 摘要的 role 恒为 user，
+// 走普通用户消息渲染路径），这里只返回内容部分，避免双重 ● 点。
+func (t *TUI) renderMediaSummary(summary string) string {
+	name, size := parseMediaSummary(summary)
+	line := styleDim.Render("📷") + " " + styleDim.Render(t.tr("tui.chat.media_image"))
+	if name != "" {
+		line += " · " + styleDim.Render(name)
+	}
+	if size != "" {
+		line += " · " + styleDim.Render(size)
+	}
+	return line
+}
+
+// parseMediaSummary 从媒体引用摘要中提取展示信息：名称与大小。
+// 格式为系统确定性生成（[image: name, mime, size, source=...]），解析失败时安全降级为空。
+func parseMediaSummary(summary string) (name, size string) {
+	inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(summary, "["), "]"))
+	parts := strings.Split(inner, ",")
+	if len(parts) < 2 {
+		return "", ""
+	}
+	name = strings.TrimSpace(parts[0])
+	// 名称可能含冒号（如 [image: photo.png），取冒号后部分。
+	if idx := strings.Index(name, ":"); idx >= 0 {
+		name = strings.TrimSpace(name[idx+1:])
+	}
+	for _, p := range parts[1:] {
+		p = strings.TrimSpace(p)
+		if strings.HasPrefix(p, "source=") {
+			continue
+		}
+		if strings.ContainsAny(p, "0123456789") && !strings.Contains(p, "/") {
+			size = p
+			break
+		}
+	}
+	return name, size
+}

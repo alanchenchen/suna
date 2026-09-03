@@ -228,9 +228,23 @@ type SessionDeleteResult struct {
 	Deleted bool `json:"deleted"`
 }
 
+// SnapshotMessageKind 标记快照消息的展示语义，与 Role 正交：Role 表达对话结构（谁说的），
+// Kind 表达消息性质（普通对话文本还是媒体引用摘要）。媒体摘要的 Role 恒为 user，
+// 因为它在对话中替换的是用户消息里的媒体块，但 UI 需要 Kind 来选择展示样式。
+type SnapshotMessageKind string
+
+const (
+	// SnapshotMessageKindText 普通对话文本，Role 决定展示为哪一侧。
+	SnapshotMessageKindText SnapshotMessageKind = "text"
+	// SnapshotMessageKindMedia 媒体引用摘要（如 [image: ...]），文本含 source 供模型读回，
+	// UI 应展示为媒体样式而非普通对话文本。
+	SnapshotMessageKindMedia SnapshotMessageKind = "media"
+)
+
 type SnapshotMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string              `json:"role"`
+	Content string              `json:"content"`
+	Kind    SnapshotMessageKind `json:"kind"`
 }
 
 type RunWaitingType string

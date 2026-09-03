@@ -661,8 +661,9 @@ Feature 缺失时隐藏对应 UI。`config.set/upsert_model` 编辑已有模型�
 7. 先 session.list，再 session.create 或 session.attach；
 8. agent.sendMessage 的 response 只表示 accepted；真实输出来自 agent.delta / agent.run；
 9. 每个 method 的 params/result 字段表见第 6 节；未列出的字段一律忽略；
-10. UI 离开 session 时调用 session.detach；断线后重新 serve 并重连；
-11. 不要访问 Suna 内部文件、SQLite、Agent 或 Go 包；所有业务交互走 protocol。
+10. session.attach 返回的 messages 每条含 role 与 kind（text/media）；kind=media 是媒体引用摘要（如 [image: ...]），文本含 source 供模型通过内置 read_image 工具读回原图，UI 应展示为媒体样式而非普通对话文本；
+11. UI 离开 session 时调用 session.detach；断线后重新 serve 并重连；
+12. 不要访问 Suna 内部文件、SQLite、Agent 或 Go 包；所有业务交互走 protocol。
 ```
 
 协议字段、完整方法与错误语义请见 [protocol.md](protocol.md)。

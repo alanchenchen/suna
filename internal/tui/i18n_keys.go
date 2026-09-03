@@ -90,6 +90,7 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 
 		"tui.chat.suna":                            {LocaleEN: "Suna", LocaleZH: "Suna"},
 		"tui.chat.worked_for":                      {LocaleEN: "Worked for", LocaleZH: "已工作"},
+		"tui.chat.media_image":                     {LocaleEN: "Image", LocaleZH: "图片"},
 		"tui.chat.thinking":                        {LocaleEN: "Thinking", LocaleZH: "思考"},
 		"tui.chat.thinking_detail_hint":            {LocaleEN: "Ctrl+R details", LocaleZH: "Ctrl+R 详情"},
 		"tui.chat.thinking_folded":                 {LocaleEN: "… {} rows folded", LocaleZH: "… 已折叠 {} 行"},
