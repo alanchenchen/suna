@@ -152,6 +152,22 @@ func (t *TUI) syncContent() {
 	})
 }
 
+// syncSelectionRange 是拖动中的轻量选区同步：只更新选区范围并重写窗口行，
+// 不重建块列表（全量 SyncTranscript 是拖动卡顿的根源）。
+// 由 flushScheduledTranscriptSync 在 selectionDirty && !transcriptSyncDirty 时调用。
+func (t *TUI) syncSelectionRange() {
+	if t.selection.HasAny() && t.selection.Region == SelectionRegionTranscript {
+		start, end := t.selection.LineRange()
+		t.chat.SelectionStart = start
+		t.chat.SelectionEnd = end
+		t.chat.SelectionStyle = styleSelection
+	} else {
+		t.chat.SelectionStart = -1
+		t.chat.SelectionEnd = -1
+	}
+	t.chat.ApplySelectionRange()
+}
+
 func (t *TUI) scheduleTranscriptSync() tea.Cmd {
 	t.transcriptSyncDirty = true
 	if t.transcriptSyncScheduled {
@@ -165,7 +181,17 @@ func (t *TUI) scheduleTranscriptSync() tea.Cmd {
 
 func (t *TUI) flushScheduledTranscriptSync() tea.Cmd {
 	t.transcriptSyncScheduled = false
-	if !t.transcriptSyncDirty || t.mode != uipage.Chat {
+	if t.mode != uipage.Chat {
+		return nil
+	}
+	// 拖动中选区变化（内容未变）：走轻量路径，只同步选区范围并重写窗口行，
+	// 不重建块列表（全量 SyncTranscript 是拖动卡顿的根源）。
+	if t.selectionDirty && !t.transcriptSyncDirty {
+		t.selectionDirty = false
+		t.syncSelectionRange()
+		return nil
+	}
+	if !t.transcriptSyncDirty {
 		return nil
 	}
 	t.trimDisplayHistoryIfNeeded()

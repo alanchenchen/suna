@@ -141,6 +141,10 @@ type TUI struct {
 	transcriptSyncDirty     bool
 	transcriptSyncScheduled bool
 
+	// selectionDirty 标记拖动中选区范围变化（内容未变）：帧门 flush 时走轻量路径
+	// （只重写窗口行，不重建块列表），与 transcriptSyncDirty（内容变化）区分。
+	selectionDirty bool
+
 	// chatSpinnerTicking 保证 loading/compacting 的 spinner 只有一条 tick 链；Join running session 时也会按需启动。
 	chatSpinnerTicking bool
 

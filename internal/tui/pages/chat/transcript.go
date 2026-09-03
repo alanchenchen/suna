@@ -331,6 +331,13 @@ func (m *Model) applyTranscriptWindow() {
 	m.applyTranscriptWindowLines(start, end, lines)
 }
 
+// ApplySelectionRange 拖动中的轻量选区同步：选区字段已由调用方更新，
+// 这里只重设窗口内容（O(窗口行) 提取 + 样式应用），不重建块列表。
+// 选区范围参与签名（SelStart/SelEnd），变化时重设内容，高亮实时跟随。
+func (m *Model) ApplySelectionRange() {
+	m.applyTranscriptWindow()
+}
+
 func (m *Model) applyTranscriptWindowLines(start, end int, lines []string) {
 	// 内容签名不包含滚动偏移：在 overscan 窗口内滚动时复用同一批内容，只移动 viewport offset。
 	// 选区样式参与签名：选区变化时重设内容，滚动（选区不变）时复用内容。

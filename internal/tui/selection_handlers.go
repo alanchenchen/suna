@@ -122,7 +122,16 @@ func (t *TUI) handleSelectionMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 		// 拖动高亮走帧门同步：Motion 事件频率取决于终端报告速率（可达 1000Hz），
 		// 直接 syncContent 会对每次事件做全量 transcript 重建，长历史下 CPU 饱和；
 		// 帧门后与流式渲染同 cadence（16ms），高亮延迟一帧无感。
-		cmd = tea.Batch(cmd, t.scheduleTranscriptSync())
+		// 拖动只改变选区范围（内容未变）：标记 selectionDirty 并只调度帧门 tick
+		// （不置 transcriptSyncDirty，否则 flush 会误走全量重建）；
+		// 流式内容到达时 transcriptSyncDirty 由 delta 路径置位，flush 走全量。
+		t.selectionDirty = true
+		if !t.transcriptSyncScheduled {
+			t.transcriptSyncScheduled = true
+			cmd = tea.Batch(cmd, tea.Tick(transcriptSyncFrameInterval, func(time.Time) tea.Msg {
+				return transcriptSyncMsg{}
+			}))
+		}
 		return true, cmd
 	default:
 		// 按下（MouseClickMsg 或其它）：左键开始拖动，其它按钮忽略。

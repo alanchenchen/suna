@@ -97,6 +97,43 @@ func TestSelectionDragFlow(t *testing.T) {
 	}
 }
 
+// TestSelectionDragUsesLightweightSync 拖动只改变选区范围（内容未变）：
+// flush 必须走轻量路径（只重写窗口行），不重建块列表（全量 SyncTranscript 是拖动卡顿根源）。
+func TestSelectionDragUsesLightweightSync(t *testing.T) {
+	tui := selectionTestTUI(t)
+	startY := tui.viewportStartY()
+
+	// 按下（内容行 0）
+	tui.handleSelectionMouse(tea.MouseClickMsg(tea.Mouse{X: 10, Y: startY, Button: tea.MouseLeft}))
+
+	// 拖动到内容行 2：标记 selectionDirty 并调度帧门
+	motion := tea.MouseMotionMsg(tea.Mouse{X: 10, Y: startY + 2, Button: tea.MouseLeft})
+	tui.handleSelectionMouse(motion)
+	if !tui.selectionDirty {
+		t.Fatal("selectionDirty = false after motion, want true")
+	}
+	if !tui.transcriptSyncScheduled {
+		t.Fatal("transcriptSyncScheduled = false after motion, want true")
+	}
+
+	// flush：selectionDirty && !transcriptSyncDirty → 轻量路径，选区范围同步到 chat 包
+	_ = tui.flushScheduledTranscriptSync()
+	if tui.selectionDirty {
+		t.Fatal("selectionDirty = true after flush, want false")
+	}
+	if tui.chat.SelectionStart != 0 || tui.chat.SelectionEnd != 2 {
+		t.Fatalf("chat selection = %d..%d, want 0..2", tui.chat.SelectionStart, tui.chat.SelectionEnd)
+	}
+
+	// 内容变化（流式 delta 到达）时：transcriptSyncDirty 置位，flush 走全量
+	tui.transcriptSyncDirty = true
+	tui.selectionDirty = true
+	_ = tui.flushScheduledTranscriptSync()
+	if tui.transcriptSyncDirty {
+		t.Fatal("transcriptSyncDirty = true after full flush, want false")
+	}
+}
+
 func TestSelectionClickWithoutDragClears(t *testing.T) {
 	tui := selectionTestTUI(t)
 	startY := tui.viewportStartY()
