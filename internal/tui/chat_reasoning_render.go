@@ -14,8 +14,8 @@ const (
 	reasoningSummaryTailBytes    = 8 * 1024
 	reasoningRunningMaxRows      = 5
 	reasoningCompletedMaxRows    = 3
-	reasoningRunningMaxRowsCap   = 8
-	reasoningCompletedMaxRowsCap = 5
+	reasoningRunningMaxRowsCap   = 10
+	reasoningCompletedMaxRowsCap = 7
 )
 
 func (t *TUI) renderThinkingBox(content string, running bool, startedAt, endedAt time.Time) string {
@@ -24,7 +24,7 @@ func (t *TUI) renderThinkingBox(content string, running bool, startedAt, endedAt
 
 func (t *TUI) renderThinkingBoxMode(content string, running, detail bool, startedAt, endedAt time.Time) string {
 	detail = detail && !running
-	width := max(24, min(t.width-8, 100))
+	width := max(24, min(t.width-12, 100))
 	inner := width - 4
 	elapsed := reasoningElapsed(running, startedAt, endedAt)
 	title := t.tr("tui.chat.thinking")
@@ -88,12 +88,13 @@ func (t *TUI) limitThinkingBodyRows(lines []string, detail bool, running bool) (
 }
 
 // reasoningMaxRows 按终端高度自适应思考链行数：小终端保持下限不挤占对话区，
-// 大终端提升到上限展示更多思考过程。高度为 0（测试/未初始化）时回落下限。
+// 大终端提升到上限展示更多思考过程；斜率 h/8、h/10 让中等尺寸更快获得高度。
+// 高度为 0（测试/未初始化）时回落下限。
 func (t *TUI) reasoningMaxRows(running bool) int {
 	if running {
-		return min(reasoningRunningMaxRowsCap, max(reasoningRunningMaxRows, t.height/10))
+		return min(reasoningRunningMaxRowsCap, max(reasoningRunningMaxRows, t.height/8))
 	}
-	return min(reasoningCompletedMaxRowsCap, max(reasoningCompletedMaxRows, t.height/12))
+	return min(reasoningCompletedMaxRowsCap, max(reasoningCompletedMaxRows, t.height/10))
 }
 
 func trimEmptyThinkingRows(lines []string) []string {

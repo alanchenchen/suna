@@ -893,14 +893,23 @@ func TestRenderRunDurationShowsEndTime(t *testing.T) {
 }
 
 func TestThinkingBoxRowsAdaptToTerminalHeight(t *testing.T) {
-	// 小终端（40 行）保持下限，不挤占对话区。
+	// 小终端（40 行）：running 保持下限，completed 因 h/10 斜率略高于下限（小尺寸也高一点）。
 	small := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 40}
 	small.initChatComponents()
 	if got := small.reasoningMaxRows(true); got != reasoningRunningMaxRows {
 		t.Fatalf("reasoningMaxRows(running) at h=40 = %d, want floor %d", got, reasoningRunningMaxRows)
 	}
-	if got := small.reasoningMaxRows(false); got != reasoningCompletedMaxRows {
-		t.Fatalf("reasoningMaxRows(completed) at h=40 = %d, want floor %d", got, reasoningCompletedMaxRows)
+	if got := small.reasoningMaxRows(false); got != 4 {
+		t.Fatalf("reasoningMaxRows(completed) at h=40 = %d, want 4 (h/10 slope)", got)
+	}
+	// 极小终端（20 行）回落下限。
+	tiny := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 20}
+	tiny.initChatComponents()
+	if got := tiny.reasoningMaxRows(true); got != reasoningRunningMaxRows {
+		t.Fatalf("reasoningMaxRows(running) at h=20 = %d, want floor %d", got, reasoningRunningMaxRows)
+	}
+	if got := tiny.reasoningMaxRows(false); got != reasoningCompletedMaxRows {
+		t.Fatalf("reasoningMaxRows(completed) at h=20 = %d, want floor %d", got, reasoningCompletedMaxRows)
 	}
 	// 大终端（100 行）提升到上限。
 	big := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 100}
