@@ -183,6 +183,40 @@ func TestSelectedSubtaskSummaryWrapsCompleteTask(t *testing.T) {
 	}
 }
 
+func TestSelectedSubtaskSummaryShowsContextWithLineLimit(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 72, height: 28, mode: uipage.Chat}
+	tui.initChatComponents()
+	entry := &toolEntry{
+		ID:      "spawn-1",
+		Name:    "Spawn",
+		RawName: "spawn",
+		Status:  toolRunning,
+		ParamsRaw: map[string]any{
+			"task":    "分析图片",
+			"context": "图片地址: attachment:sha256-abc.png\n第二行背景说明\n第三行补充\n第四行超出限制",
+		},
+	}
+
+	lines := tui.renderSelectedSubtaskSummary(entry, 60)
+	plainLines := make([]string, 0, len(lines))
+	for _, line := range lines {
+		plainLines = append(plainLines, stripANSIForTest(line))
+	}
+	plain := strings.Join(plainLines, "\n")
+	if !strings.Contains(plain, "上下文") {
+		t.Fatalf("renderSelectedSubtaskSummary() = %q, want context label", plain)
+	}
+	if !strings.Contains(plain, "attachment:sha256-abc.png") {
+		t.Fatalf("renderSelectedSubtaskSummary() = %q, want context source line", plain)
+	}
+	if strings.Contains(plain, "第四行超出限制") {
+		t.Fatalf("renderSelectedSubtaskSummary() = %q, context should be line-limited", plain)
+	}
+	if !strings.Contains(plain, "…") {
+		t.Fatalf("renderSelectedSubtaskSummary() = %q, want truncation marker", plain)
+	}
+}
+
 func TestGlobalToolDetailSkipsSpawnAndSubtaskChildren(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 28, mode: uipage.Chat}
 	tui.initChatComponents()
@@ -838,5 +872,49 @@ func BenchmarkAppendStreamingDeltaLongLine(b *testing.B) {
 		lastWidth := 0
 		pendingNewlines := 0
 		appendStreamingDelta(&lines, &lastWidth, &pendingNewlines, chunk, 120)
+	}
+}
+
+func TestRenderRunDurationShowsEndTime(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 30, mode: uipage.Chat}
+	ended := time.Date(2026, 9, 3, 14, 5, 0, 0, time.Local)
+	line := stripANSIForTest(tui.renderRunDuration("5.2s", ended))
+	if !strings.Contains(line, "5.2s") {
+		t.Fatalf("renderRunDuration() = %q, want duration", line)
+	}
+	if !strings.Contains(line, "14:05") {
+		t.Fatalf("renderRunDuration() = %q, want end time 14:05", line)
+	}
+	// 零值时间不展示时间后缀，保持旧行为。
+	plain := stripANSIForTest(tui.renderRunDuration("5.2s", time.Time{}))
+	if strings.Contains(plain, "14:05") || strings.Contains(plain, "·") {
+		t.Fatalf("renderRunDuration() = %q, zero time should not render time suffix", plain)
+	}
+}
+
+func TestThinkingBoxRowsAdaptToTerminalHeight(t *testing.T) {
+	// 小终端（40 行）保持下限，不挤占对话区。
+	small := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 40}
+	small.initChatComponents()
+	if got := small.reasoningMaxRows(true); got != reasoningRunningMaxRows {
+		t.Fatalf("reasoningMaxRows(running) at h=40 = %d, want floor %d", got, reasoningRunningMaxRows)
+	}
+	if got := small.reasoningMaxRows(false); got != reasoningCompletedMaxRows {
+		t.Fatalf("reasoningMaxRows(completed) at h=40 = %d, want floor %d", got, reasoningCompletedMaxRows)
+	}
+	// 大终端（100 行）提升到上限。
+	big := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 100}
+	big.initChatComponents()
+	if got := big.reasoningMaxRows(true); got != reasoningRunningMaxRowsCap {
+		t.Fatalf("reasoningMaxRows(running) at h=100 = %d, want cap %d", got, reasoningRunningMaxRowsCap)
+	}
+	if got := big.reasoningMaxRows(false); got != reasoningCompletedMaxRowsCap {
+		t.Fatalf("reasoningMaxRows(completed) at h=100 = %d, want cap %d", got, reasoningCompletedMaxRowsCap)
+	}
+	// 高度 0（测试/未初始化）回落下限。
+	zero := &TUI{i18n: newTranslator(LocaleZH), width: 100}
+	zero.initChatComponents()
+	if got := zero.reasoningMaxRows(true); got != reasoningRunningMaxRows {
+		t.Fatalf("reasoningMaxRows(running) at h=0 = %d, want floor %d", got, reasoningRunningMaxRows)
 	}
 }

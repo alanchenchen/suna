@@ -180,6 +180,7 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"tui.tool.subtask_tool_detail_title":       {LocaleEN: "Subtask tool detail", LocaleZH: "子任务工具详情"},
 		"tui.tool.model":                           {LocaleEN: "Model", LocaleZH: "模型"},
 		"tui.tool.task":                            {LocaleEN: "Task", LocaleZH: "任务"},
+		"tui.tool.context":                         {LocaleEN: "Context", LocaleZH: "上下文"},
 		"tui.tool.bytes":                           {LocaleEN: "bytes", LocaleZH: "字节"},
 		"tui.tool.truncated":                       {LocaleEN: "truncated", LocaleZH: "已截断"},
 		"tui.tool.prev":                            {LocaleEN: "previous", LocaleZH: "上一个"},

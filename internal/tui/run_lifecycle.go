@@ -137,7 +137,7 @@ func (t *TUI) appendRunElapsed(runID string) {
 	}
 	duration := time.Since(t.runStartedAt)
 	if t.runHadToolCall {
-		t.appendNonToolMessage(chatMsg{Role: "run_duration", Content: toolview.FormatCompactDuration(duration)})
+		t.appendNonToolMessage(chatMsg{Role: "run_duration", Content: toolview.FormatCompactDuration(duration), EndedAt: time.Now()})
 	}
 	t.runStartedAt = time.Time{}
 	t.activeRunID = ""

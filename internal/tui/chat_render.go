@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -393,8 +394,13 @@ func (t *TUI) renderAssistantMessage(msg *chatMsg) string {
 	return textutil.IndentLines(t.cachedMarkdown(msg, content, width), "  ")
 }
 
-func (t *TUI) renderRunDuration(duration string) string {
-	return "  " + styleBrand.Render("✦") + " " + styleDim.Render(t.tr("tui.chat.worked_for")) + " " + styleBrand.Render(duration)
+func (t *TUI) renderRunDuration(duration string, endedAt time.Time) string {
+	line := "  " + styleBrand.Render("✦") + " " + styleDim.Render(t.tr("tui.chat.worked_for")) + " " + styleBrand.Render(duration)
+	if !endedAt.IsZero() {
+		// 时间用中点分隔，与 subtask 行内分隔风格一致，避免“于”这类书面语在 TUI 里显得生硬。
+		line += " " + styleDim.Render("·") + " " + styleDim.Render(endedAt.Format("15:04"))
+	}
+	return line
 }
 
 func (t *TUI) cachedMarkdown(msg *chatMsg, content string, width int) string {

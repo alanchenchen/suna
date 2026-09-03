@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -35,7 +36,7 @@ type TranscriptDeps struct {
 	RenderDisplayDiscard func(DisplayDiscardSummary) string
 	RenderUserMessage    func(any, int) string
 	RenderAssistant      func(*Msg) string
-	RenderRunDuration    func(string) string
+	RenderRunDuration    func(string, time.Time) string
 	RenderReasoning      func(*Msg) string
 	RenderToolBlock      func(*toolview.Block) string
 	RenderSubtaskBlock   func(*toolview.Block) string
@@ -187,7 +188,7 @@ func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptB
 			nav = ResponseNavInfo{StartLine: startLine, LineCount: max(0, endLine-startLine), MsgIndex: i, Streaming: msg.Streaming}
 		case "run_duration":
 			if content, ok := msg.Content.(string); ok && deps.RenderRunDuration != nil {
-				addBlock(i, false, deps.RenderRunDuration(content)+"\n")
+				addBlock(i, false, deps.RenderRunDuration(content, msg.EndedAt)+"\n")
 			}
 		case "reasoning":
 			renderSunaHeader()

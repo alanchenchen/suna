@@ -13,6 +13,10 @@ import (
 	"github.com/alanchenchen/suna/internal/tui/components/toolview"
 )
 
+// subtaskContextMaxLines 限制 subtask block 中 context 字段的展示行数：
+// context 是 main 显式传入的补充上下文，可能很长，全量展示会挤掉工具 timeline。
+const subtaskContextMaxLines = 3
+
 func (t *TUI) renderSubtaskBlock(block *toolBlock) string {
 	if block == nil {
 		return ""
@@ -152,6 +156,21 @@ func (t *TUI) renderSelectedSubtaskSummary(te *toolEntry, innerWidth int) []stri
 	if task := subtaskParamText(te, "task"); task != "" {
 		parts = append(parts, styleDim.Render(t.tr("tui.tool.task")+":"))
 		for _, line := range strings.Split(strings.TrimRight(task, "\n"), "\n") {
+			for _, wrapped := range textutil.WrapLine(textutil.ExpandTabs(line, 4), max(12, innerWidth)) {
+				parts = append(parts, styleToolDim.Render(wrapped))
+			}
+		}
+	}
+	// context 是 main 显式传给 subtask 的补充上下文（可能含图片 source 等关键引用），
+	// 与 task 并列展示但限制行数，避免长 context 撑爆 subtask block 挤掉工具 timeline。
+	if ctx := subtaskParamText(te, "context"); ctx != "" {
+		parts = append(parts, styleDim.Render(t.tr("tui.tool.context")+":"))
+		lines := strings.Split(strings.TrimRight(ctx, "\n"), "\n")
+		for i, line := range lines {
+			if i >= subtaskContextMaxLines {
+				parts = append(parts, styleToolDim.Render("…"))
+				break
+			}
 			for _, wrapped := range textutil.WrapLine(textutil.ExpandTabs(line, 4), max(12, innerWidth)) {
 				parts = append(parts, styleToolDim.Render(wrapped))
 			}
