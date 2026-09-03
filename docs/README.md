@@ -2,7 +2,7 @@
 
 这里存放 Suna 当前代码实际支持的设计、架构、配置和维护文档。根目录 `README.md` 是英文项目门面，突出 isolated subtasks、layered Guard、runtime-first architecture、快速开始和常用功能；`README.zh-CN.md` 是中文项目门面；`docs/` 面向希望深入理解 Suna 的读者，目前以中文为主。
 
-`plans/` 保留规划、调研和历史设计，可能已经滞后，也可能包含未实现能力；理解当前行为时不要以 `plans/` 为准。
+`plans/` 只记录面向未来的长期方向、待验证假设和演进原则；理解当前行为时仍应以代码和 `docs/` 为准。
 
 ## 推荐阅读路径
 
@@ -22,6 +22,7 @@
 5. [架构说明](architecture.md)：再看整体分层、daemon 生命周期和核心模块边界。
 6. [代码地图](code-map.md)：需要定位代码时，看功能到包、核心流程和常见入口。
 7. [当前实现](current-implementation.md)：确认当前实际支持的行为和不要依赖的边界。
+8. [下一代通用 Agent Runtime](../plans/next-generation-agent.md)：了解 Suna 面向未来的长期愿景、架构原则和能力判断；不要把它当作当前实现。
 
 ### 配置和使用细节
 
@@ -47,7 +48,7 @@
 - `docs/configuration.md`：配置字段和示例。
 - `docs/tui.md`：TUI 内部结构。
 - `docs/development.md`：构建、测试和维护约定。
-- `plans/`：规划、调研、历史设计和阶段性记录，不作为当前实现文档。
+- `plans/next-generation-agent.md`：下一代通用 Agent Runtime 的长期愿景、架构原则、能力边界和演进判断，不作为当前实现文档。
 
 ## 维护原则
 

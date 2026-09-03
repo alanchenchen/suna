@@ -20,7 +20,7 @@ import (
 /*
 TUI 纯前端，无业务逻辑。
 
-设计原则（01-architecture.md I/O 抽象层）：
+设计原则（见 docs/architecture.md 的 TUI / protocol 边界）：
   - TUI 不持有任何业务逻辑、状态、数据库连接
   - TUI 只做两件事：渲染 UI、通过 local transport 与 daemon 通信
   - 所有输入 → protocol request → local JSON-RPC framing → daemon

@@ -1,6 +1,6 @@
 # 代码地图
 
-本文帮助读者从功能定位到代码，并用流程图说明核心链路。更高层的设计取舍见 [关键设计](design.md)，模块边界见 [架构说明](architecture.md)。本文只记录当前实现，不以 `plans/` 为准。
+本文帮助读者从功能定位到代码，并用流程图说明核心链路。更高层的设计取舍见 [关键设计](design.md)，模块边界见 [架构说明](architecture.md)。本文只记录当前实现；面向未来的方向见 [`plans/next-generation-agent.md`](../plans/next-generation-agent.md)。
 
 ## 功能到代码位置
 

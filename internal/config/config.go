@@ -159,7 +159,7 @@ type modelConfigTOML struct {
 
 type inlineTOMLTable map[string]any
 
-// GuardConfig 保存本地安全规则配置，对应 plans/04-guard.md。
+// GuardConfig 保存本地安全规则配置，字段语义见 docs/configuration.md。
 type GuardConfig struct {
 	Mode      string           `toml:"mode,omitempty"`
 	Workspace string           `toml:"workspace,omitempty"`

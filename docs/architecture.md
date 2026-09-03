@@ -1,6 +1,6 @@
 # 架构说明
 
-本文描述 Suna 当前稳定架构，用于补充 README 的功能介绍。`plans/` 目录保留规划、调研和历史设计；本文只记录当前代码应遵守的事实边界。
+本文描述 Suna 当前稳定架构，用于补充 README 的功能介绍。`plans/` 只记录面向未来的长期方向；本文只记录当前代码应遵守的事实边界。
 
 ## 总体分层
 
@@ -148,5 +148,5 @@ Suna 当前是单 daemon、多 session 形态。全局 config/runtime 共享；s
 - `docs/current-implementation.md`：当前实现事实和未完成边界。
 - `docs/configuration.md`：配置字段和示例。
 - `docs/development.md`：构建、测试和维护约定。
-- `plans/`：规划、调研、历史设计和阶段性记录，不作为当前实现依据。
+- `plans/`：下一代通用 Agent Runtime 的长期方向、待验证假设和演进原则，不作为当前实现依据。
 - 子包 README：仅当某个包足够复杂且必须贴近代码维护时再新增。
