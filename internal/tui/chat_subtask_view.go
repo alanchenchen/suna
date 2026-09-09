@@ -29,7 +29,13 @@ func (t *TUI) renderSubtaskBlock(block *toolBlock) string {
 	if active {
 		t.ensureSubtaskSelection()
 	}
-	width := max(40, t.width-8)
+	maxWidth := max(40, t.width-8)
+	width := maxWidth
+	if !active {
+		// 非 active（含完成后的历史 block）是纯展示：盒子宽度按行内容收窄，
+		// 与 tool block 的按需宽度一致；active 时保持固定宽度，避免选中态跳动。
+		width = t.subtaskContentWidth(ids, maxWidth)
+	}
 	innerWidth := max(24, width-8)
 	sectionWidth := max(24, width-4)
 	done, running, failed := t.subtaskStatusCounts(ids)
@@ -103,6 +109,30 @@ func renderTitledRoundBoxWithStyles(width int, title string, lines []string, tit
 	}
 	body = append(body, borderStyle.Render("╰"+strings.Repeat("─", contentWidth)+"╯"))
 	return strings.Join(body, "\n")
+}
+
+// subtaskContentWidth 计算非 active subtask block 的按需宽度：
+// 取行列表内容（cursor + icon + label + activity + duration）的最大宽度，
+// 下限 40、上限 maxWidth，与 tool block 的按需宽度语义一致。
+func (t *TUI) subtaskContentWidth(ids []string, maxWidth int) int {
+	w := 0
+	for _, id := range ids {
+		te := t.findTool(id)
+		if te == nil {
+			continue
+		}
+		label := toolview.PlainIntentLabel(te)
+		activity := t.subtaskActivity(te, maxWidth)
+		line := lipgloss.Width(label)
+		if activity != "" {
+			line += lipgloss.Width(" · " + activity)
+		}
+		if dur := t.subtaskDuration(te); dur != "" {
+			line += lipgloss.Width(subtaskDurationSep(dur) + dur)
+		}
+		w = max(w, line+4) // cursor(2) + icon(1) + space(1)
+	}
+	return min(maxWidth, max(40, w))
 }
 
 func (t *TUI) renderSubtaskRows(ids []string, innerWidth int, selected int) []string {

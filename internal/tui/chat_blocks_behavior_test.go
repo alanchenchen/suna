@@ -793,6 +793,51 @@ func leadingSpaces(s string) int {
 	return len(s)
 }
 
+func TestCompletedSubtaskBlockWidthFollowsContent(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 120, height: 30, mode: uipage.Chat}
+	tui.initChatComponents()
+
+	// 非 active 的完成 block：纯展示，宽度按行内容收窄，不占满全宽。
+	block := &toolBlock{}
+	block.Add(&toolEntry{ID: "spawn-1", Name: "Spawn", RawName: "spawn", Intent: "调研方案", Status: toolDone})
+
+	rendered := tui.renderSubtaskBlock(block)
+	lines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
+	if len(lines) == 0 {
+		t.Fatal("got empty render")
+	}
+	width := lipgloss.Width(strings.TrimPrefix(lines[0], transcriptBlockIndent))
+	if width >= 112 {
+		t.Fatalf("got full-width subtask box, want content-sized width, width=%d\n%s", width, rendered)
+	}
+	for _, line := range lines[1:] {
+		got := lipgloss.Width(strings.TrimPrefix(line, transcriptBlockIndent))
+		if got != width {
+			t.Fatalf("box line width mismatch: got %d want %d line=%q\n%s", got, width, line, rendered)
+		}
+	}
+}
+
+func TestActiveSubtaskBlockKeepsFixedWidth(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 120, height: 30, mode: uipage.Chat}
+	tui.initChatComponents()
+
+	// active block（当前 tool block）保持固定宽度，避免选中态跳动。
+	block := tui.ensureToolBlock()
+	block.Add(&toolEntry{ID: "spawn-1", Name: "Spawn", RawName: "spawn", Intent: "调研方案", Status: toolRunning})
+	tui.chat.CurrentToolBlock = block
+
+	rendered := tui.renderSubtaskBlock(block)
+	lines := strings.Split(strings.TrimRight(rendered, "\n"), "\n")
+	if len(lines) == 0 {
+		t.Fatal("got empty render")
+	}
+	width := lipgloss.Width(strings.TrimPrefix(lines[0], transcriptBlockIndent))
+	if want := max(40, 120-8); width != want {
+		t.Fatalf("active subtask box width = %d, want fixed %d\n%s", width, want, rendered)
+	}
+}
+
 func TestConfirmClipboardImagePasteSavesAttachment(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
 	tui.initChatComponents()
