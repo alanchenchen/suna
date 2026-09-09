@@ -1,8 +1,10 @@
-//go:build !windows
-
 package builtin
 
 import (
+	"context"
+	"math"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -10,52 +12,40 @@ import (
 	"github.com/alanchenchen/suna/internal/tools"
 )
 
-func TestExecSpecSeparatesValidOperationShapes(t *testing.T) {
+func TestExecSpecExposesTopLevelParameters(t *testing.T) {
 	parameters := Exec{}.Spec().Parameters
 	if parameters["type"] != "object" {
 		t.Fatalf("顶层 type = %#v，期望 object", parameters["type"])
 	}
-	branches, ok := parameters["oneOf"].([]any)
-	if !ok || len(branches) != 4 {
-		t.Fatalf("oneOf = %#v，期望四个分支", parameters["oneOf"])
+	if _, exists := parameters["oneOf"]; exists || parameters["additionalProperties"] != false {
+		t.Fatalf("schema is not a closed top-level object: %#v", parameters)
 	}
-
-	// 两个 run 分支的执行公共字段必须完全相同，防止文档语义漂移。
-	foreground := branches[0].(map[string]any)
-	background := branches[1].(map[string]any)
-	foregroundProperties := foreground["properties"].(map[string]any)
-	backgroundProperties := background["properties"].(map[string]any)
-	for _, name := range []string{"cwd", "timeout", "env", "shell"} {
-		if !reflect.DeepEqual(foregroundProperties[name], backgroundProperties[name]) {
-			t.Fatalf("公共字段 %s 不一致：前台=%#v 后台=%#v", name, foregroundProperties[name], backgroundProperties[name])
+	properties := parameters["properties"].(map[string]any)
+	names := []string{"action", "command", "cwd", "timeout", "env", "shell", "background", "scope", "job_id", "cursor"}
+	if len(properties) != len(names) {
+		t.Fatalf("properties = %#v", properties)
+	}
+	for _, name := range names {
+		if _, ok := properties[name]; !ok {
+			t.Fatalf("missing property %s", name)
 		}
 	}
-	for index, raw := range branches {
-		branch := raw.(map[string]any)
-		if branch["type"] != "object" || branch["additionalProperties"] != false {
-			t.Fatalf("分支 %d 未封闭为 object：%#v", index, branch)
-		}
+	if action := properties["action"].(map[string]any); action["default"] != "run" || !reflect.DeepEqual(action["enum"], []string{"run", "status", "stop"}) {
+		t.Fatalf("action = %#v", action)
 	}
-	if got := foregroundProperties["shell"].(map[string]any)["enum"]; !reflect.DeepEqual(got, []string{"auto", "bash", "powershell", "cmd"}) {
+	if got := properties["shell"].(map[string]any)["enum"]; !reflect.DeepEqual(got, []string{"auto", "bash", "powershell", "cmd"}) {
 		t.Fatalf("shell enum = %#v", got)
 	}
-	envAdditional := foregroundProperties["env"].(map[string]any)["additionalProperties"]
-	if !reflect.DeepEqual(envAdditional, map[string]any{"type": "string"}) {
-		t.Fatalf("env additionalProperties = %#v", envAdditional)
+	if got := properties["env"].(map[string]any)["additionalProperties"]; !reflect.DeepEqual(got, map[string]any{"type": "string"}) {
+		t.Fatalf("env = %#v", got)
 	}
-	description := foregroundProperties["timeout"].(map[string]any)["description"].(string) + " " +
-		foreground["description"].(string) + " " + background["description"].(string)
-	for _, fact := range []string{"Total command lifetime", "60 seconds", "no default timeout", "one-hour"} {
-		if !strings.Contains(strings.ToLower(description), strings.ToLower(fact)) {
-			t.Fatalf("timeout 描述缺少 %q：%q", fact, description)
-		}
+	description := Exec{}.Spec().Description
+	for _, raw := range properties {
+		description += " " + raw.(map[string]any)["description"].(string)
 	}
-	execDescription := Exec{}.Spec().Description + " " +
-		foregroundProperties["command"].(map[string]any)["description"].(string) + " " +
-		foregroundProperties["cwd"].(map[string]any)["description"].(string)
-	for _, fact := range []string{"Prefer dedicated file, search, and HTTP tools", "cwd", "path arguments", "redirects", "configured workspace", "workspace-local temp files", "instead of /tmp", "session cwd"} {
-		if !strings.Contains(strings.ToLower(execDescription), strings.ToLower(fact)) {
-			t.Fatalf("exec 描述缺少 %q：%q", fact, execDescription)
+	for _, fact := range []string{"background=true", "returned job_id", "never pass job_id", "owning run ends", "session deletion", "main boundary", "Total command lifetime", "60 seconds", "no default timeout", "one-hour", "Prefer dedicated file, search, and HTTP tools", "configured workspace", "workspace-local temp files", "session cwd"} {
+		if !strings.Contains(description, fact) {
+			t.Fatalf("description missing %q", fact)
 		}
 	}
 
@@ -87,91 +77,73 @@ func TestExecSpecSeparatesValidOperationShapes(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := execSchemaAccepts(parameters, test.params); got != test.valid {
-				t.Fatalf("schema accepts = %v，期望 %v；参数=%#v", got, test.valid, test.params)
+			if got := validateExecParams(test.params) == nil; got != test.valid {
+				t.Fatalf("validation accepts = %v，期望 %v；参数=%#v", got, test.valid, test.params)
+			}
+			if !test.valid {
+				result := (Exec{}).Execute(context.Background(), test.params)
+				if !result.IsError || result.Metadata["exec_status"] != execStatusStartFailed {
+					t.Fatalf("Execute accepted invalid parameters: %#v", result)
+				}
 			}
 		})
 	}
 }
 
-// execSchemaAccepts 只覆盖本测试使用的 JSON Schema 关键字，用组合表验证 oneOf 边界。
-func execSchemaAccepts(schema map[string]any, params map[string]any) bool {
-	matched := 0
-	for _, raw := range schema["oneOf"].([]any) {
-		if execSchemaBranchAccepts(raw.(map[string]any), params) {
-			matched++
+func TestExecRejectsInvalidParamsBeforeStart(t *testing.T) {
+	// 使用跨平台重定向命令验证无效参数不会启动进程。
+	marker := filepath.Join(t.TempDir(), "must-not-exist")
+	command := `echo must-not-run > "` + marker + `"`
+	tests := []map[string]any{
+		{"unknown": true}, {"action": nil}, {"action": ""}, {"action": "other"},
+		{"command": 1}, {"cwd": nil}, {"background": "true"}, {"scope": "run"},
+		{"shell": ""}, {"intent": 1}, {"job_id": "invented"}, {"cursor": float64(0)},
+		{"env": "A=B"}, {"env": map[string]string{"A": "B"}}, {"env": map[string]any{"A": nil}},
+		{"timeout": 1}, {"timeout": nil}, {"timeout": float64(0)}, {"timeout": -1.0},
+		{"timeout": 1.5}, {"timeout": math.NaN()}, {"timeout": math.Inf(1)},
+		{"timeout": float64(math.MaxInt64)}, {"timeout": float64(9223372037)},
+		{"action": "status", "job_id": "job", "cursor": math.NaN()},
+		{"action": "status", "job_id": "job", "cursor": math.Inf(1)},
+		{"action": "status", "job_id": "job", "cursor": float64(math.MaxInt64)},
+		{"action": "status", "job_id": "job", "cursor": 1.5},
+		{"action": "status", "job_id": "job", "cursor": 1},
+		{"action": "stop", "job_id": "job", "cursor": float64(0)},
+	}
+	for i, invalid := range tests {
+		params := map[string]any{"command": command}
+		for key, value := range invalid {
+			params[key] = value
+		}
+		if action, _ := params["action"].(string); action == "status" || action == "stop" {
+			delete(params, "command")
+		}
+		if err := validateExecParams(params); err == nil {
+			t.Fatalf("case %d accepted", i)
+		}
+		result := (Exec{}).Execute(context.Background(), params)
+		if !result.IsError || result.Metadata["exec_status"] != execStatusStartFailed || !strings.Contains(result.Content, "Error:") {
+			t.Fatalf("case %d: %#v", i, result)
 		}
 	}
-	return matched == 1
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("invalid call created marker: %v", err)
+	}
 }
 
-func execSchemaBranchAccepts(branch map[string]any, params map[string]any) bool {
-	properties := branch["properties"].(map[string]any)
-	for _, required := range branch["required"].([]string) {
-		if _, ok := params[required]; !ok {
-			return false
+func TestExecParameterNumericBoundariesAndIntent(t *testing.T) {
+	for _, params := range []map[string]any{
+		{"command": "echo ok", "timeout": float64(9223372036), "intent": "test"},
+		{"action": "status", "job_id": "job", "cursor": math.Nextafter(0x1p63, 0), "intent": "test"},
+		{"action": "stop", "job_id": "job", "intent": "test"},
+	} {
+		if err := validateExecParams(params); err != nil {
+			t.Fatalf("valid params: %v", err)
 		}
 	}
-	for name, value := range params {
-		raw, ok := properties[name]
-		if !ok {
-			return false
-		}
-		property := raw.(map[string]any)
-		switch property["type"] {
-		case "string":
-			if _, ok := value.(string); !ok {
-				return false
-			}
-		case "boolean":
-			if _, ok := value.(bool); !ok {
-				return false
-			}
-		case "integer":
-			number, ok := value.(float64)
-			if !ok || number != float64(int64(number)) {
-				return false
-			}
-			if minimum, ok := property["minimum"].(int); ok && number < float64(minimum) {
-				return false
-			}
-		case "object":
-			object, ok := value.(map[string]any)
-			if !ok {
-				return false
-			}
-			additional, _ := property["additionalProperties"].(map[string]any)
-			for _, item := range object {
-				if additional["type"] == "string" {
-					if _, ok := item.(string); !ok {
-						return false
-					}
-				}
-			}
-		}
-		if enum, ok := property["enum"]; ok && !execSchemaEnumContains(enum, value) {
-			return false
-		}
+	result := (Exec{}).Execute(context.Background(), map[string]any{"command": "echo exec-contract-ok", "intent": "test"})
+	if result.IsError || !strings.Contains(result.Content, "exec-contract-ok") {
+		t.Fatalf("default run: %#v", result)
 	}
-	return true
-}
-
-func execSchemaEnumContains(enum, value any) bool {
-	switch values := enum.(type) {
-	case []string:
-		for _, candidate := range values {
-			if candidate == value {
-				return true
-			}
-		}
-	case []bool:
-		for _, candidate := range values {
-			if candidate == value {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func TestMakeExecResultStatesErrorsAsFailures(t *testing.T) {

@@ -105,7 +105,7 @@ Runner 对主循环中的 model request 做内置 recovery：在尚未产生 ass
 | `read_image` | 感知 | 加载图片（本地路径 / http(s) URL / 历史附件引用 `attachment:<文件名>`）供多模态模型查看；历史对话中的 `[image: ...]` 摘要携带 `source=` 值，可传给本工具读回原图。内部复用 `media.Store.ValidateImage`（MIME 白名单、10MB 上限、attachment 目录约束、symlink 拒绝）与敏感路径检查；图片块只活一轮，run 结束时统一替换为确定性摘要文本，重复读图不重复注入。 |
 | `listdir` | 感知 | 列目录，支持递归、分页、include/exclude 和隐藏文件开关；`max_depth` 上限 3。 |
 | `search` | 感知 | 通用本地搜索工具。`path` 可指向文件或目录；`mode=auto` 同时返回路径、轻量结构入口和正文分组，也可指定 `content` / `path` / `symbol`；`symbol` 表示文档标题、配置段/key、常见定义/声明等轻量结构入口，不限于代码。支持 `context`(默认 1，最大 5)、`limit`(默认 100，最大 1000)、`depth`(默认 8，最大 20)、include/exclude、`match=literal/regex/glob`、`case=smart/insensitive/sensitive`、`scope=workspace/deps/all` 和 `word`。默认排除常见依赖/构建/缓存/VCS 目录和凭据文件，并通过扫描文件数、文件大小、输出大小限制保持有界；空结果或截断时只在正文追加诊断提示，不改变 TUI 依赖的 metadata contract。 |
-| `exec` | 行动 | 单一状态化 shell 工具：默认前台同步执行（默认总运行寿命 60 秒），持续任务必须显式 `background=true`；后台任务通过 `job_id` 执行 `status` / `stop`，支持 `run` / `session` 生命周期范围、cursor 增量输出、timeout、配额和自动回收。Guard 只放行可证明只读的简单命令（ls/cat/echo 等）；status 为只读，stop 为非只读。 |
+| `exec` | 行动 | 单一状态化 shell 工具：默认前台同步执行（默认总运行寿命 60 秒），持续任务必须显式 `background=true`；启动时不传 `job_id`，使用返回的 `job_id` 执行 `status` / `stop`。Schema 在顶层直接展示全部参数；Agent 统一过滤未知字段，exec 执行入口校验剩余字段的类型和操作组合；支持 `run` / `session` 生命周期范围、cursor 增量输出、timeout、配额和自动回收。Guard 只放行可证明只读的简单命令（ls/cat/echo 等）；status 为只读，stop 为非只读。 |
 | `writefile` | 行动 | 创建、覆盖或追加文件，支持 `create_dirs=true` 自动创建父目录和写前 SHA-256 校验；创建新文件场景应优先使用本工具而不是先 `filesystem mkdir` 再写。 |
 | `editfile` | 行动 | 对单个文件原子应用一个或多个精确文本替换；默认要求 `old_string` 唯一匹配，`target="all"` 替换全部，`target="2"` 按 1-based 序号替换第 2 个匹配。 |
 | `filesystem` | 行动 | `stat` / `mkdir` / `move` / `copy` / `remove` 文件系统路径；`stat` 为只读低风险调用。创建新文件优先使用 `writefile create_dirs=true`，避免无意义的预先 `mkdir`。 |

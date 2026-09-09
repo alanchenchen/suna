@@ -275,7 +275,7 @@ func TestBuildSubtaskToolDefsIncludesOnlyAllowedTools(t *testing.T) {
 	}
 }
 
-func TestBuildToolDefsSupportsComposedExecSchemaAndCleaning(t *testing.T) {
+func TestBuildToolDefsExposesExecParametersAndCleaning(t *testing.T) {
 	mgr := tools.NewManager()
 	a := &Agent{tools: mgr}
 	mgr.RegisterProvider(builtin.NewProvider())
@@ -294,21 +294,13 @@ func TestBuildToolDefsSupportsComposedExecSchemaAndCleaning(t *testing.T) {
 	if execDef == nil {
 		t.Fatal("exec tool definition missing")
 	}
-	branches, ok := execDef.Parameters["oneOf"].([]any)
-	if !ok || len(branches) != 4 {
-		t.Fatalf("exec oneOf = %#v, want four branches", execDef.Parameters["oneOf"])
+	props, ok := execDef.Parameters["properties"].(map[string]any)
+	if !ok || execDef.Parameters["additionalProperties"] != false {
+		t.Fatal("exec must expose a closed top-level object")
 	}
-	for index, branch := range branches {
-		object, ok := branch.(map[string]any)
-		if !ok {
-			t.Fatalf("exec branch %d = %#v", index, branch)
-		}
-		props, ok := object["properties"].(map[string]any)
-		if !ok {
-			t.Fatalf("exec branch %d properties missing", index)
-		}
-		if _, ok := props["intent"]; !ok {
-			t.Fatalf("exec branch %d intent missing", index)
+	for _, name := range []string{"command", "background", "action", "job_id", "scope", "intent"} {
+		if _, ok := props[name]; !ok {
+			t.Fatalf("missing exec property %s", name)
 		}
 	}
 

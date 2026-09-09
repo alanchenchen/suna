@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"sync"
@@ -62,6 +63,18 @@ func (e Exec) registryOrDefault() *execRegistry {
 }
 
 func (e Exec) Execute(ctx context.Context, params map[string]any) tools.Result {
+	if err := validateExecParams(params); err != nil {
+		action, _ := params["action"].(string)
+		if action != "status" && action != "stop" {
+			action = "run"
+		}
+		scope, _ := params["scope"].(string)
+		if action == "run" && scope == "" {
+			scope = execScopeRun
+		}
+		id, _ := params["job_id"].(string)
+		return makeExecResult(action, scope, id, execStatusStartFailed, nil, true, err.Error(), false, nil)
+	}
 	action, _ := params["action"].(string)
 	if action == "" {
 		action = "run"
@@ -155,7 +168,8 @@ func parseExecTimeout(params map[string]any) (time.Duration, bool, error) {
 		return 0, false, nil
 	}
 	seconds, ok := value.(float64)
-	if !ok || seconds <= 0 || seconds != float64(int64(seconds)) {
+	// 先限制秒数，再转换和相乘，避免 time.Duration 溢出。
+	if !ok || math.IsNaN(seconds) || seconds <= 0 || seconds > float64(math.MaxInt64/int64(time.Second)) || math.Trunc(seconds) != seconds {
 		return 0, true, fmt.Errorf("timeout must be a positive integer")
 	}
 	return time.Duration(int64(seconds)) * time.Second, true, nil

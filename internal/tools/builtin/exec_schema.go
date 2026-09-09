@@ -1,73 +1,28 @@
 package builtin
 
-import "github.com/alanchenchen/suna/internal/tools"
+import (
+	"math"
+	"time"
+
+	"github.com/alanchenchen/suna/internal/tools"
+)
 
 func (Exec) Spec() tools.Spec {
-	// 每个分支只暴露该操作可用的字段，避免模型拼出语义冲突的参数组合。
-	foregroundRun := execRunProperties()
-	foregroundRun["background"] = map[string]any{"type": "boolean", "enum": []bool{false}, "description": "Run in the foreground. May be omitted or false"}
-	backgroundRun := execRunProperties()
-	backgroundRun["background"] = map[string]any{"type": "boolean", "enum": []bool{true}, "description": "Run in the background. Must be true"}
-	backgroundRun["scope"] = map[string]any{"type": "string", "enum": []string{execScopeRun, execScopeSession}, "description": "Background lifetime scope. Default run"}
-
-	return builtinSpec("exec", "Run or manage a stateful shell command. Prefer dedicated file, search, and HTTP tools for supported operations. Keep cwd, path arguments, and redirects inside the configured workspace; use workspace-local temp files instead of /tmp. Use the Suna data directory only for explicit Suna-specific tasks. Omit action to run; use action=status or action=stop with a background job_id.", tools.Act, map[string]any{
-		"type": "object",
-		"oneOf": []any{
-			map[string]any{
-				"title":                "Foreground run",
-				"description":          "Run a command in the foreground. The total command lifetime defaults to 60 seconds.",
-				"type":                 "object",
-				"properties":           foregroundRun,
-				"required":             []string{"command"},
-				"additionalProperties": false,
-			},
-			map[string]any{
-				"title":                "Background run",
-				"description":          "Start a background command. Run-scoped jobs have no default timeout; session-scoped jobs default to a one-hour total command lifetime.",
-				"type":                 "object",
-				"properties":           backgroundRun,
-				"required":             []string{"command", "background"},
-				"additionalProperties": false,
-			},
-			map[string]any{
-				"title":       "Background job status",
-				"description": "Read the current status and incremental output of a background job.",
-				"type":        "object",
-				"properties": map[string]any{
-					"action": map[string]any{"type": "string", "enum": []string{"status"}, "description": "Read background job status and output"},
-					"job_id": map[string]any{"type": "string", "description": "Background job identifier"},
-					"cursor": map[string]any{"type": "integer", "minimum": 0, "description": "Optional output cursor returned by an earlier status call"},
-				},
-				"required":             []string{"action", "job_id"},
-				"additionalProperties": false,
-			},
-			map[string]any{
-				"title":       "Stop background job",
-				"description": "Request that a background job stop and report its current status.",
-				"type":        "object",
-				"properties": map[string]any{
-					"action": map[string]any{"type": "string", "enum": []string{"stop"}, "description": "Stop a background job"},
-					"job_id": map[string]any{"type": "string", "description": "Background job identifier"},
-				},
-				"required":             []string{"action", "job_id"},
-				"additionalProperties": false,
-			},
+	// 顶层暴露全部字段；操作之间的组合约束由入口校验统一执行。
+	return builtinSpec("exec", "Run or manage a stateful shell command. Prefer dedicated file, search, and HTTP tools for supported operations. Keep cwd, path arguments, and redirects inside the configured workspace; use workspace-local temp files instead of /tmp. Use the Suna data directory only for explicit Suna-specific tasks. Omit action to run. To start a background command, use background=true, not job_id. Use the returned job_id with action=status or action=stop.", tools.Act, map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"properties": map[string]any{
+			"action":     map[string]any{"type": "string", "enum": []string{"run", "status", "stop"}, "default": "run", "description": "Operation. Omit to run. Run requires command; status and stop require a returned job_id and reject run-only fields"},
+			"command":    map[string]any{"type": "string", "minLength": 1, "description": "Shell command to execute. Required for run only. Prefer dedicated tools over redirection. Keep path arguments and redirects inside the workspace."},
+			"cwd":        map[string]any{"type": "string", "description": "Run only. Optional working directory. Defaults to the session cwd; keep ordinary project work within the configured workspace."},
+			"background": map[string]any{"type": "boolean", "default": false, "description": "Run only. Set background=true to start a background command and receive its job_id. Omit or false for foreground execution"},
+			"scope":      map[string]any{"type": "string", "enum": []string{execScopeRun, execScopeSession}, "description": "Only valid with background=true. Default run: cleaned up when the owning run ends. Session: survives individual runs and is cleaned up on session deletion or daemon shutdown (not client detach); allowed only in the main boundary"},
+			"timeout":    map[string]any{"type": "integer", "minimum": 1, "maximum": int64(math.MaxInt64 / int64(time.Second)), "description": "Run only. Total command lifetime in seconds, including process startup and execution. Foreground default: 60 seconds. Run-scoped background: no default timeout. Session-scoped background: one-hour default"},
+			"env":        map[string]any{"type": "object", "description": "Run only. Environment variables added to the inherited environment", "additionalProperties": map[string]any{"type": "string"}},
+			"shell":      map[string]any{"type": "string", "enum": []string{"auto", "bash", "powershell", "cmd"}, "description": "Run only. Shell type. Default auto"},
+			"job_id":     map[string]any{"type": "string", "minLength": 1, "description": "Required for status and stop only. Use the job_id returned by background startup; never pass job_id when starting a command"},
+			"cursor":     map[string]any{"type": "integer", "minimum": 0, "description": "Status only. Optional non-negative output cursor returned by an earlier response; defaults to zero"},
 		},
 	})
-}
-
-// execRunProperties 为两个 run 分支生成独立但完全一致的公共字段定义。
-func execRunProperties() map[string]any {
-	return map[string]any{
-		"action":  map[string]any{"type": "string", "enum": []string{"run"}, "description": "Run a command. May be omitted; run is the default action"},
-		"command": map[string]any{"type": "string", "description": "Shell command to execute. Prefer dedicated tools over redirection. Keep path arguments and redirects inside the workspace."},
-		"cwd":     map[string]any{"type": "string", "description": "Optional working directory. Defaults to the session cwd; keep ordinary project work within the configured workspace."},
-		"timeout": map[string]any{"type": "integer", "minimum": 1, "description": "Total command lifetime in seconds, including process startup and execution. Foreground default: 60 seconds. Run-scoped background default: no timeout. Session-scoped background default: 1 hour"},
-		"env": map[string]any{
-			"type":                 "object",
-			"description":          "Environment variables added to the inherited environment",
-			"additionalProperties": map[string]any{"type": "string"},
-		},
-		"shell": map[string]any{"type": "string", "enum": []string{"auto", "bash", "powershell", "cmd"}, "description": "Shell type. Default auto"},
-	}
 }
