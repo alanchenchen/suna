@@ -62,3 +62,36 @@ func TestReplaceToolImagesWithSummariesSkipsWithoutImages(t *testing.T) {
 		t.Fatalf("message = %q, want unchanged", got)
 	}
 }
+
+func TestMergeImageSummariesReplacesExistingSource(t *testing.T) {
+	// 同一图片（同 source）已有旧摘要（旧 size），本轮读到更新后的图（新 size）。
+	text := "[image: shot.png, image/png, 1.2KB, source=attachment:shot.png]"
+	summaries := []string{"[image: shot.png, image/png, 3.4KB, source=attachment:shot.png]"}
+	got := mergeImageSummaries(text, summaries)
+
+	if strings.Contains(got, "1.2KB") {
+		t.Fatalf("got %q, want old size replaced", got)
+	}
+	if !strings.Contains(got, "3.4KB") {
+		t.Fatalf("got %q, want new size in summary", got)
+	}
+	if strings.Count(got, "source=attachment:shot.png") != 1 {
+		t.Fatalf("got %q, want exactly one summary for the source (no accumulation)", got)
+	}
+}
+
+func TestMergeImageSummariesAppendsNewSources(t *testing.T) {
+	text := "[image: a.png, image/png, source=attachment:a.png]"
+	summaries := []string{
+		"[image: a.png, image/png, source=attachment:a.png]",
+		"[image: b.png, image/png, source=attachment:b.png]",
+	}
+	got := mergeImageSummaries(text, summaries)
+
+	if strings.Count(got, "source=attachment:a.png") != 1 {
+		t.Fatalf("got %q, want existing summary kept once", got)
+	}
+	if !strings.Contains(got, "source=attachment:b.png") {
+		t.Fatalf("got %q, want new summary appended", got)
+	}
+}

@@ -67,15 +67,22 @@ func TestInjectToolImagesDeduplicatesBySource(t *testing.T) {
 	}
 }
 
-func TestInjectToolImagesSkipsWhenSummaryAlreadyInContext(t *testing.T) {
+func TestInjectToolImagesInjectsAcrossTurns(t *testing.T) {
 	working := memory.NewWorkingMemory()
-	working.AddMessage(model.NewTextMessage(model.RoleUser, "see [image: shot.png, source=/a/shot.png]"))
+	// 历史里已有同 source 的摘要（上一轮 read_image 后摘要化的结果）。
+	working.AddMessage(model.NewTextMessage(model.RoleUser, "see [image: shot.png, image/png, source=/a/shot.png]"))
 	r := &Runner{}
 	r.toolImages = append(r.toolImages, imageBlock("/a/shot.png"))
 	r.injectToolImages(working)
 
+	// 跨轮重读应放行注入：模型可以重看图片（含图片更新后的新版），
+	// 跨轮摘要去重由 agent 清理层保证，注入层不再检查历史摘要。
 	msgs := working.Messages()
-	if len(msgs) != 1 {
-		t.Fatalf("messages len = %d, want 1 (image already summarized, skip injection)", len(msgs))
+	if len(msgs) != 2 {
+		t.Fatalf("messages len = %d, want 2 (re-read injects even if summary exists)", len(msgs))
+	}
+	last := msgs[len(msgs)-1]
+	if len(last.Content) != 1 || last.Content[0].Type != model.ContentImage {
+		t.Fatalf("injected content should contain the image block")
 	}
 }

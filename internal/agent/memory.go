@@ -41,6 +41,8 @@ func (a *Agent) replaceRunInputMessage(original, replacement model.Message) {
 // replaceToolImagesWithSummaries 把 working 中所有带图片块的 user 消息替换为纯文本摘要，
 // 覆盖用户传图（含多图）与 read_image 注入的图片消息。图片块只参与当前 run，
 // 摘要文本（带 source）作为历史引用保留，供后续轮次通过 read_image 读回。
+// 跨轮摘要去重在这里保证：同一图片已有摘要时替换而非追加，
+// 摘要始终反映最近一次读取（size/mime 可能随图片更新变化），且不累积。
 func (a *Agent) replaceToolImagesWithSummaries() {
 	msgs := a.working.Messages()
 	changed := false
@@ -52,10 +54,7 @@ func (a *Agent) replaceToolImagesWithSummaries() {
 		text := strings.TrimSpace(msgs[i].Text())
 		summaries := imageSummaries(msgs[i].Content)
 		if len(summaries) > 0 {
-			if text != "" {
-				text += "\n"
-			}
-			text += strings.Join(summaries, "\n")
+			text = mergeImageSummaries(text, summaries)
 		}
 		msgs[i] = model.NewTextMessage(model.RoleUser, text)
 		changed = true
@@ -63,6 +62,50 @@ func (a *Agent) replaceToolImagesWithSummaries() {
 	if changed {
 		a.working.SetMessages(msgs)
 	}
+}
+
+// mergeImageSummaries 把本轮摘要合并进消息文本：
+// 已有同 source 的摘要替换为新摘要（反映最新读取），没有的追加，保证同一图片只有一条摘要。
+func mergeImageSummaries(text string, summaries []string) string {
+	for _, s := range summaries {
+		source := imageSummarySource(s)
+		if source == "" {
+			continue
+		}
+		if start, end, found := findImageSummary(text, source); found {
+			text = text[:start] + s + text[end:]
+			continue
+		}
+		if text != "" {
+			text += "\n"
+		}
+		text += s
+	}
+	return text
+}
+
+// imageSummarySource 提取摘要文本中的 source 引用（如 source=attachment:xxx.png）。
+func imageSummarySource(summary string) string {
+	start := strings.Index(summary, "source=")
+	if start < 0 {
+		return ""
+	}
+	source := summary[start:]
+	if end := strings.IndexAny(source, "]\n"); end >= 0 {
+		source = source[:end]
+	}
+	return strings.TrimSuffix(source, "]")
+}
+
+// findImageSummary 在文本中定位包含指定 source 的摘要行，返回其起止字节偏移。
+func findImageSummary(text, source string) (int, int, bool) {
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, source) {
+			start := strings.Index(text, line)
+			return start, start + len(line), true
+		}
+	}
+	return 0, 0, false
 }
 
 // imageSummaries 把图片块转换为带 source 的摘要文本，格式与 daemon 端 attachmentSummary 一致。

@@ -503,8 +503,9 @@ func cloneMessages(msgs []model.Message) []model.Message {
 }
 
 // injectToolImages 把本轮工具产出的图片块合并注入为一条 user 消息。
-// 注入前按 MediaRef 去重：同一图片已存在于 working（图片块或历史摘要中的 source）则跳过，
-// 避免模型反复读同一张图导致上下文重复累积。
+// 注入层只做同批次去重（同一轮多次 read_image 同一张图只注入一次），
+// 跨轮重读放行：模型可以重看图片（含图片内容更新后的新版），
+// 跨轮的摘要去重由 agent 清理层在 run 结束时保证，不在这里拦截。
 func (r *Runner) injectToolImages(working *memory.WorkingMemory) {
 	if working == nil {
 		return
@@ -514,11 +515,10 @@ func (r *Runner) injectToolImages(working *memory.WorkingMemory) {
 		return
 	}
 	r.toolImages = r.toolImages[:0]
-	existing := working.Messages()
 	unique := images[:0]
 	for _, img := range images {
 		// 同批次内重复也要去重：unique 是尚未注入 working 的候选，检查范围需包含它。
-		if !imageAlreadyInContext(existing, img) && !imageBlockInBlocks(unique, img) {
+		if !imageBlockInBlocks(unique, img) {
 			unique = append(unique, img)
 		}
 	}
@@ -540,23 +540,6 @@ func collectResultImages(images []model.ContentBlock) []model.ContentBlock {
 		}
 	}
 	return out
-}
-
-// imageAlreadyInContext 判断图片是否已存在于 working：图片块直接按 MediaRef 比较，
-// 历史摘要按 source 字符串包含检查（read_image 工具描述引导模型从摘要提取 source）。
-func imageAlreadyInContext(msgs []model.Message, img model.ContentBlock) bool {
-	if img.Media == nil {
-		return true
-	}
-	for _, m := range msgs {
-		if imageBlockInBlocks(m.Content, img) {
-			return true
-		}
-		if source := mediaSourceOf(img.Media); source != "" && strings.Contains(m.Text(), source) {
-			return true
-		}
-	}
-	return false
 }
 
 // imageBlockInBlocks 判断图片块是否已存在于一组内容块中（按 MediaRef 比较）。
@@ -584,28 +567,6 @@ func sameMediaRef(a, b model.MediaRef) bool {
 	default:
 		return false
 	}
-}
-
-// mediaSourceOf 生成图片的摘要 source 引用，与 daemon 摘要格式保持一致。
-func mediaSourceOf(ref *model.MediaRef) string {
-	if ref == nil {
-		return ""
-	}
-	switch ref.Kind {
-	case model.MediaAttachment:
-		if ref.Name != "" {
-			return "source=attachment:" + ref.Name
-		}
-	case model.MediaPath:
-		if ref.Path != "" {
-			return "source=" + ref.Path
-		}
-	case model.MediaURL:
-		if ref.URL != "" {
-			return "source=" + ref.URL
-		}
-	}
-	return ""
 }
 
 // calibrationCoefficient 读取指定模型的 token 估算校准系数；calibrator 未注入时返回 1.0（等价未校准）。
