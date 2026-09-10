@@ -238,7 +238,7 @@ func TestCancellingComposerKeepsSpinnerStatusWithoutSecondCancelHint(t *testing.
 	tui.chat.Loading = true
 	tui.enterCancelling()
 
-	view := stripANSIForTest(tui.renderInputArea())
+	view := stripANSIForTest(tui.renderInputArea().content)
 	if !strings.Contains(view, strings.TrimSpace(stripANSIForTest(tui.chat.Spinner.View()))) || !strings.Contains(view, "正在取消") {
 		t.Fatalf("cancelling composer = %q, want spinner and cancelling status", view)
 	}
@@ -258,7 +258,7 @@ func TestCompactingRunSnapshotRestoresCompactComposer(t *testing.T) {
 	if !tui.chat.Compacting || tui.compactStartedAt.IsZero() || tui.inputLocked() {
 		t.Fatalf("compact snapshot state = compacting %v, started %v, locked %v", tui.chat.Compacting, tui.compactStartedAt, tui.inputLocked())
 	}
-	view := stripANSIForTest(tui.renderInputArea())
+	view := stripANSIForTest(tui.renderInputArea().content)
 	if !strings.Contains(view, "上下文压缩中") || !strings.Contains(view, strings.TrimSpace(stripANSIForTest(tui.chat.Spinner.View()))) {
 		t.Fatalf("compact snapshot composer = %q, want compact spinner status", view)
 	}
@@ -283,7 +283,7 @@ func TestAutomaticCompactUsesIndependentElapsedTimeAndKeepsComposerEditable(t *t
 	if tui.inputLocked() {
 		t.Fatal("automatic compact inputLocked() = true, want steering composer")
 	}
-	view := stripANSIForTest(tui.renderInputArea())
+	view := stripANSIForTest(tui.renderInputArea().content)
 	if !strings.Contains(view, strings.TrimSpace(stripANSIForTest(tui.chat.Spinner.View()))) {
 		t.Fatalf("compact composer = %q, want spinner in editable compact status", view)
 	}

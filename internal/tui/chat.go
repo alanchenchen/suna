@@ -99,7 +99,7 @@ func (t *TUI) initChatComponents() tea.Cmd {
 	t.syncContent()
 	t.chat.RestorePendingInput()
 
-	return tea.Batch(t.syncInputFocus(), t.startInputCursorBlink())
+	return tea.Batch(t.syncInputFocus())
 }
 
 func (t *TUI) syncContent() {

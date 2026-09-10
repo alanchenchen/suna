@@ -132,10 +132,7 @@ type TUI struct {
 	// lastPasteAt 用于让终端已经传入的 PasteMsg 优先于 Ctrl+V 剪贴板图片兜底，避免文本粘贴被图片读取抢占。
 	lastPasteAt time.Time
 
-	// 输入区空态光标由 TUI 自己定时闪烁，避免依赖终端 ANSI blink 支持。
 	inputCursorVisible bool
-	// inputCursorBlinking 保证全局只存在一条闪烁 tick 链，避免多次启动累积出多条链相互打架。
-	inputCursorBlinking bool
 
 	// transcript 同步由 daemon 通知触发时按帧合并，避免流式输出和工具事件风暴反复完整重渲染。
 	transcriptSyncDirty     bool

@@ -16,34 +16,6 @@ import (
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 )
 
-const inputCursorBlinkInterval = 530 * time.Millisecond
-
-func (t *TUI) inputCursorBlinkCmd() tea.Cmd {
-	return tea.Tick(inputCursorBlinkInterval, func(time.Time) tea.Msg {
-		return inputCursorBlinkMsg{}
-	})
-}
-
-// startInputCursorBlink 启动唯一的闪烁 tick 链；已启动时不重复起链，避免多条 tick 叠加导致翻转过快。
-func (t *TUI) startInputCursorBlink() tea.Cmd {
-	t.inputCursorVisible = true
-	if t.inputCursorBlinking {
-		return nil
-	}
-	t.inputCursorBlinking = true
-	return t.inputCursorBlinkCmd()
-}
-
-// updateInputCursorBlink 只在 chat 输入态翻转可见性；其他页面保持常亮，但 tick 链永不断，回到 chat 后必然继续闪烁。
-func (t *TUI) updateInputCursorBlink() tea.Cmd {
-	if t.mode == uipage.Chat && !t.currentInteractionPresentation().Locked {
-		t.inputCursorVisible = !t.inputCursorVisible
-	} else {
-		t.inputCursorVisible = true
-	}
-	return t.inputCursorBlinkCmd()
-}
-
 func (t *TUI) currentInteractionPresentation() chatpage.InteractionPresentation {
 	return chatpage.CurrentInteractionPresentation(chatpage.InputPolicyState{
 		Compacting:      t.chat.Compacting,

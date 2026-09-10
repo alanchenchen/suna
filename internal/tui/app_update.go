@@ -42,13 +42,6 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if cmd := t.handleProtocolResultMsg(msg); cmd != nil {
 		return t, cmd
 	}
-	if _, ok := msg.(inputCursorBlinkMsg); ok {
-		// tick 链永不断：不论当前是哪个页面都要继续重排，否则离开 chat 后闪烁链会永久停止。
-		if t.inputCursorBlinking {
-			return t, t.updateInputCursorBlink()
-		}
-		return t, nil
-	}
 	if _, ok := msg.(spinner.TickMsg); ok && t.mode != uipage.Chat {
 		// spinner tick 只属于 Chat；离开 Chat 时终止链，避免回到运行会话后误判已有 tick。
 		t.chatSpinnerTicking = false

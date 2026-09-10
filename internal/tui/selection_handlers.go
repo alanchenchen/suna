@@ -188,7 +188,7 @@ func (t *TUI) updateSelectionEdgeScroll() tea.Cmd {
 // inputSelectionStartY 返回输入区在终端中的起始行（0 基），与 MouseInComposer 的
 // composerStart 计算保持一致：输入区从底部向上数（预输入提示 + 输入区 + 建议 + 2 行固定）。
 func (t *TUI) inputSelectionStartY() int {
-	inputAreaH := max(1, chatpage.RenderedLineCount(t.renderInputArea()))
+	inputAreaH := max(1, chatpage.RenderedLineCount(t.renderInputArea().content))
 	suggestionH := max(0, chatpage.RenderedLineCount(t.renderCommandSuggestions()))
 	preInputHintH := max(0, chatpage.RenderedLineCount(t.renderPreInputHint()))
 	return t.height - (preInputHintH + inputAreaH + suggestionH + 2)
@@ -198,7 +198,7 @@ func (t *TUI) inputSelectionStartY() int {
 // 输入区选区锚定输入区行索引（0..inputAreaH-1），用于复制输入框草稿。
 // 输入区行数少，不做 edge scroll。
 func (t *TUI) handleInputSelectionMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
-	inputAreaH := max(1, chatpage.RenderedLineCount(t.renderInputArea()))
+	inputAreaH := max(1, chatpage.RenderedLineCount(t.renderInputArea().content))
 	startY := t.inputSelectionStartY()
 	switch msg := msg.(type) {
 	case tea.MouseReleaseMsg:

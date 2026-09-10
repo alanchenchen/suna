@@ -23,6 +23,17 @@ func (t *TUI) View() tea.View {
 		v.SetContent(t.viewConfig())
 	case uipage.Chat:
 		v.SetContent(t.viewChat())
+		// 终端光标精确跟随 textarea 光标：IME 组合文本（拼音 preedit）由终端绘制在
+		// 终端光标位置，锚定到 textarea 光标后组合文本始终显示在输入框内，
+		// 不会跟随 renderer 增量渲染的光标移动残留到 pet 等其他区域。
+		if x, y, ok := t.textareaCursorScreenPos(); ok {
+			// CursorBar 细光标 + Blink=true（闪烁）：终端光标与 textarea 虚拟光标（反色字符）
+			// 精确重叠，闪烁由终端光标提供，视觉上就是一个自然闪烁的光标。
+			cur := tea.NewCursor(x, y)
+			cur.Shape = tea.CursorBar
+			cur.Blink = true
+			v.Cursor = cur
+		}
 	case uipage.Help:
 		v.SetContent(t.viewHelp())
 	}

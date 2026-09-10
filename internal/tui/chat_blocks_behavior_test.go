@@ -35,7 +35,7 @@ func TestSubtaskPanelKeyboardAndToolDetail(t *testing.T) {
 	block.Add(&toolEntry{ID: "spawn:spawn-1:http-1", ParentID: "spawn-1", Name: "HTTP", RawName: "http", Intent: "获取资料", ParamsRaw: map[string]any{"url": "https://kilo.ai/"}, Params: `{"url":"https://kilo.ai/"}`, Result: strings.Repeat("result\n", 20), Status: toolRunning, StartedAt: time.Now().Add(-time.Second)})
 	block.Add(&toolEntry{ID: "spawn-2", Name: "Spawn", RawName: "spawn", Intent: "结果复核", Status: toolRunning})
 
-	input := stripANSIForTest(tui.renderInputArea())
+	input := stripANSIForTest(tui.renderInputArea().content)
 	if strings.Contains(input, "Tab 聚焦子任务") {
 		t.Fatalf("renderInputArea() = %q, should not show subtask focus hint", input)
 	}
@@ -460,14 +460,18 @@ func TestRenderChatStatusBarShowsContextAndUsage(t *testing.T) {
 
 func TestInputComposerMarkerRepeatsForWrappedVisualLines(t *testing.T) {
 	long := strings.Repeat("长", 40)
-	got := stripANSIForTest(renderInputComposerBar(24, []string{long}, false, true))
+	got := stripANSIForTest(renderInputComposerBar(24, []string{long}, false))
 	lines := strings.Split(got, "\n")
 	if len(lines) < 2 {
 		t.Fatalf("renderInputComposerBar() = %q, want wrapped lines", got)
 	}
-	for _, line := range lines {
-		if !strings.Contains(line, "▌") {
-			t.Fatalf("renderInputComposerBar() = %q, every wrapped line should keep input marker", got)
+	// 首行用 prompt 符号（❯）标识输入区；续行仅缩进对齐，不再重复装饰。
+	if !strings.Contains(lines[0], "❯") {
+		t.Fatalf("renderInputComposerBar() = %q, first line should keep prompt marker", got)
+	}
+	for _, line := range lines[1:] {
+		if strings.Contains(line, "❯") {
+			t.Fatalf("renderInputComposerBar() = %q, continuation lines should not repeat prompt", got)
 		}
 	}
 }
@@ -537,7 +541,7 @@ func TestWaitingAfterToolWithCompletedToolUsesBottomLoadingHint(t *testing.T) {
 	if strings.Contains(view, "工具已完成") || strings.Contains(view, "子任务已完成") {
 		t.Fatalf("view = %q, should not duplicate bottom loading status", view)
 	}
-	input := stripANSIForTest(tui.renderInputArea())
+	input := stripANSIForTest(tui.renderInputArea().content)
 	if !strings.Contains(input, "工具已完成，正在请求模型继续") {
 		t.Fatalf("renderInputArea() = %q, want tool waiting hint", input)
 	}

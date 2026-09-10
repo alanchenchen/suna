@@ -68,7 +68,7 @@ func TestGuardLocksComposer(t *testing.T) {
 	if tui.chat.Textarea.Focused() {
 		t.Fatal("textarea.Focused() = true while guard confirmation is active")
 	}
-	view := stripANSIForTest(tui.renderInputArea())
+	view := stripANSIForTest(tui.renderInputArea().content)
 	if !strings.Contains(view, "正在等待安全确认") {
 		t.Fatalf("renderInputArea() = %q, want guard waiting state", view)
 	}

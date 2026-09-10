@@ -6,6 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/alanchenchen/suna/internal/protocol"
+	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 )
 
 // statusBarCWD 显示当前会话项目目录（basename），无会话目录时回退启动目录。
@@ -92,5 +93,21 @@ func TestViewSetsWindowTitle(t *testing.T) {
 	tui := &TUI{currentSession: protocol.SessionInfo{ID: "session-1", CWD: "/workspace/demo"}}
 	if got, want := tui.View().WindowTitle, "demo · idle"; got != want {
 		t.Fatalf("View().WindowTitle = %q, want %q", got, want)
+	}
+}
+
+// chat 模式下终端光标精确跟随 textarea 光标：IME 组合文本（拼音 preedit）由终端
+// 绘制在光标位置，锚定 textarea 光标后组合文本始终显示在输入框内，
+// 不会跟随 renderer 增量渲染的光标移动残留到 pet 等其他区域。
+func TestViewAnchorsTerminalCursorToTextarea(t *testing.T) {
+	tui := &TUI{ready: true, mode: uipage.Chat, width: 100, height: 40}
+	tui.initChatComponents()
+	v := tui.View()
+	if v.Cursor == nil {
+		t.Fatal("View().Cursor = nil, want anchored to textarea cursor")
+	}
+	// 光标必须落在输入区（屏幕下半部分），不能残留到 pet 等上方区域。
+	if v.Cursor.Y < tui.height/2 {
+		t.Fatalf("View().Cursor.Y = %d, want in input area (>= %d)", v.Cursor.Y, tui.height/2)
 	}
 }

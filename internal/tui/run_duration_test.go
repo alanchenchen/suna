@@ -14,7 +14,7 @@ func TestRunElapsedAppearsInInputAndFreezesInTranscript(t *testing.T) {
 	tui.handleAgentRunNotification(protocol.AgentRunParams{RunID: "run-1", State: protocol.AgentRunRunning, Phase: protocol.AgentRunPhaseModel})
 	tui.runStartedAt = time.Now().Add(-61 * time.Second)
 
-	input := stripANSIForTest(tui.renderInputArea())
+	input := stripANSIForTest(tui.renderInputArea().content)
 	if !strings.Contains(input, strings.TrimSpace(stripANSIForTest(tui.chat.Spinner.View()))) {
 		t.Fatalf("renderInputArea() = %q, want spinner in editable run status", input)
 	}

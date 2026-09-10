@@ -15,6 +15,7 @@ import (
 	"github.com/alanchenchen/suna/internal/tui/components/overlay"
 	textutil "github.com/alanchenchen/suna/internal/tui/components/text"
 	chatpage "github.com/alanchenchen/suna/internal/tui/pages/chat"
+	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 )
 
 func (t *TUI) viewChat() string {
@@ -78,7 +79,7 @@ func (t *TUI) viewChat() string {
 		Content:            t.chat.Viewport.View(),
 		Separator:          separator,
 		InputSeparator:     inputSeparator,
-		InputArea:          t.renderInputArea(),
+		InputArea:          t.renderInputArea().content,
 		PreInputHint:       preInputHint,
 		CommandSuggestions: cmdSuggestions,
 		StatusBar:          t.renderChatStatusBar(),
@@ -101,7 +102,7 @@ func (t *TUI) viewChat() string {
 
 func (t *TUI) layoutChat() {
 	preInputHint := t.renderPreInputHint()
-	inputArea := t.renderInputArea()
+	inputArea := t.renderInputArea().content
 	cmdSuggestions := ""
 	if len(t.chat.CmdSuggestions) > 0 {
 		cmdSuggestions = t.renderCommandSuggestions()
@@ -300,7 +301,7 @@ func (t *TUI) mouseInComposer(msg tea.MouseMsg) bool {
 	return chatpage.MouseInComposer(chatpage.ComposerHitInput{
 		Height:             t.height,
 		Y:                  m.Y,
-		InputAreaHeight:    chatpage.RenderedLineCount(t.renderInputArea()),
+		InputAreaHeight:    chatpage.RenderedLineCount(t.renderInputArea().content),
 		SuggestionHeight:   chatpage.RenderedLineCount(cmdSuggestions),
 		PreInputHintHeight: chatpage.RenderedLineCount(t.renderPreInputHint()),
 	})
@@ -315,7 +316,7 @@ func (t *TUI) overlayImagePasteAboveInput(view, panel, cmdSuggestions string) st
 	if len(lines) == 0 || len(panelLines) == 0 {
 		return view
 	}
-	composerRows := 2 + chatpage.RenderedLineCount(t.renderInputArea()) + chatpage.RenderedLineCount(t.renderPreInputHint()) // 输入分割线 + 输入区 + token 状态栏 + 预输入提示
+	composerRows := 2 + chatpage.RenderedLineCount(t.renderInputArea().content) + chatpage.RenderedLineCount(t.renderPreInputHint()) // 输入分割线 + 输入区 + token 状态栏 + 预输入提示
 	if cmdSuggestions != "" {
 		composerRows += chatpage.RenderedLineCount(cmdSuggestions)
 	}
@@ -530,7 +531,49 @@ func renderInputSeparator(width int) string {
 	return "  " + styleDim.Render(strings.Repeat("─", lineWidth))
 }
 
-func (t *TUI) renderInputArea() string {
+// textareaCursorScreenPos 计算终端光标的屏幕绝对坐标，使其精确落在 textarea 光标处。
+// IME 组合文本（拼音 preedit）由终端绘制在终端光标位置，锚定 textarea 光标后
+// 组合文本始终显示在输入框内，不会残留到 pet 等其他区域。
+// 光标相对坐标由 renderInputArea 在组装时同步累加（单一事实来源），
+// 这里只负责输入区首行的屏幕偏移。
+// 返回 ok=false 表示当前无法定位（非 chat 页、布局未就绪），调用方应跳过光标设置。
+func (t *TUI) textareaCursorScreenPos() (x, y int, ok bool) {
+	if t.mode != uipage.Chat || t.width == 0 || t.height == 0 {
+		return 0, 0, false
+	}
+	// 输入区上方固定结构：pet(3) + separator(1) + viewport + preInputHint + suggestions + inputSeparator(1)。
+	// renderMiniPet 返回 3 行（空行/眼睛/空行），view.go 把第 3 行作为剩余行输出。
+	// layoutChat 已按当前内容更新 viewport 高度，这里直接复用其结果。
+	top := 4 + t.chat.Viewport.Height() + chatpage.RenderedLineCount(t.renderPreInputHint())
+	if len(t.chat.CmdSuggestions) > 0 {
+		top += chatpage.RenderedLineCount(t.renderCommandSuggestions())
+	}
+	top++ // inputSeparator
+
+	render := t.renderInputArea()
+	if !render.cursorOK {
+		return 0, 0, false
+	}
+	return render.cursorX, top + render.cursorY, true
+}
+
+// inputRender 是输入区的渲染结果：内容与 textarea 光标的相对坐标。
+// 光标坐标由组装过程同步累加（单一事实来源），输入区新增动态行时自动跟随，
+// 避免外部逆向推导公式与渲染结构脱节。
+type inputRender struct {
+	content string
+	// cursorOK 表示本次渲染包含可定位的 textarea 光标（presentation.Locked 等场景
+	// textarea 内容被替换为状态文案，光标无意义）。
+	cursorOK bool
+	// cursorX/cursorY 是 textarea 光标相对输入区首行左上角的坐标（不含输入区首行的屏幕偏移）。
+	cursorX, cursorY int
+}
+
+// renderInputArea 渲染输入区并返回 textarea 光标的相对坐标。
+// 组装顺序：runStatus → steeringQueue → attachmentPanel → bar → help → confirm。
+// textarea 光标在 bar 内的偏移 = 之前的逻辑行数（Line()）+ 当前逻辑行的软换行（RowOffset）；
+// 列偏移 = 行首装饰宽度 + CharOffset（视觉宽度，双宽字符计 2 列）。
+func (t *TUI) renderInputArea() inputRender {
 	presentation := t.currentInteractionPresentation()
 	confirm := ""
 	if t.chat.HasDiscardDraftConfirm() {
@@ -567,16 +610,39 @@ func (t *TUI) renderInputArea() string {
 	} else if emptyInput {
 		text = styleDim.Render(t.tr("tui.chat.input_placeholder"))
 	}
-	bar := renderInputComposerBar(width, strings.Split(text, "\n"), emptyInput, t.inputCursorVisible)
+	bar := renderInputComposerBar(width, strings.Split(text, "\n"), emptyInput)
 	parts := make([]string, 0, 7)
+	render := inputRender{content: "", cursorOK: !presentation.Locked}
+	// 空输入时 textarea 光标仍在行首，IME 拼音需要在空输入阶段就锚定到输入框，
+	// 因此 cursorOK 不受 emptyInput 影响；只有 Locked（textarea 内容被状态文案替换）时无光标。
+	// textarea 光标相对输入区首行的坐标：组装到哪一行，偏移就累加到哪。
+	if render.cursorOK {
+		info := t.chat.Textarea.LineInfo()
+		// LineInfo 只处理当前逻辑行的软换行；用户主动回车后光标位于第 2+ 逻辑行，
+		// 光标之前的每个逻辑行至少占 1 行，需要累加（Line() 返回 0-based 逻辑行索引）。
+		render.cursorY = t.chat.Textarea.Line() + info.RowOffset
+		// bar 行前缀 = IndentLines 缩进 2 列 + prompt 符号 "❯ " 2 列，textarea 文本从第 4 列开始。
+		// 光标列 = 前缀 + CharOffset（视觉宽度，双宽字符计 2 列）；不能用 ColumnOffset（rune 计数），
+		// 否则中文场景光标会偏左一半。
+		render.cursorX = 4 + info.CharOffset
+	}
 	if runStatus != "" {
 		parts = append(parts, "  "+runStatus)
+		if render.cursorOK {
+			render.cursorY++
+		}
 	}
 	if queue := t.renderSteeringQueueLine(width); queue != "" {
 		parts = append(parts, "  "+queue)
+		if render.cursorOK {
+			render.cursorY++
+		}
 	}
 	if panel := t.renderAttachmentPanel(); panel != "" {
 		parts = append(parts, textutil.IndentLines(panel, "  "))
+		if render.cursorOK {
+			render.cursorY += chatpage.RenderedLineCount(panel)
+		}
 	}
 	parts = append(parts, textutil.IndentLines(bar, "  "))
 	if help := t.inputHelp(); help != "" && !inlineRunHelp {
@@ -585,7 +651,8 @@ func (t *TUI) renderInputArea() string {
 	if confirm != "" {
 		parts = append(parts, "  "+confirm)
 	}
-	return strings.Join(parts, "\n")
+	render.content = strings.Join(parts, "\n")
+	return render
 }
 
 func (t *TUI) renderSteeringQueueLine(width int) string {
@@ -644,7 +711,7 @@ func renderInlineRunStatus(width int, status, help string) string {
 	return styleDim.Render(status + " · " + help)
 }
 
-func renderInputComposerBar(width int, lines []string, emptyInput bool, cursorVisible bool) string {
+func renderInputComposerBar(width int, lines []string, emptyInput bool) string {
 	contentWidth := max(8, width-4)
 	prepared := make([]string, 0, max(1, len(lines)))
 	for i, line := range lines {
@@ -653,19 +720,17 @@ func renderInputComposerBar(width int, lines []string, emptyInput bool, cursorVi
 			wrapped = []string{""}
 		}
 		for j, visualLine := range wrapped {
-			prefix := styleBrand.Render("▌ ")
-			if emptyInput && i == 0 && j == 0 && !cursorVisible {
-				prefix = "  "
+			// 首行用 prompt 符号（❯）标识输入区，这是终端/REPL 的通用语言；
+			// 续行仅缩进对齐，保持多行文本的整体感。装饰为静态，不闪烁。
+			prefix := "  "
+			if i == 0 && j == 0 {
+				prefix = styleBrand.Render("❯ ")
 			}
 			prepared = append(prepared, prefix+visualLine)
 		}
 	}
 	if len(prepared) == 0 {
-		if cursorVisible {
-			prepared = append(prepared, styleBrand.Render("▌"))
-		} else {
-			prepared = append(prepared, " ")
-		}
+		prepared = append(prepared, styleBrand.Render("❯"))
 	}
 	return strings.Join(prepared, "\n")
 }

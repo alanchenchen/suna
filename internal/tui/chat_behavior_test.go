@@ -388,7 +388,7 @@ func TestCompactLocksInputWithoutCancelHint(t *testing.T) {
 	if !tui.inputLocked() {
 		t.Fatalf("inputLocked() = false during compact, want true")
 	}
-	view := stripANSIForTest(tui.renderInputArea())
+	view := stripANSIForTest(tui.renderInputArea().content)
 	if !strings.Contains(view, "上下文压缩中") {
 		t.Fatalf("renderInputArea() = %q, want compact running placeholder", view)
 	}
@@ -419,7 +419,7 @@ func TestAutoCompactNotificationShowsRunning(t *testing.T) {
 	if strings.Contains(view, "上下文压缩中") {
 		t.Fatalf("compact status line = %q, should not duplicate bottom loading status", view)
 	}
-	input := stripANSIForTest(tui.renderInputArea())
+	input := stripANSIForTest(tui.renderInputArea().content)
 	if !strings.Contains(input, "上下文压缩中") {
 		t.Fatalf("renderInputArea() = %q, want compact loading", input)
 	}
@@ -509,7 +509,7 @@ func TestManualCompactCommandShowsLoadingBeforeDeferredRequest(t *testing.T) {
 	if strings.Contains(view, "上下文压缩中") {
 		t.Fatalf("viewport = %q, should not duplicate bottom loading status", view)
 	}
-	input := stripANSIForTest(tui.renderInputArea())
+	input := stripANSIForTest(tui.renderInputArea().content)
 	if !strings.Contains(input, "上下文压缩中") {
 		t.Fatalf("renderInputArea() = %q, want manual compact loading before result", input)
 	}
@@ -583,7 +583,7 @@ func TestWaitingWithoutVisibleProgressShowsStatusLine(t *testing.T) {
 	if strings.Contains(view, "Esc 取消") {
 		t.Fatalf("view = %q, should not contain duplicate cancel hint in status line", view)
 	}
-	input := stripANSIForTest(tui.renderInputArea())
+	input := stripANSIForTest(tui.renderInputArea().content)
 	if !strings.Contains(input, "正在请求模型") || !strings.Contains(input, "Esc 取消") {
 		t.Fatalf("renderInputArea() = %q, want cancellable locked input placeholder", input)
 	}
@@ -602,7 +602,7 @@ func TestWaitingAfterSubtaskShowsSpecificStatusLine(t *testing.T) {
 	if strings.Contains(view, "正在请求主模型继续") {
 		t.Fatalf("view = %q, should not duplicate bottom loading status in transcript", view)
 	}
-	input := stripANSIForTest(tui.renderInputArea())
+	input := stripANSIForTest(tui.renderInputArea().content)
 	if !strings.Contains(input, "子任务已完成，正在请求主模型继续") || !strings.Contains(input, "Esc 取消") {
 		t.Fatalf("renderInputArea() = %q, want subtask waiting placeholder", input)
 	}
@@ -626,7 +626,7 @@ func TestRunningToolShowsCompactStatusLine(t *testing.T) {
 	if strings.Contains(view, "Esc 取消") {
 		t.Fatalf("view = %q, should not contain duplicate bottom status line", view)
 	}
-	input := stripANSIForTest(tui.renderInputArea())
+	input := stripANSIForTest(tui.renderInputArea().content)
 	if !strings.Contains(input, "执行工具中") || !strings.Contains(input, "Esc 取消") {
 		t.Fatalf("renderInputArea() = %q, want tool running placeholder", input)
 	}
@@ -640,7 +640,7 @@ func TestLockedInputShowsStatusPlaceholder(t *testing.T) {
 	tui.chat.PhaseStart = time.Now()
 	tui.chat.Textarea.Blur()
 
-	view := stripANSIForTest(tui.renderInputArea())
+	view := stripANSIForTest(tui.renderInputArea().content)
 	if !strings.Contains(view, "正在回复") || !strings.Contains(view, "Esc") {
 		t.Fatalf("renderInputArea() = %q, want active status and cancel hint", view)
 	}
@@ -715,7 +715,7 @@ func TestRenderInputAreaSeparatesAttachmentBoxFromComposer(t *testing.T) {
 	tui.chat.Textarea.SetValue("describe this image")
 	tui.chat.Attachments = []attachmentItem{{Type: "image", Name: "image.png", Size: 1024}}
 
-	view := stripANSIForTest(tui.renderInputArea())
+	view := stripANSIForTest(tui.renderInputArea().content)
 	attachmentStart := strings.Index(view, "Pending attachments")
 	inputStart := strings.LastIndex(view, "describe this image")
 	if attachmentStart < 0 || inputStart < 0 || !(attachmentStart < inputStart) {
@@ -871,7 +871,7 @@ func TestInputPlaceholderHidesForWhitespaceDraft(t *testing.T) {
 	tui.initChatComponents()
 	tui.chat.Textarea.SetValue(" ")
 
-	view := stripANSIForTest(tui.renderInputArea())
+	view := stripANSIForTest(tui.renderInputArea().content)
 	if strings.Contains(view, "Ask anything") || strings.Contains(view, "有什么可以帮你") {
 		t.Fatalf("renderInputArea() = %q, should hide placeholder for whitespace draft", view)
 	}
