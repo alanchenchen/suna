@@ -38,6 +38,15 @@ func (t *TUI) liveSpinnerFrame() string {
 	return ansi.Truncate(t.chat.Spinner.View(), 1, "")
 }
 
+// liveSpinnerFramePlain 返回当前 spinner 帧的纯文本（无 ANSI 样式），
+// 供终端标题等不能携带转义序列的场景使用；spinner 未初始化时返回空串。
+func (t *TUI) liveSpinnerFramePlain() string {
+	if len(t.chat.Spinner.Spinner.Frames) == 0 {
+		return ""
+	}
+	return ansi.Strip(t.liveSpinnerFrame())
+}
+
 func liveElapsedPlaceholder(startedAt time.Time) string {
 	if startedAt.IsZero() {
 		return elapsedPlaceholderText + elapsedMarkerPrefix + "0" + elapsedMarkerSuffix

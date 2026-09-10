@@ -12,6 +12,12 @@ const defaultWindowTitle = "Suna"
 
 // windowTitle 使用当前会话工作目录和运行态，便于从终端标签直接识别项目与活动状态。
 func (t *TUI) windowTitle() string {
+	return t.windowTitleWithFrame("")
+}
+
+// windowTitleWithFrame 在 working 态追加 spinner 帧（纯文本，无 ANSI），
+// 让终端标签标题随运行节奏动画；idle 态保持静态。frame 为空时回退静态 working。
+func (t *TUI) windowTitleWithFrame(frame string) string {
 	workspace := windowTitleWorkspace(t.currentSession.CWD)
 	if workspace == "" {
 		workspace = windowTitleWorkspace(t.launchCWD)
@@ -22,6 +28,9 @@ func (t *TUI) windowTitle() string {
 	status := "idle"
 	if t.windowTitleWorking() {
 		status = "working"
+		if frame != "" {
+			status = frame + " " + status
+		}
 	}
 	return workspace + " · " + status
 }

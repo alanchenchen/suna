@@ -68,6 +68,29 @@ func TestWindowTitleUsesCurrentSessionWorkspaceAndState(t *testing.T) {
 	}
 }
 
+// working 态带 spinner 帧时标题含纯文本帧；idle 态忽略帧保持静态。
+func TestWindowTitleWithFrameAnimatesWorkingState(t *testing.T) {
+	tui := &TUI{currentSession: protocol.SessionInfo{ID: "session-1", CWD: "/Users/example/projects/suna-app"}}
+
+	tui.chat.Loading = true
+	if got, want := tui.windowTitleWithFrame("⠋"), "suna-app · ⠋ working"; got != want {
+		t.Fatalf("windowTitleWithFrame() working = %q, want %q", got, want)
+	}
+
+	tui.chat.Loading = false
+	if got, want := tui.windowTitleWithFrame("⠋"), "suna-app · idle"; got != want {
+		t.Fatalf("windowTitleWithFrame() idle = %q, want %q", got, want)
+	}
+}
+
+// spinner 未初始化时纯文本帧为空串，标题回退静态 working。
+func TestLiveSpinnerFramePlainEmptyWhenUninitialized(t *testing.T) {
+	tui := &TUI{}
+	if got := tui.liveSpinnerFramePlain(); got != "" {
+		t.Fatalf("liveSpinnerFramePlain() = %q, want empty when uninitialized", got)
+	}
+}
+
 func TestWindowTitleFallsBackToCachedLaunchWorkspace(t *testing.T) {
 	tui := &TUI{launchCWD: "/Users/example/projects/launcher"}
 	if got, want := tui.windowTitle(), "launcher · idle"; got != want {
