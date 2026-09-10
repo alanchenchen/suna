@@ -132,8 +132,6 @@ type TUI struct {
 	// lastPasteAt 用于让终端已经传入的 PasteMsg 优先于 Ctrl+V 剪贴板图片兜底，避免文本粘贴被图片读取抢占。
 	lastPasteAt time.Time
 
-	inputCursorVisible bool
-
 	// transcript 同步由 daemon 通知触发时按帧合并，避免流式输出和工具事件风暴反复完整重渲染。
 	transcriptSyncDirty     bool
 	transcriptSyncScheduled bool

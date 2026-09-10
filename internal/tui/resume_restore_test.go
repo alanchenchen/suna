@@ -154,7 +154,7 @@ func TestRestoreStatusShowsToolSummaryWithI18N(t *testing.T) {
 		t.Fatalf("role = %q, want restore_summary", msg.Role)
 	}
 	content, _ := msg.Content.(string)
-	for _, want := range []string{"Previous tool activity", "3 calls", "Failures: exec", "Recent: readfile"} {
+	for _, want := range []string{"Historical tool activity", "3 calls", "Failures: exec", "Recent: readfile"} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("summary = %q, want %q", content, want)
 		}

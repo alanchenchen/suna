@@ -628,14 +628,29 @@ func TestRestoreSummaryBoxRendersCompactContent(t *testing.T) {
 		"已折叠 2 次较早操作",
 	}, "\n")
 	got := stripANSIForTest(tui.renderRestoreSummaryBox(content))
-	if strings.Count(got, "上一轮工具操作") != 1 {
-		t.Fatalf("renderRestoreSummaryBox() = %q, want single title", got)
+	// 旧格式 content 的 title 行应被剥掉，输出中不应再出现旧标题。
+	if strings.Count(got, "上一轮工具操作") != 0 {
+		t.Fatalf("renderRestoreSummaryBox() = %q, want legacy title stripped", got)
 	}
 	checks := []string{"6 次 · 5 成功 / 1 失败", "失败：exec", "变更：editfile", "最近：editfile", "已折叠 2 次"}
 	for _, want := range checks {
 		if !strings.Contains(got, want) {
 			t.Fatalf("renderRestoreSummaryBox() = %q, want %q", got, want)
 		}
+	}
+}
+
+// 新格式链路：renderSessionRestoreToolSummary 用 i18n title 生成 content，
+// renderRestoreSummaryBox 应同样剥掉 title 行，避免标题重复。
+func TestRestoreSummaryBoxStripsLocalizedTitle(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100}
+	content := strings.Join([]string{
+		tui.tr("session.restore_tools_title"),
+		"6 次 · 全部成功",
+	}, "\n")
+	got := stripANSIForTest(tui.renderRestoreSummaryBox(content))
+	if strings.Count(got, "历史工具操作") != 1 {
+		t.Fatalf("renderRestoreSummaryBox() = %q, want single localized title", got)
 	}
 }
 

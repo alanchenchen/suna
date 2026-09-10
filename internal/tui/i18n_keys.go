@@ -535,7 +535,7 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 
 		"compact.done":                      {LocaleEN: "Context compression completed", LocaleZH: "上下文压缩完成"},
 		"session.restore_compacted":         {LocaleEN: "Older conversation has been compacted into Session State. Only recent messages are shown here, but Suna can continue from the compacted context.", LocaleZH: "较早对话已压缩为 Session State。当前仅展示最近消息，但 Suna 仍可基于压缩上下文继续。"},
-		"session.restore_tools_title":       {LocaleEN: "Previous tool activity", LocaleZH: "上一轮工具操作"},
+		"session.restore_tools_title":       {LocaleEN: "Historical tool activity", LocaleZH: "历史工具操作"},
 		"session.restore_tools_all_success": {LocaleEN: "{} calls · all succeeded", LocaleZH: "{} 次 · 全部成功"},
 		"session.restore_tools_stats":       {LocaleEN: "{} calls · {} succeeded / {} failed", LocaleZH: "{} 次 · {} 成功 / {} 失败"},
 		"session.restore_tools_failures":    {LocaleEN: "Failures: {}", LocaleZH: "失败：{}"},
