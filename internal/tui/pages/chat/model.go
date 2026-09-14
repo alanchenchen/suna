@@ -169,9 +169,16 @@ type Model struct {
 	ModelPickerOpen   bool
 	ModelList         overlaylist.Model
 
-	ShowToolDetail   bool
-	ToolDetailScroll int
-	SelectedToolID   string
+	// ExpandedBlock 是当前就地展开的块（Ctrl+T）。用块指针标识而不是条目 ID：
+	// 同一个块可能同时渲染 tool/subtask 两个盒子，指针能唯一确定展开目标。
+	// 单展开约束与思考链的 ExpandedReasoningID 一致。
+	ExpandedBlock *toolview.Block
+	// ExpandedBoxKind 标记展开的是该块的哪个盒子（ExpandedBoxTool / ExpandedBoxSubtask）。
+	// 同一个块会渲染出两个相邻盒子，两者必须能独立展开：
+	// 展开 tool 盒子不应连带展开 subtask 面板，反之亦然。
+	ExpandedBoxKind           string
+	ExpandedBlockCursor       int
+	ExpandedBlockDetailScroll int
 
 	ExpandedReasoningID uint64
 	NextMessageID       uint64
@@ -182,6 +189,9 @@ type Model struct {
 	SubtaskToolCursorUserSet  bool
 	SubtaskToolDetailExpanded bool
 	SubtaskToolDetailScroll   int
+	// SubtaskResultScroll 是子任务结果小节的滚动偏移：结果可能很长，
+	// 小节只展示有限行，PgUp/PgDn 在这里滚动查看全文。
+	SubtaskResultScroll int
 
 	ActiveTools            map[string]*toolview.Entry
 	ToolStartTimes         map[string]time.Time

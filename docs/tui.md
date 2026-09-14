@@ -61,6 +61,7 @@ Chat transcript 遵循“完整数据在页面 model、渲染只取可见窗口�
 - `TranscriptBlocks` 维护消息到行数的布局信息，`TranscriptYOffset` 是全局滚动位置。
 - 每次同步 transcript 时，只把当前窗口加 overscan 的 lines 传给 Bubbles viewport，viewport 不持有完整历史。
 - 滚轮和 PageUp/PageDown 会立即更新全局 offset；只有跨出当前 overscan window 时才重新同步 transcript，窗口内滚动只移动 viewport offset。
+- 工具块与子任务块支持就地展开（Ctrl+T，与 Ctrl+R 展开思考块同构）：展开/折叠只切换块自身的渲染，不弹模态浮层。同一个 tool 消息会渲染出 tool 盒子与 subtask 面板两个相邻块，两者各自独立展开：Ctrl+T 按“视窗内最近的盒子”选择目标，展开 tool 盒子不会连带激活 subtask 面板，反之亦然。展开态下 PageUp/PageDown 与滚轮按优先级滚动子任务工具详情、子任务结果小节或条目详情窗口，都无剩余内容时继续滚动 transcript。展开态是普通状态而非模态：文本选区、输入历史等能力保持可用。
 - reasoning 展开/折叠只渲染主界面实际显示所需的头部或尾部小窗口；已完成 reasoning 离屏时复用 line count，避免长思考链在滚动或 spinner tick 中反复渲染。
 - 已完成 assistant 的 Markdown render cache 有内部预算；裁剪时只删除旧 rendered output，不删除原始消息和行数元数据。
 - streaming assistant 继续走纯文本渲染，完成后再 Markdown 渲染，避免半截 Markdown 导致行数抖动和高频重排；流式阶段原文进入 append-only buffer，渲染缓存只保留尾部窗口，降低超长单回复每帧 join 全文的 CPU 和内存压力。
@@ -88,7 +89,7 @@ Chat transcript 遵循“完整数据在页面 model、渲染只取可见窗口�
 - `overlay`：简单浮层叠放。
 - `scroll`：虚拟滚动数据源和窗口渲染。
 - `text`：文本处理辅助。
-- `toolview`：工具块和工具详情渲染。
+- `toolview`：工具块、工具详情与子任务结果渲染。
 
 组件包不应读取 root TUI 的全局状态，也不应直接使用 i18n。需要文案、样式或渲染依赖时，由调用方通过 deps/labels/styles 注入。
 

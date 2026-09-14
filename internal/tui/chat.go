@@ -292,14 +292,18 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		if t.chat.SubtaskToolDetailExpanded && t.hasActiveSubtaskPanel() {
 			if mm, ok := any(m).(tea.MouseWheelMsg); ok {
+				delta := 0
 				switch mm.Mouse().Button {
 				case tea.MouseWheelUp:
-					t.scrollSubtaskToolDetail(-t.chat.Viewport.MouseWheelDelta)
+					delta = -t.chat.Viewport.MouseWheelDelta
 				case tea.MouseWheelDown:
-					t.scrollSubtaskToolDetail(t.chat.Viewport.MouseWheelDelta)
+					delta = t.chat.Viewport.MouseWheelDelta
 				}
-				t.syncContent()
-				return t, nil
+				// 只有真正消费了滚动才拦截；已到边界时透传给 transcript（滚动链）。
+				if delta != 0 && t.scrollSubtaskToolDetail(delta) {
+					t.syncContent()
+					return t, nil
+				}
 			}
 		}
 		if t.mouseInComposer(m) {
@@ -311,7 +315,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				t.syncContent()
 			}
 			if t.chat.ActiveInteractionKind() == chatpage.InteractionNone &&
-				!t.chat.HasOverlayOpen() && !t.chat.ShowToolDetail {
+				!t.chat.HasOverlayOpen() {
 				if _, isWheel := any(m).(tea.MouseWheelMsg); !isWheel {
 					// 内容区选区拖动中跨入输入区：Motion/Release 继续交给内容区处理，
 					// 避免事件被输入区分支吞掉导致选区卡在 Active 状态（y 键失效）。
@@ -330,7 +334,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// 内容区鼠标选区：按下/拖动/释放驱动选区状态机（浏览器式拖选复制）。
 		// 仅在无阻塞交互、无 overlay 时生效；滚轮事件不进入选区逻辑。
 		if t.chat.ActiveInteractionKind() == chatpage.InteractionNone &&
-			!t.chat.HasOverlayOpen() && !t.chat.ShowToolDetail {
+			!t.chat.HasOverlayOpen() {
 			if _, isWheel := any(m).(tea.MouseWheelMsg); !isWheel {
 				// 输入区选区拖动中跨入内容区：Motion/Release 继续交给输入区处理，
 				// 避免内容区用行号污染输入区选区（Region 不对称的对称处理）。
@@ -355,15 +359,35 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return t, nil
 		}
-		if t.chat.ShowToolDetail {
+		if t.chat.ExpandedBlock != nil && t.expandedBlockVisible() {
+			// 就地展开不是模态：只接管滚轮（滚动详情窗口），
+			// 其余鼠标事件继续走选区逻辑，否则展开后无法拖选复制文本。
+			// 展开块滚出视窗后不再接管：用户此时意图是滚动 transcript 查看其它内容。
 			if mm, ok := any(m).(tea.MouseWheelMsg); ok {
-				if mm.Mouse().Button == tea.MouseWheelUp {
-					t.scrollToolDetailOverlay(-3)
-				} else if mm.Mouse().Button == tea.MouseWheelDown {
-					t.scrollToolDetailOverlay(3)
+				up := mm.Mouse().Button == tea.MouseWheelUp
+				down := mm.Mouse().Button == tea.MouseWheelDown
+				// 优先级与 PgUp/PgDn 保持一致：subtask 工具详情展开时先滚它。
+				// 只有真正消费了滚动才拦截；已到边界或无可渲染详情窗口时
+				// 透传给 transcript（滚动链），否则视窗会被内层窗口"卡住"。
+				switch {
+				case t.chat.SubtaskToolDetailExpanded && t.hasActiveSubtaskPanel():
+					if t.scrollSubtaskToolDetail(wheelDelta(up, down)) {
+						t.syncContent()
+						return t, nil
+					}
+				case t.subtaskResultScrollable():
+					// 与 PgUp/PgDn 同款优先级：结果小节可滚动时先滚它。
+					if t.scrollSubtaskResult(wheelDelta(up, down)) {
+						t.syncContent()
+						return t, nil
+					}
+				case t.expandedBlockHasMainEntries():
+					if t.scrollExpandedBlockDetail(wheelDelta(up, down)) {
+						t.syncContent()
+						return t, nil
+					}
 				}
 			}
-			return t, nil
 		}
 		if mm, ok := any(m).(tea.MouseWheelMsg); ok {
 			mouse := mm.Mouse()

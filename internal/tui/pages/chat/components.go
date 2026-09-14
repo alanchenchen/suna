@@ -42,13 +42,17 @@ func (m *Model) InitComponents(deps ComponentDeps) {
 	m.ActiveTools = make(map[string]*toolview.Entry)
 	m.ToolStartTimes = make(map[string]time.Time)
 	m.CurrentToolBlock = nil
-	m.SelectedToolID = ""
+	m.ExpandedBlock = nil
+	m.ExpandedBoxKind = ""
+	m.ExpandedBlockCursor = 0
+	m.ExpandedBlockDetailScroll = 0
 	m.SubtaskCursor = 0
 	m.SubtaskCursorUserSet = false
 	m.SubtaskToolCursor = 0
 	m.SubtaskToolCursorUserSet = false
 	m.SubtaskToolDetailExpanded = false
 	m.SubtaskToolDetailScroll = 0
+	m.SubtaskResultScroll = 0
 }
 
 func (m *Model) RestorePendingInput() {
@@ -136,11 +140,8 @@ func (m *Model) ResetRuntime() {
 	m.CmdSuggestions = nil
 	m.CmdSuggestionIdx = 0
 	m.ResetNativeLists()
-	m.ShowToolDetail = false
 	m.ExpandedReasoningID = 0
 	m.NextMessageID = 0
-	m.ToolDetailScroll = 0
-	m.SelectedToolID = ""
 	m.SubtaskCursor = 0
 	m.SubtaskCursorUserSet = false
 	m.SubtaskToolCursor = 0
@@ -157,6 +158,12 @@ func (m *Model) ResetRuntime() {
 	m.ToolStartTimes = nil
 	m.CurrentToolBlock = nil
 	m.CloseToolBlockWhenIdle = false
+	// 展开块是指向 Messages 内块的指针；Messages 已释放，必须同时清空，
+	// 否则切会话/重建后会悬挂指向已丢弃的块。
+	m.ExpandedBlock = nil
+	m.ExpandedBoxKind = ""
+	m.ExpandedBlockCursor = 0
+	m.ExpandedBlockDetailScroll = 0
 	m.Attachments = nil
 	m.AttachmentMode = false
 	m.AttachmentCursor = 0

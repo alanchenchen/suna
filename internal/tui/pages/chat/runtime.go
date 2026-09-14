@@ -11,13 +11,17 @@ func (m *Model) ResetToolState() {
 	m.ToolStartTimes = make(map[string]time.Time)
 	m.CurrentToolBlock = nil
 	m.CloseToolBlockWhenIdle = false
-	m.SelectedToolID = ""
+	m.ExpandedBlock = nil
+	m.ExpandedBoxKind = ""
+	m.ExpandedBlockCursor = 0
+	m.ExpandedBlockDetailScroll = 0
 	m.SubtaskCursor = 0
 	m.SubtaskCursorUserSet = false
 	m.SubtaskToolCursor = 0
 	m.SubtaskToolCursorUserSet = false
 	m.SubtaskToolDetailExpanded = false
 	m.SubtaskToolDetailScroll = 0
+	m.SubtaskResultScroll = 0
 }
 
 func (m *Model) StartLLMWait(now time.Time) {

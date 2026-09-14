@@ -75,6 +75,7 @@ type RenderLabels struct {
 	ExecCleanupPartial   string
 	ExecStopIncomplete   string
 	ExecSeeDetails       string
+	DetailSection        string
 }
 
 // RenderDeps 汇总工具块渲染所需依赖。
@@ -83,6 +84,16 @@ type RenderDeps struct {
 	Spinner string
 	Labels  RenderLabels
 	Styles  RenderStyles
+
+	// Expanded 表示该块处于 Ctrl+T 就地展开态；ExpandedHint 是标题后缀提示文案。
+	// 提示只依赖块状态（折叠/展开），不依赖视窗位置：块渲染必须保持静态，
+	// 否则滚动时块内容变化会让 transcript 窗口签名失效，退化为全量重渲染。
+	Expanded     bool
+	ExpandedHint string
+	// EntryCursor 是展开态下条目光标（仅多条目块显示）；DetailLines 是选中条目的详情窗口。
+	EntryCursor  int
+	DetailLines  []string
+	DetailFooter string
 
 	GuardDecisionLabel func(*GuardInfo) string
 	ReadOnlyLabel      func(bool) string
@@ -96,6 +107,8 @@ func (d RenderDeps) width() int {
 }
 
 // RenderBlock 渲染一个连续工具调用块。调用方负责将结果嵌入 Chat transcript。
+// 展开态（Ctrl+T）下额外渲染条目光标与选中条目的详情窗口；详情内容由调用方
+// 通过 DetailLines 注入，组件不感知滚动与数据源，保证渲染保持静态可缓存。
 func RenderBlock(block *Block, deps RenderDeps) string {
 	if block == nil || len(block.Order) == 0 {
 		return ""
@@ -104,14 +117,31 @@ func RenderBlock(block *Block, deps RenderDeps) string {
 	if len(entries) == 0 {
 		return ""
 	}
+	multi := len(entries) > 1
 	var lines []string
-	for _, te := range entries {
+	for i, te := range entries {
 		entryLines := strings.Split(strings.TrimSuffix(RenderEntry(te, false, deps), "\n"), "\n")
-		for _, line := range entryLines {
-			lines = append(lines, trimToolBlockIndent(line))
+		for j, line := range entryLines {
+			trimmed := trimToolBlockIndent(line)
+			// 只在展开态且多条目时显示光标，避免单条目块出现无意义的选中标记。
+			if deps.Expanded && multi && j == 0 {
+				if i == deps.EntryCursor {
+					trimmed = deps.Styles.HL.Render("▶ ") + trimmed
+				} else {
+					trimmed = "  " + trimmed
+				}
+			}
+			lines = append(lines, trimmed)
 		}
 	}
-	return renderToolTitledBox(deps.width(), toolBlockTitleWithStatus(entries, deps), lines, deps.Styles)
+	if deps.Expanded && len(deps.DetailLines) > 0 {
+		lines = append(lines, deps.Styles.Dim.Render("─ "+deps.Labels.DetailSection))
+		lines = append(lines, deps.DetailLines...)
+		if deps.DetailFooter != "" {
+			lines = append(lines, deps.Styles.Dim.Render(deps.DetailFooter))
+		}
+	}
+	return renderToolTitledBox(deps.width(), toolBlockTitleWithStatus(entries, deps), lines, deps.Styles, deps.ExpandedHint)
 }
 
 func trimToolBlockIndent(line string) string {
@@ -169,11 +199,24 @@ func runningStatusIcon(deps RenderDeps) string {
 	return "◐"
 }
 
-func renderToolTitledBox(width int, title string, lines []string, styles RenderStyles) string {
+func renderToolTitledBox(width int, title string, lines []string, styles RenderStyles, hint string) string {
 	maxOuterWidth := max(20, width-4)
 	maxContentWidth := max(8, maxOuterWidth-2)
-	title = textutil.TruncateRunes(strings.TrimSpace(title), max(4, maxContentWidth-3))
 	titlePrefix := "─ "
+	title = strings.TrimSpace(title)
+	hint = strings.TrimSpace(hint)
+	hintSuffix := ""
+	if hint != "" {
+		hintSuffix = " · " + hint
+	}
+	// 提示是可操作信息，被截断等于没有：先为提示预留空间再截断主标题；
+	// 剩余空间放不下提示时整条隐藏（与状态栏过窄隐藏 cwd 同策略）。
+	titleBudget := max(4, maxContentWidth-3-lipgloss.Width(hintSuffix))
+	if hintSuffix != "" && maxContentWidth-3-lipgloss.Width(hintSuffix) < 4 {
+		hintSuffix = ""
+		titleBudget = max(4, maxContentWidth-3)
+	}
+	title = textutil.TruncateRunes(title, titleBudget) + hintSuffix
 	titleSuffix := " "
 	titleWidth := lipgloss.Width(titlePrefix) + lipgloss.Width(title) + lipgloss.Width(titleSuffix)
 	contentWidth := max(8, titleWidth)
@@ -219,7 +262,7 @@ func RenderEntry(te *Entry, nested bool, deps RenderDeps) string {
 	if nested {
 		prefix = "      " + s.Dim.Render("└─ ")
 	}
-	maxWidth := max(20, deps.width()-lipgloss.Width(stripANSI(prefix))-8)
+	maxWidth := max(20, deps.width()-lipgloss.Width(prefix)-8)
 	// 首行必须为耗时预留空间，避免长命令或长路径把右侧 duration 挤出可视区域。
 	durWidth := lipgloss.Width(dur)
 	statusWidth := lipgloss.Width(statusIcon)
@@ -486,8 +529,6 @@ func splitWrappedStyle(content string, width int, maxLines int, style lipgloss.S
 	}
 	return out
 }
-
-func stripANSI(s string) string { return s }
 
 func topLevelEntries(block *Block) []*Entry {
 	if block == nil {

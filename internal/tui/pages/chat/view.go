@@ -22,7 +22,6 @@ type ViewDeps struct {
 	CommandSuggestions string
 	StatusBar          string
 
-	ToolDetailOverlay  string
 	HelpOverlay        string
 	ModelOverlay       string
 	SkillsOverlay      string
@@ -58,9 +57,6 @@ func (m Model) View(deps ViewDeps) string {
 	sb.WriteString(deps.Separator + "\n")
 
 	content := deps.Content
-	if m.ShowToolDetail && deps.ToolDetailOverlay != "" {
-		content = overlay(content, deps.ToolDetailOverlay, deps.Overlay)
-	}
 	if deps.HelpOverlay != "" {
 		content = overlay(content, deps.HelpOverlay, deps.Overlay)
 	}

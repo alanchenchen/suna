@@ -69,6 +69,16 @@ func (m *Model) TrimDisplayHistory(limitBytes int) bool {
 		if m.Messages[i].ID != 0 && m.Messages[i].ID == m.ExpandedReasoningID {
 			m.ExpandedReasoningID = 0
 		}
+		// 展开块用指针标识；被裁消息的块即将释放，必须同时清空展开态，
+		// 否则会保留已丢弃块的内存并让 Ctrl+T 指向不可见内容。
+		if m.ExpandedBlock != nil {
+			if block, ok := m.Messages[i].Content.(*toolview.Block); ok && block == m.ExpandedBlock {
+				m.ExpandedBlock = nil
+				m.ExpandedBoxKind = ""
+				m.ExpandedBlockCursor = 0
+				m.ExpandedBlockDetailScroll = 0
+			}
+		}
 		m.Messages[i] = Msg{}
 	}
 	kept := append([]Msg(nil), m.Messages[cutoff:]...)

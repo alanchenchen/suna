@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
+	"github.com/alanchenchen/suna/internal/tui/components/scroll"
 	textutil "github.com/alanchenchen/suna/internal/tui/components/text"
 	toolview "github.com/alanchenchen/suna/internal/tui/components/toolview"
 )
@@ -13,7 +15,21 @@ func (t *TUI) canAppendToCurrentToolBlock() bool { return t.chat.CanAppendToCurr
 func (t *TUI) hasRunningTools() bool             { return t.chat.HasRunningTools() }
 
 func (t *TUI) renderToolBlock(block *toolBlock) string {
-	return textutil.IndentLines(toolview.RenderBlock(block, t.toolRenderDeps()), transcriptBlockIndent)
+	deps := t.toolRenderDeps()
+	// 展开态是块级状态：提示与详情只依赖"这块是否展开"，不依赖视窗位置，
+	// 保证块渲染静态可缓存（滚动时 transcript 窗口签名仍可复用）。
+	// 纯 subtask 块没有主条目，RenderBlock 会返回空（面板由 renderSubtaskBlock 负责），
+	// 因此不为它构建详情，避免白算一次长结果的行索引。
+	hasMain := block != nil && len(toolview.VisibleMainEntries(block)) > 0
+	if block != nil && block == t.chat.ExpandedBlock && t.chat.ExpandedBoxKind == "tool" && hasMain {
+		deps.Expanded = true
+		deps.ExpandedHint = t.tr("tui.tool.detail_expanded")
+		deps.EntryCursor = t.chat.ExpandedBlockCursor
+		deps.DetailLines, deps.DetailFooter = t.expandedBlockDetailLines()
+	} else if hasMain {
+		deps.ExpandedHint = t.tr("tui.tool.detail_hint")
+	}
+	return textutil.IndentLines(toolview.RenderBlock(block, deps), transcriptBlockIndent)
 }
 
 func (t *TUI) renderToolEntry(te *toolEntry, nested bool) string {
@@ -73,6 +89,7 @@ func (t *TUI) toolRenderDeps() toolview.RenderDeps {
 			ExecCleanupPartial:   t.tr("tui.tool.exec.cleanup_partial"),
 			ExecStopIncomplete:   t.tr("tui.tool.exec.stop_incomplete"),
 			ExecSeeDetails:       t.tr("tui.tool.exec.see_details"),
+			DetailSection:        t.tr("tui.tool.detail_section"),
 		},
 		Styles:             toolviewStyles(),
 		GuardDecisionLabel: t.guardDecisionLabel,
@@ -81,13 +98,8 @@ func (t *TUI) toolRenderDeps() toolview.RenderDeps {
 }
 
 func (t *TUI) toolDetailDeps() toolview.DetailDeps {
-	idx, total := t.selectedToolPosition()
 	return toolview.DetailDeps{
-		Width:            t.width,
-		OverlayMaxHeight: t.overlayMaxHeight(),
-		SelectedIndex:    idx,
-		SelectedTotal:    total,
-		ShowPosition:     true,
+		Width: t.width,
 		Labels: toolview.DetailLabels{
 			DetailTitle:        t.tr("tui.tool.detail_title"),
 			SubtaskDetailTitle: t.tr("tui.tool.subtask_detail_title"),
@@ -106,16 +118,77 @@ func (t *TUI) toolDetailDeps() toolview.DetailDeps {
 			Model:              t.tr("tui.tool.model"),
 			Tools:              t.tr("tui.tool.tools"),
 			Task:               t.tr("tui.tool.task"),
+			Context:            t.tr("tui.tool.context"),
+			SideEffects:        t.tr("tui.tool.side_effects"),
 			Scroll:             t.tr("tui.overlay.scroll"),
 			Prev:               t.tr("tui.tool.prev"),
 			Next:               t.tr("tui.tool.next"),
 			Close:              t.tr("tui.tool.close"),
 		},
 		Styles:             toolviewStyles(),
-		Box:                boxStyle,
 		GuardDecisionBadge: t.renderGuardDecisionBadge,
 		ReadOnlyBadge:      t.renderReadOnlyBadge,
 	}
+}
+
+// expandedBlockDetailHeight 是展开块内详情窗口的高度上限。
+// 详情就地嵌入 transcript，过高会把块撑成整屏，因此按终端高度取比例并设上下限。
+func (t *TUI) expandedBlockDetailHeight() int {
+	return min(16, max(6, t.height/3))
+}
+
+// expandedBlockDetailLines 渲染展开块当前选中条目的详情窗口。
+// 复用 DetailLineSource（虚拟数据源），只取可见窗口，长结果不会 materialize 全文。
+func (t *TUI) expandedBlockDetailLines() (lines []string, footer string) {
+	te := t.chat.SelectedExpandedEntry()
+	if te == nil {
+		return nil, ""
+	}
+	deps := t.toolDetailDeps()
+	height := t.expandedBlockDetailHeight()
+	source := toolview.DetailLineSource(te, deps)
+	body, start, total := scroll.Window(source, height, &t.chat.ExpandedBlockDetailScroll)
+	lines = append([]string(nil), body...)
+	if total > height {
+		footer = fmt.Sprintf("PgUp/PgDn %s %d-%d/%d", t.tr("tui.overlay.scroll"), start+1, min(total, start+height), total)
+	}
+	return lines, footer
+}
+
+// scrollExpandedBlockDetail 滚动展开块详情窗口。
+// 返回是否真正消费了本次滚动：已到边界时返回 false，让调用方把滚动
+// 透传给 transcript（滚动链），否则视窗会被内层窗口"卡住"。
+func (t *TUI) scrollExpandedBlockDetail(delta int) bool {
+	te := t.chat.SelectedExpandedEntry()
+	if te == nil {
+		t.chat.ExpandedBlockDetailScroll = 0
+		return false
+	}
+	deps := t.toolDetailDeps()
+	maxOffset := max(0, toolview.DetailLineSource(te, deps).Len()-t.expandedBlockDetailHeight())
+	next := clampInt(t.chat.ExpandedBlockDetailScroll+delta, 0, maxOffset)
+	if next == t.chat.ExpandedBlockDetailScroll {
+		return false
+	}
+	t.chat.ExpandedBlockDetailScroll = next
+	return true
+}
+
+// toggleBlockDetail 切换视窗内最相关工具块的展开态（Ctrl+T），
+// 与 Ctrl+R 一样在高度变化后恢复滚动锚点，避免展开导致视口跳动。
+func (t *TUI) toggleBlockDetail() {
+	if t.chat.Compacting {
+		// 压缩中 transcript 正在重建，展开锚点会失效。
+		return
+	}
+	anchor, changed := t.chat.ToggleVisibleBlockDetail()
+	if !changed {
+		return
+	}
+	t.syncContent()
+	t.chat.RestoreTranscriptAnchor(anchor)
+	t.updateTranscriptFollowAfterNavigation()
+	t.layoutChat()
 }
 
 func toolviewStyles() toolview.RenderStyles {
@@ -143,7 +216,41 @@ func (t *TUI) toolBlockTitle(entries []*toolEntry) string {
 	return toolview.BlockTitle(entries, t.toolRenderDeps().Labels)
 }
 
-func (t *TUI) moveSelectedTool(delta int) { t.chat.MoveSelectedTool(delta) }
+func (t *TUI) moveExpandedBlockCursor(delta int) { t.chat.MoveExpandedBlockCursor(delta) }
+
+// expandedBlockHasMainEntries 判断展开的是否是含主条目的 tool 盒子。
+// 纯 subtask 块的 tool 盒子不渲染详情窗口，导航由 subtask 面板自身承担。
+func (t *TUI) expandedBlockHasMainEntries() bool {
+	block := t.chat.ExpandedBlock
+	return block != nil && t.chat.ExpandedBoxKind == "tool" && len(toolview.VisibleMainEntries(block)) > 0
+}
+
+// expandedBlockVisible 报告展开块当前是否在 transcript 视窗内。
+// 就地展开的详情窗口只在块可见时接管滚动：块滚出视窗后，
+// 用户滚动意图是查看其它内容，继续消耗会让视窗"卡住"。
+func (t *TUI) expandedBlockVisible() bool {
+	block := t.chat.ExpandedBlock
+	if block == nil {
+		return false
+	}
+	for i, msg := range t.chat.Messages {
+		if msg.Content == block {
+			return t.chat.BlockVisible(i)
+		}
+	}
+	return false
+}
+
+// wheelDelta 把滚轮方向转成滚动增量（与 viewport 的步长一致）。
+func wheelDelta(up, down bool) int {
+	switch {
+	case up:
+		return -3
+	case down:
+		return 3
+	}
+	return 0
+}
 
 func isSubtask(te *toolEntry) bool {
 	return toolview.IsSubtask(te)
@@ -151,11 +258,9 @@ func isSubtask(te *toolEntry) bool {
 func isSubtaskChild(te *toolEntry) bool {
 	return toolview.IsSubtaskChild(te)
 }
-func (t *TUI) findTool(id string) *toolEntry    { return t.chat.FindTool(id) }
-func (t *TUI) visibleToolIDs() []string         { return t.chat.VisibleToolIDs() }
-func (t *TUI) visibleSubtaskIDs() []string      { return t.chat.VisibleSubtaskIDs() }
-func (t *TUI) selectedToolPosition() (int, int) { return t.chat.SelectedToolPosition() }
-func (t *TUI) runningToolCount() int            { return t.chat.RunningToolCount() }
+func (t *TUI) findTool(id string) *toolEntry { return t.chat.FindTool(id) }
+func (t *TUI) visibleSubtaskIDs() []string   { return t.chat.VisibleSubtaskIDs() }
+func (t *TUI) runningToolCount() int         { return t.chat.RunningToolCount() }
 func (t *TUI) markToolRejected(id string) {
 	t.chat.MarkToolRejected(id, t.tr("tui.guard.rejected"), time.Now())
 }
@@ -221,25 +326,6 @@ func (t *TUI) renderReadOnlyBadge(readOnly bool) string {
 	return styleGuardWarn.Render(t.tr("tui.tool.guard.write_badge"))
 }
 
-func (t *TUI) renderToolDetailOverlay(width int) string {
-	te := t.findTool(t.chat.SelectedToolID)
-	if te == nil {
-		return ""
-	}
-	deps := t.toolDetailDeps()
-	deps.Width = width
-	return toolview.RenderDetailOverlay(te, &t.chat.ToolDetailScroll, deps)
-}
-
-func (t *TUI) toolDetailPageStep() int {
-	return toolview.DetailPageStep(t.toolDetailDeps())
-}
-
-func (t *TUI) scrollToolDetailOverlay(delta int) {
-	te := t.findTool(t.chat.SelectedToolID)
-	toolview.ScrollDetail(te, &t.chat.ToolDetailScroll, delta, t.toolDetailDeps())
-}
-
 func splitWrapped(content string, width int, maxLines int) []string {
 	var out []string
 	for _, line := range strings.Split(strings.TrimRight(content, "\n"), "\n") {
@@ -258,4 +344,12 @@ func splitWrapped(content string, width int, maxLines int) []string {
 		}
 	}
 	return out
+}
+
+// clampInt 将 v 限制在 [low, high] 区间内；high < low 时交换边界，避免调用方传入反向区间。
+func clampInt(v, low, high int) int {
+	if high < low {
+		low, high = high, low
+	}
+	return min(high, max(low, v))
 }

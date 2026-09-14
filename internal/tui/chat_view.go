@@ -30,10 +30,6 @@ func (t *TUI) viewChat() string {
 	if t.showHelp {
 		helpOverlay = t.renderHelpOverlay(t.width)
 	}
-	toolOverlay := ""
-	if t.chat.ShowToolDetail {
-		toolOverlay = t.renderToolDetailOverlay(t.width)
-	}
 	modelOverlay := ""
 	if t.chat.ModelPickerOpen {
 		modelOverlay = t.renderModelOverlay(t.width)
@@ -83,7 +79,6 @@ func (t *TUI) viewChat() string {
 		PreInputHint:       preInputHint,
 		CommandSuggestions: cmdSuggestions,
 		StatusBar:          t.renderChatStatusBar(),
-		ToolDetailOverlay:  toolOverlay,
 		HelpOverlay:        helpOverlay,
 		ModelOverlay:       modelOverlay,
 		SkillsOverlay:      skillsOverlay,

@@ -21,9 +21,11 @@ func TestStartToolTreatsInvalidSpawnPrefixAsMainTool(t *testing.T) {
 	if te.ParentID != "" {
 		t.Fatalf("ParentID = %q, want empty for missing spawn parent", te.ParentID)
 	}
-	ids := m.VisibleToolIDs()
-	if len(ids) != 1 || ids[0] != "spawn:missing:read-1" {
-		t.Fatalf("VisibleToolIDs() = %v, want invalid spawn-prefixed tool as main tool", ids)
+	m.ExpandedBlock = m.CurrentToolBlock
+	m.ExpandedBoxKind = "tool"
+	entries := m.ExpandedBlockEntries()
+	if len(entries) != 1 || entries[0].ID != "spawn:missing:read-1" {
+		t.Fatalf("ExpandedBlockEntries() = %v, want invalid spawn-prefixed tool as main tool", entries)
 	}
 }
 
@@ -217,34 +219,36 @@ func TestSelectedSubtaskSummaryShowsContextWithLineLimit(t *testing.T) {
 	}
 }
 
-func TestGlobalToolDetailSkipsSpawnAndSubtaskChildren(t *testing.T) {
+func TestToggleBlockDetailExpandsBlockInView(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 28, mode: uipage.Chat}
 	tui.initChatComponents()
 	block := tui.ensureToolBlock()
-	block.Add(&toolEntry{ID: "spawn-1", Name: "Spawn", RawName: "spawn", Intent: "调研提示词", Status: toolRunning})
-	block.Add(&toolEntry{ID: "spawn:spawn-1:http-1", ParentID: "spawn-1", Name: "HTTP", RawName: "http", Intent: "获取资料", Status: toolRunning})
 	block.Add(&toolEntry{ID: "read-1", Name: "Readfile", RawName: "readfile", Intent: "读取文件", Status: toolDone})
-	tui.chat.SelectedToolID = "spawn:spawn-1:http-1"
+	tui.syncContent()
 
-	tui.toggleToolDetail()
-	if !tui.chat.ShowToolDetail {
-		t.Fatalf("ShowToolDetail = false after toggle, want true")
+	tui.toggleBlockDetail()
+	if tui.chat.ExpandedBlock != block {
+		t.Fatalf("ExpandedBlock = %v, want the block in view", tui.chat.ExpandedBlock)
 	}
-	if got, want := tui.chat.SelectedToolID, "read-1"; got != want {
-		t.Fatalf("SelectedToolID = %q, want %q", got, want)
+	// 再次按下收起（toggle 语义与 Ctrl+R 一致）。
+	tui.toggleBlockDetail()
+	if tui.chat.ExpandedBlock != nil {
+		t.Fatalf("ExpandedBlock = %v after second toggle, want nil", tui.chat.ExpandedBlock)
 	}
 }
 
-func TestGlobalToolDetailNoopsWhenOnlySubtasks(t *testing.T) {
+func TestToggleBlockDetailExpandsSubtaskOnlyBlock(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 100, height: 28, mode: uipage.Chat}
 	tui.initChatComponents()
 	block := tui.ensureToolBlock()
-	block.Add(&toolEntry{ID: "spawn-1", Name: "Spawn", RawName: "spawn", Intent: "调研提示词", Status: toolRunning})
-	block.Add(&toolEntry{ID: "spawn:spawn-1:http-1", ParentID: "spawn-1", Name: "HTTP", RawName: "http", Intent: "获取资料", Status: toolRunning})
+	block.Add(&toolEntry{ID: "spawn-1", Name: "Spawn", RawName: "spawn", Intent: "调研提示词", Status: toolDone})
+	block.Add(&toolEntry{ID: "spawn:spawn-1:http-1", ParentID: "spawn-1", Name: "HTTP", RawName: "http", Intent: "获取资料", Status: toolDone})
+	tui.syncContent()
 
-	tui.toggleToolDetail()
-	if tui.chat.ShowToolDetail {
-		t.Fatalf("ShowToolDetail = true with only subtask tools, want false")
+	// 只有子任务的块同样可展开：这是子任务结果可见的前提。
+	tui.toggleBlockDetail()
+	if tui.chat.ExpandedBlock != block {
+		t.Fatalf("ExpandedBlock = %v, want subtask-only block expandable", tui.chat.ExpandedBlock)
 	}
 }
 

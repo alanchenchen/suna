@@ -369,10 +369,10 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return t, t.readClipboardImagePasteCmd(time.Now())
 	case ks == "ctrl+t":
-		t.toggleToolDetail()
+		t.toggleBlockDetail()
 		return t, nil
 	case ks == "tab":
-		if t.hasActiveSubtaskPanel() {
+		if t.canUseSubtaskPanelKeys() {
 			t.moveSubtaskCursor(1)
 			t.syncContent()
 			return t, nil
@@ -409,8 +409,18 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, nil
 		}
 	case ks == "pgup":
-		if t.chat.SubtaskToolDetailExpanded && t.hasActiveSubtaskPanel() {
-			t.scrollSubtaskToolDetail(-max(1, t.subtaskToolDetailHeight()-1))
+		if t.chat.SubtaskToolDetailExpanded && t.hasActiveSubtaskPanel() && t.scrollSubtaskToolDetail(-max(1, t.subtaskToolDetailHeight()-1)) {
+			t.syncContent()
+			return t, nil
+		}
+		if t.subtaskResultScrollable() && t.scrollSubtaskResult(-max(1, t.subtaskResultMaxRows()-1)) {
+			// 结果小节只展示有限行，PgUp/PgDn 优先滚动它，避免长结果永远看不到剩余内容。
+			t.syncContent()
+			return t, nil
+		}
+		if t.expandedBlockHasMainEntries() && t.scrollExpandedBlockDetail(-max(1, t.expandedBlockDetailHeight()-1)) {
+			// 只有含主条目的展开块才有可渲染的详情窗口，且只有真正消费了滚动才拦截；
+			// 已到边界或纯 subtask 块时放行给 transcript 翻页（滚动链）。
 			t.syncContent()
 			return t, nil
 		}
@@ -418,8 +428,16 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.updateTranscriptFollowAfterNavigation()
 		return t, nil
 	case ks == "pgdown":
-		if t.chat.SubtaskToolDetailExpanded && t.hasActiveSubtaskPanel() {
-			t.scrollSubtaskToolDetail(max(1, t.subtaskToolDetailHeight()-1))
+		if t.chat.SubtaskToolDetailExpanded && t.hasActiveSubtaskPanel() && t.scrollSubtaskToolDetail(max(1, t.subtaskToolDetailHeight()-1)) {
+			t.syncContent()
+			return t, nil
+		}
+		if t.subtaskResultScrollable() && t.scrollSubtaskResult(max(1, t.subtaskResultMaxRows()-1)) {
+			t.syncContent()
+			return t, nil
+		}
+		if t.expandedBlockHasMainEntries() && t.scrollExpandedBlockDetail(max(1, t.expandedBlockDetailHeight()-1)) {
+			// 同上：已到边界或纯 subtask 块不消耗 PgDown，交给 transcript 翻页。
 			t.syncContent()
 			return t, nil
 		}
@@ -427,7 +445,15 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.updateTranscriptFollowAfterNavigation()
 		return t, nil
 	case ks == "up":
-		if t.hasActiveSubtaskPanel() {
+		if t.expandedBlockHasMainEntries() && strings.TrimSpace(t.chat.Textarea.Value()) == "" {
+			// Ctrl+T 展开态是用户显式进入的模式：优先在块内移动条目光标；
+			// 但输入框有草稿时让位，避免多行编辑无法移动文本光标。
+			// 纯 subtask 块没有可渲染的条目光标，交给下面的面板导航分支。
+			t.moveExpandedBlockCursor(-1)
+			t.syncContent()
+			return t, nil
+		}
+		if t.canNavigateSubtaskTools() {
 			t.moveSubtaskToolCursor(-1)
 			t.syncContent()
 			return t, nil
@@ -439,7 +465,12 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.moveChatCursor(-1)
 		return t, nil
 	case ks == "down":
-		if t.hasActiveSubtaskPanel() {
+		if t.expandedBlockHasMainEntries() && strings.TrimSpace(t.chat.Textarea.Value()) == "" {
+			t.moveExpandedBlockCursor(1)
+			t.syncContent()
+			return t, nil
+		}
+		if t.canNavigateSubtaskTools() {
 			t.moveSubtaskToolCursor(1)
 			t.syncContent()
 			return t, nil
@@ -534,8 +565,13 @@ func (t *TUI) updateChatEsc() (tea.Model, tea.Cmd) {
 		t.syncContent()
 		return t, nil
 	}
-	if t.chat.ShowToolDetail {
-		t.chat.ShowToolDetail = false
+	if t.chat.ExpandedBlock != nil {
+		// 展开态优先于取消 run：否则用户按 Esc 想退出展开会误取消正在执行的任务。
+		t.chat.ExpandedBlock = nil
+		t.chat.ExpandedBoxKind = ""
+		t.chat.ExpandedBlockCursor = 0
+		t.chat.ExpandedBlockDetailScroll = 0
+		t.syncContent()
 		return t, nil
 	}
 	if t.showHelp {
@@ -577,14 +613,6 @@ func (t *TUI) jumpToBottom() {
 }
 
 func (t *TUI) scrollChatPage(direction int) {
-	if t.chat.ShowToolDetail {
-		delta := max(1, t.toolDetailPageStep())
-		if direction < 0 {
-			delta = -delta
-		}
-		t.scrollToolDetailOverlay(delta)
-		return
-	}
 	if direction < 0 {
 		if t.chat.PageTranscript(-1) {
 			t.syncContent()
@@ -599,14 +627,12 @@ func (t *TUI) scrollChatPage(direction int) {
 }
 
 func (t *TUI) canBrowseInputHistory() bool {
-	return !t.chat.ShowToolDetail && len(t.chat.CmdSuggestions) == 0 && t.chat.ActiveAsk() == nil && !t.chat.AttachmentMode && !t.chat.AttachmentDelete
+	// 就地展开不是模态：它只接管 ↑↓ 的块内导航（见 up/down 分支），
+	// 不影响输入历史；草稿保护由 BrowseInputHistory 自身负责。
+	return len(t.chat.CmdSuggestions) == 0 && t.chat.ActiveAsk() == nil && !t.chat.AttachmentMode && !t.chat.AttachmentDelete
 }
 
 func (t *TUI) moveChatCursor(delta int) {
-	if t.chat.ShowToolDetail {
-		t.moveSelectedTool(delta)
-		return
-	}
 	if len(t.chat.CmdSuggestions) > 0 {
 		t.chat.CmdSuggestionIdx += delta
 		if t.chat.CmdSuggestionIdx < 0 {

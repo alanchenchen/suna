@@ -245,7 +245,7 @@ Shift+Enter        输入换行
 Ctrl+J             输入换行
 Esc                取消运行、返回或关闭浮层
 ↑ / ↓             输入框为空时召回上一条 / 下一条历史输入
-Ctrl+T             打开 / 关闭工具详情
+Ctrl+T             展开 / 折叠视窗内的工具块
 Ctrl+R             展开 / 折叠 reasoning 详情
 ?                  打开或关闭帮助
 PgUp / PgDn        滚动；手动滚动后暂停跟随

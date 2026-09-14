@@ -66,9 +66,6 @@ func (m *Model) StartTool(p protocol.ToolStartParams, id string, now time.Time) 
 	m.ActiveTools[id] = te
 	m.ToolStartTimes[id] = te.StartedAt
 	m.EnsureToolBlock().Add(te)
-	if m.SelectedToolID == "" {
-		m.SelectedToolID = id
-	}
 	return te
 }
 
@@ -127,13 +124,13 @@ func (m *Model) EndTool(p protocol.ToolEndParams, id string, now time.Time) {
 			// 子任务根调用结束后，后续主 Agent 工具属于新的执行批次，不能继续追加到该子任务块。
 			m.CurrentToolBlock = nil
 			m.CloseToolBlockWhenIdle = false
-			m.SelectedToolID = ""
 			m.SubtaskCursor = 0
 			m.SubtaskCursorUserSet = false
 			m.SubtaskToolCursor = 0
 			m.SubtaskToolCursorUserSet = false
 			m.SubtaskToolDetailExpanded = false
 			m.SubtaskToolDetailScroll = 0
+			m.SubtaskResultScroll = 0
 		}
 	}
 }

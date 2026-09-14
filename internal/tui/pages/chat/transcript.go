@@ -55,7 +55,16 @@ type transcriptBlock struct {
 	Streaming bool
 	Text      string
 	LineCount int
+	// BoxKind 标记该块来自哪个盒子（tool / subtask）。同一个 tool 消息会渲染出
+	// 两个相邻块，Ctrl+T 的目标选择需要区分它们，才能让两个盒子独立展开。
+	BoxKind string
 }
+
+// 就地展开的盒子类型：同一个 tool 消息会渲染出 tool 盒子与 subtask 面板两个相邻块。
+const (
+	boxKindTool    = "tool"
+	boxKindSubtask = "subtask"
+)
 
 type transcriptWindowSignature struct {
 	Start      int
@@ -133,18 +142,21 @@ func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptB
 	var nav ResponseNavInfo
 	lineCount := 0
 	inSunaBlock := false
-	addBlockWithLineCount := func(msgIndex int, streaming bool, text string, lines int) {
+	addBlockWithLineCount := func(msgIndex int, streaming bool, text string, lines int, boxKind string) {
 		if lines <= 0 {
 			return
 		}
-		blocks = append(blocks, transcriptBlock{MsgIndex: msgIndex, Streaming: streaming, Text: text, LineCount: lines})
+		blocks = append(blocks, transcriptBlock{MsgIndex: msgIndex, Streaming: streaming, Text: text, LineCount: lines, BoxKind: boxKind})
 		lineCount += lines
 	}
-	addBlock := func(msgIndex int, streaming bool, text string) {
+	addBlockWithKind := func(msgIndex int, streaming bool, text string, boxKind string) {
 		if text == "" {
 			return
 		}
-		addBlockWithLineCount(msgIndex, streaming, text, blockLines(text))
+		addBlockWithLineCount(msgIndex, streaming, text, blockLines(text), boxKind)
+	}
+	addBlock := func(msgIndex int, streaming bool, text string) {
+		addBlockWithKind(msgIndex, streaming, text, "")
 	}
 	renderSunaHeader := func() {
 		if inSunaBlock {
@@ -179,7 +191,7 @@ func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptB
 			if deps.RenderAssistant != nil {
 				// 非窗口内的已完成 assistant 只复用行数元数据，不渲染大段 Markdown 文本。
 				if cachedLines, ok := m.cachedAssistantBlockLines(msg, deps); ok && !deps.RenderAll && !m.shouldRenderBlockText(startLine, cachedLines) {
-					addBlockWithLineCount(i, msg.Streaming, "", cachedLines)
+					addBlockWithLineCount(i, msg.Streaming, "", cachedLines, "")
 				} else {
 					addBlock(i, msg.Streaming, deps.RenderAssistant(msg)+"\n")
 				}
@@ -200,7 +212,7 @@ func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptB
 				}
 				// 思考链展开时可能很长；离屏时只复用行数，避免滚动历史后仍反复渲染不可见内容。
 				if cachedLines, ok := m.cachedRenderedBlockLines(msg, deps.Width, deps.Theme, mode); ok && !deps.RenderAll && !m.shouldRenderBlockText(startLine, cachedLines) {
-					addBlockWithLineCount(i, msg.Streaming, "", cachedLines)
+					addBlockWithLineCount(i, msg.Streaming, "", cachedLines, "")
 				} else {
 					addBlock(i, msg.Streaming, deps.RenderReasoning(msg))
 				}
@@ -209,10 +221,10 @@ func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptB
 			if v, ok := msg.Content.(*toolview.Block); ok {
 				renderSunaHeader()
 				if deps.RenderToolBlock != nil {
-					addBlock(i, msg.Streaming, deps.RenderToolBlock(v))
+					addBlockWithKind(i, msg.Streaming, deps.RenderToolBlock(v), boxKindTool)
 				}
 				if deps.RenderSubtaskBlock != nil {
-					addBlock(i, msg.Streaming, deps.RenderSubtaskBlock(v))
+					addBlockWithKind(i, msg.Streaming, deps.RenderSubtaskBlock(v), boxKindSubtask)
 				}
 			}
 		case "error":
@@ -406,6 +418,24 @@ func (m *Model) SetTranscriptYOffset(offset int) bool {
 	m.TranscriptYOffset = clampInt(offset, 0, m.TranscriptMaxYOffset())
 	m.applyTranscriptWindow()
 	return true
+}
+
+// BlockVisible 报告指定消息的块是否与当前 transcript 窗口相交。
+// 就地展开的详情窗口只在展开块可见时才接管滚动：块滚出视窗后，
+// 用户滚动意图是查看其它内容，此时继续消耗滚动会让视窗"卡住"。
+func (m Model) BlockVisible(msgIndex int) bool {
+	if msgIndex < 0 || m.TranscriptWindowEnd <= m.TranscriptWindowStart {
+		return false
+	}
+	cursor := 0
+	for _, block := range m.TranscriptBlocks {
+		blockEnd := cursor + block.LineCount
+		if block.MsgIndex == msgIndex {
+			return blockEnd > m.TranscriptWindowStart && cursor < m.TranscriptWindowEnd
+		}
+		cursor = blockEnd
+	}
+	return false
 }
 
 func (m Model) canReuseTranscriptWindow(offset int) bool {

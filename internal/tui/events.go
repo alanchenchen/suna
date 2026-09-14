@@ -675,6 +675,11 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) bool {
 	t.chat.Compacting = false
 	t.compactStartedAt = time.Time{}
 	t.chat.Messages = nil
+	// 展开块是指向 Messages 内块的指针；重建前必须清空，否则悬挂指向已丢弃的旧块。
+	t.chat.ExpandedBlock = nil
+	t.chat.ExpandedBoxKind = ""
+	t.chat.ExpandedBlockCursor = 0
+	t.chat.ExpandedBlockDetailScroll = 0
 	t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}
 	for _, m := range p.Messages {
 		if m.Content == "" {

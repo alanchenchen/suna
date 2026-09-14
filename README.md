@@ -239,7 +239,7 @@ Shift+Enter        Newline
 Ctrl+J             Newline
 Esc                Cancel run, go back, or close overlay
 ↑ / ↓             Recall previous / next input when the composer is empty
-Ctrl+T             Toggle tool detail
+Ctrl+T             Expand or collapse the tool block in view
 Ctrl+R             Toggle reasoning detail
 ?                  Toggle help
 PgUp / PgDn        Scroll; manual scrolling pauses follow

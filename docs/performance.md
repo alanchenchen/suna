@@ -149,7 +149,7 @@ user profile memory 不保存完整对话，也不保存项目任务日志。主
 
 ### 工具结果上下文截断
 
-工具结果进入模型上下文前会做截断，避免 raw logs、大文件内容或超长命令输出吞掉上下文窗口。TUI 展示级工具结果也有单独大小限制，完整细节优先通过工具详情 overlay 查看，而不是塞进主 transcript。
+工具结果进入模型上下文前会做截断，避免 raw logs、大文件内容或超长命令输出吞掉上下文窗口。TUI 展示级工具结果也有单独大小限制，完整细节通过就地展开的工具块（Ctrl+T）查看，而不是塞进主 transcript。
 
 相关代码：
 
@@ -301,14 +301,14 @@ transcript viewport window 使用内容签名：window start/end、width/height�
 
 - `internal/tui/pages/chat/transcript.go`
 
-### 工具详情 overlay 虚拟滚动
+### 工具详情虚拟滚动
 
-工具详情 overlay 使用 `LineSource` 和窗口渲染：
+就地展开的工具块详情使用 `LineSource` 和窗口渲染：
 
 - 工具详情被拆成 section。
 - 只渲染当前可见窗口。
 - wrap 后行不需要完整常驻缓存。
-- overlay 内滚动不触发整个 Chat transcript 重建。
+- 详情窗口内滚动不触发整个 Chat transcript 重建。
 
 相关代码：
 

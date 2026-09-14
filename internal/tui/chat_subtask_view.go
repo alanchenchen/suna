@@ -25,21 +25,34 @@ func (t *TUI) renderSubtaskBlock(block *toolBlock) string {
 	if len(ids) == 0 {
 		return ""
 	}
-	active := block == t.chat.CurrentToolBlock
+	// 面板活跃判定与数据来源共用 ActiveSubtaskBlock：
+	// 正在执行的块，或用户用 Ctrl+T 展开的块。子任务结果恰好在根调用结束时到达
+	// （此时 CurrentToolBlock 已置空），因此展开态必须能激活面板。
+	active := block == t.chat.ActiveSubtaskBlock()
 	if active {
 		t.ensureSubtaskSelection()
 	}
 	maxWidth := max(40, t.width-8)
-	width := maxWidth
-	if !active {
-		// 非 active（含完成后的历史 block）是纯展示：盒子宽度按行内容收窄，
-		// 与 tool block 的按需宽度一致；active 时保持固定宽度，避免选中态跳动。
-		width = t.subtaskContentWidth(ids, maxWidth)
-	}
-	innerWidth := max(24, width-8)
-	sectionWidth := max(24, width-4)
+	innerWidth := max(24, maxWidth-8)
+	sectionWidth := max(24, maxWidth-4)
 	done, running, failed := t.subtaskStatusCounts(ids)
 	title := fmt.Sprintf("%s "+t.tr("tui.subtask_panel.title"), t.subtaskBlockStatusIcon(done, running, failed, len(ids)), len(ids), running, done, failed)
+	if !active {
+		// 折叠态提示：与思考链的 "Ctrl+R 展开" 同款，提示只依赖块状态，不依赖视窗位置。
+		title += " · " + t.tr("tui.tool.detail_hint")
+	} else if block == t.chat.ExpandedBlock && t.chat.ExpandedBoxKind == "subtask" {
+		// 展开态提示：纯 subtask 块没有 tool 盒子，收起提示只能由面板提供，
+		// 否则用户展开后看不到任何退出提示（与 tool 盒子的展开态保持一致）。
+		title += " · " + t.tr("tui.tool.detail_expanded")
+	}
+	width := maxWidth
+	if !active {
+		// 非 active（含完成后的历史 block）是纯展示：盒子宽度按行内容与标题收窄，
+		// 与 tool block 的按需宽度一致；active 时保持固定宽度，避免选中态跳动。
+		width = t.subtaskContentWidth(ids, title, maxWidth)
+		innerWidth = max(24, width-8)
+		sectionWidth = max(24, width-4)
+	}
 	lines := make([]string, 0)
 	selected := -1
 	if active {
@@ -50,6 +63,7 @@ func (t *TUI) renderSubtaskBlock(block *toolBlock) string {
 		if current := t.selectedSubtask(); current != nil {
 			lines = append(lines, t.subtaskSectionTitle(t.tr("tui.subtask_panel.current"), sectionWidth))
 			lines = append(lines, t.renderSelectedSubtaskSummary(current, innerWidth)...)
+			lines = append(lines, t.renderSelectedSubtaskResult(current, innerWidth)...)
 			lines = append(lines, t.subtaskSectionTitle(t.tr("tui.subtask_panel.tools"), sectionWidth))
 			lines = append(lines, t.renderSelectedSubtaskTools(innerWidth)...)
 			if t.chat.SubtaskToolDetailExpanded {
@@ -112,10 +126,14 @@ func renderTitledRoundBoxWithStyles(width int, title string, lines []string, tit
 }
 
 // subtaskContentWidth 计算非 active subtask block 的按需宽度：
-// 取行列表内容（cursor + icon + label + activity + duration）的最大宽度，
+// 取行列表内容（cursor + icon + label + activity + duration）与标题的较大者，
 // 下限 40、上限 maxWidth，与 tool block 的按需宽度语义一致。
-func (t *TUI) subtaskContentWidth(ids []string, maxWidth int) int {
-	w := 0
+// 标题必须纳入计算，否则折叠态标题（含 "Ctrl+T 详情" 提示）会被边框截断，
+// 提示一旦被截就等于没有（与 tool 盒子为提示预留空间同策略）。
+func (t *TUI) subtaskContentWidth(ids []string, title string, maxWidth int) int {
+	// 标题预算与 renderTitledRoundBox 的截断公式对齐：contentWidth-3 = (width-2)-3，
+	// 因此宽度需满足 width >= 标题宽 + 5，否则标题会被边框截断（提示一旦被截等于没有）。
+	w := lipgloss.Width(title) + 5
 	for _, id := range ids {
 		te := t.findTool(id)
 		if te == nil {
@@ -207,6 +225,87 @@ func (t *TUI) renderSelectedSubtaskSummary(te *toolEntry, innerWidth int) []stri
 		}
 	}
 	return parts
+}
+
+// subtaskResultMaxRows 限制结果小节的可视行数：结果可能很长，全量展示会挤掉工具 timeline。
+// 与思考链一致按终端高度自适应，超出部分用 PgUp/PgDn 滚动查看全文。
+func (t *TUI) subtaskResultMaxRows() int {
+	return min(8, max(4, t.height/10))
+}
+
+// subtaskResultSource 构建结果正文的虚拟行数据源（含 wrap 计数），
+// 供渲染与滚动共用，避免两处各自计算行数不一致。
+func (t *TUI) subtaskResultSource(te *toolEntry, innerWidth int) (toolview.SubtaskResult, scroll.LineSource) {
+	if te == nil || te.Status == toolview.StatusRunning || strings.TrimSpace(te.Result) == "" {
+		return toolview.SubtaskResult{}, nil
+	}
+	result := toolview.ParseSubtaskResult(te.Result)
+	if result.Text == "" {
+		return result, nil
+	}
+	return result, scroll.NewWrappedLineSection(result.Text, max(12, innerWidth), styleToolDim)
+}
+
+// renderSelectedSubtaskResult 渲染选中子任务的结果小节。
+// spawn 结果是 JSON 载荷，这里解析出可读正文与副作用披露，避免把原始 JSON 丢给用户。
+// 正文按窗口滚动展示，长结果不会丢失（PgUp/PgDn 查看剩余内容）。
+func (t *TUI) renderSelectedSubtaskResult(te *toolEntry, innerWidth int) []string {
+	result, source := t.subtaskResultSource(te, innerWidth)
+	if result.Text == "" && result.SideEffects == "" {
+		return nil
+	}
+	var parts []string
+	if source != nil {
+		parts = append(parts, styleDim.Render(t.tr("tui.subtask_panel.result")+":"))
+		height := t.subtaskResultMaxRows()
+		body, start, total := scroll.Window(source, height, &t.chat.SubtaskResultScroll)
+		parts = append(parts, body...)
+		if total > height {
+			parts = append(parts, styleToolDim.Render(fmt.Sprintf("PgUp/PgDn %s %d-%d/%d", t.tr("tui.overlay.scroll"), start+1, min(total, start+height), total)))
+		}
+	}
+	if result.SideEffects != "" {
+		parts = append(parts, styleDim.Render(t.tr("tui.subtask_panel.side_effects")+": ")+styleToolDim.Render(textutil.TruncateRunes(result.SideEffects, max(12, innerWidth-10))))
+	}
+	return parts
+}
+
+// subtaskResultScrollable 判断当前子任务结果是否超出可视行数。
+// 只有确实有剩余内容时才消耗 PgUp/PgDn 与滚轮，避免短结果下按键"无反应"。
+func (t *TUI) subtaskResultScrollable() bool {
+	if !t.hasActiveSubtaskPanel() {
+		return false
+	}
+	te := t.selectedSubtask()
+	_, source := t.subtaskResultSource(te, t.subtaskResultInnerWidth())
+	return source != nil && source.Len() > t.subtaskResultMaxRows()
+}
+
+// scrollSubtaskResult 滚动结果小节窗口。
+// 返回是否真正消费了本次滚动：已到边界时返回 false，让调用方透传给
+// transcript（滚动链），否则视窗会被结果窗口"卡住"。
+func (t *TUI) scrollSubtaskResult(delta int) bool {
+	te := t.selectedSubtask()
+	_, source := t.subtaskResultSource(te, t.subtaskResultInnerWidth())
+	if source == nil {
+		t.chat.SubtaskResultScroll = 0
+		return false
+	}
+	maxOffset := max(0, source.Len()-t.subtaskResultMaxRows())
+	next := clampInt(t.chat.SubtaskResultScroll+delta, 0, maxOffset)
+	if next == t.chat.SubtaskResultScroll {
+		return false
+	}
+	t.chat.SubtaskResultScroll = next
+	return true
+}
+
+// subtaskResultInnerWidth 返回结果小节可用的内容宽度。
+// 必须与 renderSubtaskBlock 中 active 面板的 innerWidth 完全一致：active 面板
+// 使用固定宽度（不按内容收窄），否则滚动会按更窄宽度 wrap 出更多行，
+// maxOffset 偏大导致滚动无法揭示最后一行。
+func (t *TUI) subtaskResultInnerWidth() int {
+	return max(24, max(40, t.width-8)-8)
 }
 
 func (t *TUI) renderSelectedSubtaskTools(innerWidth int) []string {
@@ -416,13 +515,15 @@ func (t *TUI) subtaskStatusIcon(te *toolEntry) string {
 }
 
 func (t *TUI) subtaskActivity(te *toolEntry, width int) string {
-	if te == nil || t.chat.CurrentToolBlock == nil {
+	// 与 selectedSubtaskTools 同源：展开态（CurrentToolBlock 已置空）也要能显示工具活动。
+	block := t.chat.ActiveSubtaskBlock()
+	if te == nil || block == nil {
 		return ""
 	}
 	if te.Status == toolview.StatusError {
 		return t.subtaskFailureReason(te)
 	}
-	children := toolview.SubtaskChildren(t.chat.CurrentToolBlock, te.ID)
+	children := toolview.SubtaskChildren(block, te.ID)
 	var latest *toolEntry
 	for _, child := range children {
 		if child.Status == toolview.StatusRunning {
@@ -507,20 +608,29 @@ func fixedToolDuration(te *toolEntry) time.Duration {
 	return te.EndedAt.Sub(te.StartedAt)
 }
 
-func (t *TUI) toggleToolDetail() {
-	t.chat.ToggleToolDetail(t.visibleToolIDs())
-}
-
 func (t *TUI) hasActiveSubtaskPanel() bool {
-	return len(t.visibleSubtaskIDs()) > 0
+	return t.visibleSubtaskIDs() != nil
 }
 
 func (t *TUI) canToggleSubtaskDetailWithEnter() bool {
-	return t.hasActiveSubtaskPanel() &&
-		strings.TrimSpace(t.chat.Textarea.Value()) == "" &&
+	return t.canUseSubtaskPanelKeys() &&
 		len(t.chat.Attachments) == 0 &&
 		len(t.chat.CmdSuggestions) == 0 &&
 		!t.chat.HasBlockingInteraction()
+}
+
+// canUseSubtaskPanelKeys 判断 ↑↓/Tab 是否应交给 subtask 面板。
+// 面板是随 run 自动出现的隐式模式，不能抢正在编辑的输入框：
+// 草稿非空时 ↑↓ 必须留给文本光标，否则多行输入无法移动光标。
+func (t *TUI) canUseSubtaskPanelKeys() bool {
+	return t.hasActiveSubtaskPanel() && strings.TrimSpace(t.chat.Textarea.Value()) == ""
+}
+
+// canNavigateSubtaskTools 报告 ↑↓ 是否可以接管为子任务工具导航。
+// 只有面板激活且确实有内部工具可切换时才接管，否则让位给输入历史：
+// 就地展开不是模态，按键被消耗却没有任何可见反馈属于隐形操作。
+func (t *TUI) canNavigateSubtaskTools() bool {
+	return t.canUseSubtaskPanelKeys() && len(t.selectedSubtaskTools()) > 0
 }
 
 func (t *TUI) selectedSubtaskID() string {
@@ -538,10 +648,13 @@ func (t *TUI) selectedSubtask() *toolEntry {
 
 func (t *TUI) selectedSubtaskTools() []*toolEntry {
 	parent := t.selectedSubtask()
-	if parent == nil || t.chat.CurrentToolBlock == nil {
+	// 用 ActiveSubtaskBlock 而不是 CurrentToolBlock：run 结束后块仍在 Messages 里，
+	// 用户通过 Ctrl+T 展开 subtask 盒子查看结果时，内部工具列表也必须可见。
+	block := t.chat.ActiveSubtaskBlock()
+	if parent == nil || block == nil {
 		return nil
 	}
-	return toolview.SubtaskChildren(t.chat.CurrentToolBlock, parent.ID)
+	return toolview.SubtaskChildren(block, parent.ID)
 }
 
 func (t *TUI) selectedSubtaskTool() *toolEntry {
@@ -564,6 +677,7 @@ func (t *TUI) moveSubtaskCursor(delta int) {
 		t.chat.SubtaskToolCursor = 0
 		t.chat.SubtaskToolCursorUserSet = false
 		t.chat.SubtaskToolDetailScroll = 0
+		t.chat.SubtaskResultScroll = 0
 		return
 	}
 	t.chat.SubtaskCursor += delta
@@ -577,6 +691,7 @@ func (t *TUI) moveSubtaskCursor(delta int) {
 	t.chat.SubtaskToolCursor = t.defaultSubtaskToolCursor()
 	t.chat.SubtaskToolCursorUserSet = false
 	t.chat.SubtaskToolDetailScroll = 0
+	t.chat.SubtaskResultScroll = 0
 }
 
 func (t *TUI) moveSubtaskToolCursor(delta int) {
@@ -585,6 +700,7 @@ func (t *TUI) moveSubtaskToolCursor(delta int) {
 		t.chat.SubtaskToolCursor = 0
 		t.chat.SubtaskToolCursorUserSet = false
 		t.chat.SubtaskToolDetailScroll = 0
+		t.chat.SubtaskResultScroll = 0
 		return
 	}
 	t.chat.SubtaskToolCursor += delta
@@ -596,6 +712,7 @@ func (t *TUI) moveSubtaskToolCursor(delta int) {
 		t.chat.SubtaskToolCursor = len(children) - 1
 	}
 	t.chat.SubtaskToolDetailScroll = 0
+	t.chat.SubtaskResultScroll = 0
 }
 
 func (t *TUI) clampSubtaskCursor() {
@@ -667,20 +784,22 @@ func (t *TUI) defaultSubtaskToolCursor() int {
 	return lastDone
 }
 
-func (t *TUI) scrollSubtaskToolDetail(delta int) {
+// scrollSubtaskToolDetail 滚动子任务工具详情窗口。
+// 返回是否真正消费了本次滚动：已到边界时返回 false，让调用方透传给
+// transcript（滚动链）。
+func (t *TUI) scrollSubtaskToolDetail(delta int) bool {
 	te := t.selectedSubtaskTool()
 	if te == nil {
 		t.chat.SubtaskToolDetailScroll = 0
-		return
+		return false
 	}
 	deps := t.toolDetailDeps()
 	source := toolview.DetailLineSource(te, deps)
 	maxOffset := max(0, source.Len()-t.subtaskToolDetailHeight())
-	t.chat.SubtaskToolDetailScroll += delta
-	if t.chat.SubtaskToolDetailScroll < 0 {
-		t.chat.SubtaskToolDetailScroll = 0
+	next := clampInt(t.chat.SubtaskToolDetailScroll+delta, 0, maxOffset)
+	if next == t.chat.SubtaskToolDetailScroll {
+		return false
 	}
-	if t.chat.SubtaskToolDetailScroll > maxOffset {
-		t.chat.SubtaskToolDetailScroll = maxOffset
-	}
+	t.chat.SubtaskToolDetailScroll = next
+	return true
 }
