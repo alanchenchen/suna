@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -32,17 +33,50 @@ func TestEnsureDataDirsCreatesAttachmentsOwnerOnly(t *testing.T) {
 		}
 	}
 
-	info, err := os.Stat(cfg.AttachmentsDir())
-	if err != nil {
-		t.Fatalf("stat attachments dir: %v", err)
-	}
-	if got := info.Mode().Perm(); got != 0o700 {
-		t.Fatalf("attachments dir perm = %o, want 700", got)
+	// Windows 的 FileMode.Perm 不表示 ACL，不能用 POSIX mode 数值判断目录私有性。
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(cfg.AttachmentsDir())
+		if err != nil {
+			t.Fatalf("stat attachments dir: %v", err)
+		}
+		if got := info.Mode().Perm(); got != 0o700 {
+			t.Fatalf("attachments dir perm = %o, want 700", got)
+		}
 	}
 
 	// 幂等：重复调用不应报错（daemon 重启、多次初始化都会走到这里）。
 	if err := cfg.EnsureDataDirs(); err != nil {
 		t.Fatalf("EnsureDataDirs() must be idempotent, got %v", err)
+	}
+}
+
+// 已存在的目录权限必须被修正：MkdirAll 对已存在目录不生效，
+// 老用户升级后 attachments 会保留旧权限，因此需要显式 Chmod。
+func TestEnsureDataDirsCorrectsExistingPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows 的 FileMode.Perm 不表示 ACL")
+	}
+	dataDir := t.TempDir()
+	cfg := &Config{DataDir: dataDir}
+
+	// 模拟老用户：attachments 已存在且权限过宽。
+	if err := os.MkdirAll(cfg.AttachmentsDir(), 0o755); err != nil {
+		t.Fatalf("prepare attachments dir: %v", err)
+	}
+	if err := os.Chmod(cfg.AttachmentsDir(), 0o755); err != nil {
+		t.Fatalf("prepare attachments perm: %v", err)
+	}
+
+	if err := cfg.EnsureDataDirs(); err != nil {
+		t.Fatalf("EnsureDataDirs() error = %v", err)
+	}
+
+	info, err := os.Stat(cfg.AttachmentsDir())
+	if err != nil {
+		t.Fatalf("stat attachments dir: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("attachments dir perm = %o, want 700 (existing dir must be corrected)", got)
 	}
 }
 
