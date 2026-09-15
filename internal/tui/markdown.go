@@ -9,6 +9,7 @@ import (
 	"charm.land/glamour/v2"
 	"charm.land/glamour/v2/ansi"
 
+	textutil "github.com/alanchenchen/suna/internal/tui/components/text"
 	themesys "github.com/alanchenchen/suna/internal/tui/theme"
 )
 
@@ -21,6 +22,11 @@ func RenderMarkdown(text string, width int) string {
 	if width < 20 {
 		width = 20
 	}
+	// 先展开 tab 再交给 glamour：lipgloss/glamour 的宽度计算把 \t 当作 1 列，
+	// 而终端会跳到下一个 tab stop（8 列）。代码块会保留源码缩进 tab，
+	// 不预处理的话按 1 列算出的换行宽度小于终端实际渲染宽度，
+	// 内容会横向溢出（思考链表现为右边框断裂，助手消息表现为文字越界）。
+	text = textutil.ExpandTabs(text, 4)
 	r := markdownRenderer(width)
 	text = defaultFenceLanguage(text)
 	out, err := r.Render(text)
