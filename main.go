@@ -188,7 +188,7 @@ func loadOrCreateConfig(configPath string) *config.Config {
 	}
 	return &config.Config{
 		DataDir: config.DefaultDataDir(),
-		UI:      config.UIConfig{Locale: "en", Theme: "auto"},
+		UI:      config.UIConfig{Locale: "en", Theme: "default"},
 	}
 }
 

@@ -174,7 +174,8 @@ func (p *Provider) saveBinaryContent(ctx context.Context, server, toolName strin
 		return fmt.Sprintf("[MCP %s content decode failed: %v]", kind, err)
 	}
 	attachmentDir := execCtx.AttachmentDir
-	if err := os.MkdirAll(attachmentDir, 0755); err != nil {
+	// 与 TUI 侧写入附件时一致：附件目录含用户数据，限制为 owner-only。
+	if err := os.MkdirAll(attachmentDir, 0700); err != nil {
 		return fmt.Sprintf("[MCP %s content save failed: %v]", kind, err)
 	}
 	// MCP 提供的 name 仅作为可读标签，不能影响目录或覆盖已有文件。
