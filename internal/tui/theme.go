@@ -160,6 +160,9 @@ func (t *TUI) setTheme(name string) {
 //
 // Chat 内的重建走帧门异步执行：主题切换会让所有 markdown 块缓存失效，
 // 长会话下全量重建可达上百毫秒，同步执行会阻塞切回 Chat 的那一帧。
+// 这里只登记待办，由 Update 边界转成 tea.Cmd 返回——绝不能在 Update 内
+// 直接 program.Send：bubbletea 的消息 channel 无缓冲，事件循环处理 Update
+// 时不会回读，会永久阻塞（连 Ctrl+C 都失效）。
 // 测试环境没有 program，退回同步重建以保持可断言性。
 func (t *TUI) applyResolvedTheme() {
 	applyThemePalette(themesys.Resolve(t.theme, t.themeSpecs, t.terminalBackground))
@@ -168,18 +171,23 @@ func (t *TUI) applyResolvedTheme() {
 		t.applyTextAreaTheme()
 		t.refreshNativeLists()
 		if t.program != nil {
-			// 直接投递帧门消息：scheduleTranscriptSync 返回的 tea.Tick 需要由
-			// Update 返回才能启动，而 setTheme 的调用点分布很广（配置页、通知、
-			// 浮层），逐个传播 tea.Cmd 会污染大量签名。program.Send 走同一事件循环，
-			// 效果等价且只改这一处。
-			t.transcriptSyncDirty = true
-			t.program.Send(transcriptSyncMsg{})
+			t.transcriptSyncPending = true
 		} else {
 			// 测试环境没有 program，同步重建以保持可断言性。
 			t.syncContent()
 		}
 	}
 	t.chat.Spinner.Style = lipgloss.NewStyle().Foreground(ColorAccent)
+}
+
+// takeTranscriptSyncCmd 取出待办的重建请求并转成命令。
+// 必须在 Update 返回路径调用：命令由事件循环执行，而不是在 Update 内同步投递。
+func (t *TUI) takeTranscriptSyncCmd() tea.Cmd {
+	if !t.transcriptSyncPending {
+		return nil
+	}
+	t.transcriptSyncPending = false
+	return t.scheduleTranscriptSync()
 }
 
 // applyDetectedBackground 记录终端背景并重新应用主题（所有主题都依赖它做适配）。

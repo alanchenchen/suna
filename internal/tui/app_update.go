@@ -16,6 +16,16 @@ func notificationUpdatesChatContent(msg notificationMsg) bool {
 }
 
 func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	model, cmd := t.update(msg)
+	// 主题切换等路径只登记待办，命令必须在这里返回给事件循环执行。
+	// 在 update 内部直接 program.Send 会死锁（消息 channel 无缓冲且无人接收）。
+	if pending := t.takeTranscriptSyncCmd(); pending != nil {
+		cmd = tea.Batch(cmd, pending)
+	}
+	return model, cmd
+}
+
+func (t *TUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if background, ok := msg.(tea.BackgroundColorMsg); ok {
 		t.applyDetectedBackground(background)
 		return t, nil
