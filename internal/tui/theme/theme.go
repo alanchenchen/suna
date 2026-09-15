@@ -178,13 +178,28 @@ func LoadUser(dir string) []Spec {
 	return specs
 }
 
-// legacyNames 是旧配置值，启动时迁移为 Default。
-var legacyNames = map[string]bool{"auto": true, "dark": true, "light": true}
-
-// Normalize 把配置值归一为可用主题名（旧值归一为 Default）。
-func Normalize(name string) string {
+// normalize 只做基础清理：去掉空白，空值落到内置 default。
+// 它不判断主题是否可用——那需要主题列表，由 ResolveName 负责。
+func normalize(name string) string {
 	name = strings.TrimSpace(name)
-	if name == "" || legacyNames[strings.ToLower(name)] {
+	if name == "" {
+		return Default
+	}
+	return name
+}
+
+// ResolveName 把主题名归一为可用主题名：不在可用集合（内置 default +
+// 解析成功的用户主题）里的一律落到 default。
+//
+// 这条规则取代了此前的旧值白名单：旧配置里的 auto/dark/light 只是
+// "集合外的值"的一个特例，用户删除或写坏主题文件也走同一条路径，
+// 因此显示名、配置值与实际配色始终一致。
+func ResolveName(name string, specs []Spec) string {
+	name = normalize(name)
+	if name == Default {
+		return Default
+	}
+	if spec, ok := findSpec(specs, name); !ok || spec.Err != "" {
 		return Default
 	}
 	return name
@@ -201,15 +216,12 @@ func findSpec(specs []Spec, name string) (Spec, bool) {
 }
 
 // Resolve 解析主题名到具体调色板。
-// 未知或不可用的主题回退到内置 default，保证界面始终可用。
+// 不可用的主题回退到内置 default，保证界面始终可用。
 func Resolve(name string, specs []Spec, bg Background) Palette {
-	name = Normalize(name)
+	name = ResolveName(name, specs)
 	if name == Default {
 		return Adapt(Default, DefaultColors(), bg)
 	}
-	spec, ok := findSpec(specs, name)
-	if !ok || spec.Err != "" {
-		return Adapt(Default, DefaultColors(), bg)
-	}
+	spec, _ := findSpec(specs, name)
 	return Adapt(spec.Name, spec.Colors, bg)
 }

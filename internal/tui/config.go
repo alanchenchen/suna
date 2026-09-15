@@ -541,7 +541,7 @@ func (t *TUI) nextTheme() string {
 			names = append(names, s.Name)
 		}
 	}
-	cur := themesys.Normalize(t.theme)
+	cur := themesys.ResolveName(t.theme, t.themeSpecs)
 	for i, n := range names {
 		if n == cur {
 			return names[(i+1)%len(names)]

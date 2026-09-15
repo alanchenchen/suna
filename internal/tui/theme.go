@@ -146,9 +146,11 @@ func onFor(bg color.Color) color.Color {
 	}
 }
 
-// setTheme 设置主题名并应用（用户主题列表由 TUI 持有）。
+// setTheme 设置主题名并应用。
+// 名字先按可用集合归一：不可用的（旧值、已删除或写坏的用户主题）落到 default，
+// 因此 t.theme 始终指向一个真实存在的主题，显示名与配色不会脱节。
 func (t *TUI) setTheme(name string) {
-	t.theme = themesys.Normalize(name)
+	t.theme = themesys.ResolveName(name, t.themeSpecs)
 	t.applyResolvedTheme()
 }
 
@@ -198,7 +200,7 @@ func (t *TUI) reloadThemeSpecs() {
 
 // themeDisplay 返回当前主题的展示名。
 func (t *TUI) themeDisplay() string {
-	name := themesys.Normalize(t.theme)
+	name := themesys.ResolveName(t.theme, t.themeSpecs)
 	if name == ThemeDefault {
 		return t.tr("tui.theme.default")
 	}

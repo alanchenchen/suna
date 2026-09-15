@@ -15,8 +15,10 @@ func TestThemePreviewRestoredOnForcedClose(t *testing.T) {
 	before := tui.theme
 
 	// 打开列表 → 预览另一个主题（不按 Enter）。
-	tui.reloadThemeSpecs()
-	tui.themeBeforePreview = themesys.Normalize(tui.theme)
+	// 预览名必须登记在 themeSpecs 里：主题名归一按“可用集合”判定。
+	// 这里不调 reloadThemeSpecs，否则会被真实用户目录覆盖。
+	tui.themeSpecs = []themesys.Spec{{Name: "previewed-theme", Colors: themesys.DefaultColors()}}
+	tui.themeBeforePreview = themesys.ResolveName(tui.theme, tui.themeSpecs)
 	tui.chat.ThemeOverlayOpen = true
 	tui.setTheme("previewed-theme")
 	if tui.theme == before {
@@ -39,6 +41,7 @@ func TestThemePreviewRestoredOnForcedClose(t *testing.T) {
 // Enter 确认后不应再被恢复逻辑回滚。
 func TestThemeApplyClearsPreviewBaseline(t *testing.T) {
 	tui := newEdgeTUI(t)
+	tui.themeSpecs = []themesys.Spec{{Name: "picked", Colors: themesys.DefaultColors()}}
 	tui.setTheme(themesys.Default)
 	tui.themeBeforePreview = themesys.Default
 	tui.chat.ThemeOverlayOpen = true

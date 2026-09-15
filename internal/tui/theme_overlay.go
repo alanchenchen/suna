@@ -23,7 +23,7 @@ import (
 // openThemeOverlay 打开主题列表，并记住当前主题用于 Esc 恢复。
 func (t *TUI) openThemeOverlay() {
 	t.reloadThemeSpecs()
-	t.themeBeforePreview = themesys.Normalize(t.theme)
+	t.themeBeforePreview = themesys.ResolveName(t.theme, t.themeSpecs)
 
 	// 内置 default 始终排在首位，用户因此能随时切回它；
 	// 它由 Suna 自己设计（不来自用户目录），色块用其调色板渲染。

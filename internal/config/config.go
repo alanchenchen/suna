@@ -214,7 +214,7 @@ func Load(path string) (*Config, error) {
 
 // LoadFromDataDir 从指定数据目录加载配置与凭证，避免调用方的作用域被默认目录覆盖。
 func LoadFromDataDir(path, dataDir string) (*Config, error) {
-	cfg := &Config{UI: UIConfig{Theme: "auto", Locale: "en"}, DataDir: dataDir}
+	cfg := &Config{UI: UIConfig{Theme: "default", Locale: "en"}, DataDir: dataDir}
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil, fmt.Errorf("config file not found: %s\nPlease create ~/.suna/config.toml with active_model and [[models]] entries", path)
@@ -253,7 +253,7 @@ func (c *Config) NormalizeUI() {
 		c.UI.Locale = "en"
 	}
 	if c.UI.Theme == "" {
-		c.UI.Theme = "auto"
+		c.UI.Theme = "default"
 	}
 }
 

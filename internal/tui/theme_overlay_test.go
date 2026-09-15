@@ -12,11 +12,16 @@ import (
 
 // themeOverlayTUI 构造一个主题浮层已打开、条目已注入的 TUI。
 // 直接注入条目而不走 openThemeOverlay，避免测试依赖用户真实主题目录。
+// themeSpecs 一并登记：主题名归一按“可用集合”判定，未登记的名字会被回退到 default。
 func themeOverlayTUI(t *testing.T, saved string, names ...string) *TUI {
 	t.Helper()
 	tui := newEdgeTUI(t)
+	tui.themeSpecs = nil
+	for _, name := range names {
+		tui.themeSpecs = append(tui.themeSpecs, themesys.Spec{Name: name, Colors: themesys.DefaultColors()})
+	}
 	tui.setTheme(saved)
-	tui.themeBeforePreview = themesys.Normalize(saved)
+	tui.themeBeforePreview = themesys.ResolveName(saved, tui.themeSpecs)
 
 	items := []chatpage.ThemeItem{{
 		Name:    themesys.Default,

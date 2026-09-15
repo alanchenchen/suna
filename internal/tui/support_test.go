@@ -73,14 +73,39 @@ func TestResolveThemePaletteFollowsTerminalBackground(t *testing.T) {
 	}
 }
 
-func TestNormalizeThemeNameMigratesLegacyValues(t *testing.T) {
-	for _, legacy := range []string{"auto", "dark", "light", ""} {
-		if got := themesys.Normalize(legacy); got != themesys.Default {
-			t.Fatalf("themesys.Normalize(%q) = %q, want %q", legacy, got, themesys.Default)
+// 旧配置值、已删除或写坏的主题都落到 default：可用集合判定取代了旧值白名单。
+func TestResolveNameFallsBackToDefault(t *testing.T) {
+	valid := []themesys.Spec{{Name: "mytheme", Colors: themesys.DefaultColors()}}
+	broken := []themesys.Spec{{Name: "broken", Err: "bad color"}}
+	specs := append(append([]themesys.Spec{}, valid...), broken...)
+
+	for _, unavailable := range []string{"auto", "dark", "light", "", "deleted-theme", "broken"} {
+		if got := themesys.ResolveName(unavailable, specs); got != themesys.Default {
+			t.Fatalf("ResolveName(%q) = %q, want %q", unavailable, got, themesys.Default)
 		}
 	}
-	if got := themesys.Normalize("mytheme"); got != "mytheme" {
-		t.Fatalf("custom theme name must be preserved, got %q", got)
+	if got := themesys.ResolveName("mytheme", specs); got != "mytheme" {
+		t.Fatalf("available custom theme must be preserved, got %q", got)
+	}
+}
+
+// 用户删掉主题文件后，配置里的旧名字必须彻底回到 default：
+// 配置页显示名、快捷键循环都按归一后的名字走，不会停在一个不存在的主题上。
+func TestDeletedThemeFallsBackEverywhere(t *testing.T) {
+	tui := newEdgeTUI(t)
+	// 只留下一个可用的用户主题，删掉的那个不在集合里。
+	tui.themeSpecs = []themesys.Spec{{Name: "kept-theme", Colors: themesys.DefaultColors()}}
+	tui.setTheme("deleted-theme")
+
+	if tui.theme != themesys.Default {
+		t.Fatalf("theme = %q, want %q", tui.theme, themesys.Default)
+	}
+	if got := tui.themeDisplay(); got != tui.tr("tui.theme.default") {
+		t.Fatalf("config page must show the default label, got %q", got)
+	}
+	// 快捷键循环必须能从 default 正常走到下一个可用主题，而不是每次都跳回 default。
+	if next := tui.nextTheme(); next != "kept-theme" {
+		t.Fatalf("nextTheme = %q, want kept-theme", next)
 	}
 }
 

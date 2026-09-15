@@ -16,6 +16,10 @@ func New(locale LocaleID) *TUI {
 		theme:     ThemeDefault,
 		launchCWD: currentProcessCWD(),
 	}
+	// 先加载用户主题：主题名的归一需要知道哪些主题真实存在
+	// （否则用户主题会被误判为不可用），快捷键循环也依赖这份列表。
+	// 目录扫描 + TOML 解析在微秒量级，对启动耗时无影响。
+	t.reloadThemeSpecs()
 	t.setTheme(ThemeDefault)
 	// 主题目录的模板说明由 TUI 负责：主题是纯展示层概念，daemon 不参与。
 	// 幂等：仅在 README 不存在时写入，用户可从中复制出第一个自定义主题。
