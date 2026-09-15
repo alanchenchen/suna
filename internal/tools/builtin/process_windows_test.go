@@ -261,31 +261,20 @@ func waitPIDFile(t *testing.T, path string, limit time.Duration) uint32 {
 }
 
 // waitPIDFile 必须容忍“文件已创建但内容尚未写入”的瞬态：
-// Windows 上创建与写入之间存在时间窗，读到的可能是空文件或部分内容。
-func TestWaitPIDFileToleratesIncompleteWrite(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		initial string
-		final   string
-		want    uint32
-	}{
-		{"empty then written", "", "4321", 4321},
-		{"partial then written", "12", "12345", 12345},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "descendant.pid")
-			if err := os.WriteFile(path, []byte(tc.initial), 0o600); err != nil {
-				t.Fatalf("prepare marker: %v", err)
-			}
-			go func() {
-				time.Sleep(50 * time.Millisecond)
-				_ = os.WriteFile(path, []byte(tc.final), 0o600)
-			}()
+// Windows 上创建与写入之间存在时间窗，读到的可能是空文件。
+// helper 用 os.WriteFile 一次性写入完整 PID，因此只存在“空”与“完整”两种状态。
+func TestWaitPIDFileToleratesEmptyFileBeforeWrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "descendant.pid")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatalf("prepare empty marker: %v", err)
+	}
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_ = os.WriteFile(path, []byte("4321"), 0o600)
+	}()
 
-			if got := waitPIDFile(t, path, 3*time.Second); got != tc.want {
-				t.Fatalf("waitPIDFile() = %d, want %d", got, tc.want)
-			}
-		})
+	if got := waitPIDFile(t, path, 3*time.Second); got != 4321 {
+		t.Fatalf("waitPIDFile() = %d, want 4321", got)
 	}
 }
 
