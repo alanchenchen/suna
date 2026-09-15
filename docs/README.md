@@ -27,6 +27,7 @@
 ### 配置和使用细节
 
 - [配置说明](configuration.md)：`config.toml`、`credentials.toml` 的字段、示例和限制。
+- [主题](themes.md)：自定义主题的编写、选择与分享。
 - [TUI 架构](tui.md)：`internal/tui` 目录结构、Bubble Tea 约定和维护边界。
 
 ### 本地开发维护
@@ -46,6 +47,7 @@
 - `docs/code-map.md`：功能到代码位置和核心流程，解释“代码从哪里看”。
 - `docs/current-implementation.md`：当前功能事实和未完成边界，解释“现在到底支持什么”。
 - `docs/configuration.md`：配置字段和示例。
+- `docs/themes.md`：面向用户的主题编写、选择与分享指南。
 - `docs/tui.md`：TUI 内部结构。
 - `docs/development.md`：构建、测试和维护约定。
 - `plans/next-generation-agent.md`：下一代通用 Agent Runtime 的长期愿景、架构原则、能力边界和演进判断，不作为当前实现文档。

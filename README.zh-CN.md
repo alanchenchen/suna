@@ -169,7 +169,7 @@ suna stop
 
 常用设置都可以在 TUI 中通过 `/config` 修改。`context_window` 和 `max_output_tokens` 必须按当前模型服务的真实限制填写。`strengths` 用于告诉主 Agent 模型擅长什么；`subtask_for` 可选地控制哪些 session 模型能看到该模型作为 Subtask 候选。
 
-主题可在 Config → Theme 中切换。Suna 内置一个 `default` 主题（按终端背景自动适配），并从 `~/.suna/themes/*.toml` 读取自定义主题（文件名即主题名）。字段说明和模板见自动生成的 `~/.suna/themes/README.md`。
+主题可在 **配置 → 通用 → 主题** 中切换。Suna 内置一个 `default` 主题（按终端背景自动适配），并从 `~/.suna/themes/*.toml` 读取自定义主题（文件名即主题名）。自定义主题的编写与分享见[主题](docs/themes.md)，字段说明和模板见自动生成的 `~/.suna/themes/README.md`。
 
 `/model` 只切换当前会话的模型；Config 中的默认模型只影响之后新建的会话。
 

@@ -31,7 +31,7 @@ mode = "ask"
 workspace = ""
 
 [ui]
-theme = "auto"
+theme = "default"
 locale = "en"
 ```
 
@@ -131,7 +131,7 @@ tool = "exec"
 reason = "常用只读命令直接放行"
 
 [ui]
-theme = "auto"                              # auto | dark | light
+theme = "default"                           # 主题名；自定义主题见 docs/themes.md
 locale = "zh"                               # en | zh；其它值通常回退到英文文案
 
 # Skill 管理记录通常由 /skills 或 skill_start 写入；手写时注意 section 名。
@@ -228,7 +228,7 @@ api_key = "<API_KEY>"
 | `guard.allowed.pattern` | string | 是 | 无 | Go regexp，匹配命令、路径或 URL。 |
 | `guard.allowed.tool` | string | 否 | 空 | 限定工具名；为空表示匹配所有 guard target。建议显式填写。 |
 | `guard.allowed.reason` | string | 否 | 空 | 放行原因，当前主要用于配置可读性和持久化。 |
-| `[ui].theme` | string | 否 | `auto` | TUI 主题：`auto` / `dark` / `light`。 |
+| `[ui].theme` | string | 否 | `default` | TUI 主题名。内置 `default`，自定义主题见 [主题](themes.md)；不在可用主题集合里的值会回退到 `default`。 |
 | `[ui].locale` | string | 否 | `en` | TUI 文案语言：当前内置 `en` 和 `zh`。 |
 | `[skills.<name>].enabled` | bool | 否 | `false` | 是否允许加载该 Skill。只有 enabled=true 且 SKILL.md 有效时才进入 active skill index。 |
 | `[skills.<name>].reasons` | string[] | 否 | 空 | 最近一次 check/review 发现的原因或风险提示。 |

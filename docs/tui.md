@@ -127,6 +127,8 @@ Chat transcript 遵循“完整数据在页面 model、渲染只取可见窗口�
 
 主题列表在配置页 Theme 行打开：`↑↓` 实时预览（不落库）、`Enter` 应用并持久化、`Esc` 取消并恢复进入列表前的主题。每次打开列表都会重新扫描主题目录，因此改完 TOML 无需重启。解析失败的主题会出现在列表里并标注原因，不阻塞 Suna 启动。
 
+面向用户的主题编写、选择与分享指南见 [主题](themes.md)。
+
 ## transport
 
 `internal/tui/transport` 是 TUI 侧 local transport 适配层，只负责 protocol request / response / notification：
@@ -147,6 +149,7 @@ Bubble Tea 的维护约定：
 3. local transport 的通知读取 goroutine 不直接阻塞在 UI 更新上，统一通过 notification pump 入队；method response 通过 typed local `tea.Msg` 进入 Update。
 4. UI 状态只能在 Bubble Tea 事件循环内修改。
 5. 页面和组件尽量返回结构化意图，由 root 决定是否执行副作用。
+6. 禁止在 `Update` 内调用 `program.Send`：Bubble Tea 的消息 channel 无缓冲，事件循环处理 `Update` 时不会回读，会立即死锁，连 Ctrl+C 都失效。需要投递消息时，只把意图登记到状态，由 `Update` 返回 `tea.Cmd`，在事件循环边界统一转换。
 
 ## 注释约定
 
