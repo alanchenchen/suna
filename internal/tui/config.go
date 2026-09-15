@@ -88,6 +88,12 @@ func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_, cmd = t.updateModelPicker(ks, m)
 			case t.chat.ThemeOverlayOpen:
 				_, cmd = t.updateThemeOverlay(ks, m)
+				// 主题浮层的 Enter 会关闭浮层并返回 config.set 持久化命令，
+				// 该命令必须传播，否则主题不会落库（下次启动仍是旧主题）。
+				// 其余 overlay 关闭时只返回 syncInputFocus，统一丢弃以避免配置页焦点漂移。
+				if !t.chat.ThemeOverlayOpen {
+					return t, cmd
+				}
 			}
 			// overlay 关闭后回到 Config 页；丢弃 chat 场景的 syncInputFocus，避免焦点漂移。
 			if !t.chat.SkillsOverlayOpen && !t.chat.MCPOverlayOpen && !t.chat.MemoryOverlayOpen && !t.chat.ModelPickerOpen && !t.chat.ThemeOverlayOpen {

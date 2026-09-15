@@ -155,13 +155,27 @@ func (t *TUI) setTheme(name string) {
 // applyResolvedTheme 按当前主题与终端背景应用调色板。
 // 样式变量是全局的，因此任何页面都可能受影响；这里只刷新与当前页面相关的组件状态，
 // 配置页/欢迎页的颜色会在下一次 View 时自然使用新样式。
+//
+// Chat 内的重建走帧门异步执行：主题切换会让所有 markdown 块缓存失效，
+// 长会话下全量重建可达上百毫秒，同步执行会阻塞切回 Chat 的那一帧。
+// 测试环境没有 program，退回同步重建以保持可断言性。
 func (t *TUI) applyResolvedTheme() {
 	applyThemePalette(themesys.Resolve(t.theme, t.themeSpecs, t.terminalBackground))
 	t.applyConfigInputTheme()
 	if t.mode == uipage.Chat {
 		t.applyTextAreaTheme()
 		t.refreshNativeLists()
-		t.syncContent()
+		if t.program != nil {
+			// 直接投递帧门消息：scheduleTranscriptSync 返回的 tea.Tick 需要由
+			// Update 返回才能启动，而 setTheme 的调用点分布很广（配置页、通知、
+			// 浮层），逐个传播 tea.Cmd 会污染大量签名。program.Send 走同一事件循环，
+			// 效果等价且只改这一处。
+			t.transcriptSyncDirty = true
+			t.program.Send(transcriptSyncMsg{})
+		} else {
+			// 测试环境没有 program，同步重建以保持可断言性。
+			t.syncContent()
+		}
 	}
 	t.chat.Spinner.Style = lipgloss.NewStyle().Foreground(ColorAccent)
 }
