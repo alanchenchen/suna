@@ -39,6 +39,9 @@ func (t *TUI) viewConfig() string {
 	if t.chat.MemoryOverlayOpen {
 		return overlay.OverlayBlock(base, t.renderMemoryOverlay(t.width))
 	}
+	if t.chat.ThemeOverlayOpen {
+		return overlay.OverlayBlock(base, t.renderThemeOverlay(t.width))
+	}
 	if t.showHelp {
 		return overlay.OverlayBlock(base, t.renderHelpOverlay(t.width))
 	}
@@ -61,7 +64,7 @@ func (t *TUI) renderModelPickerOverlay(width int) string {
 		Dim:    styleDim,
 	}))
 	if t.modelPickerLoading {
-		lines = append(lines, "", styleDim.Render("• "+t.tr("tui.config.provider.models_loading")))
+		lines = append(lines, "", styleMuted.Render("• "+t.tr("tui.config.provider.models_loading")))
 	}
 	if detail := nativeListError(t.modelPickerError, innerWidth); detail != "" {
 		lines = append(lines, detail)
@@ -74,15 +77,15 @@ func (t *TUI) renderModelPickerOverlay(width int) string {
 // 有候选时提示选择，输入非空时提示可直接确认自定义名。
 func (t *TUI) modelPickerFooter() string {
 	parts := []string{
-		styleCursor.Render("↑↓") + " " + styleDim.Render(t.tr("tui.list.key.move")),
+		styleCursor.Render("↑↓") + " " + styleMuted.Render(t.tr("tui.list.key.move")),
 	}
 	if t.modelCombobox.Count() > 0 {
-		parts = append(parts, styleCursor.Render("Enter")+" "+styleDim.Render(t.tr("tui.config.picker.select")))
+		parts = append(parts, styleCursor.Render("Enter")+" "+styleMuted.Render(t.tr("tui.config.picker.select")))
 	}
 	if t.modelCombobox.InputValue() != "" {
-		parts = append(parts, styleCursor.Render("Enter")+" "+styleDim.Render(t.tr("tui.config.picker.use_input")))
+		parts = append(parts, styleCursor.Render("Enter")+" "+styleMuted.Render(t.tr("tui.config.picker.use_input")))
 	}
-	parts = append(parts, styleCursor.Render("Esc")+" "+styleDim.Render(t.tr("tui.list.close")))
+	parts = append(parts, styleCursor.Render("Esc")+" "+styleMuted.Render(t.tr("tui.list.close")))
 	return strings.Join(parts, styleDim.Render("  ·  "))
 }
 
@@ -103,7 +106,7 @@ func (t *TUI) viewConfigPage() string {
 	for i, row := range rows {
 		var sb strings.Builder
 		if row.Kind == "label" {
-			sb.WriteString("    " + styleDim.Render(row.Label))
+			sb.WriteString("    " + styleMuted.Render(row.Label))
 		} else if row.Kind == "info" {
 			t.renderConfigInfoRow(&sb, row.Label, row.Value)
 		} else {
@@ -130,13 +133,13 @@ func (t *TUI) viewConfigPage() string {
 		lines = append(lines, "", styleError.Render("  ✗ "+t.config.Error))
 	}
 	if t.config.Notice != "" {
-		lines = append(lines, "", styleDim.Render("  • "+t.config.Notice))
+		lines = append(lines, "", styleMuted.Render("  • "+t.config.Notice))
 	}
 	if t.config.DeleteConfirm != "" {
 		lines = append(lines, "", t.renderConfigDeleteConfirm())
 	}
 	if help := t.configHelp(rows); help != "" {
-		lines = append(lines, "", styleDim.Render("  "+help))
+		lines = append(lines, "", styleMuted.Render("  "+help))
 	}
 
 	// 可用高度 = 终端高度 - header 两行；底部留一行给滚动提示。
@@ -165,7 +168,7 @@ func (t *TUI) viewConfigPage() string {
 	visible := lines[t.config.Scroll:min(len(lines), t.config.Scroll+avail)]
 	out := header + "\n" + strings.Join(visible, "\n")
 	if t.config.Scroll < maxScroll {
-		out += "\n" + styleDim.Render("  ↓ "+t.tr("tui.config.scroll_more"))
+		out += "\n" + styleMuted.Render("  ↓ "+t.tr("tui.config.scroll_more"))
 	}
 	return out
 }
@@ -202,11 +205,11 @@ func (t *TUI) viewProviderForm() string {
 	var lines []string
 	for i, in := range t.config.Inputs {
 		if t.config.FormProvider != "" && i == tuiconfig.ProviderFormProviderIndex {
-			lines = append(lines, styleDim.Render(t.tr("tui.config.provider.type")+": ")+styleHL.Render(t.config.FormProvider)+styleDim.Render("  "+t.tr("tui.config.locked")))
+			lines = append(lines, styleMuted.Render(t.tr("tui.config.provider.type")+": ")+styleHL.Render(t.config.FormProvider)+styleMuted.Render("  "+t.tr("tui.config.locked")))
 			continue
 		}
 		if t.config.FormProvider != "" && i == tuiconfig.ProviderFormAPIKeyIndex {
-			lines = append(lines, styleDim.Render(t.tr("tui.config.provider.api_key")+": ")+styleDim.Render(t.i18n.Tf("tui.config.api_key_reused", t.config.FormProvider)))
+			lines = append(lines, styleMuted.Render(t.tr("tui.config.provider.api_key")+": ")+styleMuted.Render(t.i18n.Tf("tui.config.api_key_reused", t.config.FormProvider)))
 			continue
 		}
 		if i == tuiconfig.ProviderFormModelIndex {
@@ -229,9 +232,9 @@ func (t *TUI) viewProviderForm() string {
 		lines = append(lines, "", styleError.Render("✗ "+view.Error))
 	}
 	if view.Notice != "" {
-		lines = append(lines, "", styleDim.Render("• "+view.Notice))
+		lines = append(lines, "", styleMuted.Render("• "+view.Notice))
 	}
-	lines = append(lines, "", styleDim.Render(view.Help))
+	lines = append(lines, "", styleMuted.Render(view.Help))
 	body := strings.Join(lines, "\n")
 	return boxStyle.Width(view.Width).Padding(1, 2).Render(styleHL.Render(view.Title) + "\n\n" + body)
 }
@@ -240,8 +243,8 @@ func (t *TUI) viewProviderForm() string {
 // 一行。动态提示只讲"Enter 在这个字段是什么意思"（选模型/切换选项/输入），
 // 固定行只保留全局导航键位，不重复 Enter 语义，避免窄终端折行。
 func (t *TUI) providerFormHelp() string {
-	parts := []string{styleDim.Render("  " + t.providerFieldHint(t.config.InputFocus))}
-	parts = append(parts, styleDim.Render("  "+t.tr("tui.config.form_help")))
+	parts := []string{styleMuted.Render("  " + t.providerFieldHint(t.config.InputFocus))}
+	parts = append(parts, styleMuted.Render("  "+t.tr("tui.config.form_help")))
 	return strings.Join(parts, "\n")
 }
 
@@ -266,7 +269,7 @@ func (t *TUI) viewWorkspaceForm() string {
 	}
 	for _, help := range strings.Split(view.Help, "\n") {
 		if help != "" {
-			lines = append(lines, "", styleDim.Render(help))
+			lines = append(lines, "", styleMuted.Render(help))
 		}
 	}
 	if view.Error != "" {
@@ -315,7 +318,7 @@ func (t *TUI) renderConfigProviderHeader(provider string) string {
 	if name == "" {
 		name = t.tr("tui.config.provider.unnamed")
 	}
-	label := lipgloss.NewStyle().Foreground(currentTheme.MutedText).Bold(true).Render(name)
+	label := lipgloss.NewStyle().Foreground(currentTheme.Muted).Bold(true).Render(name)
 	lineWidth := max(8, min(28, t.width-lipgloss.Width(name)-14))
 	return "  " + styleDim.Render("╭─ ") + label + styleDim.Render(" "+strings.Repeat("─", lineWidth))
 }
@@ -346,11 +349,10 @@ func (t *TUI) configBadge(text string, active bool) string {
 	if text == "" {
 		return ""
 	}
-	st := lipgloss.NewStyle().Padding(0, 1).Bold(true)
 	if active {
-		return st.Foreground(currentTheme.ToolText).Background(ColorBrand).Render(text)
+		return pill(ColorAccent, currentTheme.OnAccent).Render(text)
 	}
-	return st.Foreground(currentTheme.MutedText).Background(currentTheme.CodeBg).Render(text)
+	return pill(currentTheme.Surface, currentTheme.Muted).Render(text)
 }
 
 func (t *TUI) configSoftBadge(text string) string {
@@ -358,7 +360,7 @@ func (t *TUI) configSoftBadge(text string) string {
 	if text == "" {
 		return ""
 	}
-	return lipgloss.NewStyle().Foreground(currentTheme.MutedText).Background(currentTheme.CodeBg).Padding(0, 1).Render(text)
+	return pill(currentTheme.Surface, currentTheme.Muted).Render(text)
 }
 
 func (t *TUI) renderConfigModelRow(sb *strings.Builder, idx int, row tuiconfig.Row) {
@@ -403,7 +405,7 @@ func (t *TUI) renderConfigModelRow(sb *strings.Builder, idx int, row tuiconfig.R
 		meta = append(meta, reasoning)
 	}
 	if len(meta) > 0 {
-		sb.WriteString(t.configModelLine(bodyIndent, styleDim.Render(strings.Join(meta, "  ·  "))) + "\n")
+		sb.WriteString(t.configModelLine(bodyIndent, styleMuted.Render(strings.Join(meta, "  ·  "))) + "\n")
 	}
 
 	tail := []string{}
@@ -414,7 +416,7 @@ func (t *TUI) renderConfigModelRow(sb *strings.Builder, idx int, row tuiconfig.R
 		tail = append(tail, strings.Join(mc.Strengths, " · "))
 	}
 	if len(tail) > 0 {
-		sb.WriteString(t.configModelLine(bodyIndent, lipgloss.NewStyle().Foreground(currentTheme.SubtleText).Render(strings.Join(tail, "  ·  "))) + "\n")
+		sb.WriteString(t.configModelLine(bodyIndent, lipgloss.NewStyle().Foreground(currentTheme.Muted).Render(strings.Join(tail, "  ·  "))) + "\n")
 	}
 	if tuiconfig.ModelNeedsAttention(mc) {
 		sb.WriteString(t.configModelLine(bodyIndent, styleError.Render(t.modelSummary(mc))) + "\n")
@@ -452,13 +454,13 @@ func (t *TUI) renderConfigDeleteConfirm() string {
 	}, offerAPIKey, provider, min(max(44, t.width-8), 72))
 	message := styleError.Render("✗ " + view.Message)
 	if view.Hint != "" {
-		message += "\n" + styleDim.Render(view.Hint)
+		message += "\n" + styleMuted.Render(view.Hint)
 	}
 	buttons := make([]string, 0, len(view.Options))
 	for i, label := range view.Options {
 		buttons = append(buttons, t.configConfirmButton(i, label))
 	}
-	body := message + "\n\n" + strings.Join(buttons, "  ") + "\n" + styleDim.Render(view.Help)
+	body := message + "\n\n" + strings.Join(buttons, "  ") + "\n" + styleMuted.Render(view.Help)
 	return boxStyle.Width(view.MaxWidth).Padding(1, 2).Render(body)
 }
 
@@ -466,7 +468,7 @@ func (t *TUI) configConfirmButton(idx int, label string) string {
 	if t.config.DeleteCursor == idx {
 		return styleCursor.Render("▶ ") + styleHL.Render(label)
 	}
-	return styleDim.Render("  " + label)
+	return styleMuted.Render("  " + label)
 }
 
 func (t *TUI) renderConfigInfoRow(sb *strings.Builder, label, value string) {
@@ -475,10 +477,10 @@ func (t *TUI) renderConfigInfoRow(sb *strings.Builder, label, value string) {
 		return
 	}
 	if strings.TrimSpace(label) == t.tr("tui.config.active_model") {
-		sb.WriteString("  " + styleDim.Render(label) + styleDim.Render("  ") + styleHL.Render(value) + "\n")
+		sb.WriteString("  " + styleMuted.Render(label) + styleDim.Render("  ") + styleHL.Render(value) + "\n")
 		return
 	}
-	sb.WriteString("    " + styleDim.Render(fmt.Sprintf("%-12s", label)) + " " + value + "\n")
+	sb.WriteString("    " + styleMuted.Render(fmt.Sprintf("%-12s", label)) + " " + value + "\n")
 }
 
 // providerModelChoiceView 将 model 字段渲染为纯值行，不用 ‹ › 箭头：
@@ -496,7 +498,7 @@ func (t *TUI) providerModelChoiceView(in textinput.Model) string {
 		if focused {
 			return prompt + styleHL.Render(value)
 		}
-		return prompt + styleDim.Render(value)
+		return prompt + styleMuted.Render(value)
 	}
 	style := styleDim
 	if focused {

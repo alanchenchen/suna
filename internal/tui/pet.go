@@ -80,8 +80,6 @@ func petFaces(state petState) []petFace {
 	}
 }
 
-var bodyFill = lipgloss.NewStyle().Background(ColorBrand).Foreground(lipgloss.Color("0"))
-
 // renderPet 渲染大号纯色矩形机器人（welcome 页使用）。
 // 总宽固定 10 格、4 行：顶、眼睛、空、底；眼睛每只 2 列宽 ██（深色前景），
 // 与 chat 迷你宠物共用同一套方块眼帧，形象一致；

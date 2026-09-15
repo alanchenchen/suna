@@ -377,7 +377,7 @@ func (t *TUI) viewReasoning() string {
 		}
 		lines = append(lines, cursor+st.Render(item))
 	}
-	lines = append(lines, "", styleDim.Render(t.tr("tui.config.reasoning.help")))
+	lines = append(lines, "", styleMuted.Render(t.tr("tui.config.reasoning.help")))
 	return boxStyle.Width(min(max(48, t.width-8), 72)).Padding(1, 2).Render(styleHL.Render(t.tr("tui.config.reasoning")) + "\n\n" + strings.Join(lines, "\n"))
 }
 
@@ -389,7 +389,7 @@ func (t *TUI) viewReasoningCustom() string {
 	if t.config.Error != "" {
 		lines = append(lines, "", styleError.Render("✗ "+t.config.Error))
 	}
-	lines = append(lines, "", styleDim.Render(t.tr("tui.config.reasoning.custom_help")))
+	lines = append(lines, "", styleMuted.Render(t.tr("tui.config.reasoning.custom_help")))
 	return boxStyle.Width(min(max(56, t.width-8), 90)).Padding(1, 2).Render(styleHL.Render(t.tr("tui.config.reasoning.custom")) + "\n\n" + strings.Join(lines, "\n"))
 }
 

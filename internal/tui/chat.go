@@ -41,29 +41,6 @@ const (
 	phaseWaitingAfterTool = chatpage.PhaseWaitingAfterTool
 )
 
-var (
-	styleUserLine      = lipgloss.NewStyle().Foreground(ColorUser).Bold(true)
-	styleAgentLine     = lipgloss.NewStyle().Foreground(ColorAgent).Bold(true)
-	styleToolPill      = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(ColorTool).Padding(0, 1).Bold(true)
-	styleToolOk        = lipgloss.NewStyle().Foreground(ColorAgent).Bold(true)
-	styleToolErr       = lipgloss.NewStyle().Foreground(ColorError).Bold(true)
-	styleToolRun       = lipgloss.NewStyle().Foreground(ColorBrand).Bold(true)
-	styleToolDim       = lipgloss.NewStyle().Foreground(ColorDim)
-	styleToolIntent    = lipgloss.NewStyle().Foreground(lipgloss.Color("243"))
-	styleToolAdd       = lipgloss.NewStyle().Foreground(ColorAgent).Bold(true)
-	styleToolDel       = lipgloss.NewStyle().Foreground(ColorError).Bold(true)
-	styleMetaPill      = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(ColorBrand).Padding(0, 1).Bold(true)
-	styleThinkingIcon  = lipgloss.NewStyle().Foreground(ColorBrand).Bold(true)
-	styleThinkingLabel = lipgloss.NewStyle().Foreground(ColorDim)
-	styleThinkingValue = lipgloss.NewStyle().Foreground(ColorBrand).Bold(true)
-	styleGuardOK       = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(ColorAgent).Padding(0, 1).Bold(true)
-	styleGuardWarn     = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(ColorTool).Padding(0, 1).Bold(true)
-	styleGuardErr      = lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Background(ColorError).Padding(0, 1).Bold(true)
-	styleFilePath      = lipgloss.NewStyle().Foreground(ColorHL).Bold(true)
-	styleSysLine       = lipgloss.NewStyle().Foreground(ColorDim)
-	styleErrLine       = lipgloss.NewStyle().Foreground(ColorError).Bold(true)
-)
-
 type toolStatus = toolview.Status
 
 const (
@@ -89,9 +66,9 @@ func (t *TUI) initChatComponents() tea.Cmd {
 	t.chat.InitComponents(chatpage.ComponentDeps{
 		Placeholder:    t.tr("tui.chat.input_placeholder"),
 		TextareaStyles: textareaStyles(),
-		SpinnerStyle:   lipgloss.NewStyle().Foreground(ColorBrand),
+		SpinnerStyle:   lipgloss.NewStyle().Foreground(ColorAccent),
 	})
-	t.chat.InitNativeLists(currentTheme.Name == ThemeDark, t.nativeListStyles(), t.nativeListText())
+	t.chat.InitNativeLists(currentTheme.Dark, t.nativeListStyles(), t.nativeListText())
 	// 选区高亮由内容层处理（applySelectionStyle：strip ANSI + 反色），
 	// 不再使用 viewport 的 StyleLineFunc——它是外层包裹，无法覆盖行内 markdown 背景色。
 	t.syncContent()
@@ -144,10 +121,10 @@ func (t *TUI) syncContent() {
 			return fmt.Sprintf("  %s %s\n", styleToolOk.Render("●"), styleAgentLine.Render(opt))
 		},
 		RenderAskOption: func(opt string) string {
-			return fmt.Sprintf("  %s %s\n", styleToolDim.Render("○"), styleSysLine.Render(opt))
+			return fmt.Sprintf("  %s %s\n", styleToolMuted.Render("○"), styleMuted.Render(opt))
 		},
 		RenderAskHelp: func(help string) string {
-			return styleDim.Render("  "+help) + "\n\n"
+			return styleMuted.Render("  "+help) + "\n\n"
 		},
 	})
 }

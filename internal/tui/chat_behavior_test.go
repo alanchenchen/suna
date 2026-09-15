@@ -12,6 +12,7 @@ import (
 	"github.com/alanchenchen/suna/internal/tui/components/toolview"
 	chatpage "github.com/alanchenchen/suna/internal/tui/pages/chat"
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
+	themesys "github.com/alanchenchen/suna/internal/tui/theme"
 	tuitransport "github.com/alanchenchen/suna/internal/tui/transport"
 )
 
@@ -668,7 +669,7 @@ func TestWelcomeNewInitializesChatBeforeResetPhase(t *testing.T) {
 
 func TestRenderSkillLoadMessageUsesHighlightedBadges(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80}
-	applyTheme(ThemeDark)
+	applyThemePalette(themesys.Adapt(themesys.Default, themesys.DefaultColors(), themesys.DarkBackground))
 
 	view := stripANSIForTest(tui.renderSkillLoadMessage(&chatpage.SkillLoadView{Name: "img", Status: "loaded", Duration: time.Millisecond}))
 	for _, want := range []string{"╭", "╰", "✓ 已加载 SKILL", "img", "1ms"} {
@@ -686,8 +687,10 @@ func TestRenderSkillLoadMessageUsesHighlightedBadges(t *testing.T) {
 
 func TestRenderSkillLoadMessageSupportsLightTheme(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleEN), width: 80}
-	applyTheme(ThemeLight)
-	t.Cleanup(func() { applyTheme(ThemeDark) })
+	applyThemePalette(themesys.Adapt(themesys.Default, themesys.DefaultColors(), themesys.LightBackground))
+	t.Cleanup(func() {
+		applyThemePalette(themesys.Adapt(themesys.Default, themesys.DefaultColors(), themesys.DarkBackground))
+	})
 
 	view := stripANSIForTest(tui.renderSkillLoadMessage(&chatpage.SkillLoadView{Name: "img", Status: "loading", StartedAt: time.Now()}))
 	for _, want := range []string{"╭", "╰", "◐ LOADING SKILL", "img"} {

@@ -218,11 +218,18 @@ type Model struct {
 
 	Memories          []protocol.MemoryItem
 	MemoryOverlayOpen bool
-	MemoryLoading     bool
-	MemoryCursor      int
-	MemoryScroll      int
-	MemoryError       string
-	MemoryConfirm     MemoryConfirmMode
+	// ThemeList/ThemeOverlayOpen 承载主题选择浮层。主题是纯展示层状态，
+	// 不涉及 daemon 数据，因此列表项由 root TUI 直接注入。
+	ThemeList        overlaylist.Model
+	ThemeOverlayOpen bool
+	// PendingThemeRestore 表示主题列表在预览未确认的情况下被强制关闭
+	// （切 session 等），root TUI 需要恢复进入列表前的主题。
+	PendingThemeRestore bool
+	MemoryLoading       bool
+	MemoryCursor        int
+	MemoryScroll        int
+	MemoryError         string
+	MemoryConfirm       MemoryConfirmMode
 
 	Sessions            []protocol.SessionInfo
 	SessionsOverlayOpen bool
@@ -238,9 +245,10 @@ type Model struct {
 }
 
 // HasOverlayOpen 表示是否有任何列表 overlay 打开（model picker / skills / mcp /
-// memory / sessions / attachments）。内容区鼠标选区在这些 overlay 打开时不应生效，
+// memory / sessions / attachments / theme）。内容区鼠标选区在这些 overlay 打开时不应生效，
 // 避免拖动误触发选区遮挡面板交互。
 func (m Model) HasOverlayOpen() bool {
 	return m.ModelPickerOpen || m.SkillsOverlayOpen || m.MCPOverlayOpen ||
-		m.MemoryOverlayOpen || m.SessionsOverlayOpen || m.AttachmentsOverlayOpen
+		m.MemoryOverlayOpen || m.SessionsOverlayOpen || m.AttachmentsOverlayOpen ||
+		m.ThemeOverlayOpen
 }

@@ -640,6 +640,12 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) bool {
 		// 在 Chat 内 join 另一会话不会经过 Welcome 的 ResetRuntime；列表数据、筛选词
 		// 和选中项必须随 session 切换清空，避免显示或操作前一会话的项目。
 		t.chat.ResetNativeLists()
+		// 主题列表若在预览未确认时被关闭，恢复进入列表前的主题：
+		// 预览是内存态，不恢复会让界面停留在未落库的值上。
+		if t.chat.PendingThemeRestore {
+			t.chat.PendingThemeRestore = false
+			t.closeThemeOverlay(true)
+		}
 	}
 	if t.handoffRole == "" {
 		t.handoffRole = handoffRoleHost

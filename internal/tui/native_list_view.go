@@ -15,10 +15,10 @@ func (t *TUI) nativeListEmptyHint(model overlaylist.Model, emptyKey string) stri
 	if model.ItemCount() == 0 {
 		// 空状态带一只静态小宠物，延续 pet 形象，避免纯文本显得生硬。
 		pet := styleDim.Render("▀  ▀")
-		return pet + "\n" + styleDim.Render(t.tr(emptyKey))
+		return pet + "\n" + styleMuted.Render(t.tr(emptyKey))
 	}
 	if model.VisibleCount() == 0 && strings.TrimSpace(model.List().FilterValue()) != "" {
-		return styleDim.Render(t.tr("tui.list.no_matches"))
+		return styleMuted.Render(t.tr("tui.list.no_matches"))
 	}
 	return ""
 }
@@ -27,7 +27,7 @@ func (t *TUI) nativeListEmptyHint(model overlaylist.Model, emptyKey string) stri
 // View 会在筛选时用输入框替换标题；这里接管布局，避免数量和筛选状态丢失。
 func (t *TUI) nativeListHeader(model overlaylist.Model) string {
 	width := model.List().Width()
-	count := styleDim.Render(model.CountText())
+	count := styleMuted.Render(model.CountText())
 	countWidth := lipgloss.Width(count)
 	leftWidth := max(1, width-countWidth-2)
 
@@ -73,26 +73,26 @@ func (t *TUI) gradientText(text string) string {
 func (t *TUI) nativeListFooter(model overlaylist.Model, action string, actionable ...bool) string {
 	text := t.nativeListText()
 	canAct := len(actionable) == 0 || actionable[0]
-	parts := []string{styleCursor.Render("↑↓") + " " + styleDim.Render(t.tr("tui.list.key.move"))}
+	parts := []string{styleCursor.Render("↑↓") + " " + styleMuted.Render(t.tr("tui.list.key.move"))}
 	// 多于一页时提示翻页键；单页列表不显示，避免噪音。
 	if model.List().Paginator.TotalPages > 1 {
-		parts = append(parts, styleCursor.Render("PgUp/PgDn")+" "+styleDim.Render(t.tr("tui.list.key.page")))
+		parts = append(parts, styleCursor.Render("PgUp/PgDn")+" "+styleMuted.Render(t.tr("tui.list.key.page")))
 	}
 	if model.Filtering() {
 		if canAct {
-			parts = append(parts, styleCursor.Render("Enter")+" "+styleDim.Render(action))
+			parts = append(parts, styleCursor.Render("Enter")+" "+styleMuted.Render(action))
 		} else if strings.TrimSpace(action) != "" {
-			parts = append(parts, styleDim.Render(action))
+			parts = append(parts, styleMuted.Render(action))
 		}
-		parts = append(parts, styleCursor.Render("Esc")+" "+styleDim.Render(text.ClearFilter))
+		parts = append(parts, styleCursor.Render("Esc")+" "+styleMuted.Render(text.ClearFilter))
 	} else {
-		parts = append(parts, styleCursor.Render("/")+" "+styleDim.Render(text.FilterHelp))
+		parts = append(parts, styleCursor.Render("/")+" "+styleMuted.Render(text.FilterHelp))
 		if canAct {
-			parts = append(parts, styleCursor.Render(actionKey(action))+" "+styleDim.Render(action))
+			parts = append(parts, styleCursor.Render(actionKey(action))+" "+styleMuted.Render(action))
 		} else if strings.TrimSpace(action) != "" {
-			parts = append(parts, styleDim.Render(action))
+			parts = append(parts, styleMuted.Render(action))
 		}
-		parts = append(parts, styleCursor.Render("Esc")+" "+styleDim.Render(text.Close))
+		parts = append(parts, styleCursor.Render("Esc")+" "+styleMuted.Render(text.Close))
 	}
 	return strings.Join(parts, styleDim.Render("  ·  "))
 }
@@ -132,7 +132,7 @@ func (t *TUI) renderNativeListOverlay(owner string, model *overlaylist.Model, wi
 	divider := styleDim.Render(strings.Repeat("─", innerWidth))
 	hint := t.nativeListEmptyHint(*model, emptyKey)
 	if loading != "" && model.ItemCount() == 0 {
-		hint = styleDim.Render(loading)
+		hint = styleMuted.Render(loading)
 	}
 
 	var rows []string

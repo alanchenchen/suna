@@ -1,21 +1,32 @@
 package tui
 
 import (
-	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/alanchenchen/suna/internal/config"
+	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 )
 
 func New(locale LocaleID) *TUI {
 	t := &TUI{
 		i18n:      newTranslator(locale),
 		mode:      uipage.Welcome,
-		theme:     ThemeAuto,
+		theme:     ThemeDefault,
 		launchCWD: currentProcessCWD(),
 	}
-	t.setTheme(ThemeAuto)
+	t.setTheme(ThemeDefault)
+	// 主题目录的模板说明由 TUI 负责：主题是纯展示层概念，daemon 不参与。
+	// 幂等：仅在 README 不存在时写入，用户可从中复制出第一个自定义主题。
+	t.ensureThemesReadme()
 	return t
+}
+
+// ensureThemesReadme 在主题目录写入模板说明（不存在时）。
+func (t *TUI) ensureThemesReadme() {
+	cfg := config.Config{DataDir: configDataDir()}
+	_ = cfg.WriteThemesReadme(ThemeReadmeTemplate())
 }
 
 func (t *TUI) Run() error {

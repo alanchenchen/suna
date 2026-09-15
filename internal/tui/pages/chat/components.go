@@ -87,6 +87,18 @@ func (m *Model) ResetNativeLists() {
 		m.ModelList.Reset()
 	}
 	m.ModelPickerOpen = false
+	// 主题列表是纯展示层状态，但同样不能跨 session 继承：
+	// 残留的浮层状态会让下一个会话打开时停在旧光标位置。
+	// 预览是内存态（只有 Enter 落库），因此关闭时置 PendingThemeRestore，
+	// 由 root TUI 在下一帧恢复进入列表前的主题，避免切换 session 后
+	// 界面显示未确认的预览值而配置里仍是旧值。
+	if m.ThemeOverlayOpen {
+		m.PendingThemeRestore = true
+	}
+	if m.ThemeList.Initialized() {
+		m.ThemeList.Reset()
+	}
+	m.ThemeOverlayOpen = false
 }
 
 // ResetRuntime 释放当前 Chat 页面与某个 session 绑定的临时展示状态。

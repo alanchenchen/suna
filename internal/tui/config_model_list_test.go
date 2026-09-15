@@ -6,6 +6,7 @@ import (
 
 	"github.com/alanchenchen/suna/internal/protocol"
 	tuiconfig "github.com/alanchenchen/suna/internal/tui/pages/config"
+	themesys "github.com/alanchenchen/suna/internal/tui/theme"
 )
 
 func TestAddProviderModelOpensFormDirectly(t *testing.T) {
@@ -27,8 +28,10 @@ func TestAddProviderModelOpensFormDirectly(t *testing.T) {
 }
 
 func TestConfigModelDefaultMarkerDoesNotUseSelectionRail(t *testing.T) {
-	applyTheme(ThemeDark)
-	t.Cleanup(func() { applyTheme(ThemeDark) })
+	applyThemePalette(themesys.Adapt(themesys.Default, themesys.DefaultColors(), themesys.DarkBackground))
+	t.Cleanup(func() {
+		applyThemePalette(themesys.Adapt(themesys.Default, themesys.DefaultColors(), themesys.DarkBackground))
+	})
 
 	tui := &TUI{
 		i18n:   newTranslator(LocaleEN),

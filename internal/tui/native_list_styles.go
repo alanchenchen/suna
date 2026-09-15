@@ -7,7 +7,7 @@ func (t *TUI) nativeListStyles() chatpage.ListStyles {
 	return chatpage.ListStyles{
 		Cursor: styleCursor,
 		Title:  styleHL,
-		Text:   styleSysLine,
+		Text:   styleMuted,
 		Dim:    styleDim,
 		OK:     styleToolOk,
 		Error:  styleToolErr,
@@ -19,14 +19,14 @@ func (t *TUI) refreshNativeLists() {
 	if t.chat.SkillsList.Owner() == "" {
 		return
 	}
-	t.chat.InitNativeLists(currentTheme.Name == ThemeDark, t.nativeListStyles(), t.nativeListText())
+	t.chat.InitNativeLists(currentTheme.Dark, t.nativeListStyles(), t.nativeListText())
 }
 
 // ensureNativeLists 保证原生列表已初始化。Config 页的管理分组会在 Chat 页面
 // 尚未初始化时就打开 Skills/MCP 等浮层，零值 list.Model 的 SetSize 会崩溃。
 func (t *TUI) ensureNativeLists() {
 	if t.chat.SkillsList.Owner() == "" {
-		t.chat.InitNativeLists(currentTheme.Name == ThemeDark, t.nativeListStyles(), t.nativeListText())
+		t.chat.InitNativeLists(currentTheme.Dark, t.nativeListStyles(), t.nativeListText())
 	}
 }
 
@@ -35,6 +35,7 @@ func (t *TUI) nativeListText() chatpage.ListText {
 	return chatpage.ListText{
 		SkillsTitle:  t.tr("tui.list.skills.title"),
 		MCPTitle:     t.tr("tui.list.mcp.title"),
+		ThemeTitle:   t.tr("tui.theme.title"),
 		ModelsTitle:  t.tr("tui.list.models.title"),
 		CountSuffix:  t.tr("tui.list.count_suffix"),
 		Filter:       t.tr("tui.list.filter_prompt"),
@@ -46,6 +47,7 @@ func (t *TUI) nativeListText() chatpage.ListText {
 		Models:       t.tr("tui.list.models"),
 		Toggle:       t.tr("tui.list.toggle"),
 		Reload:       t.tr("tui.list.reload"),
+		Apply:        t.tr("tui.list.apply"),
 		GlobalScope:  t.tr("tui.skills.scope.global"),
 		ProjectScope: t.tr("tui.skills.scope.project"),
 		Select:       t.tr("tui.list.select"),

@@ -14,6 +14,7 @@ internal/tui/
 ├── components/           # 无状态或低状态复用组件
 ├── events/               # daemon notification 解码与流式合并
 ├── pages/                # 页面级 model/view/state
+├── theme/                # 主题解析、校验与颜色适配（纯子系统）
 └── transport/            # TUI 到 daemon 的 local transport 适配
 ```
 
@@ -107,6 +108,25 @@ Chat transcript 遵循“完整数据在页面 model、渲染只取可见窗口�
 - 非文本事件必须先 flush 已合并文本再发送，避免 tool/done 被历史 delta 堵住。
 - 解码失败要转成错误消息，不应 panic。
 
+## 主题系统
+
+主题分两层：`internal/tui/theme` 是纯子系统（解析、校验、颜色适配），只依赖标准库与 TOML，不引用任何 TUI 类型；root 侧 `theme.go` 只负责把适配后的调色板铺成样式变量。
+
+内置主题只有一个 `default`：它按深色终端设计，浅色终端由适配逻辑映射，因此只需维护一套。用户主题放在 `~/.suna/themes/*.toml`，文件名即主题名，与内置走同一条解析与适配路径。
+
+主题文件只接受 `#rrggbb`：只有十六进制才能反推出确定的 RGB，从而精确计算对比度；ANSI 索引的真实 RGB 由终端主题决定，Suna 无法测量。
+
+字段分两级：必填 5 个语义色（`accent` / `success` / `info` / `warning` / `error`），可选 4 个中性色（`text` / `muted` / `dim` / `surface`），中性色缺省时按终端背景派生。色块上的文字色（`On*`）由背景亮度自动计算，不需要配置。
+
+适配规则：
+
+- 与终端背景**匹配**的一侧原样使用，一个字节都不改。
+- 不匹配的一侧只调整对比度不足的颜色：语义色保留色相，中性色保留**绝对彩度**（避免近白色在浅底上变成高饱和色，让界面整体发蓝）。
+- `dim` 只做很低的可见性兜底，保留作者想要的低调装饰色。
+- 对比度基于**检测到的真实终端背景**计算；终端不支持查询时回退近似基准，深浅判断仍然有效。
+
+主题列表在配置页 Theme 行打开：`↑↓` 实时预览（不落库）、`Enter` 应用并持久化、`Esc` 取消并恢复进入列表前的主题。每次打开列表都会重新扫描主题目录，因此改完 TOML 无需重启。解析失败的主题会出现在列表里并标注原因，不阻塞 Suna 启动。
+
 ## transport
 
 `internal/tui/transport` 是 TUI 侧 local transport 适配层，只负责 protocol request / response / notification：
@@ -148,7 +168,8 @@ TUI 改动优先补以下类型测试：
 - askuser / guard / cancel 回归。
 - notification decode 和 stream batching。
 - 配置表单保存参数。
-- 工具块渲染和详情浮层。
+- 工具块渲染与就地展开。
+- 主题解析、校验与颜色适配。
 - 附件识别与删除。
 
 局部验证命令：

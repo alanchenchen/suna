@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/alanchenchen/suna/internal/protocol"
+	themesys "github.com/alanchenchen/suna/internal/tui/theme"
 	tuitransport "github.com/alanchenchen/suna/internal/tui/transport"
 )
 
@@ -44,8 +45,16 @@ type TUI struct {
 	height   int
 	ready    bool
 
-	// 终端背景色由 Bubble Tea 查询，仅用于 auto 主题选择。
-	terminalDark bool
+	// terminalBackground 是 Bubble Tea 查询到的终端背景，用于主题深浅适配。
+	// 同时保存深浅与真实颜色：真实颜色让对比度基于用户实际底色计算，
+	// 终端不支持查询时（零值）按深浅取近似基准。
+	terminalBackground themesys.Background
+	// themeSpecs 是已加载的用户主题（~/.suna/themes/*.toml）。
+	// 打开主题列表时重新扫描，不需要重启即可看到新增/修改的主题。
+	// 解析失败的主题也保留在列表中（带 Err），供 UI 展示原因。
+	themeSpecs []themesys.Spec
+	// themeBeforePreview 记录打开主题列表前的主题名，供 Esc 取消预览时恢复。
+	themeBeforePreview string
 	// launchCWD 在 TUI 创建时缓存，避免每次 View 更新终端标题都查询文件系统。
 	launchCWD string
 	// 全局配置与 daemon 快照。真实持久化状态由 daemon 持有，TUI 只缓存用于显示。

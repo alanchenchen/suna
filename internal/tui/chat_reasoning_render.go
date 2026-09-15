@@ -80,7 +80,7 @@ func (t *TUI) limitThinkingBodyRows(lines []string, detail bool, running bool) (
 		return lines, false
 	}
 	folded := len(lines) - (maxRows - 1)
-	ellipsis := styleDim.Render(t.i18n.Tf("tui.chat.thinking_folded", folded))
+	ellipsis := styleMuted.Render(t.i18n.Tf("tui.chat.thinking_folded", folded))
 	if running {
 		return append([]string{ellipsis}, lines[len(lines)-maxRows+1:]...), true
 	}

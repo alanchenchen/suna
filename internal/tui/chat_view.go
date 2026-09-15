@@ -259,9 +259,9 @@ func (t *TUI) renderHandoffBlock() string {
 	}
 	name = textutil.TruncateRunes(name, max(8, contentWidth/3))
 	cwd = textutil.TruncateRunes(cwd, max(10, contentWidth-lipgloss.Width(primary)-lipgloss.Width(name)-6))
-	line1 := styleBrand.Render(primary) + styleDim.Render(" · ") + styleHL.Render(name) + styleDim.Render(" · ") + styleDim.Render(cwd)
+	line1 := styleBrand.Render(primary) + styleDim.Render(" · ") + styleHL.Render(name) + styleDim.Render(" · ") + styleMuted.Render(cwd)
 	if !guest && otherClients > 0 {
-		line1 += styleDim.Render(" · ") + styleDim.Render(t.i18n.Tf("handoff.window_count", otherClients))
+		line1 += styleDim.Render(" · ") + styleMuted.Render(t.i18n.Tf("handoff.window_count", otherClients))
 	}
 
 	state := t.tr("handoff.idle_continue")
@@ -274,13 +274,13 @@ func (t *TUI) renderHandoffBlock() string {
 	if guest && otherClients > 0 {
 		otherText := t.i18n.Tf("handoff.other_window_count", otherClients)
 		stateWidth := max(10, contentWidth-lipgloss.Width(otherText)-3)
-		line2 = styleHL.Render(textutil.TruncateRunes(state, stateWidth)) + styleDim.Render(" · ") + styleDim.Render(otherText)
+		line2 = styleHL.Render(textutil.TruncateRunes(state, stateWidth)) + styleDim.Render(" · ") + styleMuted.Render(otherText)
 	} else {
 		line2 = styleHL.Render(textutil.TruncateRunes(state, contentWidth))
 	}
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(ColorBrand).
+		BorderForeground(ColorAccent).
 		Padding(0, 1).
 		Width(width).
 		Render(line1 + "\n" + line2)
@@ -392,18 +392,18 @@ func (t *TUI) renderChatStatusBar() string {
 			pct = int(float64(t.contextTokens) / float64(t.contextWindow) * 100)
 		}
 	}
-	ctxPct := styleDim.Render(fmt.Sprintf("(%d%%)", pct))
+	ctxPct := styleMuted.Render(fmt.Sprintf("(%d%%)", pct))
 	bar := ""
 	if t.contextWindow > 0 {
 		bar = t.renderContextBar(pct) + " "
 	}
-	ctxPart := styleDim.Render(fmt.Sprintf("ctx %s/%s ", ctx, window)) + bar + ctxPct
+	ctxPart := styleMuted.Render(fmt.Sprintf("ctx %s/%s ", ctx, window)) + bar + ctxPct
 	// 左侧最前显示当前会话项目目录（basename），空间不足时优先隐藏 cwd 而非用量。
 	// 预留 70 列给 ctx 状态与右侧用量，剩余宽度给 cwd；窄终端下 cwd 自动截断/隐藏。
 	cwdPart := t.statusBarCWD(max(0, t.width-70))
 	if !t.hasUsage {
 		// 无用量数据时也走左右分栏：右侧占位右对齐，窄终端截断，避免初始状态全部挤在左侧。
-		right := styleDim.Render("↑? ↓? cached ? · ?t/s")
+		right := styleMuted.Render("↑? ↓? cached ? · ?t/s")
 		left := "  " + cwdPart + "  " + ctxPart
 		available := max(20, t.width-2)
 		rightWidth := lipgloss.Width(right)
@@ -459,7 +459,7 @@ func (t *TUI) statusBarCWD(maxWidth int) string {
 		return ""
 	}
 	workspace = textutil.TruncateRunes(workspace, avail)
-	return styleDim.Render(prefix + workspace + " ")
+	return styleMuted.Render(prefix + workspace + " ")
 }
 
 // renderContextBar 渲染上下文占用进度条（█ 填充 / ░ 空余），颜色随占用比例变化。
@@ -479,7 +479,7 @@ func (t *TUI) contextPercentStyle(pct int) lipgloss.Style {
 		return styleError
 	}
 	if pct >= 60 {
-		return lipgloss.NewStyle().Bold(true).Foreground(ColorTool)
+		return lipgloss.NewStyle().Bold(true).Foreground(ColorWarning)
 	}
 	return styleBrand
 }
@@ -495,7 +495,7 @@ func (t *TUI) renderCommandSuggestions() string {
 	for i, c := range view.Items {
 		if c.Group != lastGroup {
 			if titleKey := chatpage.CommandGroupTitle(c.Group); titleKey != "" {
-				lines = append(lines, styleDim.Render(t.tr(titleKey)))
+				lines = append(lines, styleMuted.Render(t.tr(titleKey)))
 			}
 			lastGroup = c.Group
 		}
@@ -505,10 +505,10 @@ func (t *TUI) renderCommandSuggestions() string {
 			prefix = styleCursor.Render("▎ ")
 			style = styleHL
 		}
-		line := prefix + style.Render(fmt.Sprintf("%-16s", c.Cmd)) + styleDim.Render(t.tr(c.DescKey))
+		line := prefix + style.Render(fmt.Sprintf("%-16s", c.Cmd)) + styleMuted.Render(t.tr(c.DescKey))
 		lines = append(lines, line)
 	}
-	lines = append(lines, styleDim.Render(t.tr("tui.command.suggestion_help")))
+	lines = append(lines, styleMuted.Render(t.tr("tui.command.suggestion_help")))
 	return boxStyle.Width(width).Render(strings.Join(lines, "\n"))
 }
 
@@ -572,7 +572,7 @@ func (t *TUI) renderInputArea() inputRender {
 	presentation := t.currentInteractionPresentation()
 	confirm := ""
 	if t.chat.HasDiscardDraftConfirm() {
-		confirm = styleError.Render(t.tr("tui.chat.discard_draft")) + " " + styleDim.Render(t.tr("tui.chat.discard_draft_help"))
+		confirm = styleError.Render(t.tr("tui.chat.discard_draft")) + " " + styleMuted.Render(t.tr("tui.chat.discard_draft_help"))
 	}
 	width := max(40, t.width-4)
 	text := strings.TrimRight(t.chat.Textarea.View(), "\n")
@@ -584,7 +584,7 @@ func (t *TUI) renderInputArea() inputRender {
 		}
 		runStatus = renderInlineRunStatus(width, strings.TrimSpace(t.chat.Spinner.View()+" "+status), t.tr("tui.chat.input_help_running"))
 	} else if t.cancelling && t.chat.Loading {
-		runStatus = styleDim.Render(strings.TrimSpace(t.chat.Spinner.View() + " " + t.tr("status.cancelling")))
+		runStatus = styleMuted.Render(strings.TrimSpace(t.chat.Spinner.View() + " " + t.tr("status.cancelling")))
 	}
 	// 输入区 placeholder 只按原始输入值判断，不能复用 HasDraft()。
 	// HasDraft() 会 trim 空白用于发送/退出判断；如果用户刚输入空格或换行，
@@ -597,13 +597,13 @@ func (t *TUI) renderInputArea() inputRender {
 			text = renderInlineRunStatus(width, status, t.tr("tui.chat.input_help_running"))
 			inlineRunHelp = true
 		} else {
-			text = styleDim.Render(status)
+			text = styleMuted.Render(status)
 		}
 	}
 	if presentation.GuardActive {
 		text = styleError.Render(t.tr("tui.guard.input_waiting"))
 	} else if emptyInput {
-		text = styleDim.Render(t.tr("tui.chat.input_placeholder"))
+		text = styleMuted.Render(t.tr("tui.chat.input_placeholder"))
 	}
 	bar := renderInputComposerBar(width, strings.Split(text, "\n"), emptyInput)
 	parts := make([]string, 0, 7)
@@ -641,7 +641,7 @@ func (t *TUI) renderInputArea() inputRender {
 	}
 	parts = append(parts, textutil.IndentLines(bar, "  "))
 	if help := t.inputHelp(); help != "" && !inlineRunHelp {
-		parts = append(parts, "  "+styleDim.Render(help))
+		parts = append(parts, "  "+styleMuted.Render(help))
 	}
 	if confirm != "" {
 		parts = append(parts, "  "+confirm)
@@ -665,7 +665,7 @@ func (t *TUI) renderSteeringQueueLine(width int) string {
 		return ""
 	}
 	if confirmed == 0 {
-		return styleDim.Render(t.i18n.Tf("tui.chat.queue_submitting", submitting))
+		return styleMuted.Render(t.i18n.Tf("tui.chat.queue_submitting", submitting))
 	}
 	latest := t.chat.PendingSteering[confirmed-1]
 	text := singleLineSteeringPreview(steeringMessageText(latest))
@@ -684,9 +684,9 @@ func (t *TUI) renderSteeringQueueLine(width int) string {
 	}
 	available := max(12, width-lipgloss.Width(label)-lipgloss.Width(help)-8)
 	text = ansi.Truncate(text, available, "…")
-	line := styleBrand.Render("↳ ") + styleDim.Render(label+" · ") + styleToolDim.Render(text)
+	line := styleBrand.Render("↳ ") + styleMuted.Render(label+" · ") + styleToolMuted.Render(text)
 	if help != "" {
-		line += styleDim.Render("  " + help)
+		line += styleMuted.Render("  " + help)
 	}
 	return line
 }
@@ -701,9 +701,9 @@ func renderInlineRunStatus(width int, status, help string) string {
 	helpWidth := lipgloss.Width(help)
 	if statusWidth+helpWidth+1 <= contentWidth {
 		gap := strings.Repeat(" ", contentWidth-statusWidth-helpWidth)
-		return styleDim.Render(status) + gap + styleDim.Render(help)
+		return styleMuted.Render(status) + gap + styleMuted.Render(help)
 	}
-	return styleDim.Render(status + " · " + help)
+	return styleMuted.Render(status) + styleDim.Render(" · ") + styleMuted.Render(help)
 }
 
 func renderInputComposerBar(width int, lines []string, emptyInput bool) string {
@@ -745,7 +745,7 @@ func (t *TUI) lockedInputPlaceholder() string {
 func (t *TUI) renderPreInputHint() string {
 	presentation := t.currentInteractionPresentation()
 	if presentation.GuardActive {
-		return styleError.Render("  ⚠ "+t.tr("tui.guard.input_waiting")) + styleDim.Render(" · ") + styleDim.Render(t.tr("tui.guard.help"))
+		return styleError.Render("  ⚠ "+t.tr("tui.guard.input_waiting")) + styleDim.Render(" · ") + styleMuted.Render(t.tr("tui.guard.help"))
 	}
 	if block := t.renderHandoffBlock(); block != "" {
 		return block
@@ -788,7 +788,7 @@ func (t *TUI) resumeHint() string {
 	if !t.chat.ResumeAvailable || t.inputLocked() {
 		return ""
 	}
-	return styleDim.Render(t.tr("session.resume_hint"))
+	return styleMuted.Render(t.tr("session.resume_hint"))
 }
 
 func (t *TUI) responseNavHint() string {
@@ -805,7 +805,7 @@ func (t *TUI) responseNavHint() string {
 	default:
 		return ""
 	}
-	content := styleBrand.Render(arrow) + " " + styleDim.Render(label) + styleDim.Render("   "+key)
+	content := styleBrand.Render(arrow) + " " + styleMuted.Render(label) + styleDim.Render("   "+key)
 	return lipgloss.NewStyle().Width(max(1, t.width)).Align(lipgloss.Center).Render(content)
 }
 
@@ -906,15 +906,15 @@ func (t *TUI) renderGuardOverlay(width int) string {
 	var lines []string
 	lines = append(lines, styleError.Render("⚠ "+view.Labels.Title))
 	lines = append(lines, "")
-	lines = append(lines, styleDim.Render(view.Labels.Tool)+" "+styleTool.Render(g.Tool))
-	lines = append(lines, styleDim.Render(view.Labels.ReadOnly)+" "+t.guardReadOnlyLabel(g.ReadOnly))
+	lines = append(lines, styleMuted.Render(view.Labels.Tool)+" "+styleTool.Render(g.Tool))
+	lines = append(lines, styleMuted.Render(view.Labels.ReadOnly)+" "+t.guardReadOnlyLabel(g.ReadOnly))
 	if len(body) > 0 {
 		lines = append(lines, "")
 		lines = append(lines, body...)
 	}
 	approve := t.guardButton(0, view.Labels.Approve)
 	reject := t.guardButton(1, view.Labels.Reject)
-	lines = append(lines, "", approve+"  "+reject, styleDim.Render(chatpage.GuardHelpText(start, view.BodyHeight, total, view.Labels)))
+	lines = append(lines, "", approve+"  "+reject, styleMuted.Render(chatpage.GuardHelpText(start, view.BodyHeight, total, view.Labels)))
 	return boxStyle.Width(view.Width).Padding(1, 2).Render(strings.Join(lines, "\n"))
 }
 
@@ -925,7 +925,7 @@ func (t *TUI) guardOverlayBodyLines(view chatpage.GuardOverlayView) []string {
 	}
 	var body []string
 	if strings.TrimSpace(g.ReviewCode) != "" || strings.TrimSpace(g.ReviewMessage) != "" {
-		body = append(body, styleDim.Render(view.Labels.Review))
+		body = append(body, styleMuted.Render(view.Labels.Review))
 		review := strings.TrimSpace(g.ReviewMessage)
 		if code := strings.TrimSpace(g.ReviewCode); code != "" {
 			if review != "" {
@@ -940,7 +940,7 @@ func (t *TUI) guardOverlayBodyLines(view chatpage.GuardOverlayView) []string {
 		if len(body) > 0 {
 			body = append(body, "")
 		}
-		body = append(body, styleDim.Render(view.Labels.Reason))
+		body = append(body, styleMuted.Render(view.Labels.Reason))
 		body = append(body, splitWrapped(g.Reason, view.Inner, 0)...)
 	}
 	params := chatpage.GuardBodyParams(g)
@@ -948,7 +948,7 @@ func (t *TUI) guardOverlayBodyLines(view chatpage.GuardOverlayView) []string {
 		if len(body) > 0 {
 			body = append(body, "")
 		}
-		body = append(body, styleDim.Render(view.Labels.Params))
+		body = append(body, styleMuted.Render(view.Labels.Params))
 		body = append(body, splitWrapped(params, view.Inner, 0)...)
 	}
 	return body
@@ -970,7 +970,7 @@ func (t *TUI) guardButton(idx int, label string) string {
 	if t.chat.GuardCursor == idx {
 		return styleCursor.Render("▶ ") + styleHL.Render(label)
 	}
-	return styleDim.Render("  " + label)
+	return styleMuted.Render("  " + label)
 }
 
 // guardReadOnlyLabel 展示只读/行动标签：只读绿色，非只读黄色。

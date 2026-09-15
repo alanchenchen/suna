@@ -21,6 +21,7 @@ func DataDirCredentialsPath(dataDir string) string { return filepath.Join(dataDi
 func DataDirLogsDir(dataDir string) string         { return filepath.Join(dataDir, "logs") }
 func DataDirLogPath(dataDir string) string         { return filepath.Join(DataDirLogsDir(dataDir), "app.log") }
 func DataDirSkillsDir(dataDir string) string       { return filepath.Join(dataDir, "skills") }
+func DataDirThemesDir(dataDir string) string       { return filepath.Join(dataDir, "themes") }
 func DataDirDBPath(dataDir string) string          { return filepath.Join(dataDir, "memory.db") }
 func DataDirPIDPath(dataDir string) string         { return filepath.Join(dataDir, "sunad.pid") }
 func DataDirLockPath(dataDir string) string        { return filepath.Join(dataDir, "sunad.lock") }
@@ -35,6 +36,7 @@ func DefaultCredentialsPath() string { return DataDirCredentialsPath(DefaultData
 func DefaultLogsDir() string         { return DataDirLogsDir(DefaultDataDir()) }
 func DefaultLogPath() string         { return DataDirLogPath(DefaultDataDir()) }
 func DefaultSkillsDir() string       { return DataDirSkillsDir(DefaultDataDir()) }
+func DefaultThemesDir() string       { return DataDirThemesDir(DefaultDataDir()) }
 func DefaultDBPath() string          { return DataDirDBPath(DefaultDataDir()) }
 func DefaultPIDPath() string         { return DataDirPIDPath(DefaultDataDir()) }
 func DefaultLockPath() string        { return DataDirLockPath(DefaultDataDir()) }
@@ -49,6 +51,7 @@ func (c *Config) CredentialsPath() string { return DataDirCredentialsPath(c.Data
 func (c *Config) LogsDir() string         { return DataDirLogsDir(c.DataDir) }
 func (c *Config) LogPath() string         { return DataDirLogPath(c.DataDir) }
 func (c *Config) SkillsDir() string       { return DataDirSkillsDir(c.DataDir) }
+func (c *Config) ThemesDir() string       { return DataDirThemesDir(c.DataDir) }
 func (c *Config) PIDPath() string         { return DataDirPIDPath(c.DataDir) }
 func (c *Config) LockPath() string        { return DataDirLockPath(c.DataDir) }
 func (c *Config) SocketPath() string      { return DataDirSocketPath(c.DataDir) }

@@ -17,7 +17,7 @@ func notificationUpdatesChatContent(msg notificationMsg) bool {
 
 func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if background, ok := msg.(tea.BackgroundColorMsg); ok {
-		t.applyDetectedBackground(background.IsDark())
+		t.applyDetectedBackground(background)
 		return t, nil
 	}
 	if _, ok := msg.(petTickMsg); ok {

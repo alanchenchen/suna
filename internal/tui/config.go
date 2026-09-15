@@ -13,6 +13,7 @@ import (
 	chatpage "github.com/alanchenchen/suna/internal/tui/pages/chat"
 	tuiconfig "github.com/alanchenchen/suna/internal/tui/pages/config"
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
+	themesys "github.com/alanchenchen/suna/internal/tui/theme"
 )
 
 func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -35,6 +36,10 @@ func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case chatpage.NativeListModels:
 			if t.chat.ModelPickerOpen {
 				return t, t.chat.UpdateModelPicker(m.Inner)
+			}
+		case chatpage.NativeListTheme:
+			if t.chat.ThemeOverlayOpen {
+				return t, t.chat.UpdateThemeList(m.Inner)
 			}
 		}
 		return t, nil
@@ -69,7 +74,7 @@ func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 		t.config.Notice = ""
 		// Config 页打开 chat overlay（管理分组）时，按键转发给对应 overlay；
 		// esc 关闭 overlay 后回到 Config 页，不退出配置。
-		if t.chat.SkillsOverlayOpen || t.chat.MCPOverlayOpen || t.chat.MemoryOverlayOpen || t.chat.ModelPickerOpen {
+		if t.chat.SkillsOverlayOpen || t.chat.MCPOverlayOpen || t.chat.MemoryOverlayOpen || t.chat.ModelPickerOpen || t.chat.ThemeOverlayOpen {
 			ks := m.String()
 			var cmd tea.Cmd
 			switch {
@@ -81,9 +86,11 @@ func (t *TUI) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_, cmd = t.updateMemoryOverlay(ks)
 			case t.chat.ModelPickerOpen:
 				_, cmd = t.updateModelPicker(ks, m)
+			case t.chat.ThemeOverlayOpen:
+				_, cmd = t.updateThemeOverlay(ks, m)
 			}
 			// overlay 关闭后回到 Config 页；丢弃 chat 场景的 syncInputFocus，避免焦点漂移。
-			if !t.chat.SkillsOverlayOpen && !t.chat.MCPOverlayOpen && !t.chat.MemoryOverlayOpen && !t.chat.ModelPickerOpen {
+			if !t.chat.SkillsOverlayOpen && !t.chat.MCPOverlayOpen && !t.chat.MemoryOverlayOpen && !t.chat.ModelPickerOpen && !t.chat.ThemeOverlayOpen {
 				return t, nil
 			}
 			return t, cmd
@@ -290,6 +297,11 @@ func configDataDir() string {
 	return config.DefaultDataDir()
 }
 
+// themesDir 是用户自定义主题目录：~/.suna/themes。
+func themesDir() string {
+	return config.DataDirThemesDir(configDataDir())
+}
+
 func configFilePath() string {
 	return config.DataDirConfigPath(configDataDir())
 }
@@ -390,7 +402,9 @@ func (t *TUI) handleConfigAction(rows []tuiconfig.Row) tea.Cmd {
 	case "general_language":
 		return t.toggleLanguage()
 	case "general_theme":
-		return t.toggleTheme()
+		t.ensureNativeLists()
+		t.openThemeOverlay()
+		return nil
 	case "general_guard":
 		return t.toggleGuardMode()
 	case "general_workspace":
@@ -488,6 +502,11 @@ func (t *TUI) leaveConfig() tea.Cmd {
 	}
 	// detail/models/home 之间切换后 rows 集合不同，残留 Scroll 会裁掉顶部。
 	t.config.Scroll = 0
+	// 主题列表的预览是内存态：只有 Enter 才落库。离开配置页时必须恢复进入列表前的
+	// 主题，否则预览值会留在内存里但不落库，造成界面与配置不一致。
+	if t.chat.ThemeOverlayOpen {
+		t.closeThemeOverlay(true)
+	}
 	if target != uipage.None {
 		t.mode = target
 	}
@@ -502,9 +521,27 @@ func (t *TUI) toggleLanguage() tea.Cmd {
 	return t.sendConfigSet(protocol.ConfigSetParams{Action: protocol.ConfigActionUpdateGeneral, Locale: locale, Theme: t.theme})
 }
 func (t *TUI) toggleTheme() tea.Cmd {
-	theme := nextTheme(t.theme)
+	theme := t.nextTheme()
 	t.setTheme(theme)
 	return t.sendConfigSet(protocol.ConfigSetParams{Action: protocol.ConfigActionUpdateGeneral, Locale: string(t.i18n.Locale()), Theme: theme})
+}
+
+// nextTheme 按列表顺序循环切换主题（内置 default 在最前）。
+// 主题列表可能包含不可用的主题，跳过它们避免切到空白界面。
+func (t *TUI) nextTheme() string {
+	names := []string{ThemeDefault}
+	for _, s := range t.themeSpecs {
+		if s.Err == "" {
+			names = append(names, s.Name)
+		}
+	}
+	cur := themesys.Normalize(t.theme)
+	for i, n := range names {
+		if n == cur {
+			return names[(i+1)%len(names)]
+		}
+	}
+	return ThemeDefault
 }
 func (t *TUI) toggleGuardMode() tea.Cmd {
 	mode := tuiconfig.NextGuardMode(t.configState.GuardMode)

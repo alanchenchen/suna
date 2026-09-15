@@ -200,20 +200,20 @@ func (t *TUI) renderAttachmentsOverlay(width int) string {
 	if t.chat.AttachmentsConfirm {
 		var lines []string
 		lines = append(lines, t.gradientText(t.tr("tui.attachments.clear_confirm_title")), "")
-		lines = append(lines, styleDim.Render(t.tr("tui.attachments.clear_confirm_body", t.attachmentStatus.Count)))
-		lines = append(lines, "", styleDim.Render(t.tr("tui.attachments.clear_confirm_help")))
+		lines = append(lines, styleMuted.Render(t.tr("tui.attachments.clear_confirm_body", t.attachmentStatus.Count)))
+		lines = append(lines, "", styleMuted.Render(t.tr("tui.attachments.clear_confirm_help")))
 		return boxStyle.Width(w).Padding(1, 2).Render(strings.Join(lines, "\n"))
 	}
 	var lines []string
 	lines = append(lines, t.gradientText(t.tr("tui.attachments.title", t.attachmentStatus.Count, formatAttachmentSize(t.attachmentStatus.Bytes))))
 	if t.attachmentStatus.SessionID == "" || t.attachmentStatus.SessionID != t.currentSession.ID {
-		lines = append(lines, "", styleDim.Render("▀  ▀"), styleDim.Render(t.tr("tui.attachments.empty")))
+		lines = append(lines, "", styleDim.Render("▀  ▀"), styleMuted.Render(t.tr("tui.attachments.empty")))
 	} else if t.attachmentStatus.Count == 0 {
-		lines = append(lines, "", styleDim.Render("▀  ▀"), styleDim.Render(t.tr("tui.attachments.empty")))
+		lines = append(lines, "", styleDim.Render("▀  ▀"), styleMuted.Render(t.tr("tui.attachments.empty")))
 	} else {
-		lines = append(lines, "", styleDim.Render(t.tr("tui.attachments.description")))
+		lines = append(lines, "", styleMuted.Render(t.tr("tui.attachments.description")))
 	}
-	lines = append(lines, "", styleDim.Render(t.tr("tui.attachments.help")))
+	lines = append(lines, "", styleMuted.Render(t.tr("tui.attachments.help")))
 	return boxStyle.Width(w).Padding(1, 2).Render(strings.Join(lines, "\n"))
 }
 
@@ -503,12 +503,12 @@ func (t *TUI) renderMemoryOverlay(width int) string {
 		return t.renderMemoryConfirmOverlay(view)
 	}
 	var body []string
-	body = append(body, styleDim.Render(t.tr("tui.memory.description")), "")
+	body = append(body, styleMuted.Render(t.tr("tui.memory.description")), "")
 	if view.Loading {
-		body = append(body, styleDim.Render(t.tr("tui.memory.loading")))
+		body = append(body, styleMuted.Render(t.tr("tui.memory.loading")))
 	} else if len(view.Rows) == 0 {
 		// 空状态带一只静态小宠物，与公共 overlay 组件一致。
-		body = append(body, styleDim.Render("▀  ▀"), styleDim.Render(t.tr("tui.memory.empty")))
+		body = append(body, styleDim.Render("▀  ▀"), styleMuted.Render(t.tr("tui.memory.empty")))
 	} else {
 		for _, row := range view.Rows {
 			body = append(body, t.renderMemoryRowView(row, view.Inner)...)
@@ -521,13 +521,13 @@ func (t *TUI) renderMemoryOverlay(width int) string {
 	if view.Error != "" {
 		lines = append(lines, "", styleError.Render(view.Error))
 	}
-	lines = append(lines, "", styleDim.Render(t.memoryHelpText(start, view.Height, total)))
+	lines = append(lines, "", styleMuted.Render(t.memoryHelpText(start, view.Height, total)))
 	return boxStyle.Width(view.Width).Padding(1, 2).Render(strings.Join(lines, "\n"))
 }
 
 func (t *TUI) renderMemoryRowView(row chatpage.MemoryRowView, width int) []string {
 	cursor := "  "
-	contentStyle := styleToolDim
+	contentStyle := styleToolMuted
 	if row.Selected {
 		cursor = styleCursor.Render("▎ ")
 		contentStyle = styleHL
@@ -560,13 +560,13 @@ func (t *TUI) renderMemoryConfirmOverlay(view chatpage.MemoryOverlayView) string
 	case chatpage.MemoryConfirmDelete:
 		lines = append(lines, styleHL.Render(t.tr("tui.memory.delete_confirm_title")), "")
 		if t.chat.MemoryCursor >= 0 && t.chat.MemoryCursor < len(t.chat.Memories) {
-			lines = append(lines, styleToolDim.Render(t.chat.Memories[t.chat.MemoryCursor].Content))
+			lines = append(lines, styleToolMuted.Render(t.chat.Memories[t.chat.MemoryCursor].Content))
 		}
-		lines = append(lines, "", styleDim.Render(t.tr("tui.memory.delete_confirm_help")))
+		lines = append(lines, "", styleMuted.Render(t.tr("tui.memory.delete_confirm_help")))
 	case chatpage.MemoryConfirmClear:
 		lines = append(lines, styleHL.Render(t.tr("tui.memory.clear_confirm_title")), "")
-		lines = append(lines, styleDim.Render(t.tr("tui.memory.clear_confirm_body", view.Total)), "")
-		lines = append(lines, styleDim.Render(t.tr("tui.memory.clear_confirm_help")))
+		lines = append(lines, styleMuted.Render(t.tr("tui.memory.clear_confirm_body", view.Total)), "")
+		lines = append(lines, styleMuted.Render(t.tr("tui.memory.clear_confirm_help")))
 	}
 	return boxStyle.Width(view.Width).Padding(1, 2).Render(strings.Join(lines, "\n"))
 }
@@ -655,9 +655,9 @@ func renderMemoryItem(m protocol.MemoryItem, width int) []string {
 	if len(wrapped) == 0 {
 		wrapped = []string{""}
 	}
-	lines := []string{"  " + styleDim.Render("• ") + head}
+	lines := []string{"  " + styleDim.Render("• ") + styleMuted.Render(head)}
 	for _, line := range wrapped {
-		lines = append(lines, "    "+styleToolDim.Render(line))
+		lines = append(lines, "    "+styleToolMuted.Render(line))
 	}
 	return lines
 }
@@ -676,14 +676,14 @@ func (t *TUI) renderSessionsOverlay(width int) string {
 	var lines []string
 	lines = append(lines, t.gradientText(t.tr("tui.sessions.title")))
 	if t.chat.SessionsLoading && len(t.chat.Sessions) == 0 {
-		lines = append(lines, "", styleDim.Render(t.tr("tui.loading")))
+		lines = append(lines, "", styleMuted.Render(t.tr("tui.loading")))
 	} else if t.chat.SessionsError != "" {
 		lines = append(lines, "", styleErrLine.Render(t.chat.SessionsError))
 	}
 	if len(t.chat.Sessions) == 0 && !t.chat.SessionsLoading {
 		// 空状态带一只静态小宠物，延续 pet 形象，避免纯文本显得生硬；逐行居中。
 		pet := styleDim.Render("▀  ▀")
-		lines = append(lines, "", centerCell(pet, inner), centerCell(styleDim.Render(t.tr("tui.sessions.empty")), inner))
+		lines = append(lines, "", centerCell(pet, inner), centerCell(styleMuted.Render(t.tr("tui.sessions.empty")), inner))
 	}
 	start := 0
 	if t.chat.SessionCursor >= bodyHeight {
@@ -694,12 +694,12 @@ func (t *TUI) renderSessionsOverlay(width int) string {
 	for i := start; i < end; i++ {
 		kind := t.chat.SessionRowKindAt(i)
 		if kind != lastKind {
-			lines = append(lines, "", styleDim.Render(t.sessionGroupLabel(kind)))
+			lines = append(lines, "", styleMuted.Render(t.sessionGroupLabel(kind)))
 			lastKind = kind
 		}
 		lines = append(lines, t.renderSessionRow(i, t.chat.Sessions[i], inner)...)
 	}
-	lines = append(lines, "", styleDim.Render(t.sessionsHelpText(start, bodyHeight, len(t.chat.Sessions))))
+	lines = append(lines, "", styleMuted.Render(t.sessionsHelpText(start, bodyHeight, len(t.chat.Sessions))))
 	return boxStyle.Width(w).Padding(1, 2).Render(strings.Join(lines, "\n"))
 }
 
@@ -719,10 +719,10 @@ func (t *TUI) renderSessionDeleteConfirm(width int) string {
 	lines = append(lines, styleHL.Render(t.tr("tui.sessions.delete_confirm_title")), "")
 	if t.chat.SessionCursor >= 0 && t.chat.SessionCursor < len(t.chat.Sessions) {
 		s := t.chat.Sessions[t.chat.SessionCursor]
-		lines = append(lines, styleToolDim.Render(sessionTitle(s)))
-		lines = append(lines, styleDim.Render(s.CWD))
+		lines = append(lines, styleToolMuted.Render(sessionTitle(s)))
+		lines = append(lines, styleMuted.Render(s.CWD))
 	}
-	lines = append(lines, "", styleDim.Render(t.tr("tui.sessions.delete_confirm_help")))
+	lines = append(lines, "", styleMuted.Render(t.tr("tui.sessions.delete_confirm_help")))
 	return boxStyle.Width(width).Padding(1, 2).Render(strings.Join(lines, "\n"))
 }
 
@@ -749,7 +749,7 @@ func (t *TUI) sessionStatusLabel(s protocol.SessionInfo) string {
 
 func (t *TUI) renderSessionRow(i int, s protocol.SessionInfo, width int) []string {
 	cursor := "  "
-	contentStyle := styleToolDim
+	contentStyle := styleToolMuted
 	if i == t.chat.SessionCursor {
 		cursor = styleCursor.Render("▎ ")
 		contentStyle = styleHL
@@ -760,7 +760,7 @@ func (t *TUI) renderSessionRow(i int, s protocol.SessionInfo, width int) []strin
 	if s.ClientCount > 0 {
 		clients = " · " + t.i18n.Tf("tui.sessions.client_count", s.ClientCount)
 	}
-	head := fmt.Sprintf("%s%s %s%s", cursor, styleTool.Render("["+status+"]"), contentStyle.Render(name), styleDim.Render(clients))
+	head := fmt.Sprintf("%s%s %s%s", cursor, styleTool.Render("["+status+"]"), contentStyle.Render(name), styleMuted.Render(clients))
 	meta := []string{textutil.TruncateRunes(s.CWD, max(10, width-4))}
 	if s.MessageCount > 0 {
 		meta = append(meta, t.i18n.Tf("tui.sessions.message_count", s.MessageCount))
@@ -768,7 +768,7 @@ func (t *TUI) renderSessionRow(i int, s protocol.SessionInfo, width int) []strin
 	if updated := relativeSessionTime(s.UpdatedAt); updated != "" {
 		meta = append(meta, t.i18n.Tf("tui.sessions.updated", updated))
 	}
-	return []string{head, "    " + styleDim.Render(strings.Join(meta, " · "))}
+	return []string{head, "    " + styleMuted.Render(strings.Join(meta, " · "))}
 }
 
 func (t *TUI) sessionsHelpText(start, height, total int) string {

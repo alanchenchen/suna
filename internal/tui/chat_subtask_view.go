@@ -72,7 +72,7 @@ func (t *TUI) renderSubtaskBlock(block *toolBlock) string {
 			}
 		}
 		if t.canToggleSubtaskDetailWithEnter() {
-			lines = append(lines, styleDim.Render(t.tr(t.subtaskPanelHelpKey())))
+			lines = append(lines, styleMuted.Render(t.tr(t.subtaskPanelHelpKey())))
 		}
 	}
 	return textutil.IndentLines(renderTitledRoundBox(width, title, lines), transcriptBlockIndent)
@@ -178,10 +178,10 @@ func (t *TUI) renderSubtaskRows(ids []string, innerWidth int, selected int) []st
 		label, activity := fitSubtaskRowParts(rawLabel, rawActivity, innerWidth-prefixWidth-durWidth)
 		line := fmt.Sprintf("%s%s %s", cursor, icon, labelStyle.Render(label))
 		if activity != "" {
-			line += styleDim.Render(" · " + activity)
+			line += styleDim.Render(" · ") + styleMuted.Render(activity)
 		}
 		if dur != "" {
-			line += styleDim.Render(subtaskDurationSep(dur) + dur)
+			line += styleMuted.Render(subtaskDurationSep(dur) + dur)
 		}
 		rows = append(rows, line)
 	}
@@ -192,27 +192,27 @@ func (t *TUI) renderSelectedSubtaskSummary(te *toolEntry, innerWidth int) []stri
 	var parts []string
 	if te != nil && te.Status == toolview.StatusError {
 		if reason := t.subtaskFailureReason(te); reason != "" {
-			parts = append(parts, styleDim.Render(t.tr("tui.subtask_panel.error")+": ")+styleToolErr.Render(textutil.TruncateRunes(reason, max(12, innerWidth-8))))
+			parts = append(parts, styleMuted.Render(t.tr("tui.subtask_panel.error")+": ")+styleToolErr.Render(textutil.TruncateRunes(reason, max(12, innerWidth-8))))
 		}
 	}
 	if model := subtaskParamLabel(te, "model"); model != "" {
-		parts = append(parts, styleDim.Render(t.tr("tui.tool.model")+": ")+styleToolDim.Render(textutil.TruncateRunes(model, max(10, innerWidth-8))))
+		parts = append(parts, styleMuted.Render(t.tr("tui.tool.model")+": ")+styleToolMuted.Render(textutil.TruncateRunes(model, max(10, innerWidth-8))))
 	}
 	if tools := subtaskParamLabel(te, "tools"); tools != "" {
-		parts = append(parts, styleDim.Render(t.tr("tui.tool.tools")+": ")+styleToolDim.Render(textutil.TruncateRunes(tools, max(10, innerWidth-8))))
+		parts = append(parts, styleMuted.Render(t.tr("tui.tool.tools")+": ")+styleToolMuted.Render(textutil.TruncateRunes(tools, max(10, innerWidth-8))))
 	}
 	if task := subtaskParamText(te, "task"); task != "" {
-		parts = append(parts, styleDim.Render(t.tr("tui.tool.task")+":"))
+		parts = append(parts, styleMuted.Render(t.tr("tui.tool.task")+":"))
 		for _, line := range strings.Split(strings.TrimRight(task, "\n"), "\n") {
 			for _, wrapped := range textutil.WrapLine(textutil.ExpandTabs(line, 4), max(12, innerWidth)) {
-				parts = append(parts, styleToolDim.Render(wrapped))
+				parts = append(parts, styleToolMuted.Render(wrapped))
 			}
 		}
 	}
 	// context 是 main 显式传给 subtask 的补充上下文（可能含图片 source 等关键引用），
 	// 与 task 并列展示但限制行数，避免长 context 撑爆 subtask block 挤掉工具 timeline。
 	if ctx := subtaskParamText(te, "context"); ctx != "" {
-		parts = append(parts, styleDim.Render(t.tr("tui.tool.context")+":"))
+		parts = append(parts, styleMuted.Render(t.tr("tui.tool.context")+":"))
 		lines := strings.Split(strings.TrimRight(ctx, "\n"), "\n")
 		for i, line := range lines {
 			if i >= subtaskContextMaxLines {
@@ -220,7 +220,7 @@ func (t *TUI) renderSelectedSubtaskSummary(te *toolEntry, innerWidth int) []stri
 				break
 			}
 			for _, wrapped := range textutil.WrapLine(textutil.ExpandTabs(line, 4), max(12, innerWidth)) {
-				parts = append(parts, styleToolDim.Render(wrapped))
+				parts = append(parts, styleToolMuted.Render(wrapped))
 			}
 		}
 	}
@@ -243,7 +243,7 @@ func (t *TUI) subtaskResultSource(te *toolEntry, innerWidth int) (toolview.Subta
 	if result.Text == "" {
 		return result, nil
 	}
-	return result, scroll.NewWrappedLineSection(result.Text, max(12, innerWidth), styleToolDim)
+	return result, scroll.NewWrappedLineSection(result.Text, max(12, innerWidth), styleToolMuted)
 }
 
 // renderSelectedSubtaskResult 渲染选中子任务的结果小节。
@@ -256,7 +256,7 @@ func (t *TUI) renderSelectedSubtaskResult(te *toolEntry, innerWidth int) []strin
 	}
 	var parts []string
 	if source != nil {
-		parts = append(parts, styleDim.Render(t.tr("tui.subtask_panel.result")+":"))
+		parts = append(parts, styleMuted.Render(t.tr("tui.subtask_panel.result")+":"))
 		height := t.subtaskResultMaxRows()
 		body, start, total := scroll.Window(source, height, &t.chat.SubtaskResultScroll)
 		parts = append(parts, body...)
@@ -265,7 +265,7 @@ func (t *TUI) renderSelectedSubtaskResult(te *toolEntry, innerWidth int) []strin
 		}
 	}
 	if result.SideEffects != "" {
-		parts = append(parts, styleDim.Render(t.tr("tui.subtask_panel.side_effects")+": ")+styleToolDim.Render(textutil.TruncateRunes(result.SideEffects, max(12, innerWidth-10))))
+		parts = append(parts, styleMuted.Render(t.tr("tui.subtask_panel.side_effects")+": ")+styleToolMuted.Render(textutil.TruncateRunes(result.SideEffects, max(12, innerWidth-10))))
 	}
 	return parts
 }
@@ -312,9 +312,9 @@ func (t *TUI) renderSelectedSubtaskTools(innerWidth int) []string {
 	children := t.selectedSubtaskTools()
 	if len(children) == 0 {
 		if t.selectedSubtaskWaitingForTool() {
-			return []string{styleToolRun.Render(spinnerPlaceholder+" ") + styleDim.Render(t.tr("tui.subtask_panel.waiting_tool"))}
+			return []string{styleToolRun.Render(spinnerPlaceholder+" ") + styleMuted.Render(t.tr("tui.subtask_panel.waiting_tool"))}
 		}
-		return []string{styleDim.Render(t.tr("tui.subtask_panel.no_tools"))}
+		return []string{styleMuted.Render(t.tr("tui.subtask_panel.no_tools"))}
 	}
 	t.ensureSubtaskSelection()
 	height := min(len(children), t.subtaskTimelineHeight())
@@ -328,7 +328,7 @@ func (t *TUI) renderSelectedSubtaskTools(innerWidth int) []string {
 	end := min(len(children), start+height)
 	rows := make([]string, 0, height+2)
 	if start > 0 {
-		rows = append(rows, styleDim.Render(fmt.Sprintf(t.tr("tui.subtask_panel.more_above"), start)))
+		rows = append(rows, styleMuted.Render(fmt.Sprintf(t.tr("tui.subtask_panel.more_above"), start)))
 	}
 	for i := start; i < end; i++ {
 		child := children[i]
@@ -354,14 +354,14 @@ func (t *TUI) renderSelectedSubtaskTools(innerWidth int) []string {
 		label := t.subtaskToolTimelineLabel(child, max(4, remaining))
 		line := fmt.Sprintf("%s%s %s", cursor, icon, labelStyle.Render(label))
 		if dur != "" {
-			line += styleDim.Render(subtaskDurationSep(dur) + dur)
+			line += styleMuted.Render(subtaskDurationSep(dur) + dur)
 		}
 		rows = append(rows, line)
 	}
 	if end < len(children) {
-		rows = append(rows, styleDim.Render(fmt.Sprintf(t.tr("tui.subtask_panel.more_below"), len(children)-end)))
+		rows = append(rows, styleMuted.Render(fmt.Sprintf(t.tr("tui.subtask_panel.more_below"), len(children)-end)))
 	} else if t.selectedSubtaskWaitingForTool() {
-		rows = append(rows, styleToolRun.Render(spinnerPlaceholder)+styleDim.Render(" "+t.tr("tui.subtask_panel.waiting_tool")))
+		rows = append(rows, styleToolRun.Render(spinnerPlaceholder)+styleMuted.Render(" "+t.tr("tui.subtask_panel.waiting_tool")))
 	}
 	return rows
 }
@@ -422,18 +422,18 @@ func (t *TUI) selectedSubtaskWaitingForTool() bool {
 func (t *TUI) renderSelectedSubtaskToolDetail(innerWidth int) []string {
 	te := t.selectedSubtaskTool()
 	if te == nil {
-		return []string{styleDim.Render(t.tr("tui.subtask_panel.no_tools"))}
+		return []string{styleMuted.Render(t.tr("tui.subtask_panel.no_tools"))}
 	}
 	deps := t.toolDetailDeps()
 	deps.Width = max(44, innerWidth)
 	source := toolview.DetailLineSource(te, deps)
 	body, start, total := scroll.Window(source, t.subtaskToolDetailHeight(), &t.chat.SubtaskToolDetailScroll)
 	if total == 0 {
-		return []string{styleDim.Render(t.tr("tui.subtask_panel.no_detail"))}
+		return []string{styleMuted.Render(t.tr("tui.subtask_panel.no_detail"))}
 	}
 	lines := append([]string(nil), body...)
 	end := min(total, start+t.subtaskToolDetailHeight())
-	lines = append(lines, styleDim.Render(fmt.Sprintf("PgUp/PgDn/%s %s %d-%d/%d", t.tr("tui.subtask_panel.wheel"), t.tr("tui.overlay.scroll"), start+1, end, total)))
+	lines = append(lines, styleMuted.Render(fmt.Sprintf("PgUp/PgDn/%s %s %d-%d/%d", t.tr("tui.subtask_panel.wheel"), t.tr("tui.overlay.scroll"), start+1, end, total)))
 	return lines
 }
 

@@ -337,7 +337,7 @@ func splitWrapped(content string, width int, maxLines int) []string {
 			}
 		}
 		for _, wrapped := range textutil.WrapLineLimit(line, width, remaining) {
-			out = append(out, styleToolDim.Render(wrapped))
+			out = append(out, styleToolMuted.Render(wrapped))
 			if maxLines > 0 && len(out) >= maxLines {
 				return append(out, styleDim.Render("..."))
 			}

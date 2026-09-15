@@ -165,6 +165,8 @@ You can change most settings from the TUI with `/config`. `context_window` and `
 
 `/model` changes only the current conversation. The default model in Config is used only for conversations created afterwards.
 
+Themes can be changed from Config → Theme. Suna ships a single built-in `default` theme that adapts to your terminal background, and reads custom themes from `~/.suna/themes/*.toml` (the file name is the theme name). See the generated `~/.suna/themes/README.md` for the field reference and templates.
+
 ## Try these prompts
 
 These prompts are intentionally simple. They are meant to show how Suna delegates work, limits tool access, and asks before risky actions.

@@ -36,9 +36,9 @@ func (t *TUI) renderDisplayDiscardSummary(s chatpage.DisplayDiscardSummary) stri
 	lines := strings.Split(wrapped, "\n")
 	for i := range lines {
 		if i == 0 {
-			lines[i] = styleSysLine.Render("  ◇ ") + styleDim.Render(lines[i])
+			lines[i] = styleSysLine.Render("  ◇ ") + styleMuted.Render(lines[i])
 		} else {
-			lines[i] = "    " + styleDim.Render(lines[i])
+			lines[i] = "    " + styleMuted.Render(lines[i])
 		}
 	}
 	return "\n" + strings.Join(lines, "\n") + "\n"
@@ -98,7 +98,7 @@ func (t *TUI) renderSkillLoadMessage(p *chatpage.SkillLoadView) string {
 	}
 	labelKey := "tui.skill.loaded"
 	icon := "✓"
-	accent := ColorAgent
+	accent := ColorSuccess
 	if p.Status == "cancelled" {
 		labelKey = "tui.skill.cancelled"
 		icon = "⊘"
@@ -110,23 +110,18 @@ func (t *TUI) renderSkillLoadMessage(p *chatpage.SkillLoadView) string {
 	} else if strings.TrimSpace(p.Status) == "loading" {
 		labelKey = "tui.skill.loading"
 		icon = "◐"
-		accent = ColorBrand
+		accent = ColorAccent
 	}
-	badge := lipgloss.NewStyle().
-		Foreground(currentTheme.ToolText).
-		Background(accent).
-		Bold(true).
-		Padding(0, 1).
-		Render(icon + " " + t.tr(labelKey))
+	badge := pill(accent, onFor(accent)).Render(icon + " " + t.tr(labelKey))
 	nameBadge := lipgloss.NewStyle().
 		Foreground(currentTheme.Text).
-		Background(currentTheme.CodeBg).
+		Background(currentTheme.Surface).
 		Bold(true).
 		Padding(0, 1).
 		Render(name)
 	content := badge + " " + nameBadge
 	if p.Duration > 0 {
-		content += styleDim.Render(" · " + toolview.FormatCompactDuration(p.Duration))
+		content += styleDim.Render(" · ") + styleMuted.Render(toolview.FormatCompactDuration(p.Duration))
 	} else if p.Status == "loading" && !p.StartedAt.IsZero() {
 		content += styleDim.Render(" · ") + liveElapsedPlaceholder(p.StartedAt)
 	}
@@ -158,7 +153,7 @@ func (t *TUI) renderSkillReviewMessage(p protocol.SkillReviewParams) string {
 		}
 		content += "\n" + rendered
 	}
-	return textutil.IndentLines(boxStyle.BorderForeground(ColorBrand).Width(width).Padding(1, 2).Render(content), "  ")
+	return textutil.IndentLines(boxStyle.BorderForeground(ColorAccent).Width(width).Padding(1, 2).Render(content), "  ")
 }
 func (t *TUI) compactRunningLabel() string {
 	return t.tr("compact.running")
@@ -347,11 +342,11 @@ func (t *TUI) renderRestoreSummaryBox(content string) string {
 			continue
 		}
 		for _, wrapped := range textutil.WrapLine(line, inner) {
-			body = append(body, styleDim.Render(wrapped))
+			body = append(body, styleMuted.Render(wrapped))
 		}
 	}
 	if len(body) == 0 {
-		body = []string{styleDim.Render(content)}
+		body = []string{styleMuted.Render(content)}
 	}
 	title := styleHL.Render(t.tr("session.restore_tools_title"))
 	return textutil.IndentLines(boxStyle.Width(width).Padding(1, 2).Render(title+"\n"+strings.Join(body, "\n")), "  ")
@@ -395,10 +390,10 @@ func (t *TUI) renderAssistantMessage(msg *chatMsg) string {
 }
 
 func (t *TUI) renderRunDuration(duration string, endedAt time.Time) string {
-	line := "  " + styleBrand.Render("✦") + " " + styleDim.Render(t.tr("tui.chat.worked_for")) + " " + styleBrand.Render(duration)
+	line := "  " + styleBrand.Render("✦") + " " + styleMuted.Render(t.tr("tui.chat.worked_for")) + " " + styleBrand.Render(duration)
 	if !endedAt.IsZero() {
 		// 时间用中点分隔，与 subtask 行内分隔风格一致，避免“于”这类书面语在 TUI 里显得生硬。
-		line += " " + styleDim.Render("·") + " " + styleDim.Render(endedAt.Format("15:04"))
+		line += " " + styleDim.Render("·") + " " + styleMuted.Render(endedAt.Format("15:04"))
 	}
 	return line
 }

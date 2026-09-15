@@ -20,11 +20,13 @@ const (
 	overlayListSkills = "skills"
 	overlayListMCP    = "mcp"
 	overlayListModels = "models"
+	overlayListTheme  = "theme"
 
 	// NativeList* 是 root TUI 渲染原生列表浮层时使用的稳定归属标识。
 	NativeListSkills = overlayListSkills
 	NativeListMCP    = overlayListMCP
 	NativeListModels = overlayListModels
+	NativeListTheme  = overlayListTheme
 )
 
 // ListStyles 由 root 注入主题，页面只保留列表结构和业务数据。
@@ -43,6 +45,7 @@ type ListText struct {
 	SkillsTitle  string
 	MCPTitle     string
 	ModelsTitle  string
+	ThemeTitle   string
 	CountSuffix  string
 	Filter       string
 	Skill        string
@@ -53,6 +56,7 @@ type ListText struct {
 	Models       string
 	Toggle       string
 	Reload       string
+	Apply        string
 	GlobalScope  string
 	ProjectScope string
 	Select       string
@@ -176,6 +180,19 @@ func (d nativeDelegate) renderItem(width int, selected bool, item overlaylist.It
 		case "◉":
 			mark, markStyle = "✓", d.styles.OK
 		}
+	case ThemeItem:
+		// 主题项：色块预览 + 名称 + 解析失败原因。
+		// 内置 default 排首位（可随时切回），用本地化展示名。
+		name = row.Label()
+		badge = row.Swatch
+		switch {
+		case row.Err != "":
+			mark, markStyle = "!", d.styles.Error
+			detail = row.Err
+		case row.Active:
+			// 勾选只标记已保存生效的主题；光标移动仅是预览，不改变生效状态。
+			mark, markStyle = "✓", d.styles.OK
+		}
 	}
 
 	return d.renderLineWithBadge(width, rail, mark, markStyle, badge, name, nameStyle, detail)
@@ -251,8 +268,11 @@ func (m *Model) InitNativeLists(dark bool, styles ListStyles, text ListText) {
 	}
 	if m.ModelList.Owner() == "" {
 		m.ModelList = overlaylist.New(overlayListModels, nil, nativeDelegate{styles: styles, text: text}, 1, 1)
+		m.ThemeList = overlaylist.New(overlayListTheme, nil, nativeDelegate{styles: styles, text: text}, 1, 1)
 	}
 	configure(&m.SkillsList, text.SkillsTitle, text.Skill, text.Skills, nativeDelegate{styles: styles, text: text})
+	// 主题列表项由 root 注入（内置 default 不在列表里），这里只配置标题与计数。
+	configure(&m.ThemeList, text.ThemeTitle, text.Model, text.Models, nativeDelegate{styles: styles, text: text})
 	configure(&m.MCPList, text.MCPTitle, text.Server, text.Servers, nativeDelegate{styles: styles, text: text, loading: func(name string) bool { return m.MCPActionServer == name }})
 	configure(&m.ModelList, text.ModelsTitle, text.Model, text.Models, nativeDelegate{styles: styles, text: text})
 }
@@ -332,6 +352,9 @@ func (m *Model) NativeListRows(owner string, styles ListStyles, text ListText, w
 		delegate = nativeDelegate{styles: styles, text: text, loading: func(name string) bool { return m.MCPActionServer == name }}
 	case overlayListModels:
 		model = &m.ModelList
+		delegate = nativeDelegate{styles: styles, text: text}
+	case overlayListTheme:
+		model = &m.ThemeList
 		delegate = nativeDelegate{styles: styles, text: text}
 	default:
 		return nil

@@ -9,34 +9,6 @@ import (
 	"github.com/alanchenchen/suna/internal/protocol"
 )
 
-var (
-	ColorBrand = lipgloss.Color("14")
-	ColorDim   = lipgloss.Color("8")
-	ColorUser  = lipgloss.Color("12")
-	ColorAgent = lipgloss.Color("10")
-	ColorTool  = lipgloss.Color("11")
-	ColorError = lipgloss.Color("9")
-	ColorHL    = lipgloss.Color("15")
-
-	styleUser    = lipgloss.NewStyle().Bold(true).Foreground(ColorUser)
-	styleAgent   = lipgloss.NewStyle().Bold(true).Foreground(ColorAgent)
-	styleTool    = lipgloss.NewStyle().Bold(true).Foreground(ColorTool)
-	styleError   = lipgloss.NewStyle().Bold(true).Foreground(ColorError)
-	styleSystem  = lipgloss.NewStyle().Bold(true).Foreground(ColorDim)
-	styleDim     = lipgloss.NewStyle().Foreground(ColorDim)
-	styleHL      = lipgloss.NewStyle().Bold(true).Foreground(ColorHL)
-	styleCursor  = lipgloss.NewStyle().Bold(true).Foreground(ColorBrand)
-	styleLogo    = lipgloss.NewStyle().Foreground(ColorBrand).Bold(true)
-	styleLogoDim = lipgloss.NewStyle().Foreground(ColorDim)
-	styleBrand   = lipgloss.NewStyle().Foreground(ColorBrand).Bold(true)
-
-	// styleSelection 是内容区鼠标选区的反色高亮：品牌色背景 + 深色前景，
-	// 与 pet/面板的选中 rail 视觉一致；主题切换时在 applyThemePalette 重建。
-	styleSelection = lipgloss.NewStyle().Background(ColorBrand).Foreground(ColorDim)
-
-	boxStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(ColorDim)
-)
-
 // UI 通用工具函数和小型面板渲染。
 // 这里集中放置跨页面复用的纯布局逻辑，页面文件只保留各自状态机和主要渲染入口。
 
@@ -65,7 +37,7 @@ func renderHeader(title, right string, width int) string {
 		width = 80
 	}
 	left := "  " + styleHL.Render(title)
-	r := styleDim.Render(right)
+	r := styleMuted.Render(right)
 	pad := max(1, width-lipgloss.Width(left)-lipgloss.Width(r)-2)
 	return left + strings.Repeat(" ", pad) + r + "\n" + styleDim.Render(strings.Repeat("─", width))
 }

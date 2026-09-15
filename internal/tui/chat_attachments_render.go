@@ -129,13 +129,13 @@ func (t *TUI) renderAttachmentBox(items []attachmentItem, cursor int, selectable
 		lines = append(lines, st.Render(line))
 	}
 	if len(items) > limit {
-		lines = append(lines, styleDim.Render(fmt.Sprintf("  +%d more", len(items)-limit)))
+		lines = append(lines, styleMuted.Render(fmt.Sprintf("  +%d more", len(items)-limit)))
 	}
 	if strings.TrimSpace(help) != "" {
 		if len(lines) > 0 {
 			lines = append(lines, styleDim.Render(strings.Repeat("─", inner)))
 		}
-		lines = append(lines, styleDim.Render(help))
+		lines = append(lines, styleMuted.Render(help))
 	}
 	return boxStyle.Width(width).Padding(0, 1).Render(styleHL.Render(title) + "\n" + strings.Join(lines, "\n"))
 }
@@ -175,7 +175,7 @@ func (t *TUI) renderAttachmentList(items []attachmentItem, cursor int, selectabl
 		lines = append(lines, st.Render(line))
 	}
 	if len(items) > limit {
-		lines = append(lines, styleDim.Render(fmt.Sprintf("  +%d more", len(items)-limit)))
+		lines = append(lines, styleMuted.Render(fmt.Sprintf("  +%d more", len(items)-limit)))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -200,18 +200,18 @@ func (t *TUI) renderPendingImagePaste() string {
 		title = t.tr("tui.attachment.detected_data")
 		help = t.tr("tui.attachment.confirm_data_help")
 	}
-	return styleHL.Render(title) + "\n" + styleDim.Render(help)
+	return styleHL.Render(title) + "\n" + styleMuted.Render(help)
 }
 
 func (t *TUI) attachmentHelp() string {
 	if t.chat.AttachmentDelete && len(t.chat.Attachments) > 0 {
 		name := t.chat.Attachments[t.chat.AttachmentCursor].Name
-		return styleError.Render(t.tr("tui.attachment.delete")+" "+name+"?") + " " + styleDim.Render(t.tr("tui.attachment.delete_help"))
+		return styleError.Render(t.tr("tui.attachment.delete")+" "+name+"?") + " " + styleMuted.Render(t.tr("tui.attachment.delete_help"))
 	}
 	if t.chat.AttachmentMode {
-		return styleDim.Render(t.tr("tui.attachment.mode_help"))
+		return styleMuted.Render(t.tr("tui.attachment.mode_help"))
 	}
-	return styleDim.Render(t.tr("tui.attachment.normal_help"))
+	return styleMuted.Render(t.tr("tui.attachment.normal_help"))
 }
 
 func (t *TUI) savePastedImage(p *pendingImagePaste) (string, string, int64, error) {
@@ -248,12 +248,12 @@ func truncateMiddle(s string, maxWidth int) string {
 // 走普通用户消息渲染路径），这里只返回内容部分，避免双重 ● 点。
 func (t *TUI) renderMediaSummary(summary string) string {
 	name, size := parseMediaSummary(summary)
-	line := styleDim.Render("📷") + " " + styleDim.Render(t.tr("tui.chat.media_image"))
+	line := styleDim.Render("📷") + " " + styleMuted.Render(t.tr("tui.chat.media_image"))
 	if name != "" {
-		line += " · " + styleDim.Render(name)
+		line += " · " + styleMuted.Render(name)
 	}
 	if size != "" {
-		line += " · " + styleDim.Render(size)
+		line += " · " + styleMuted.Render(size)
 	}
 	return line
 }
