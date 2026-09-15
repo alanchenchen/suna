@@ -233,25 +233,60 @@ func systemCMD(t *testing.T) string {
 	return path
 }
 
+// waitPIDFile 等待 descendant 写入 PID 标记文件并返回其中的 PID。
+// Windows 上文件创建与写入之间存在时间窗，读到的可能是空文件：
+// 那是瞬态而非错误，必须继续重试，否则会在写入完成前误报失败。
 func waitPIDFile(t *testing.T, path string, limit time.Duration) uint32 {
 	t.Helper()
 	deadline := time.Now().Add(limit)
 	for time.Now().Before(deadline) {
 		data, err := os.ReadFile(path)
 		if err == nil {
-			pid, parseErr := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 32)
-			if parseErr != nil || pid == 0 {
-				t.Fatalf("invalid descendant PID %q: %v", data, parseErr)
+			if pid, parseErr := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 32); parseErr == nil && pid != 0 {
+				return uint32(pid)
 			}
-			return uint32(pid)
-		}
-		if !errors.Is(err, os.ErrNotExist) {
+			// 内容尚未写入或尚未写完整，等下一次轮询。
+		} else if !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("read descendant PID: %v", err)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("descendant did not create PID marker within %s", limit)
+	// 超时后重新读一次，把实际内容带进失败信息，便于区分“从未创建”与“内容非法”。
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("descendant did not create PID marker within %s: %v", limit, err)
+	}
+	t.Fatalf("descendant PID marker not parseable within %s: %q", limit, data)
 	return 0
+}
+
+// waitPIDFile 必须容忍“文件已创建但内容尚未写入”的瞬态：
+// Windows 上创建与写入之间存在时间窗，读到的可能是空文件或部分内容。
+func TestWaitPIDFileToleratesIncompleteWrite(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		initial string
+		final   string
+		want    uint32
+	}{
+		{"empty then written", "", "4321", 4321},
+		{"partial then written", "12", "12345", 12345},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "descendant.pid")
+			if err := os.WriteFile(path, []byte(tc.initial), 0o600); err != nil {
+				t.Fatalf("prepare marker: %v", err)
+			}
+			go func() {
+				time.Sleep(50 * time.Millisecond)
+				_ = os.WriteFile(path, []byte(tc.final), 0o600)
+			}()
+
+			if got := waitPIDFile(t, path, 3*time.Second); got != tc.want {
+				t.Fatalf("waitPIDFile() = %d, want %d", got, tc.want)
+			}
+		})
+	}
 }
 
 func waitProcessGone(t *testing.T, pid uint32, limit time.Duration) {

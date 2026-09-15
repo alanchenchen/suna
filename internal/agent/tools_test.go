@@ -411,13 +411,16 @@ func TestMainGuardGateMakesApprovedReceiptVisibleToNextReview(t *testing.T) {
 	first := call("first", t.TempDir()+"/first.txt")
 	second := call("second", t.TempDir()+"/second.txt")
 
+	// 两个 exec 各自要拉起一个 shell 进程，Guard 审查又由 guardGate 串行化，
+	// Windows 上进程创建明显更慢。超时只影响失败路径（成功时 select 立即返回），
+	// 因此给足余量而不做平台分支。
 	for _, result := range []<-chan tools.Result{first, second} {
 		select {
 		case got := <-result:
 			if got.IsError {
 				t.Fatalf("tool result = %#v, want success", got)
 			}
-		case <-time.After(time.Second):
+		case <-time.After(10 * time.Second):
 			t.Fatal("tool execution did not complete")
 		}
 	}
