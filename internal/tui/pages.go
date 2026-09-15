@@ -52,9 +52,16 @@ func (t *TUI) updateWelcome(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (t *TUI) initWelcomeList() {
 	if !t.menu.HasItems() {
-		t.menu = welcomepage.New(welcomepage.Deps{Tr: func(key string) string { return t.tr(key) }, Styles: welcomepage.Styles{Cursor: styleCursor, Dim: styleDim, HL: styleHL, Brand: styleBrand}})
+		// 样式不在这里：它随主题变化，由 View 每帧传入，
+		// 因此主题切换无需任何外部推送，theme 层也不必知道 welcome 存在。
+		t.menu = welcomepage.New(welcomepage.Deps{Tr: func(key string) string { return t.tr(key) }})
 	}
 	t.menu.SetItems(t.welcomeMenuItems(), t.width)
+}
+
+// welcomeStyles 返回当前主题下的 welcome 菜单样式，供 View 每帧传入。
+func (t *TUI) welcomeStyles() welcomepage.Styles {
+	return welcomepage.Styles{Cursor: styleCursor, Dim: styleDim, Brand: styleBrand}
 }
 
 func (t *TUI) handleWelcomeAction(action welcomepage.Action) tea.Cmd {
@@ -175,7 +182,7 @@ func (t *TUI) viewWelcome() string {
 		Height:        t.height,
 		Pet:           renderPet(petIdle, t.petFrame),
 		Info:          t.renderWelcomeInfo(),
-		Menu:          t.menu.View(),
+		Menu:          t.menu.View(t.welcomeStyles()),
 		Help:          t.welcomeHelp(),
 		HasConfigured: t.hasConfiguredModel(),
 	}, welcomepage.ViewDeps{

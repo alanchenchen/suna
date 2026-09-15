@@ -37,18 +37,14 @@ func TestModelUpdateKey(t *testing.T) {
 }
 
 func TestSelectedItemUsesBrandStyle(t *testing.T) {
-	m := New(Deps{
-		Tr: func(key string) string { return key },
-		Styles: Styles{
-			Cursor: lipgloss.NewStyle().Foreground(lipgloss.Color("12")),
-			Dim:    lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
-			HL:     lipgloss.NewStyle().Foreground(lipgloss.Color("15")).Bold(true),
-			Brand:  lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true),
-		},
-	})
+	m := New(Deps{Tr: func(key string) string { return key }})
 	m.SetItems([]Item{{LabelKey: "config", Action: ActionConfig}}, 80)
 
-	view := m.View()
+	view := m.View(Styles{
+		Cursor: lipgloss.NewStyle().Foreground(lipgloss.Color("12")),
+		Dim:    lipgloss.NewStyle().Foreground(lipgloss.Color("8")),
+		Brand:  lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true),
+	})
 	if !strings.Contains(view, "96m") {
 		t.Fatalf("selected item should use brand cyan style, view=%q", view)
 	}
@@ -72,7 +68,7 @@ func TestJoinPickerRendersTitleAndTruncatedCWD(t *testing.T) {
 		Action:   ActionJoin,
 	}}, 30)
 
-	view := m.View()
+	view := m.View(Styles{})
 	if !strings.Contains(view, "A friendly se...") {
 		t.Fatalf("join title should be truncated to menu width, view=%q", view)
 	}
@@ -127,9 +123,9 @@ func TestJoinPickerBackHasNoBlankSecondLine(t *testing.T) {
 		{LabelKey: "Join", Key: "Title", CWD: "/workspace", Action: ActionJoin},
 	}, 80)
 
-	lines := strings.Split(stripANSI(m.View()), "\n")
+	lines := strings.Split(stripANSI(m.View(Styles{})), "\n")
 	if len(lines) < 2 || strings.TrimSpace(lines[1]) == "" {
-		t.Fatalf("Back item has blank second line: %q", m.View())
+		t.Fatalf("Back item has blank second line: %q", m.View(Styles{}))
 	}
 	if !strings.Contains(lines[1], "Return to welcome menu") {
 		t.Fatalf("Back detail line = %q, want localized detail", lines[1])

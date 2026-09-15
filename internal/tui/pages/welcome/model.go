@@ -48,17 +48,20 @@ func (i Item) FilterValue() string { return i.LabelKey }
 type Styles struct {
 	Cursor lipgloss.Style
 	Dim    lipgloss.Style
-	HL     lipgloss.Style
 	Brand  lipgloss.Style
 }
 
+// Deps 是菜单的跨帧依赖。样式不在这里：它随主题变化，属于每帧渲染输入，
+// 由 View 传入，与 RenderView/RenderEntry 等渲染函数的约定一致。
 type Deps struct {
-	Tr     func(string) string
-	Styles Styles
+	Tr func(string) string
 }
 
 type Model struct {
-	deps        Deps
+	deps Deps
+	// styles 是当前帧的样式，由 View 注入。delegate 只持有 Model 指针，
+	// 渲染每项时读取它，因此主题切换只需调用方在下一帧传入新样式。
+	styles      Styles
 	cursor      int
 	initialized bool
 	menu        list.Model
@@ -103,7 +106,10 @@ func (m *Model) HasItems() bool {
 	return m.initialized && len(m.menu.Items()) > 0
 }
 
-func (m *Model) View() string {
+// View 渲染菜单。样式是每帧输入：主题可在任意时刻切换，缓存到 deps 会让菜单
+// 停在旧配色。存入字段是因为 delegate 只持有 Model 指针，渲染每项时读取它。
+func (m *Model) View(styles Styles) string {
+	m.styles = styles
 	return m.menu.View()
 }
 
@@ -158,13 +164,14 @@ func (d delegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	if !ok {
 		return
 	}
-	cursor := selection.Rail(index == m.Index(), 0, d.m.deps.Styles.Cursor)
+	styles := d.m.styles
+	cursor := selection.Rail(index == m.Index(), 0, styles.Cursor)
 	st := lipgloss.NewStyle()
 	if wi.Disabled {
-		st = d.m.deps.Styles.Dim
+		st = styles.Dim
 	}
 	if index == m.Index() && !wi.Disabled {
-		st = d.m.deps.Styles.Brand
+		st = styles.Brand
 	}
 
 	if wi.Action == ActionJoin || wi.Deletable {
@@ -172,17 +179,17 @@ func (d delegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 		title := textutil.TruncateRunes(wi.Key, contentWidth)
 		cwd := textutil.TruncateRunes(wi.CWD, contentWidth)
 		indent := strings.Repeat(" ", lipgloss.Width(cursor))
-		fmt.Fprint(w, cursor+st.Render(title)+"\n"+indent+d.m.deps.Styles.Dim.Render(cwd))
+		fmt.Fprint(w, cursor+st.Render(title)+"\n"+indent+styles.Dim.Render(cwd))
 		return
 	}
 
 	line := cursor + st.Render(d.m.deps.Tr(wi.LabelKey))
 	if wi.Key != "" {
-		line += d.m.deps.Styles.Dim.Render("  [" + wi.Key + "]")
+		line += styles.Dim.Render("  [" + wi.Key + "]")
 	}
 	if d.twoLine {
 		indent := strings.Repeat(" ", lipgloss.Width(cursor))
-		fmt.Fprint(w, line+"\n"+indent+d.m.deps.Styles.Dim.Render(d.m.deps.Tr(wi.DetailKey)))
+		fmt.Fprint(w, line+"\n"+indent+styles.Dim.Render(d.m.deps.Tr(wi.DetailKey)))
 		return
 	}
 	fmt.Fprint(w, line)
