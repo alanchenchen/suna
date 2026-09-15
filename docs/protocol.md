@@ -138,18 +138,135 @@ daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 
 | `session.updated` | 全局轻量 Session Catalog 增量；session metadata/status/client_count 变化时向所有已连接且完成握手的客户端广播。 |
 | `session.compact_result` | compact running / done / error / result 状态；带 `session_id` 标识归属。 |
 | `config.state` | 配置变更后的主动状态通知。 |
-| `memory.state` | memory 变更后的主动状态通知。 |
+| `config.models_result` | `config.discoverModels` 的异步结果；只发给发起请求的连接。 |
+| `memory.state` | memory 变更后的主动状态通知；只发给发起请求的连接。 |
 | `mcp.updated` | 单个 MCP server 的完整状态增量；按 `server.id` 覆盖本地快照。 |
 | `skill.load` | Skill load 生命周期通知。 |
 | `skill.review` | Skill review 生命周期通知。 |
 
 客户端必须忽略自己不认识的 notification，不能因此关闭连接。Catalog 用于提前初始化功能，但实际接收端仍应保持宽松。
 
+每个 notification 的完整 payload 字段、类型、语义和客户端职责见下方 [Notification 字段参考](#notification-字段参考)。
+
 `agent.delta`、`agent.run`、`agent.steering`、`agent.usage`、`agent.tool_start`、`agent.tool_guard`、`agent.tool_end` 与 `session.compact_result` 均携带 `session_id` 字段。单 session 客户端可忽略该字段；多 session 并存的客户端用它区分事件归属，避免把不同 session 的事件路由到错误视图。
 
 `mcp.list` 与 `mcp.updated` 采用相同的 snapshot + delta 语义。MCP server 的 `state` 只能是 `disabled / starting / active / error`；daemon core ready 不等待 MCP，只有 `active` server 的工具进入模型 Tool Catalog。多个 server 短时间完成时，Agent 会合并刷新目录，并在目录发布完成后再发送 `active` 增量。
 
 `session.list` 与 `session.updated` 共同维护全局轻量 Session Catalog：连接建立后用 `session.list` 获取初始快照，之后用 `session.updated` 合并 metadata、`status` 与 `client_count` 变化。详细 agent 事件仍只发送给已 attach 目标 session 的客户端。
+
+#### Notification 字段参考
+
+本节是 method 参数参考的对称清单，逐字段列出公开 notification 的 payload、类型、语义与客户端职责。未列出的字段一律忽略；类型后缀 `?` 表示可选（可能缺省）。
+
+`范围` 列取值：
+
+- `session`：只发给已 attach 该 session 的客户端。
+- `全局`：发给所有已完成握手的连接，包括未 attach 该 session 的客户端。
+- `请求方`：只发给触发该操作的连接。
+
+| Notification | 范围 | 字段 | 类型 | 语义 | 客户端应做什么 |
+|---|---|---|---|---|---|
+| `agent.delta` | session | `session_id` | string? | 事件归属 session。 | 多 session 客户端据此路由。 |
+| | | `run_id` | string? | 事件归属 run。 | 关联同一 run 的事件。 |
+| | | `kind` | string | `assistant` 或 `reasoning`。 | 分别渲染正文与思考内容。 |
+| | | `content` | string | 文本增量。 | 追加到对应缓冲，不要据此推断 run 状态。 |
+| `agent.run` | session | `session_id` | string? | 事件归属 session。 | 多 session 客户端据此路由。 |
+| | | `run_id` | string? | 事件归属 run。 | 关联同一 run 的事件。 |
+| | | `state` | string | `running` / `retrying` / `cancelling` / `done` / `failed` / `cancelled`。 | 只有 `done` / `failed` / `cancelled` 是终态；`cancelling` 期间不得再发送、排队或取消。 |
+| | | `phase` | string? | 当前阶段：`model` / `tool` / `compact` / `guard` / `ask` / `skill`。 | 用于展示阶段，不用于状态判断。 |
+| | | `can_control` | bool | 本连接是否拥有当前 run 控制权。 | 为 false 时隐藏发送与取消入口。 |
+| | | `message` | string? | 可读描述（如 retry 原因）。 | 仅展示。 |
+| | | `attempt` / `max_attempts` | int? | 仅 `retrying` 出现。 | 展示重试进度。 |
+| | | `delay_ms` | int? | 仅 `retrying` 出现，下次重试延迟。 | 展示等待时间。 |
+| | | `error` | object? | `ModelError`：`kind` / `message` / `status_code` / `code` / `type` / `provider` / `model`。 | 展示上游错误；不据此判断 retry。 |
+| | | `run_error` | object? | `{kind, model_ref}`，模型请求前的前置条件失败。 | 按 `kind` 分支引导用户处理。 |
+| | | `resume_available` | bool? | 仅 `failed` 时可能为 true。 | 提供“继续/恢复”，调用 `agent.resumeRun`。 |
+| `agent.steering` | session | `session_id` | string? | 事件归属 session。 | 多 session 客户端据此路由。 |
+| | | `id` | string | steering 消息 ID。 | 与 response、`session.user_message.message_id` 关联。 |
+| | | `run_id` | string | 事件归属 run。 | 关联同一 run 的事件。 |
+| | | `client_msg_id` | string? | 客户端提供的幂等 ID。 | 与本地排队请求关联。 |
+| | | `state` | string | `queued` / `applied` / `removed` / `rejected`。 | `queued` 不渲染为正式消息；`removed` / `rejected` 恢复为草稿；`applied` 后等待 `session.user_message`。 |
+| | | `sequence` | int | 同一 run 内递增序号。 | 用于排序，不用于幂等。 |
+| | | `can_control` | bool | 本连接是否可撤回该消息。 | 为 false 时隐藏撤回入口。 |
+| | | `parts` | array? | 消息内容 parts。 | 展示排队内容。 |
+| `agent.usage` | session | `session_id` | string? | 事件归属 session。 | 多 session 客户端据此路由。 |
+| | | `run_id` | string? | 事件归属 run。 | 关联同一 run 的事件。 |
+| | | `input_tokens` / `output_tokens` | int | 本次请求输入 / 输出 token。 | 累加展示。 |
+| | | `cache_read_tokens` / `cache_creation_tokens` | int? | 缓存读写明细，**已包含在 `input_tokens` 内**。 | 汇总时不得重复相加。 |
+| | | `context_tokens` | int? | 最近一次请求的实际上下文 token。 | 展示上下文占用。 |
+| | | `estimated_context_tokens` | int? | 估算值。 | 与 `context_tokens` 都缺省时不要自行推算。 |
+| | | `context_window` | int? | 模型上下文窗口。 | 计算占用比例。 |
+| | | `duration_ms` | int? | 本次请求耗时。 | 展示耗时。 |
+| | | `tokens_per_sec` | float? | 生成速度。 | 展示速度。 |
+| `agent.tool_start` | session | `session_id` | string? | 事件归属 session。 | 多 session 客户端据此路由。 |
+| | | `id` | string | 工具调用 ID。 | 与 `tool_guard` / `tool_end` 关联。 |
+| | | `tool` | string | 工具名。 | 展示工具名。 |
+| | | `params` | object | 工具入参。 | 展示入参。 |
+| | | `intent` | string? | 可选意图描述。 | 展示意图。 |
+| `agent.tool_guard` | session | `session_id` | string? | 事件归属 session。 | 多 session 客户端据此路由。 |
+| | | `tool_call_id` | string | 工具调用 ID。 | 与 `tool_start` / `tool_end` 关联。 |
+| | | `tool` | string | 工具名。 | 展示工具名。 |
+| | | `readonly` | bool | 是否只读调用。 | 区分展示样式。 |
+| | | `decision` | string | `approve` / `reject` / `confirm`。 | `confirm` 表示等待用户确认，随后会有 `agent.guard_confirm`；`reject` 展示为拒绝。 |
+| | | `source` | string | 决策来源：`rule` / `static` / `user` / `llm` / `fallback`。 | 展示来源标签，不用于业务分支。 |
+| | | `reason` | string? | 决策原因。 | 展示原因。 |
+| | | `review_code` / `review_message` | string? | Smart Review 的稳定 code 与说明。 | 展示审核信息。 |
+| `agent.tool_end` | session | `session_id` | string? | 事件归属 session。 | 多 session 客户端据此路由。 |
+| | | `id` | string | 工具调用 ID。 | 与 `tool_start` 关联。 |
+| | | `tool` | string | 工具名。 | 展示工具名。 |
+| | | `result` | string | 展示用结果文本，可能被截断。 | 展示结果。 |
+| | | `error` | bool? | 工具是否执行失败。 | 展示失败样式。 |
+| | | `result_truncated` | bool? | `result` 是否被截断。 | 截断时提示。 |
+| | | `result_bytes` | int? | 原始结果字节数。 | 展示原始大小。 |
+| | | `metadata` | object? | 工具附加元数据（如 exec 退出码）。 | 按需展示。 |
+| `agent.ask_user` | session | `session_id` | string? | 事件归属 session。 | 多 session 客户端据此路由。 |
+| | | `id` | string | 交互 ID。 | 回复 `agent.askReply` 时回传。 |
+| | | `question` | string | 问题文本。 | 展示问题。 |
+| | | `options` | string[]? | 预设选项。 | 展示选项。 |
+| | | `allow_custom` | bool | 是否接受自定义文本。 | 为 true 时才提供自由输入。 |
+| | | `can_reply` | bool | 本连接是否可回复。 | 为 false 时只展示不回复。 |
+| `agent.guard_confirm` | session | `session_id` | string? | 事件归属 session。 | 多 session 客户端据此路由。 |
+| | | `id` | string | 交互 ID。 | 回复 `agent.guardReply` 时回传。 |
+| | | `tool_call_id` | string? | 工具调用 ID。 | 关联工具块。 |
+| | | `tool` | string | 工具名。 | 展示工具名。 |
+| | | `params` | object | 待确认的工具入参。 | 展示入参。 |
+| | | `readonly` | bool | 是否只读调用。 | 区分展示样式。 |
+| | | `reason` | string | 需要确认的原因。 | 展示原因。 |
+| | | `review_code` / `review_message` | string? | Smart Review 的稳定 code 与说明。 | 展示审核信息。 |
+| | | `can_reply` | bool | 本连接是否可回复。 | 为 false 时只展示。 |
+| `agent.interaction_resolved` | session | `session_id` | string? | 事件归属 session。 | 多 session 客户端据此路由。 |
+| | | `id` | string | 已解决的交互 ID。 | 关闭对应交互。 |
+| `session.user_message` | session | `session_id` | string? | 事件归属 session。 | 多 session 客户端据此路由。 |
+| | | `run_id` | string? | 事件归属 run。 | 关联同一 run 的事件。 |
+| | | `message_id` | string? | 消息 ID；steering applied 时为 steering 消息 ID。 | 与 `agent.steering.id` 关联。 |
+| | | `client_msg_id` | string? | 客户端幂等 ID。 | 与本地请求关联。 |
+| | | `parts` | array? | 消息内容 parts（`type` / `text` / `source`）。 | 展示用户消息；**直接发送时本连接不会收到**（发送方应本地渲染）；steering applied 时所有 attached 客户端都会收到。 |
+| `session.updated` | 全局 | `session` | object | `SessionInfo`：`id` / `title` / `cwd` / `model_ref` / `message_count` / `created_at` / `updated_at` / `last_attached_at` / `status` / `client_count`。 | 按 `id` 合并 metadata、`status` 与 `client_count`。 |
+| `session.compact_result` | session / 请求方 | `session_id` | string? | 事件归属 session。 | 多 session 客户端据此路由。 |
+| | | `running` | bool? | 是否正在压缩。 | `true` 进入压缩展示，`false` 退出。 |
+| | | `error` | string? | 压缩错误信息。 | 展示错误。 |
+| | | `before_tokens` / `after_tokens` | int | 压缩前后 token；仅压缩完成时有效。 | 展示压缩效果。 |
+| | | `context_window` | int | 模型上下文窗口；仅压缩完成时有效。 | 计算比例。 |
+| | | `turns_compressed` | int | 压缩的轮数；仅压缩完成时有效。 | 展示统计。 |
+| | | `summary_tokens` | int | Session State 摘要 token；仅压缩完成时有效。 | 展示统计。 |
+| | | `truncated_outputs` | int | 被截断的工具输出数；仅压缩完成时有效。 | 展示统计。 |
+| | | `noop` | bool? | 是否无需压缩。 | 展示提示。 |
+| `config.state` | 全局 | `models` | array | 模型条目数组。 | 重建模型列表。 |
+| | | `active_model` | string | 当前默认模型 ref。 | 更新当前模型展示。 |
+| | | `locale` / `theme` / `guard_mode` / `workspace` | string? | 通用配置。 | 同步 UI 设置。 |
+| `config.models_result` | 请求方 | `provider` | string | 目标 provider。 | 与发起时的 provider 匹配。 |
+| | | `models` | string[]? | 可用模型 ID。 | 展示候选。 |
+| | | `error_message` | string? | 脱敏错误信息。 | 展示错误。 |
+| `memory.state` | 请求方 | `memories` | array | `MemoryItem`：`id` / `content` / `kind` / `tags` / `priority` / `is_core`。 | 重建 memory 列表。 |
+| `mcp.updated` | 全局 | `server` | object | `MCPServerInfo`：`id` / `name` / `transport` / `command` / `state` / `tool_count` / `error`。 | 按 `server.id` 覆盖本地快照；`state` 只能是 `disabled` / `starting` / `active` / `error`，只有 `active` server 的工具进入 Tool Catalog。 |
+| `skill.load` | session | `name` | string | Skill 名称。 | 展示名称。 |
+| | | `status` | string? | 加载状态。 | 展示状态。 |
+| `skill.review` | session | `name` | string | Skill 名称。 | 展示名称。 |
+| | | `status` | string? | 审核状态。 | 展示状态。 |
+| | | `review` | string? | 审核内容。 | 展示审核结果。 |
+| | | `error` | string? | 审核错误。 | 展示错误。 |
+
+`daemon.full_status` 不在公开 Catalog 中，schema 不承诺稳定；其广播时机与处理约束见第 10 节。
 
 ### Features
 
@@ -416,7 +533,7 @@ TUI 的“本会话 / 已加入 / 观察中”是 UI 根据 attach 方式、clie
 修改 protocol 时必须遵守：
 
 - `runtime_version` 只用于展示和诊断，不用于判断功能。
--新增公开 method、notification 或 feature 时同步更新 `internal/protocol` Catalog 与本文对应分组。
+-新增公开 method、notification 或 feature 时同步更新 `internal/protocol` Catalog 与本文对应分组，并同步 [Notification 字段参考](#notification-字段参考) 的字段行。
 -已有 Catalog 名称的语义保持稳定；增量能力增加新名称。
 -客户端只调用 `catalog.methods` 中存在的方法，并按 `catalog.features` 渐进启用细粒度 UI。
 -客户端必须忽略未知字段和 notification。
@@ -432,5 +549,5 @@ TUI 的“本会话 / 已加入 / 观察中”是 UI 根据 attach 方式、clie
 | 文档 | 面向对象 | 职责 |
 |---|---|---|
 | `docs/tcp-client.md` | 第三方 UI 开发者 | 如何确保 daemon 已启动、连接 TCP、写 JSON-RPC client、调用 method、处理 notification 和错误。 |
-| `docs/protocol.md` | Suna 维护者 / transport 实现者 / 高级集成者 | protocol 语义边界、分层约束、错误模型、recovery 和兼容性规则。 |
+| `docs/protocol.md` | Suna 维护者 / transport 实现者 / 高级集成者 | protocol 语义边界、分层约束、错误模型、recovery 和兼容性规则；notification 字段参考。 |
 | `docs/architecture.md` | 架构读者 | CLI、TUI、daemon、agent、transport、config、memory、skill、MCP 的整体分层。 |
