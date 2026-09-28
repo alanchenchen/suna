@@ -526,8 +526,8 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"tui.error.daemon_not_connected":      {LocaleEN: "daemon not connected", LocaleZH: "daemon 未连接"},
 
 		"status.waiting_model":                  {LocaleEN: "Waiting for model...", LocaleZH: "正在等待模型..."},
-		"status.model_retrying":                 {LocaleEN: "Model request failed temporarily · retrying in {}s ({}/{})", LocaleZH: "模型请求临时失败 · {} 秒后自动重试（{}/{}）"},
-		"status.model_retrying_simple":          {LocaleEN: "Model request failed temporarily · retrying...", LocaleZH: "模型请求临时失败 · 正在自动重试..."},
+		"status.model_retrying":                 {LocaleEN: "Model service temporarily unavailable · retry {} (in {}s, {})", LocaleZH: "模型服务暂时不可用 · 第 {} 次重试（{} 秒后，已持续 {}）"},
+		"status.model_retrying_simple":          {LocaleEN: "Model service temporarily unavailable · retrying...", LocaleZH: "模型服务暂时不可用 · 正在重试..."},
 		"model_error.failed":                    {LocaleEN: "Model request failed: {}", LocaleZH: "模型请求失败：{}"},
 		"model_error.detail":                    {LocaleEN: "Details: {}", LocaleZH: "详情：{}"},
 		"model_error.action_retry":              {LocaleEN: "Press Enter to retry, or type a new message to continue.", LocaleZH: "按 Enter 重试，或输入新消息继续。"},

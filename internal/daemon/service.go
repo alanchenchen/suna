@@ -426,7 +426,7 @@ func (s *service) runAgentEvents(ctx context.Context, connID, sessionID, runID, 
 					s.daemon.broadcastSessionState(ctx, sessionID)
 				case agent.StatusLLMRetrying:
 					s.daemon.sessions.transitionRunState(sessionID, runID, protocol.AgentRunRetrying, func(state protocol.AgentRunState) {
-						emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{SessionID: sessionID, RunID: runID, State: state, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Attempt: evt.Attempt, MaxAttempts: evt.MaxAttempts, DelayMs: evt.DelayMs, Error: protocolModelError(evt.ModelError)})
+						emit(ctx, sink, protocol.NotifyAgentRun, protocol.AgentRunParams{SessionID: sessionID, RunID: runID, State: state, Phase: protocol.AgentRunPhaseModel, Message: evt.Content, Attempt: evt.Attempt, DelayMs: evt.DelayMs, ElapsedMs: evt.ElapsedMs, BudgetMs: evt.BudgetMs, Error: protocolModelError(evt.ModelError)})
 					})
 				case agent.StatusDone:
 					s.daemon.sessions.transitionRunState(sessionID, runID, protocol.AgentRunDone, func(state protocol.AgentRunState) {

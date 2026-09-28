@@ -263,7 +263,7 @@ Attach response 中的 `current_run`、`run_id`、`assistant_buffer` 与 `reason
 
 各通知的关键可选字段（未列出的字段一律忽略）：
 
-- `agent.run`：`error` 是 `ModelError`（`kind/message/status_code/code/type/provider/model`），`run_error` 是 `{kind, model_ref}`；两者语义不同，见 protocol.md 错误模型。`attempt/max_attempts/delay_ms` 仅 `retrying` 时出现。
+- `agent.run`：`error` 是 `ModelError`（`kind/message/status_code/code/type/provider/model`），`run_error` 是 `{kind, model_ref}`；两者语义不同，见 protocol.md 错误模型。`attempt/delay_ms/elapsed_ms/budget_ms` 仅 `retrying` 时出现。
 - `agent.usage`：`context_tokens` 是最近一次请求的实际上下文，`estimated_context_tokens` 是估算值；两者都缺省时不要自行推算。`cache_read_tokens`/`cache_creation_tokens` 已包含在 `input_tokens` 内，汇总时不得重复相加。
 - `agent.tool_start`：`params` 是工具入参对象，`intent` 是可选意图描述。
 - `agent.tool_end`：`result` 是展示用文本（可能被截断），`result_truncated=true` 时 `result_bytes` 给出原始字节数；`error=true` 表示工具执行失败。

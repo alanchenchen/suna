@@ -61,12 +61,13 @@ const (
 )
 
 type StatusEvent struct {
-	Kind        StatusKind
-	Message     string
-	Attempt     int
-	MaxAttempts int
-	Delay       time.Duration
-	Error       *model.ModelError
+	Kind    StatusKind
+	Message string
+	Attempt int
+	Delay   time.Duration
+	Elapsed time.Duration
+	Budget  time.Duration
+	Error   *model.ModelError
 }
 
 type EventSink interface {
@@ -135,11 +136,12 @@ type Hooks struct {
 }
 
 type Runner struct {
-	Compressor *memory.Compressor
-	Executor   ToolExecutor
-	Sink       EventSink
-	UsageSink  UsageSink
-	Hooks      Hooks
+	Compressor  *memory.Compressor
+	Executor    ToolExecutor
+	Sink        EventSink
+	UsageSink   UsageSink
+	Hooks       Hooks
+	RetryPolicy RetryPolicy
 	// Calibrator 跨多次 Run 复用，用模型真实 input token 校准本地估算；
 	// 由 Agent 注入共享实例，nil 时压缩判断退化为未校准行为。
 	Calibrator *model.TokenCalibrator

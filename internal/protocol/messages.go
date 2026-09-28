@@ -151,9 +151,10 @@ type AgentRunParams struct {
 
 	Message string `json:"message,omitempty"`
 
-	Attempt     int   `json:"attempt,omitempty"`
-	MaxAttempts int   `json:"max_attempts,omitempty"`
-	DelayMs     int64 `json:"delay_ms,omitempty"`
+	Attempt   int   `json:"attempt,omitempty"`
+	DelayMs   int64 `json:"delay_ms,omitempty"`
+	ElapsedMs int64 `json:"elapsed_ms,omitempty"`
+	BudgetMs  int64 `json:"budget_ms,omitempty"`
 
 	Error           *ModelError `json:"error,omitempty"`
 	RunError        *RunError   `json:"run_error,omitempty"`

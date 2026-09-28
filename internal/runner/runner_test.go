@@ -101,13 +101,16 @@ func TestReadStreamReportsNoVisibleOutputBeforeInitialError(t *testing.T) {
 	}
 }
 
-func TestModelRequestRecoveryAllowsThreeRetries(t *testing.T) {
-	t.Parallel()
-	if got, want := modelRequestMaxRetries, 3; got != want {
-		t.Fatalf("modelRequestMaxRetries = %d, want %d", got, want)
+func TestDefaultRetryPolicyUsesTimeBudgetAndBackoff(t *testing.T) {
+	p := DefaultRetryPolicy()
+	if p.Budget != 2*time.Minute || p.InitialDelay != 2*time.Second || p.MaxDelay != 30*time.Second || p.JitterRatio != 0.2 {
+		t.Fatalf("DefaultRetryPolicy() = %#v", p)
 	}
-	if got, want := modelRequestMaxAttempts, 4; got != want {
-		t.Fatalf("modelRequestMaxAttempts = %d, want %d", got, want)
+	for i := 1; i <= 6; i++ {
+		delay := p.delay(i)
+		if delay <= 0 || delay > p.MaxDelay {
+			t.Fatalf("delay(%d) = %s, want within (0,%s]", i, delay, p.MaxDelay)
+		}
 	}
 }
 
@@ -118,8 +121,12 @@ func TestRetryableModelRequestErrorUsesStructuredStatus(t *testing.T) {
 		err  error
 		want bool
 	}{
+		{name: "request timeout", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 408}, want: true},
+		{name: "too early", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 425}, want: true},
 		{name: "rate limit", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 429}, want: true},
 		{name: "server unavailable", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 503}, want: true},
+		{name: "cloudflare gateway", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 522}, want: true},
+		{name: "overloaded", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 529}, want: true},
 		{name: "bad request", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 400}, want: false},
 		{name: "network", err: &model.ModelError{Kind: model.ModelErrorNetwork, Message: "temporary network failure"}, want: true},
 		{name: "unknown", err: &model.ModelError{Kind: model.ModelErrorUnknown, Message: "temporarily unavailable"}, want: false},

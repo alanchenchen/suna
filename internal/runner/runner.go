@@ -3,7 +3,6 @@ package runner
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,12 +13,6 @@ import (
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/tools"
-)
-
-const (
-	modelRequestMaxRetries  = 3
-	modelRequestMaxAttempts = 1 + modelRequestMaxRetries
-	modelRequestRetryDelay  = 8 * time.Second
 )
 
 func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
@@ -279,56 +272,83 @@ func (r *Runner) completeWithRecovery(ctx context.Context, binding *model.ModelB
 		streamTimeout = defaultChatIdleTimeout
 		dynamicReasoningTimeout = true
 	}
+	policy := r.RetryPolicy.normalized()
+	var recoveryStarted time.Time
+	var deadline time.Time
 	var lastErr error
-	for attempt := 1; attempt <= modelRequestMaxAttempts; attempt++ {
-		ch, err := binding.Complete(ctx, *completionReq)
+	for attempt := 1; ; attempt++ {
+		if attempt > 1 && !recoveryStarted.IsZero() && !time.Now().Before(deadline) {
+			logModelRecovery("exhausted", completionReq, modelRef, attempt-1, 0, lastErr)
+			return "", nil, nil, lastErr
+		}
+		requestCtx := ctx
+		cancelRequest := func() {}
+		if !recoveryStarted.IsZero() {
+			requestCtx, cancelRequest = context.WithDeadline(ctx, deadline)
+		}
+		ch, err := binding.Complete(requestCtx, *completionReq)
 		if err != nil {
 			lastErr = err
 		} else {
-			content, toolCalls, usage, streamErr, visibleOutput := r.readStream(ctx, ch, streamTimeout, dynamicReasoningTimeout, req)
+			content, toolCalls, usage, streamErr, visibleOutput := r.readStream(requestCtx, ch, streamTimeout, dynamicReasoningTimeout, req)
 			if streamErr == nil {
+				cancelRequest()
 				if attempt > 1 {
-					logModelRecovery("recovered", completionReq, modelRef, attempt, modelRequestMaxAttempts, 0, nil)
+					logModelRecovery("recovered", completionReq, modelRef, attempt, 0, nil)
 				}
 				return content, toolCalls, usage, nil
 			}
 			if visibleOutput {
+				cancelRequest()
 				return content, toolCalls, usage, streamErr
 			}
 			lastErr = streamErr
 		}
-		if attempt >= modelRequestMaxAttempts || !retryableModelRequestError(lastErr) {
-			if attempt > 1 || retryableModelRequestError(lastErr) {
-				logModelRecovery("exhausted", completionReq, modelRef, attempt, modelRequestMaxAttempts, 0, lastErr)
-			}
+		cancelRequest()
+		if !retryableModelRequestError(lastErr) {
 			return "", nil, nil, lastErr
 		}
-		logModelRecovery("retrying", completionReq, modelRef, attempt, modelRequestMaxAttempts, modelRequestRetryDelay, lastErr)
-		if r.Sink != nil {
-			r.Sink.Status(StatusEvent{Kind: StatusLLMRetrying, Attempt: attempt + 1, MaxAttempts: modelRequestMaxAttempts, Delay: modelRequestRetryDelay, Error: model.NewModelError(lastErr)})
+		if recoveryStarted.IsZero() {
+			recoveryStarted = time.Now()
+			deadline = policy.deadline(recoveryStarted)
 		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			logModelRecovery("exhausted", completionReq, modelRef, attempt, 0, lastErr)
+			return "", nil, nil, lastErr
+		}
+		delay := policy.delay(attempt)
+		if delay > remaining {
+			delay = remaining
+		}
+		logModelRecovery("retrying", completionReq, modelRef, attempt, delay, lastErr)
+		if r.Sink != nil {
+			r.Sink.Status(StatusEvent{Kind: StatusLLMRetrying, Attempt: attempt, Delay: delay, Elapsed: time.Since(recoveryStarted), Budget: policy.Budget, Error: model.NewModelError(lastErr)})
+		}
+		timer := time.NewTimer(delay)
 		select {
-		case <-time.After(modelRequestRetryDelay):
+		case <-timer.C:
 		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 			return "", nil, nil, ctx.Err()
 		}
 		if r.Sink != nil {
 			r.Sink.Status(StatusEvent{Kind: StatusWaitingLLM})
 		}
 	}
-	if lastErr == nil {
-		lastErr = fmt.Errorf("model request failed without an error")
-	}
-	return "", nil, nil, lastErr
 }
 
-func logModelRecovery(status string, req *model.CompletionRequest, modelRef string, attempt, maxAttempts int, delay time.Duration, err error) {
+func logModelRecovery(status string, req *model.CompletionRequest, modelRef string, attempt int, delay time.Duration, err error) {
 	fields := logging.Event{
-		"request_id":   requestIDForRecovery(req),
-		"status":       status,
-		"attempt":      attempt,
-		"max_attempts": maxAttempts,
-		"model_ref":    modelRef,
+		"request_id": requestIDForRecovery(req),
+		"status":     status,
+		"attempt":    attempt,
+		"model_ref":  modelRef,
 	}
 	if req != nil {
 		fields["model"] = req.Model
@@ -362,31 +382,6 @@ func requestIDForRecovery(req *model.CompletionRequest) string {
 		return req.RequestID
 	}
 	return ""
-}
-
-func retryableModelRequestError(err error) bool {
-	if err == nil || errors.Is(err, context.Canceled) {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	me := model.NewModelError(err)
-	if me == nil {
-		return false
-	}
-	if me.Kind == model.ModelErrorNetwork {
-		return true
-	}
-	if me.Kind != model.ModelErrorHTTP {
-		return false
-	}
-	switch me.StatusCode {
-	case 408, 429, 500, 502, 503, 504:
-		return true
-	default:
-		return false
-	}
 }
 
 func (r *Runner) readStream(ctx context.Context, ch <-chan model.Chunk, streamTimeout time.Duration, dynamicReasoningTimeout bool, req Request) (string, []model.ToolCall, *model.Usage, error, bool) {

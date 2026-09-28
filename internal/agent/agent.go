@@ -571,7 +571,7 @@ func (s eventSink) Status(status runner.StatusEvent) {
 	case runner.StatusWaitingLLM:
 		s.events <- Event{Type: EventStatus, Status: StatusWaitingLLM}
 	case runner.StatusLLMRetrying:
-		s.events <- Event{Type: EventStatus, Status: StatusLLMRetrying, Content: status.Message, Attempt: status.Attempt, MaxAttempts: status.MaxAttempts, DelayMs: status.Delay.Milliseconds(), ModelError: status.Error}
+		s.events <- Event{Type: EventStatus, Status: StatusLLMRetrying, Content: status.Message, Attempt: status.Attempt, DelayMs: status.Delay.Milliseconds(), ElapsedMs: status.Elapsed.Milliseconds(), BudgetMs: status.Budget.Milliseconds(), ModelError: status.Error}
 	}
 }
 func (s eventSink) Stream(content string) { s.events <- Event{Type: EventStream, Content: content} }

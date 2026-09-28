@@ -153,7 +153,9 @@ func (t *TUI) runElapsedLabel() string {
 
 func (t *TUI) setRunRetryStatus(p protocol.AgentRunParams, now time.Time) {
 	t.retryAttempt = p.Attempt
-	t.retryMaxAttempts = p.MaxAttempts
+	t.retryElapsed = time.Duration(p.ElapsedMs) * time.Millisecond
+	t.retryBudget = time.Duration(p.BudgetMs) * time.Millisecond
+	t.retryStarted = now.Add(-t.retryElapsed)
 	if p.DelayMs > 0 {
 		t.retryDeadline = now.Add(time.Duration(p.DelayMs) * time.Millisecond)
 	} else {
@@ -165,7 +167,9 @@ func (t *TUI) setRunRetryStatus(p protocol.AgentRunParams, now time.Time) {
 func (t *TUI) clearRunRetryStatus() {
 	t.retryDeadline = time.Time{}
 	t.retryAttempt = 0
-	t.retryMaxAttempts = 0
+	t.retryElapsed = 0
+	t.retryBudget = 0
+	t.retryStarted = time.Time{}
 }
 
 func (t *TUI) refreshRunRetryStatus(now time.Time) {
@@ -175,11 +179,36 @@ func (t *TUI) refreshRunRetryStatus(now time.Time) {
 }
 
 func (t *TUI) formatRunRetryStatus(now time.Time) string {
-	if !t.retryDeadline.IsZero() && t.retryAttempt > 0 && t.retryMaxAttempts > 0 {
+	if !t.retryDeadline.IsZero() && t.retryAttempt > 0 {
 		remaining := max(0, int(math.Ceil(t.retryDeadline.Sub(now).Seconds())))
-		return t.i18n.Tf("status.model_retrying", remaining, t.retryAttempt, t.retryMaxAttempts)
+		elapsed := t.retryElapsed
+		if !t.retryStarted.IsZero() {
+			elapsed = minDuration(t.retryBudget, now.Sub(t.retryStarted))
+		}
+		return t.i18n.Tf("status.model_retrying", t.retryAttempt, remaining, formatRetryProgress(elapsed, t.retryBudget))
 	}
 	return t.tr("status.model_retrying_simple")
+}
+
+func minDuration(a, b time.Duration) time.Duration {
+	if a > 0 && b > a {
+		return a
+	}
+	return b
+}
+
+func formatRetryProgress(elapsed, budget time.Duration) string {
+	if budget <= 0 {
+		return formatRetryBudget(elapsed)
+	}
+	return formatRetryBudget(elapsed) + " / " + formatRetryBudget(budget)
+}
+
+func formatRetryBudget(budget time.Duration) string {
+	if budget <= 0 {
+		return ""
+	}
+	return toolview.FormatCompactDuration(budget)
 }
 
 func (t *TUI) formatModelError(p protocol.AgentRunParams) string {

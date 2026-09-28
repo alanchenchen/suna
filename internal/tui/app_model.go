@@ -95,9 +95,11 @@ type TUI struct {
 	chat chatpage.Model
 
 	// retryDeadline 仅用于展示模型自动重试的实时倒计时；真实重试时序始终由 daemon/Runner 控制。
-	retryDeadline    time.Time
-	retryAttempt     int
-	retryMaxAttempts int
+	retryDeadline time.Time
+	retryAttempt  int
+	retryElapsed  time.Duration
+	retryBudget   time.Duration
+	retryStarted  time.Time
 
 	// Config 页面状态。页面内部状态归属 pages/config.Model；root 只负责 daemon/configState glue。
 	config tuiconfig.Model

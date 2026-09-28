@@ -81,8 +81,9 @@ type Event struct {
 
 	ResumeAvailable bool
 	Attempt         int
-	MaxAttempts     int
 	DelayMs         int64
+	ElapsedMs       int64
+	BudgetMs        int64
 	ModelError      *model.ModelError
 	RunError        *RunError
 }

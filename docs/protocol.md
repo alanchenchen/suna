@@ -176,8 +176,9 @@ daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 
 | | | `phase` | string? | 当前阶段：`model` / `tool` / `compact` / `guard` / `ask` / `skill`。 | 用于展示阶段，不用于状态判断。 |
 | | | `can_control` | bool | 本连接是否拥有当前 run 控制权。 | 为 false 时隐藏发送与取消入口。 |
 | | | `message` | string? | 可读描述（如 retry 原因）。 | 仅展示。 |
-| | | `attempt` / `max_attempts` | int? | 仅 `retrying` 出现。 | 展示重试进度。 |
-| | | `delay_ms` | int? | 仅 `retrying` 出现，下次重试延迟。 | 展示等待时间。 |
+| | | `attempt` | int? | 仅 `retrying` 出现，第几次自动重试，从 `1` 开始。 | 展示重试进度。 |
+| | | `delay_ms` | int? | 仅 `retrying` 出现，下一次重试前的等待时间。 | 展示倒计时。 |
+| | | `elapsed_ms` / `budget_ms` | int? | 当前恢复已持续时间 / 本次恢复总预算。 | 展示恢复进度；不要据此推算尝试次数。 |
 | | | `error` | object? | `ModelError`：`kind` / `message` / `status_code` / `code` / `type` / `provider` / `model`。 | 展示上游错误；不据此判断 retry。 |
 | | | `run_error` | object? | `{kind, model_ref}`，模型请求前的前置条件失败。 | 按 `kind` 分支引导用户处理。 |
 | | | `resume_available` | bool? | 仅 `failed` 时可能为 true。 | 提供“继续/恢复”，调用 `agent.resumeRun`。 |
@@ -447,16 +448,16 @@ agent.run state=failed error=ModelError
 
 Runner 在模型请求边界做自动 recovery：
 
-- 自动重试次数：3 次，因此总尝试次数为 4。
-- retry 间隔：8 秒。
+- 总恢复预算：2 分钟；不以固定重试次数作为策略约束。
+- 退避：初始 2 秒，按 2 倍增长，单次最多 30 秒，并加入 ±20% jitter。
 - 仅在尚未产生 assistant/reasoning/tool call 可见输出前自动 retry。
-- 只根据结构化状态判断：HTTP `408`、`429`、`500`、`502`、`503`、`504`，以及 network / timeout。
-- 不根据错误字符串判断是否 retry。
+- 重试状态码：HTTP `408`、`425`、`429`、`500`、`502`、`503`、`504`、`520`、`521`、`522`、`523`、`524`、`529`，以及 network / timeout。
+- 不根据错误字符串判断是否 retry；用户取消、配置和模型绑定等请求前错误不会进入该 recovery。
 
 retry 期间 daemon 发送：
 
 ```txt
-agent.run state=retrying phase=model attempt=N max_attempts=4 delay_ms=8000
+agent.run state=retrying phase=model attempt=N delay_ms=... elapsed_ms=... budget_ms=...
 ```
 
 如果 recovery 耗尽或遇到不可 retry 错误，daemon 发送：
