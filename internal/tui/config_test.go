@@ -239,18 +239,6 @@ func TestReasoningLabelMatch(t *testing.T) {
 	}
 }
 
-func TestMiniMaxReasoningLabelMatch(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleEN), config: tuiconfig.Model{DetailRef: "minimax/MiniMax-M3"}, configState: testReasoningConfig("minimax", "MiniMax-M3")}
-	mc := tui.configModelsSnapshot()[0]
-	mc.Reasoning = tuiconfig.MiniMaxReasoning()
-	if got := tui.reasoningDisplay(mc); got != "MiniMax M3 / Split" {
-		t.Fatalf("reasoningDisplay() = %q, want %q", got, "MiniMax M3 / Split")
-	}
-	if got := mc.Reasoning["reasoning_split"]; got != true {
-		t.Fatalf("MiniMaxReasoning()[reasoning_split] = %#v, want true", got)
-	}
-}
-
 func TestSaveReasoningUpdatesDetailStateImmediately(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleEN), config: tuiconfig.Model{DetailRef: "deepseek/deepseek-v4-pro"}, configState: testReasoningConfig("deepseek", "deepseek-v4-pro")}
 

@@ -89,7 +89,7 @@ model = "MiniMax-M3"
 base_url = "https://api.minimax.io/v1"
 context_window = 1000000
 max_output_tokens = 8192
-reasoning = { reasoning_split = true }
+# MiniMax 等兼容服务的协议扩展字段按需手写到 reasoning 中。
 # 可选：仅当当前 session 模型 ref 匹配这些 glob 时，MiniMax-M3 才作为 subtask 候选展示。
 subtask_for = ["openai/*", "anthropic/claude-*"]
 
