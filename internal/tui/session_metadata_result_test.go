@@ -29,6 +29,42 @@ func TestSessionMetadataResultUpdatesTitleWithoutRestoringTranscript(t *testing.
 	}
 }
 
+func TestSessionModelNotificationPreservesTranscript(t *testing.T) {
+	tui := &TUI{
+		i18n:           newTranslator(LocaleZH),
+		mode:           uipage.Chat,
+		currentSession: protocol.SessionInfo{ID: "session-1", ModelRef: "openai/gpt-old"},
+		configState: protocol.ConfigParams{Models: []protocol.ConfigModel{
+			{Provider: "openai", Model: "gpt-old", ContextWindow: 128000},
+			{Provider: "anthropic", Model: "claude-new", ContextWindow: 200000},
+		}},
+		chat: chatpage.Model{
+			Messages:          []chatpage.Msg{{Role: "assistant", Content: "已展示的历史回复"}},
+			TranscriptYOffset: 4, ManualScrollPaused: true,
+		},
+	}
+
+	// daemon 在 session.update 成功后广播元数据；不再用 RPC 的快照恢复 transcript。
+	tui.handleSessionStateNotification(protocol.SessionStateParams{
+		Session: protocol.SessionInfo{ID: "session-1", ModelRef: "anthropic/claude-new", Status: protocol.SessionStatusIdle},
+	})
+	if got := tui.currentSession.ModelRef; got != "anthropic/claude-new" {
+		t.Fatalf("model ref = %q, want anthropic/claude-new", got)
+	}
+	if got := tui.providerName + "/" + tui.modelName; got != "anthropic/claude-new" {
+		t.Fatalf("display model = %q, want anthropic/claude-new", got)
+	}
+	if got := tui.contextWindow; got != 200000 {
+		t.Fatalf("context window = %d, want 200000", got)
+	}
+	if got := len(tui.chat.Messages); got != 1 || tui.chat.Messages[0].Content != "已展示的历史回复" {
+		t.Fatalf("messages = %#v, want unchanged transcript", tui.chat.Messages)
+	}
+	if tui.chat.TranscriptYOffset != 4 || !tui.chat.ManualScrollPaused {
+		t.Fatalf("scroll = %d paused = %v, want unchanged", tui.chat.TranscriptYOffset, tui.chat.ManualScrollPaused)
+	}
+}
+
 func TestAutoTitleFailureRestoresOptimisticTitleWithoutRestoringTranscript(t *testing.T) {
 	tui := &TUI{
 		i18n:           newTranslator(LocaleZH),

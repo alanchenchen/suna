@@ -108,11 +108,11 @@ func (t *TUI) updateSessionModelCmd(sessionID, modelRef string) tea.Cmd {
 		if t.localCli == nil {
 			return ipcErrorNotification(notifyConfigError, errNotConnected(t))
 		}
-		updated, err := t.localCli.UpdateSession(protocol.SessionUpdateParams{SessionID: sessionID, ModelRef: &modelRef})
-		if err != nil {
+		if _, err := t.localCli.UpdateSession(protocol.SessionUpdateParams{SessionID: sessionID, ModelRef: &modelRef}); err != nil {
 			return ipcErrorNotification(notifyConfigError, err)
 		}
-		return sessionSnapshotResultMsg{Params: updated}
+		// 更新成功后的会话元数据由 daemon 广播；这里不消费旧快照，避免切模型重建 transcript。
+		return nil
 	}
 }
 
