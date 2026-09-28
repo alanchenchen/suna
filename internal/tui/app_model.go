@@ -116,10 +116,8 @@ type TUI struct {
 	// modelPickerError 是模型列表拉取失败的错误提示，展示在浮层内。
 	modelPickerError string
 	// modelCombobox 是 provider 表单 model 字段的同步选择器：输入即过滤，
-	// 无异步消息链路；候选为空时输入值即自定义模型名。
+	// 候选为空时输入值即自定义模型名。
 	modelCombobox combobox.Model
-	// modelsCache 缓存 provider 的模型列表，避免同一 provider 重复拉取。
-	modelsCache map[string][]string
 
 	// Help overlay 状态。
 	showHelp bool

@@ -506,11 +506,6 @@ func (t *TUI) openModelPickerForForm() tea.Cmd {
 	t.modelPickerOpen = true
 	t.modelPickerProvider = provider
 	t.modelPickerError = ""
-	if models, ok := t.modelsCache[provider]; ok {
-		t.modelPickerLoading = false
-		t.modelCombobox.SetItems(models)
-		return t.modelCombobox.Focus()
-	}
 	t.modelPickerLoading = true
 	return tea.Batch(t.modelCombobox.Focus(), func() tea.Msg {
 		if t.localCli == nil {

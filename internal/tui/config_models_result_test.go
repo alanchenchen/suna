@@ -11,7 +11,7 @@ import (
 	tuiconfig "github.com/alanchenchen/suna/internal/tui/pages/config"
 )
 
-func TestConfigModelsResultFillsPickerAndCache(t *testing.T) {
+func TestConfigModelsResultFillsPicker(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
 	tui.openProviderForm("provider-a/model", &tuiconfig.ModelConfig{
 		Provider: "provider-a", Protocol: coreconfig.ModelProtocolOpenAIChat,
@@ -19,20 +19,12 @@ func TestConfigModelsResultFillsPickerAndCache(t *testing.T) {
 	})
 	tui.config.InputFocus = tuiconfig.ProviderFormModelIndex
 	tui.updateProviderForm(tea.KeyPressMsg{Code: tea.KeyEnter})
-	tui.modelPickerLoading = true
-
-	tui.handleConfigModelsResultNotification(protocol.ConfigModelsResultParams{
-		Provider: "provider-a",
-		Models:   []string{"gpt-5.2", "gpt-5.6-sol"},
-	})
+	tui.handleConfigModelsResultNotification(protocol.ConfigModelsResultParams{Provider: "provider-a", Models: []string{"gpt-5.2", "gpt-5.6-sol"}})
 	if tui.modelPickerLoading {
 		t.Fatal("modelPickerLoading = true after result, want false")
 	}
 	if got := tui.modelCombobox.Count(); got != 2 {
 		t.Fatalf("combobox count = %d, want 2", got)
-	}
-	if got := tui.modelsCache["provider-a"]; len(got) != 2 {
-		t.Fatalf("cache = %v, want 2 models", got)
 	}
 }
 
@@ -76,12 +68,9 @@ func TestConfigModelsResultErrorShowsInPicker(t *testing.T) {
 	if tui.modelPickerError == "" {
 		t.Fatal("modelPickerError = empty, want error message")
 	}
-	if _, ok := tui.modelsCache["provider-a"]; ok {
-		t.Fatal("cache written on error, want not cached")
-	}
 }
 
-func TestConfigModelsResultWritesCacheWhenPickerClosed(t *testing.T) {
+func TestConfigModelsResultIgnoredWhenPickerClosed(t *testing.T) {
 	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
 	tui.openProviderForm("provider-a/model", &tuiconfig.ModelConfig{
 		Provider: "provider-a", Protocol: coreconfig.ModelProtocolOpenAIChat,
@@ -89,18 +78,13 @@ func TestConfigModelsResultWritesCacheWhenPickerClosed(t *testing.T) {
 	})
 	tui.config.InputFocus = tuiconfig.ProviderFormModelIndex
 	tui.updateProviderForm(tea.KeyPressMsg{Code: tea.KeyEnter})
-	// esc 直接关闭浮层（同步选择器无过滤态）。
 	tui.updateProviderModelPicker("esc", tea.KeyPressMsg{Code: tea.KeyEsc})
 
-	// 浮层已关闭，通知仍应写入缓存（下次打开直接命中），但不刷新已关闭的浮层。
 	tui.handleConfigModelsResultNotification(protocol.ConfigModelsResultParams{
 		Provider: "provider-a",
 		Models:   []string{"gpt-5.2"},
 	})
-	if got := tui.modelsCache["provider-a"]; len(got) != 1 {
-		t.Fatalf("cache = %v, want 1 model after picker closed", got)
-	}
 	if tui.modelPickerOpen {
-		t.Fatal("modelPickerOpen = true after closed picker result, want false")
+		t.Fatal("modelPickerOpen = true after closed picker, want false")
 	}
 }

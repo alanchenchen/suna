@@ -33,9 +33,9 @@ func TestConfigViewRendersPickerOverForm(t *testing.T) {
 		Provider: "provider-a", Protocol: coreconfig.ModelProtocolOpenAIChat,
 		Model: "model", BaseURL: "https://api.example.com/v1",
 	})
-	tui.modelsCache = map[string][]string{"provider-a": {"gpt-5.2"}}
 	tui.config.InputFocus = tuiconfig.ProviderFormModelIndex
 	tui.updateProviderForm(tea.KeyPressMsg{Code: tea.KeyEnter})
+	tui.handleConfigModelsResultNotification(protocol.ConfigModelsResultParams{Provider: "provider-a", Models: []string{"gpt-5.2"}})
 	if !tui.modelPickerOpen {
 		t.Fatal("modelPickerOpen = false after model field enter")
 	}
@@ -55,9 +55,9 @@ func TestConfigKeysForwardToPickerWhileOpen(t *testing.T) {
 		Provider: "provider-a", Protocol: coreconfig.ModelProtocolOpenAIChat,
 		Model: "model", BaseURL: "https://api.example.com/v1",
 	})
-	tui.modelsCache = map[string][]string{"provider-a": {"gpt-5.2", "gpt-5.6-sol"}}
 	tui.config.InputFocus = tuiconfig.ProviderFormModelIndex
 	tui.updateProviderForm(tea.KeyPressMsg{Code: tea.KeyEnter})
+	tui.handleConfigModelsResultNotification(protocol.ConfigModelsResultParams{Provider: "provider-a", Models: []string{"gpt-5.2", "gpt-5.6-sol"}})
 
 	// 浮层打开后按 down：应移动选择器光标，而不是表单 InputFocus 变化。
 	tui.updateConfig(tea.KeyPressMsg{Code: tea.KeyDown})

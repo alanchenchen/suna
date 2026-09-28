@@ -787,20 +787,12 @@ func (t *TUI) handleConfigStateNotification(p protocol.ConfigParams) {
 	}
 }
 
-// handleConfigModelsResultNotification 处理模型列表拉取的异步结果：
-// 无论浮层是否仍打开都写入缓存（用户下次打开直接命中）；
-// 浮层打开时才刷新候选，并保留用户正在输入的筛选文本。
+// handleConfigModelsResultNotification 处理当前模型选择浮层的异步结果。
+// 只接受当前 provider 的结果，避免快速切换 provider 时迟到结果污染当前浮层。
 func (t *TUI) handleConfigModelsResultNotification(p protocol.ConfigModelsResultParams) {
 	// 只处理当前浮层对应 provider 的结果；跨 provider 的陈旧结果
 	// （快速切换 provider 时迟到）不能提前灭掉加载指示或错误提示。
 	if t.modelPickerProvider != p.Provider {
-		// 仍写入缓存：结果本身有效，下次打开同 provider 直接命中。
-		if p.ErrorMessage == "" {
-			if t.modelsCache == nil {
-				t.modelsCache = map[string][]string{}
-			}
-			t.modelsCache[p.Provider] = p.Models
-		}
 		return
 	}
 	t.modelPickerLoading = false
@@ -808,12 +800,7 @@ func (t *TUI) handleConfigModelsResultNotification(p protocol.ConfigModelsResult
 		t.modelPickerError = p.ErrorMessage
 		return
 	}
-	if t.modelsCache == nil {
-		t.modelsCache = map[string][]string{}
-	}
-	t.modelsCache[p.Provider] = p.Models
 	if !t.modelPickerOpen {
-		// 浮层已关闭：只写缓存，不刷新候选。
 		return
 	}
 	t.modelPickerError = ""

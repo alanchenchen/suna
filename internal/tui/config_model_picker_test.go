@@ -13,7 +13,7 @@ import (
 	tuiconfig "github.com/alanchenchen/suna/internal/tui/pages/config"
 )
 
-// newPickerFormTUI 构造一个已打开 provider 表单并缓存模型列表的 TUI，
+// newPickerFormTUI 构造一个已打开 provider 表单并加载模型列表，
 // 焦点停在 model 字段并按 enter 打开选择浮层。
 func newPickerFormTUI(t *testing.T, models []string) *TUI {
 	t.Helper()
@@ -24,25 +24,22 @@ func newPickerFormTUI(t *testing.T, models []string) *TUI {
 		Model:    "model",
 		BaseURL:  "https://api.example.com/v1",
 	})
-	tui.modelsCache = map[string][]string{"provider-a": models}
 	tui.config.InputFocus = tuiconfig.ProviderFormModelIndex
 	tui.updateProviderForm(tea.KeyPressMsg{Code: tea.KeyEnter})
+	tui.handleConfigModelsResultNotification(protocol.ConfigModelsResultParams{Provider: "provider-a", Models: models})
 	return tui
 }
 
-func TestProviderFormModelEnterOpensPickerWithCache(t *testing.T) {
+func TestProviderFormModelEnterOpensPickerAndLoadsModels(t *testing.T) {
 	tui := newPickerFormTUI(t, []string{"gpt-5.2", "gpt-5.6-sol"})
-	tui.config.InputFocus = tuiconfig.ProviderFormModelIndex
-
-	tui.updateProviderForm(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !tui.modelPickerOpen {
 		t.Fatal("modelPickerOpen = false, want true after model field enter")
 	}
 	if tui.modelPickerLoading {
-		t.Fatal("modelPickerLoading = true with cache hit, want false")
+		t.Fatal("modelPickerLoading = true after result, want false")
 	}
 	if got := tui.modelCombobox.Count(); got != 2 {
-		t.Fatalf("combobox count = %d, want 2 from cache", got)
+		t.Fatalf("combobox count = %d, want 2 from result", got)
 	}
 }
 
@@ -83,8 +80,6 @@ func TestProviderFormModelEnterRequiresProvider(t *testing.T) {
 
 func TestProviderPickerEnterFillsModelField(t *testing.T) {
 	tui := newPickerFormTUI(t, []string{"gpt-5.2", "gpt-5.6-sol"})
-	tui.config.InputFocus = tuiconfig.ProviderFormModelIndex
-	tui.updateProviderForm(tea.KeyPressMsg{Code: tea.KeyEnter})
 	// 光标移到第二项后 enter 确认。
 	tui.updateProviderModelPicker("down", tea.KeyPressMsg{Code: tea.KeyDown})
 
@@ -360,7 +355,6 @@ func TestProviderPickerDoesNotBlurChatInput(t *testing.T) {
 		Model:    "model",
 		BaseURL:  "https://api.example.com/v1",
 	})
-	tui.modelsCache = map[string][]string{"provider-a": {"gpt-5.2"}}
 	tui.config.InputFocus = tuiconfig.ProviderFormModelIndex
 
 	// 模拟回到 chat 前输入框是聚焦的（正常 chat → config 切换不改变焦点）。
