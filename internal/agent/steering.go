@@ -86,13 +86,16 @@ func (a *Agent) PendingSteering(runID string) []SteeringItem {
 	return mailbox.pending()
 }
 
-func (a *Agent) SetSteeringInteractionPending(runID string, pending bool) {
+// beginSteeringInteraction 在发出交互前登记等待者；结束函数固定释放原 mailbox，
+// 防止旧 run 的迟到收尾影响新 run。同一结束函数可重复调用但只释放一次。
+func (a *Agent) beginSteeringInteraction(runID string) func() {
 	a.steeringMu.RLock()
 	mailbox := a.steering
 	a.steeringMu.RUnlock()
-	if mailbox != nil && mailbox.runID == runID {
-		mailbox.setInteractionPending(pending)
+	if mailbox == nil || mailbox.runID != runID {
+		return func() {}
 	}
+	return mailbox.beginInteraction()
 }
 
 func (a *Agent) RejectPendingSteering(runID string) []SteeringItem {
@@ -134,16 +137,16 @@ func (a *Agent) onSteeringApplied(ctx context.Context, input runner.SteeringInpu
 }
 
 type steeringMailbox struct {
-	mu              sync.Mutex
-	runID           string
-	sealed          bool
-	interaction     bool
-	items           []SteeringItem
-	byClient        map[string]SteeringItem
-	byID            map[string]SteeringItem
-	acceptedBytes   int
-	nextSequence    uint64
-	lastAppliedText string
+	mu               sync.Mutex
+	runID            string
+	sealed           bool
+	interactionCount int
+	items            []SteeringItem
+	byClient         map[string]SteeringItem
+	byID             map[string]SteeringItem
+	acceptedBytes    int
+	nextSequence     uint64
+	lastAppliedText  string
 }
 
 func newSteeringMailbox(runID string) *steeringMailbox {
@@ -170,7 +173,7 @@ func (m *steeringMailbox) enqueue(runID, clientMsgID, text string) (SteeringItem
 	if m.sealed {
 		return SteeringItem{}, false, fmt.Errorf("run_not_steerable")
 	}
-	if m.interaction {
+	if m.interactionCount > 0 {
 		return SteeringItem{}, false, fmt.Errorf("interaction_pending")
 	}
 	if len(m.byClient) >= MaxSteeringMessages || m.acceptedBytes+len(text) > MaxSteeringBytes {
@@ -185,13 +188,16 @@ func (m *steeringMailbox) enqueue(runID, clientMsgID, text string) (SteeringItem
 	return item, true, nil
 }
 
-func (m *steeringMailbox) setInteractionPending(pending bool) {
-	if m == nil {
-		return
-	}
+func (m *steeringMailbox) beginInteraction() func() {
+	// 计数增减和 steering 的检查、队列修改共用短锁，不持锁等待用户。
 	m.mu.Lock()
-	m.interaction = pending
+	m.interactionCount++
 	m.mu.Unlock()
+	return sync.OnceFunc(func() {
+		m.mu.Lock()
+		m.interactionCount--
+		m.mu.Unlock()
+	})
 }
 
 func (m *steeringMailbox) remove(runID, id string) (SteeringItem, string, bool, error) {
@@ -200,7 +206,7 @@ func (m *steeringMailbox) remove(runID, id string) (SteeringItem, string, bool, 
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.interaction {
+	if m.interactionCount > 0 {
 		return SteeringItem{}, "", false, fmt.Errorf("interaction_pending")
 	}
 	for i := len(m.items) - 1; i >= 0; i-- {

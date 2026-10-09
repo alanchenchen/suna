@@ -73,8 +73,8 @@ func (agentSkillPrompter) AskChoice(ctx context.Context, question string, option
 	}
 	replyCh := make(chan string, 1)
 	runID := runIDFromContext(ctx)
-	ag.SetSteeringInteractionPending(runID, true)
-	defer ag.SetSteeringInteractionPending(runID, false)
+	finish := ag.beginSteeringInteraction(runID)
+	defer finish()
 	events <- Event{Type: EventAskUser, Question: question, Options: append([]string(nil), options...), AllowCustom: false, Reply: replyCh}
 	select {
 	case <-ctx.Done():

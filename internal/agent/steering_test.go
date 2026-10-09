@@ -2,6 +2,7 @@ package agent
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 )
 
@@ -65,14 +66,15 @@ func TestSteeringMailboxBlocksChangesDuringInteraction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enqueue error = %v", err)
 	}
-	mailbox.setInteractionPending(true)
+	finish := mailbox.beginInteraction()
+	defer finish()
 	if _, _, err := mailbox.enqueue("run-1", "client-2", "blocked"); err == nil {
 		t.Fatal("enqueue during interaction error = nil")
 	}
 	if _, _, _, err := mailbox.remove("run-1", item.ID); err == nil {
 		t.Fatal("remove during interaction error = nil")
 	}
-	mailbox.setInteractionPending(false)
+	finish()
 	if _, _, changed, err := mailbox.remove("run-1", item.ID); err != nil || !changed {
 		t.Fatalf("remove after interaction = %v, %v", changed, err)
 	}
@@ -101,5 +103,98 @@ func TestSteeringMailboxRejectsPendingOnRunFailure(t *testing.T) {
 	got := mailbox.rejectPending()
 	if len(got) != 1 || got[0].ID != item.ID || got[0].State != SteeringRejected || got[0].Text != "keep this" {
 		t.Fatalf("rejectPending() = %#v", got)
+	}
+}
+
+func TestSteeringInteractionsRemainPendingUntilAllFinish(t *testing.T) {
+	a := &Agent{}
+	a.PrepareSteering("run-1")
+	item, _, err := a.EnqueueSteering("run-1", "initial", "queued")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := a.beginSteeringInteraction("run-1")
+	second := a.beginSteeringInteraction("run-1")
+	defer first()
+	defer second()
+	assertBlocked := func() {
+		t.Helper()
+		if _, _, err := a.EnqueueSteering("run-1", "new", "new"); err == nil || err.Error() != "interaction_pending" {
+			t.Fatalf("enqueue error = %v, want interaction_pending", err)
+		}
+		if _, _, err := a.RemoveSteering("run-1", item.ID); err == nil || err.Error() != "interaction_pending" {
+			t.Fatalf("remove error = %v, want interaction_pending", err)
+		}
+	}
+	assertBlocked()
+	first()
+	first()
+	assertBlocked()
+	second()
+	if _, _, err := a.EnqueueSteering("run-1", "new", "new"); err != nil {
+		t.Fatal(err)
+	}
+	if _, removed, err := a.RemoveSteering("run-1", item.ID); err != nil || !removed {
+		t.Fatalf("remove = %v/%v, want true/nil", removed, err)
+	}
+}
+
+func TestSteeringInteractionFinishIsBoundToOriginalMailbox(t *testing.T) {
+	a := &Agent{}
+	a.PrepareSteering("old")
+	oldFinish := a.beginSteeringInteraction("old")
+	a.clearSteeringMailbox("old")
+	a.PrepareSteering("new")
+	newFinish := a.beginSteeringInteraction("new")
+	defer newFinish()
+	oldFinish()
+	a.beginSteeringInteraction("old")()
+	if _, _, err := a.EnqueueSteering("new", "message", "text"); err == nil || err.Error() != "interaction_pending" {
+		t.Fatalf("enqueue error = %v, want interaction_pending", err)
+	}
+	newFinish()
+	if _, _, err := a.EnqueueSteering("new", "message", "text"); err != nil {
+		t.Fatal(err)
+	}
+	// 不存在 mailbox 的工具调用不创建隐式 run，也无需额外释放状态。
+	a.clearSteeringMailbox("new")
+	finish := a.beginSteeringInteraction("missing")
+	finish()
+	finish()
+	if a.steering != nil {
+		t.Fatal("missing run created a mailbox")
+	}
+}
+
+func TestSteeringInteractionCountHandlesConcurrentFinish(t *testing.T) {
+	a := &Agent{}
+	a.PrepareSteering("run-1")
+	anchor := a.beginSteeringInteraction("run-1")
+	defer anchor()
+	const workers = 32
+	finishes := make(chan func(), workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() { finishes <- a.beginSteeringInteraction("run-1") })
+	}
+	wg.Wait()
+	close(finishes)
+	for finish := range finishes {
+		wg.Go(finish)
+		wg.Go(finish)
+	}
+	wg.Wait()
+	if _, _, err := a.EnqueueSteering("run-1", "blocked", "text"); err == nil || err.Error() != "interaction_pending" {
+		t.Fatalf("enqueue error = %v, want remaining interaction to block", err)
+	}
+	anchor()
+	if _, _, err := a.EnqueueSteering("run-1", "allowed", "text"); err != nil {
+		t.Fatal(err)
+	}
+	a.steering.mu.Lock()
+	count := a.steering.interactionCount
+	a.steering.mu.Unlock()
+	if count != 0 {
+		t.Fatalf("interaction count = %d, want 0", count)
 	}
 }

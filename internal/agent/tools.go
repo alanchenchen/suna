@@ -109,8 +109,8 @@ func (a *Agent) confirmGuard(ctx context.Context, id string, call runner.ToolExe
 	}
 	replyCh := make(chan string, 1)
 	runID := runIDFromContext(ctx)
-	a.SetSteeringInteractionPending(runID, true)
-	defer a.SetSteeringInteractionPending(runID, false)
+	finish := a.beginSteeringInteraction(runID)
+	defer finish()
 	events <- Event{Type: EventGuardConfirm, GuardToolCallID: id, GuardTool: name, GuardParams: params, GuardReadOnly: result.ReadOnly, GuardReason: result.Reason, GuardReviewCode: result.ReviewCode, GuardReviewMsg: result.ReviewMessage, Reply: replyCh}
 	select {
 	case <-ctx.Done():
@@ -157,8 +157,8 @@ func (a *Agent) ExecuteAskUserTool(ctx context.Context, params map[string]any) t
 	}
 	replyCh := make(chan string, 1)
 	runID := runIDFromContext(ctx)
-	a.SetSteeringInteractionPending(runID, true)
-	defer a.SetSteeringInteractionPending(runID, false)
+	finish := a.beginSteeringInteraction(runID)
+	defer finish()
 	events <- Event{Type: EventAskUser, Question: question, Options: options, AllowCustom: allowCustom, Reply: replyCh}
 	select {
 	case <-ctx.Done():
