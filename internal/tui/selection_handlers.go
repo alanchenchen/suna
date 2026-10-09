@@ -206,7 +206,6 @@ func (t *TUI) handleInputSelectionMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 			return false, nil
 		}
 		t.selection.Finish()
-		t.syncContent()
 		return true, nil
 	case tea.MouseWheelMsg:
 		return false, nil
@@ -216,8 +215,8 @@ func (t *TUI) handleInputSelectionMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 		}
 		line := min(max(msg.Mouse().Y-startY, 0), inputAreaH-1)
 		t.selection.Extend(line, inputAreaH)
-		// 输入区选区同样走帧门：syncContent 会同步整个 transcript，拖动事件频率不受控。
-		return true, t.scheduleTranscriptSync()
+		// 输入区高亮由 View 渲染，只共享帧门，不同步正文。
+		return true, t.scheduleChatFrame()
 	default:
 		m := msg.Mouse()
 		if m.Button != tea.MouseLeft || t.selection.Active {
@@ -225,7 +224,7 @@ func (t *TUI) handleInputSelectionMouse(msg tea.MouseMsg) (bool, tea.Cmd) {
 		}
 		line := min(max(m.Y-startY, 0), inputAreaH-1)
 		t.selection.Begin(line, SelectionRegionInput)
-		t.syncContent()
+		t.syncSelectionRange()
 		return true, nil
 	}
 }

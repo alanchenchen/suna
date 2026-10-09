@@ -34,7 +34,7 @@ type ViewDeps struct {
 }
 
 // View 负责 Chat 页面主布局和 overlay 叠放顺序；具体样式和子组件渲染由 root adapter 注入。
-func (m Model) View(deps ViewDeps) string {
+func (m *Model) View(deps ViewDeps) string {
 	if deps.Width == 0 {
 		return ""
 	}

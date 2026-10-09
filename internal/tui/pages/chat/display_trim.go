@@ -36,7 +36,8 @@ func (m *Model) TrimDisplayHistory(limitBytes int) bool {
 	if m == nil || limitBytes <= 0 || len(m.Messages) == 0 {
 		return false
 	}
-	used := m.EstimatedDisplayBytes()
+	m.updateDisplayBudget()
+	used := m.displayBudget.total
 	if used <= limitBytes {
 		return false
 	}
@@ -53,12 +54,14 @@ func (m *Model) TrimDisplayHistory(limitBytes int) bool {
 		}
 		for i := cutoff; i < next; i++ {
 			discarded.Messages++
-			discarded.Bytes += estimateMsgDisplayBytes(&m.Messages[i])
+			discarded.Bytes += m.displayBudget.bytes[i]
 			if m.Messages[i].Role == "user" {
 				discarded.Turns++
 			}
 		}
-		used -= estimateMessagesDisplayBytes(m.Messages[cutoff:next])
+		for i := cutoff; i < next; i++ {
+			used -= m.displayBudget.bytes[i]
+		}
 		cutoff = next
 	}
 	if cutoff <= 0 {
@@ -86,7 +89,7 @@ func (m *Model) TrimDisplayHistory(limitBytes int) bool {
 	m.DisplayDiscard.Messages += discarded.Messages
 	m.DisplayDiscard.Turns += discarded.Turns
 	m.DisplayDiscard.Bytes += discarded.Bytes
-	m.TranscriptBlocks = nil
+	m.InvalidateTranscript()
 	m.TranscriptWindowSignature = transcriptWindowSignature{}
 	m.ClearResponseNav()
 	return true

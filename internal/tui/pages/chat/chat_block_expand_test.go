@@ -26,7 +26,7 @@ func appendToolBlock(m *Model, entries map[string]*toolview.Entry, order ...stri
 	if len(toolview.VisibleMainEntries(block)) == 0 {
 		kind = boxKindSubtask
 	}
-	m.TranscriptBlocks = append(m.TranscriptBlocks, transcriptBlock{MsgIndex: len(m.Messages) - 1, LineCount: 3, BoxKind: kind})
+	m.TranscriptBlocks = append(m.TranscriptBlocks, transcriptBlock{MsgIndex: int32(len(m.Messages) - 1), LineCount: 3, BoxKind: transcriptBox(kind)})
 	m.TranscriptTotalLines += 3
 	return block
 }

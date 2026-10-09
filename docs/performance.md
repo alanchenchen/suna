@@ -253,6 +253,26 @@ spinner tick 不再无条件触发完整 transcript sync：当最近 120ms 内�
 
 该设计参考 Bubbles `table` / `list` 的窗口化思路：展示数据留在业务 model，View 只渲染当前窗口，而不是把无限增长的历史交给 viewport。因此滚动成本主要跟终端高度、overscan 和当前窗口内容相关。连续滚动不会被延迟或丢弃；优化点是跳过未跨窗口滚动时的 transcript 重建。
 
+### 正文增量布局与变化记账
+
+Chat 正文复用既有 `TranscriptBlocks`，而不是每次同步重建全部历史。消息按角色预留紧凑槽位，Fenwick 行高索引用于更新变化块高度和直接定位可见窗口；工具、技能与流式消息的变化登记到所属消息。正文只在窗口附近保留文本，离屏保存高度，滚回和复制时在同一次操作中补齐，复制结束后释放临时补齐的离屏正文。
+
+- 普通更新只处理变化消息和可见窗口，不反复渲染未变化历史工具块。
+- 展示数据和 Markdown 输出按消息变化记账，不逐帧扫描历史计算预算；原估算口径、预算和完整 turn 裁剪规则不变。
+- 状态栏、输入选区和列表通知不再无条件触发正文同步；输入资格改变时仍及时更新子任务面板提示。
+- 流式、滚动、选区、展开与跟随底部保持原有交互；正文同步帧间隔仍为 16ms。
+- 初次布局、改变宽度或主题、实际历史裁剪仍需历史级处理；不保证任意输出或终端环境下 CPU 无波动。
+
+没有新增第二套完整正文缓存；索引只保存布局和所有权元数据。性能回归基准覆盖短消息、文本、工具和子任务历史，以及流式、活跃面板和滚动。它们不能替代 VSCode 终端长时间使用、RSS 与终端输出测量。
+
+相关代码：
+
+- `internal/tui/pages/chat/transcript_retained.go`
+- `internal/tui/pages/chat/transcript_index.go`
+- `internal/tui/pages/chat/transcript_mutations.go`
+- `internal/tui/pages/chat/display_budget.go`
+- `internal/tui/chat_performance_test.go`
+
 ### TUI 展示历史预算
 
 TUI 不把展示历史下沉成 daemon 归档语义。Chat 页面维护自己的展示内存软上限：超过阈值后，从最顶部按完整 turn 裁剪到低水位，裁后第一条真实消息必须仍是 user；顶部只保留一个累计摘要块。该裁剪只影响当前 TUI 进程的显示缓存，不影响 daemon `WorkingMemory`、`Session State`、模型上下文或会话恢复语义。

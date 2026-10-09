@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"hash/fnv"
 	"strings"
@@ -25,6 +26,10 @@ type TranscriptDeps struct {
 	MarkdownWidth int
 	Theme         string
 	RenderAll     bool
+	// SubtaskKeys 跟踪展开子任务页脚是否允许使用 Enter。
+	SubtaskKeys bool
+	// ReasoningHeight 为终端高度，不使用受输入区影响的视口高度。
+	ReasoningHeight int
 
 	ReasoningMode func(*Msg) string
 
@@ -50,14 +55,44 @@ type TranscriptDeps struct {
 	RenderAskHelp        func(string) string
 }
 
+// transcriptBoxKind 将仅有的两种盒子标记编码为一个字节，避免每块重复字符串头。
+type transcriptBoxKind uint8
+
+const (
+	transcriptBoxNone transcriptBoxKind = iota
+	transcriptBoxTool
+	transcriptBoxSubtask
+)
+
+func transcriptBox(kind string) transcriptBoxKind {
+	switch kind {
+	case boxKindTool:
+		return transcriptBoxTool
+	case boxKindSubtask:
+		return transcriptBoxSubtask
+	default:
+		return transcriptBoxNone
+	}
+}
+
+func (kind transcriptBoxKind) name() string {
+	switch kind {
+	case transcriptBoxTool:
+		return boxKindTool
+	case transcriptBoxSubtask:
+		return boxKindSubtask
+	default:
+		return ""
+	}
+}
+
 type transcriptBlock struct {
-	MsgIndex  int
-	Streaming bool
 	Text      string
 	LineCount int
-	// BoxKind 标记该块来自哪个盒子（tool / subtask）。同一个 tool 消息会渲染出
-	// 两个相邻块，Ctrl+T 的目标选择需要区分它们，才能让两个盒子独立展开。
-	BoxKind string
+	MsgIndex  int32
+	Streaming bool
+	// BoxKind 区分同一工具消息的工具盒子与子任务盒子，确保独立展开。
+	BoxKind transcriptBoxKind
 }
 
 // 就地展开的盒子类型：同一个 tool 消息会渲染出 tool 盒子与 subtask 面板两个相邻块。
@@ -79,36 +114,6 @@ type transcriptWindowSignature struct {
 	SelEnd   int
 }
 
-func (m *Model) SyncTranscript(deps TranscriptDeps) {
-	followBottom := !m.ManualScrollPaused && (m.ForceBottom || m.FollowBottom || m.TranscriptAtBottom())
-	if m.ForceBottom {
-		m.ForceBottom = false
-	}
-	blocks, nav := m.RenderTranscriptBlocksWithNav(deps)
-	m.TranscriptBlocks = blocks
-	m.recomputeTranscriptLayout()
-	m.applyResponseNav(nav)
-	if followBottom {
-		m.SetTranscriptYOffset(m.TranscriptMaxYOffset())
-		m.FollowBottom = true
-		m.ManualScrollPaused = false
-	} else {
-		m.SetTranscriptYOffset(m.TranscriptYOffset)
-		m.FollowBottom = m.TranscriptAtBottom()
-	}
-	if m.trimMarkdownRenderCache() {
-		blocks, nav = m.RenderTranscriptBlocksWithNav(deps)
-		m.TranscriptBlocks = blocks
-		m.recomputeTranscriptLayout()
-		m.applyResponseNav(nav)
-		if followBottom {
-			m.SetTranscriptYOffset(m.TranscriptMaxYOffset())
-			return
-		}
-		m.SetTranscriptYOffset(m.TranscriptYOffset)
-	}
-}
-
 type ResponseNavInfo struct {
 	StartLine int
 	LineCount int
@@ -117,7 +122,7 @@ type ResponseNavInfo struct {
 }
 
 // RenderTranscript 负责 Chat transcript 的结构编排；具体样式与 markdown 渲染由 root 注入。
-func (m Model) RenderTranscript(deps TranscriptDeps) string {
+func (m *Model) RenderTranscript(deps TranscriptDeps) string {
 	deps.RenderAll = true
 	blocks, _ := m.RenderTranscriptBlocksWithNav(deps)
 	lines := make([]string, 0)
@@ -127,7 +132,7 @@ func (m Model) RenderTranscript(deps TranscriptDeps) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) RenderTranscriptWithNav(deps TranscriptDeps) (string, ResponseNavInfo) {
+func (m *Model) RenderTranscriptWithNav(deps TranscriptDeps) (string, ResponseNavInfo) {
 	deps.RenderAll = true
 	blocks, nav := m.RenderTranscriptBlocksWithNav(deps)
 	lines := make([]string, 0)
@@ -137,7 +142,7 @@ func (m Model) RenderTranscriptWithNav(deps TranscriptDeps) (string, ResponseNav
 	return strings.Join(lines, "\n"), nav
 }
 
-func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptBlock, ResponseNavInfo) {
+func (m *Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptBlock, ResponseNavInfo) {
 	var blocks []transcriptBlock
 	var nav ResponseNavInfo
 	lineCount := 0
@@ -146,7 +151,7 @@ func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptB
 		if lines <= 0 {
 			return
 		}
-		blocks = append(blocks, transcriptBlock{MsgIndex: msgIndex, Streaming: streaming, Text: text, LineCount: lines, BoxKind: boxKind})
+		blocks = append(blocks, transcriptBlock{MsgIndex: int32(msgIndex), Streaming: streaming, Text: text, LineCount: lines, BoxKind: transcriptBox(boxKind)})
 		lineCount += lines
 	}
 	addBlockWithKind := func(msgIndex int, streaming bool, text string, boxKind string) {
@@ -157,15 +162,6 @@ func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptB
 	}
 	addBlock := func(msgIndex int, streaming bool, text string) {
 		addBlockWithKind(msgIndex, streaming, text, "")
-	}
-	renderSunaHeader := func() {
-		if inSunaBlock {
-			return
-		}
-		if deps.RenderSunaHeader != nil {
-			addBlock(-1, false, deps.RenderSunaHeader(deps.SunaLabel))
-		}
-		inSunaBlock = true
 	}
 
 	if !m.DisplayDiscard.Empty() {
@@ -178,88 +174,15 @@ func (m Model) RenderTranscriptBlocksWithNav(deps TranscriptDeps) ([]transcriptB
 	}
 
 	for i := range m.Messages {
-		msg := &m.Messages[i]
-		switch msg.Role {
-		case "user":
-			if deps.RenderUserMessage != nil {
-				addBlock(i, msg.Streaming, "\n"+deps.RenderUserMessage(msg.Content, max(20, deps.Width-8))+"\n")
-			}
-			inSunaBlock = false
-		case "assistant":
-			renderSunaHeader()
-			startLine := lineCount
-			if deps.RenderAssistant != nil {
-				// 非窗口内的已完成 assistant 只复用行数元数据，不渲染大段 Markdown 文本。
-				if cachedLines, ok := m.cachedAssistantBlockLines(msg, deps); ok && !deps.RenderAll && !m.shouldRenderBlockText(startLine, cachedLines) {
-					addBlockWithLineCount(i, msg.Streaming, "", cachedLines, "")
-				} else {
-					addBlock(i, msg.Streaming, deps.RenderAssistant(msg)+"\n")
-				}
-			}
-			endLine := lineCount
-			nav = ResponseNavInfo{StartLine: startLine, LineCount: max(0, endLine-startLine), MsgIndex: i, Streaming: msg.Streaming}
-		case "run_duration":
-			if content, ok := msg.Content.(string); ok && deps.RenderRunDuration != nil {
-				addBlock(i, false, deps.RenderRunDuration(content, msg.EndedAt)+"\n")
-			}
-		case "reasoning":
-			renderSunaHeader()
-			startLine := lineCount
-			if deps.RenderReasoning != nil {
-				mode := "reasoning_collapsed"
-				if deps.ReasoningMode != nil {
-					mode = deps.ReasoningMode(msg)
-				}
-				// 思考链展开时可能很长；离屏时只复用行数，避免滚动历史后仍反复渲染不可见内容。
-				if cachedLines, ok := m.cachedRenderedBlockLines(msg, deps.Width, deps.Theme, mode); ok && !deps.RenderAll && !m.shouldRenderBlockText(startLine, cachedLines) {
-					addBlockWithLineCount(i, msg.Streaming, "", cachedLines, "")
-				} else {
-					addBlock(i, msg.Streaming, deps.RenderReasoning(msg))
-				}
-			}
-		case "tool":
-			if v, ok := msg.Content.(*toolview.Block); ok {
-				renderSunaHeader()
-				if deps.RenderToolBlock != nil {
-					addBlockWithKind(i, msg.Streaming, deps.RenderToolBlock(v), boxKindTool)
-				}
-				if deps.RenderSubtaskBlock != nil {
-					addBlockWithKind(i, msg.Streaming, deps.RenderSubtaskBlock(v), boxKindSubtask)
-				}
-			}
-		case "error":
-			content, _ := msg.Content.(string)
-			if deps.RenderError != nil {
-				addBlock(i, msg.Streaming, "\n"+deps.RenderError(content)+"\n")
-			}
-			inSunaBlock = false
-		case "restore_summary":
-			content, _ := msg.Content.(string)
-			if deps.RenderRestoreSummary != nil {
-				addBlock(i, msg.Streaming, "\n"+deps.RenderRestoreSummary(content)+"\n")
-			}
-			inSunaBlock = false
-		case "panel":
-			content, _ := msg.Content.(string)
-			addBlock(i, msg.Streaming, "\n"+content+"\n")
-			inSunaBlock = false
-		case "skill":
-			renderSunaHeader()
-			if p, ok := msg.Content.(*SkillLoadView); ok && deps.RenderSkillLoad != nil {
-				addBlock(i, msg.Streaming, deps.RenderSkillLoad(p)+"\n")
-			}
-		case "skill_review":
-			if p, ok := msg.Content.(protocol.SkillReviewParams); ok && deps.RenderSkillReview != nil {
-				addBlock(i, msg.Streaming, "\n"+deps.RenderSkillReview(p)+"\n")
-			}
-			inSunaBlock = false
-		default:
-			content, _ := msg.Content.(string)
-			if deps.RenderSystem != nil {
-				addBlock(i, msg.Streaming, "\n"+deps.RenderSystem(content)+"\n")
-			}
-			inSunaBlock = false
+		part, response, next := m.renderTranscriptMessage(deps, i, lineCount, inSunaBlock)
+		blocks = append(blocks, part...)
+		for _, block := range part {
+			lineCount += block.LineCount
 		}
+		if m.Messages[i].Role == "assistant" {
+			nav = response
+		}
+		inSunaBlock = next
 	}
 
 	if ask := m.ActiveAsk(); ask != nil && len(ask.Options) > 0 {
@@ -292,27 +215,45 @@ func (m *Model) recomputeTranscriptLayout() {
 	m.TranscriptTotalLines = total
 }
 
-func (m Model) cachedAssistantBlockLines(msg *Msg, deps TranscriptDeps) (int, bool) {
+func (m *Model) cachedAssistantBlockLines(msg *Msg, deps TranscriptDeps) (int, bool) {
 	if msg.Streaming || msg.Role != "assistant" || msg.Render.LineCount <= 0 {
 		return 0, false
 	}
 	if msg.Render.Width != deps.MarkdownWidth || msg.Render.Theme != deps.Theme {
 		return 0, false
 	}
+	if content, ok := msg.Content.(string); ok {
+		if msg.Render.ContentLen != 0 && msg.Render.ContentLen != len(content) {
+			return 0, false
+		}
+		if msg.Render.ContentHash != 0 {
+			sum := sha256.Sum256([]byte(content))
+			var hash uint64
+			for _, b := range sum[:8] {
+				hash = hash<<8 | uint64(b)
+			}
+			if hash != msg.Render.ContentHash {
+				return 0, false
+			}
+		}
+	}
 	return msg.Render.LineCount + 1, true
 }
 
-func (m Model) cachedRenderedBlockLines(msg *Msg, width int, theme string, mode string) (int, bool) {
+func (m *Model) cachedRenderedBlockLines(msg *Msg, width int, theme string, mode string) (int, bool) {
 	if msg == nil || msg.Streaming || msg.Render.LineCount <= 0 {
 		return 0, false
 	}
 	if msg.Render.Width != width || msg.Render.Theme != theme || msg.Render.Mode != mode {
 		return 0, false
 	}
+	if content, ok := msg.Content.(string); ok && msg.Render.ContentLen != 0 && len(content) != msg.Render.ContentLen {
+		return 0, false
+	}
 	return msg.Render.LineCount, true
 }
 
-func (m Model) shouldRenderBlockText(start, lines int) bool {
+func (m *Model) shouldRenderBlockText(start, lines int) bool {
 	if lines <= 0 || m.Viewport.Height() <= 0 {
 		return true
 	}
@@ -320,7 +261,7 @@ func (m Model) shouldRenderBlockText(start, lines int) bool {
 	return start+lines > windowStart && start < windowEnd
 }
 
-func (m Model) desiredTranscriptWindowRange() (int, int) {
+func (m *Model) desiredTranscriptWindowRange() (int, int) {
 	height := m.Viewport.Height()
 	if height <= 0 {
 		return 0, m.TranscriptTotalLines
@@ -334,11 +275,19 @@ func (m Model) desiredTranscriptWindowRange() (int, int) {
 func (m *Model) applyTranscriptWindow() {
 	height := m.Viewport.Height()
 	if height <= 0 {
+		m.hydrateTranscriptRange(0, m.TranscriptTotalLines)
 		lines := m.visibleTranscriptLines(0, m.TranscriptTotalLines)
 		m.applyTranscriptWindowLines(0, m.TranscriptTotalLines, lines)
 		return
 	}
 	start, end := m.desiredTranscriptWindowRange()
+	total := m.TranscriptTotalLines
+	m.hydrateTranscriptRange(start, end)
+	if total != m.TranscriptTotalLines {
+		m.TranscriptYOffset = clampInt(m.TranscriptYOffset, 0, m.TranscriptMaxYOffset())
+		start, end = m.desiredTranscriptWindowRange()
+		m.hydrateTranscriptRange(start, end)
+	}
 	lines := m.visibleTranscriptLines(start, end)
 	m.applyTranscriptWindowLines(start, end, lines)
 }
@@ -375,7 +324,7 @@ func (m *Model) applyTranscriptWindowLines(start, end int, lines []string) {
 // applySelectionStyle 对窗口内行应用选区样式：选中行 strip ANSI 后叠加反色背景，
 // 避免行内 markdown 背景色覆盖选区背景（StyleLineFunc 是外层包裹，无法覆盖行内 SGR）。
 // 无选区时原样返回（零开销）。
-func (m Model) applySelectionStyle(lines []string, windowStart int) []string {
+func (m *Model) applySelectionStyle(lines []string, windowStart int) []string {
 	if m.SelectionStart < 0 || m.SelectionEnd < m.SelectionStart {
 		return lines
 	}
@@ -391,13 +340,14 @@ func (m Model) applySelectionStyle(lines []string, windowStart int) []string {
 	return out
 }
 
-func (m Model) visibleTranscriptLines(start, end int) []string {
+func (m *Model) visibleTranscriptLines(start, end int) []string {
 	if end <= start || len(m.TranscriptBlocks) == 0 {
 		return nil
 	}
 	lines := make([]string, 0, end-start)
-	cursor := 0
-	for _, block := range m.TranscriptBlocks {
+	first, last, cursor := m.transcriptRange(start, end)
+	for slot := first; slot < last; slot = m.nextTranscriptSlot(slot, cursor) {
+		block := m.TranscriptBlocks[slot]
 		blockEnd := cursor + block.LineCount
 		if blockEnd <= start {
 			cursor = blockEnd
@@ -408,7 +358,7 @@ func (m Model) visibleTranscriptLines(start, end int) []string {
 		}
 		from := max(0, start-cursor)
 		to := min(block.LineCount, end-cursor)
-		lines = append(lines, blockLineRange(block.Text, from, to)...)
+		lines = append(lines, transcriptBlockLineRange(block, from, to)...)
 		cursor = blockEnd
 	}
 	return lines
@@ -423,14 +373,22 @@ func (m *Model) SetTranscriptYOffset(offset int) bool {
 // BlockVisible 报告指定消息的块是否与当前 transcript 窗口相交。
 // 就地展开的详情窗口只在展开块可见时才接管滚动：块滚出视窗后，
 // 用户滚动意图是查看其它内容，此时继续消耗滚动会让视窗"卡住"。
-func (m Model) BlockVisible(msgIndex int) bool {
+func (m *Model) ToolBlockVisible(block *toolview.Block) bool {
+	if i, ok := m.transcript.blocks[block]; ok {
+		return m.BlockVisible(i)
+	}
+	return false
+}
+
+func (m *Model) BlockVisible(msgIndex int) bool {
 	if msgIndex < 0 || m.TranscriptWindowEnd <= m.TranscriptWindowStart {
 		return false
 	}
-	cursor := 0
-	for _, block := range m.TranscriptBlocks {
+	first, last, cursor := m.transcriptRange(m.TranscriptWindowStart, m.TranscriptWindowEnd)
+	for slot := first; slot < last; slot = m.nextTranscriptSlot(slot, cursor) {
+		block := m.TranscriptBlocks[slot]
 		blockEnd := cursor + block.LineCount
-		if block.MsgIndex == msgIndex {
+		if int(block.MsgIndex) == msgIndex {
 			return blockEnd > m.TranscriptWindowStart && cursor < m.TranscriptWindowEnd
 		}
 		cursor = blockEnd
@@ -438,7 +396,7 @@ func (m Model) BlockVisible(msgIndex int) bool {
 	return false
 }
 
-func (m Model) canReuseTranscriptWindow(offset int) bool {
+func (m *Model) canReuseTranscriptWindow(offset int) bool {
 	if m.Viewport.Height() <= 0 || m.TranscriptWindowEnd <= m.TranscriptWindowStart {
 		return false
 	}
@@ -470,11 +428,11 @@ func (m *Model) PageTranscript(direction int) bool {
 	return m.ScrollTranscript(delta)
 }
 
-func (m Model) TranscriptMaxYOffset() int {
+func (m *Model) TranscriptMaxYOffset() int {
 	return max(0, m.TranscriptTotalLines-m.Viewport.Height())
 }
 
-func (m Model) TranscriptAtBottom() bool {
+func (m *Model) TranscriptAtBottom() bool {
 	return m.TranscriptYOffset >= m.TranscriptMaxYOffset()
 }
 
@@ -521,6 +479,9 @@ func transcriptLinesHash(lines []string) uint64 {
 }
 
 func (m *Model) trimMarkdownRenderCache() bool {
+	if m.transcript.ready {
+		return m.trimRetainedMarkdownCache()
+	}
 	// 只裁剪渲染输出，不裁剪原始消息和行数元数据，确保滚回旧内容时能按需恢复。
 	used := 0
 	for i := range m.Messages {
@@ -545,7 +506,7 @@ func (m *Model) trimMarkdownRenderCache() bool {
 	return trimmed
 }
 
-func (m Model) protectedMarkdownCacheMessages() map[int]bool {
+func (m *Model) protectedMarkdownCacheMessages() map[int]bool {
 	protected := make(map[int]bool)
 	for i := len(m.Messages) - 1; i >= 0 && len(protected) < markdownRenderCacheRecentKeep; i-- {
 		if m.Messages[i].Render.Output != "" {
@@ -556,7 +517,7 @@ func (m Model) protectedMarkdownCacheMessages() map[int]bool {
 	for _, block := range m.TranscriptBlocks {
 		blockEnd := cursor + block.LineCount
 		if blockEnd > m.TranscriptWindowStart && cursor < m.TranscriptWindowEnd && block.MsgIndex >= 0 {
-			protected[block.MsgIndex] = true
+			protected[int(block.MsgIndex)] = true
 		}
 		cursor = blockEnd
 	}
@@ -570,6 +531,33 @@ func blockLines(text string) int {
 		return 0
 	}
 	return strings.Count(text, "\n") + 1
+}
+
+// transcriptBlockLineRange 对尾部窗口反向定位，避免长块每次从首字节扫描到末尾。
+// 利用已有行数，不额外保存逐行索引或正文副本。
+func transcriptBlockLineRange(block transcriptBlock, start, end int) []string {
+	start, end = max(0, start), min(end, block.LineCount)
+	if block.Text == "" || end <= start {
+		return nil
+	}
+	if start <= block.LineCount-end {
+		return blockLineRange(block.Text, start, end)
+	}
+	lineEnd := len(block.Text)
+	for line := block.LineCount - 1; line >= end; line-- {
+		separator := strings.LastIndexByte(block.Text[:lineEnd], '\n')
+		if separator < 0 {
+			return nil
+		}
+		lineEnd = separator
+	}
+	lines := make([]string, end-start)
+	for line := end - 1; line >= start; line-- {
+		separator := strings.LastIndexByte(block.Text[:lineEnd], '\n')
+		lines[line-start] = block.Text[separator+1 : lineEnd]
+		lineEnd = max(0, separator)
+	}
+	return lines
 }
 
 func blockLineRange(text string, start, end int) []string {
@@ -598,32 +586,26 @@ func blockLineRange(text string, start, end int) []string {
 // SelectionPlainText 提取内容行范围 [start, end]（含端点）的纯文本（剥离 ANSI），
 // 供选区复制使用。数据源是 TranscriptBlocks（每块 Text + LineCount），
 // 按内容行偏移截取；越界范围自动 clamp。
-func (m Model) SelectionPlainText(start, end int) string {
-	if end < start || len(m.TranscriptBlocks) == 0 {
+func (m *Model) SelectionPlainText(start, end int) string {
+	if end < start {
 		return ""
 	}
-	var sb strings.Builder
-	cursor := 0
-	for _, block := range m.TranscriptBlocks {
-		blockEnd := cursor + block.LineCount
-		if blockEnd <= start {
-			cursor = blockEnd
-			continue
-		}
-		// end 是含端点的行号：cursor == end 时该块第一行就是 end 行，仍需处理。
-		if cursor > end {
-			break
-		}
-		from := max(0, start-cursor)
-		to := min(block.LineCount, end-cursor+1)
-		lines := blockLineRange(block.Text, from, to)
-		for _, line := range lines {
-			sb.WriteString(ansi.Strip(line))
-			sb.WriteString("\n")
-		}
-		cursor = blockEnd
+	start = max(0, start)
+	end = min(end, m.TranscriptTotalLines-1)
+	m.hydrateTranscriptRange(start, end+1)
+	lines := m.visibleTranscriptLines(start, end+1)
+	for i := range lines {
+		lines[i] = ansi.Strip(lines[i])
 	}
-	return strings.TrimRight(sb.String(), "\n")
+	result := strings.TrimRight(strings.Join(lines, "\n"), "\n")
+	// 复制可能补水全部历史；立即释放离屏文本及扩容后的映射。
+	if m.transcript.ready {
+		windowStart, windowEnd := m.desiredTranscriptWindowRange()
+		m.releaseTranscriptOutside(windowStart, windowEnd, true)
+		m.hydrateTranscriptRange(windowStart, windowEnd)
+		m.trimMarkdownRenderCache()
+	}
+	return result
 }
 
 func AskSelectedLine(icon, value string) string { return fmt.Sprintf("  %s %s\n", icon, value) }

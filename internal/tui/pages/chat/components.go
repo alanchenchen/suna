@@ -111,7 +111,7 @@ func (m *Model) ResetRuntime() {
 		m.Messages[i] = Msg{}
 	}
 	m.Messages = nil
-	m.TranscriptBlocks = nil
+	m.InvalidateTranscript()
 	m.TranscriptYOffset = 0
 	m.TranscriptTotalLines = 0
 	m.TranscriptWindowStart = 0

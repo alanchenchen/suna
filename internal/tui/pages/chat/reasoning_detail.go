@@ -7,7 +7,7 @@ type TranscriptAnchor struct {
 }
 
 // ReasoningMode 返回某条思考消息当前应使用的展示模式。
-func (m Model) ReasoningMode(msg *Msg) string {
+func (m *Model) ReasoningMode(msg *Msg) string {
 	if msg != nil && !msg.Streaming && msg.ID != 0 && msg.ID == m.ExpandedReasoningID {
 		return "reasoning_detail"
 	}
@@ -16,7 +16,7 @@ func (m Model) ReasoningMode(msg *Msg) string {
 
 // HasStreamingReasoning 已废弃：流式期间允许展开历史思考链，
 // 单展开与折叠约束由 ExpandedReasoningID + ReasoningMode 保证。
-func (m Model) HasStreamingReasoning() bool {
+func (m *Model) HasStreamingReasoning() bool {
 	for i := range m.Messages {
 		if m.Messages[i].Role == "reasoning" && m.Messages[i].Streaming {
 			return true
@@ -36,22 +36,25 @@ func (m *Model) ToggleVisibleReasoningDetail() (TranscriptAnchor, bool) {
 	if m == nil {
 		return TranscriptAnchor{}, false
 	}
-	m.ensureMessageIDs()
+	if !m.transcript.ready {
+		m.ensureMessageIDs()
+	}
 	viewportStart := m.TranscriptYOffset
 	viewportEnd := viewportStart + m.Viewport.Height()
 	if m.Viewport.Height() <= 0 {
 		viewportEnd = m.TranscriptTotalLines
 	}
 
-	cursor := 0
+	first, last, cursor := m.transcriptRange(viewportStart, viewportEnd)
 	bestIndex := -1
 	bestStart := 0
 	bestDistance := 0
-	for _, block := range m.TranscriptBlocks {
+	for slot := first; slot < last; slot = m.nextTranscriptSlot(slot, cursor) {
+		block := m.TranscriptBlocks[slot]
 		blockStart := cursor
 		blockEnd := cursor + block.LineCount
 		cursor = blockEnd
-		if block.MsgIndex < 0 || block.MsgIndex >= len(m.Messages) || blockEnd <= viewportStart || blockStart >= viewportEnd {
+		if block.MsgIndex < 0 || int(block.MsgIndex) >= len(m.Messages) || blockEnd <= viewportStart || blockStart >= viewportEnd {
 			continue
 		}
 		msg := &m.Messages[block.MsgIndex]
@@ -60,7 +63,7 @@ func (m *Model) ToggleVisibleReasoningDetail() (TranscriptAnchor, bool) {
 		}
 		distance := absInt((blockStart + blockEnd) - (viewportStart + viewportEnd))
 		if bestIndex < 0 || distance < bestDistance || (distance == bestDistance && blockStart > bestStart) {
-			bestIndex = block.MsgIndex
+			bestIndex = int(block.MsgIndex)
 			bestStart = blockStart
 			bestDistance = distance
 		}
@@ -85,9 +88,36 @@ func (m *Model) RestoreTranscriptAnchor(anchor TranscriptAnchor) bool {
 	if m == nil || anchor.MessageID == 0 {
 		return false
 	}
+	if m.transcript.ready {
+		i, ok := m.transcript.ids[anchor.MessageID]
+		if !ok {
+			// 只有工具和思考链需要常规锚点索引；通用锚点保留回退查找，不给每个面板建索引。
+			for j := range m.Messages {
+				if m.Messages[j].ID == anchor.MessageID {
+					i, ok = j, true
+					break
+				}
+			}
+		}
+		if ok {
+			slot, endSlot := m.transcriptMessageRange(i)
+			for j := 0; j < endSlot-slot; j++ {
+				if m.TranscriptBlocks[slot+j].MsgIndex == int32(i) && m.TranscriptBlocks[slot+j].LineCount > 0 {
+					m.SetTranscriptYOffset(m.transcript.heights.prefix(slot+j) - anchor.RelativeRow)
+					m.FollowBottom = m.TranscriptAtBottom()
+					m.ManualScrollPaused = !m.FollowBottom
+					if m.FollowBottom {
+						m.NewContentWhilePaused = false
+					}
+					return true
+				}
+			}
+		}
+		return false
+	}
 	cursor := 0
 	for _, block := range m.TranscriptBlocks {
-		if block.MsgIndex >= 0 && block.MsgIndex < len(m.Messages) && m.Messages[block.MsgIndex].ID == anchor.MessageID {
+		if block.MsgIndex >= 0 && int(block.MsgIndex) < len(m.Messages) && m.Messages[block.MsgIndex].ID == anchor.MessageID {
 			m.SetTranscriptYOffset(cursor - anchor.RelativeRow)
 			m.FollowBottom = m.TranscriptAtBottom()
 			m.ManualScrollPaused = !m.FollowBottom

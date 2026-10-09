@@ -104,12 +104,14 @@ func (t *TUI) handleLocalNotification(notif localNotification) {
 	}
 }
 
-func (t *TUI) handleNotificationMsg(msg notificationMsg) {
+func (t *TUI) handleNotificationMsg(msg notificationMsg) bool {
 	// Welcome 不消费与 Chat runtime 绑定的事件。detach 前已经进入本地队列的
 	// stream/tool/interaction 通知不能重新持有刚释放的展示内容。
 	if isChatRuntimeNotification(msg) && t.mode == uipage.Welcome && t.currentSession.ID == "" {
-		return
+		return false
 	}
+	before := t.notificationBodyState()
+	changed := false
 	switch m := msg.(type) {
 	case agentDeltaMsg:
 		t.handleAgentDeltaNotification(m.Params)
@@ -124,11 +126,11 @@ func (t *TUI) handleNotificationMsg(msg notificationMsg) {
 	case usageMsg:
 		t.handleUsageNotification(m.Params)
 	case toolStartMsg:
-		t.handleToolStartNotification(m.Params)
+		changed = t.handleToolStartNotification(m.Params)
 	case toolGuardMsg:
-		t.handleToolGuardNotification(m.Params)
+		changed = t.handleToolGuardNotification(m.Params)
 	case toolEndMsg:
-		t.handleToolEndNotification(m.Params)
+		changed = t.handleToolEndNotification(m.Params)
 	case askUserMsg:
 		t.handleAskUserNotification(m.Params)
 	case guardConfirmMsg:
@@ -160,6 +162,7 @@ func (t *TUI) handleNotificationMsg(msg notificationMsg) {
 	case requestErrorMsg:
 		t.handleRequestErrorNotification(m)
 	}
+	return changed || before != t.notificationBodyState()
 }
 
 func isChatRuntimeNotification(msg notificationMsg) bool {
@@ -211,7 +214,6 @@ func (t *TUI) handleSteeringNotification(p protocol.SteeringMessage) {
 		}
 	}
 	t.layoutChat()
-	t.syncContent()
 }
 
 func (t *TUI) resolveSteeringSubmission(clientMsgID string, failed bool) (resolved bool, restore []string) {
@@ -440,10 +442,10 @@ func (t *TUI) handleInteractionResolvedNotification(p protocol.InteractionResolv
 	}
 }
 
-func (t *TUI) handleToolStartNotification(p protocol.ToolStartParams) {
+func (t *TUI) handleToolStartNotification(p protocol.ToolStartParams) bool {
 	// 其它会话的工具事件不进入本页 transcript（attach 在途窗口期可能串扰）。
 	if p.SessionID != "" && t.currentSession.ID != "" && p.SessionID != t.currentSession.ID {
-		return
+		return false
 	}
 	t.runHadToolCall = true
 	t.finishStreamingMessages()
@@ -457,19 +459,28 @@ func (t *TUI) handleToolStartNotification(p protocol.ToolStartParams) {
 	now := time.Now()
 	if p.Tool == "skill_load" {
 		t.chat.StartSkillLoad(p, id, now)
-		return
+		return true
 	}
 	t.chat.StartTool(p, id, now)
+	return true
 }
 
-func (t *TUI) handleToolGuardNotification(p protocol.ToolGuardParams) {
+func (t *TUI) handleToolGuardNotification(p protocol.ToolGuardParams) bool {
+	te := t.chat.FindTool(p.ToolCallID)
+	if te == nil || (te.Guard != nil && te.Guard.ReadOnly == p.ReadOnly &&
+		te.Guard.Decision == p.Decision && te.Guard.Source == p.Source &&
+		te.Guard.Reason == p.Reason && te.Guard.ReviewCode == p.ReviewCode &&
+		te.Guard.ReviewMessage == p.ReviewMessage) {
+		return false
+	}
 	t.chat.ApplyToolGuard(p)
+	return true
 }
 
-func (t *TUI) handleToolEndNotification(p protocol.ToolEndParams) {
+func (t *TUI) handleToolEndNotification(p protocol.ToolEndParams) bool {
 	// 与 tool.start 对称：其它会话的工具结束事件同样丢弃。
 	if p.SessionID != "" && t.currentSession.ID != "" && p.SessionID != t.currentSession.ID {
-		return
+		return false
 	}
 	id := p.ID
 	if id == "" {
@@ -477,9 +488,14 @@ func (t *TUI) handleToolEndNotification(p protocol.ToolEndParams) {
 	}
 	now := time.Now()
 	if t.chat.EndSkillLoad(p, id, now) {
-		return
+		return true
+	}
+	te := t.chat.ActiveTools[id]
+	if te == nil {
+		te = t.chat.FindTool(id)
 	}
 	t.chat.EndTool(p, id, now)
+	return te != nil && te.Status != toolCancelled
 }
 
 func (t *TUI) handleCompactResultNotification(p protocol.CompactResult) {
@@ -681,6 +697,7 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) bool {
 	t.chat.Compacting = false
 	t.compactStartedAt = time.Time{}
 	t.chat.Messages = nil
+	t.chat.InvalidateTranscript()
 	// 展开块是指向 Messages 内块的指针；重建前必须清空，否则悬挂指向已丢弃的旧块。
 	t.chat.ExpandedBlock = nil
 	t.chat.ExpandedBoxKind = ""
@@ -753,6 +770,10 @@ func (t *TUI) handleConfigStateNotification(p protocol.ConfigParams) {
 	}
 	if t.configState.Locale != "" {
 		t.i18n.SetLocale(LocaleID(t.configState.Locale))
+		t.chat.InvalidateTranscript()
+		if t.mode == uipage.Chat {
+			t.transcriptSyncPending = true
+		}
 		t.refreshNativeLists()
 	}
 	if t.configState.Theme != "" {

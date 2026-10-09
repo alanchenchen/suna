@@ -118,6 +118,8 @@ type Model struct {
 	Textarea textarea.Model
 	Spinner  spinner.Model
 
+	transcript                retainedTranscript
+	displayBudget             displayBudget
 	TranscriptBlocks          []transcriptBlock
 	TranscriptYOffset         int
 	TranscriptTotalLines      int

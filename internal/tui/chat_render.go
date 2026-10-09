@@ -405,7 +405,11 @@ func (t *TUI) cachedMarkdown(msg *chatMsg, content string, width int) string {
 		return cache.Output
 	}
 	out := RenderMarkdown(content, width)
-	msg.Render = msgRenderCache{Width: width, Theme: currentTheme.Name, ContentLen: len(content), ContentHash: hash, LineCount: chatpage.RenderedLineCount(out), Output: out}
+	lines := 0
+	if out != "" {
+		lines = strings.Count(strings.TrimRight(out, "\n"), "\n") + 1
+	}
+	msg.Render = msgRenderCache{Width: width, Theme: currentTheme.Name, ContentLen: len(content), ContentHash: hash, LineCount: lines, Output: out}
 	return out
 }
 

@@ -20,7 +20,7 @@ func (m *Model) StartSkillLoad(p protocol.ToolStartParams, id string, now time.T
 	entry := &toolview.Entry{ID: id, RawName: p.Tool, ParamsRaw: p.Params, Status: toolview.StatusRunning, StartedAt: now}
 	m.ActiveTools[id] = entry
 	m.ToolStartTimes[id] = now
-	m.Messages = append(m.Messages, Msg{Role: "skill", Content: view})
+	m.appendMessage(Msg{Role: "skill", Content: view})
 	m.Phase = PhaseTool
 	m.PhaseStart = now
 	m.StatusLabel = ""
@@ -35,6 +35,7 @@ func (m *Model) EndSkillLoad(p protocol.ToolEndParams, id string, now time.Time)
 	if entry == nil || entry.RawName != "skill_load" {
 		return false
 	}
+	m.markToolDirty(id)
 	view := m.findSkillLoad(id)
 	if view != nil {
 		view.Status = "loaded"
@@ -59,11 +60,6 @@ func (m *Model) finishSkillLoadPhase(now time.Time) {
 }
 
 func (m *Model) findSkillLoad(id string) *SkillLoadView {
-	for i := len(m.Messages) - 1; i >= 0; i-- {
-		view, ok := m.Messages[i].Content.(*SkillLoadView)
-		if ok && view != nil && view.ID == id {
-			return view
-		}
-	}
-	return nil
+	view, _ := m.findSkillLoadOwner(id)
+	return view
 }

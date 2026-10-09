@@ -18,7 +18,7 @@ func TestToolAndSubtaskBoxesExpandIndependently(t *testing.T) {
 	}, "t1", "s1")
 
 	// 视窗内只有 tool 盒子（BoxKind=tool）时，Ctrl+T 展开 tool 盒子。
-	m.TranscriptBlocks = []transcriptBlock{{MsgIndex: 0, LineCount: 3, BoxKind: boxKindTool}}
+	m.TranscriptBlocks = []transcriptBlock{{MsgIndex: 0, LineCount: 3, BoxKind: transcriptBoxTool}}
 	m.TranscriptTotalLines = 3
 	if _, changed := m.ToggleVisibleBlockDetail(); !changed {
 		t.Fatal("expected tool box to expand")
@@ -33,7 +33,7 @@ func TestToolAndSubtaskBoxesExpandIndependently(t *testing.T) {
 	// 视窗内只有 subtask 盒子时，Ctrl+T 展开 subtask 面板（独立于 tool 盒子）。
 	m.ExpandedBlock = nil
 	m.ExpandedBoxKind = ""
-	m.TranscriptBlocks = []transcriptBlock{{MsgIndex: 0, LineCount: 3, BoxKind: boxKindSubtask}}
+	m.TranscriptBlocks = []transcriptBlock{{MsgIndex: 0, LineCount: 3, BoxKind: transcriptBoxSubtask}}
 	if _, changed := m.ToggleVisibleBlockDetail(); !changed {
 		t.Fatal("expected subtask box to expand")
 	}

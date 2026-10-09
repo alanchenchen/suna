@@ -52,6 +52,7 @@ func (m *Model) appendMessage(msg Msg) {
 		m.NextMessageID = msg.ID
 	}
 	m.Messages = append(m.Messages, msg)
+	m.MarkMessageDirty(len(m.Messages) - 1)
 }
 
 func (m *Model) AppendStreamMessage(role, chunk string, now time.Time) {
@@ -71,6 +72,7 @@ func (m *Model) AppendStreamMessage(role, chunk string, now time.Time) {
 			msg.StartedAt = now
 		}
 		msg.EndedAt = time.Time{}
+		m.MarkMessageDirty(len(m.Messages) - 1)
 		// 流式内容只追加到 builder，避免 prev+chunk 对长回复反复复制。
 		return
 	}
@@ -81,7 +83,10 @@ func (m *Model) AppendStreamMessage(role, chunk string, now time.Time) {
 }
 
 func (m *Model) FinishStreamingMessages(now time.Time) {
-	for i := range m.Messages {
+	finish := func(i int) {
+		if i < 0 || i >= len(m.Messages) {
+			return
+		}
 		if m.Messages[i].Streaming {
 			m.Messages[i].Streaming = false
 			if m.Messages[i].EndedAt.IsZero() {
@@ -92,6 +97,21 @@ func (m *Model) FinishStreamingMessages(now time.Time) {
 				m.Messages[i].Stream = nil
 			}
 			m.Messages[i].Render = MsgRenderCache{}
+			m.MarkMessageDirty(i)
 		}
+	}
+	if m.transcript.ready {
+		// 已同步的流式消息登记在动态集合中，尚未同步的登记在脏集合中，
+		// 避免每个 tool.start 都扫描整个长会话。
+		for i := range m.transcript.dynamic {
+			finish(i)
+		}
+		for i := range m.transcript.dirty {
+			finish(i)
+		}
+		return
+	}
+	for i := range m.Messages {
+		finish(i)
 	}
 }

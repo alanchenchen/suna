@@ -60,7 +60,7 @@ func TestTrimMarkdownRenderCacheKeepsVisibleAndRecent(t *testing.T) {
 			Content: fmt.Sprintf("message-%02d", i),
 			Render:  MsgRenderCache{Output: large},
 		})
-		m.TranscriptBlocks = append(m.TranscriptBlocks, transcriptBlock{MsgIndex: i, Text: fmt.Sprintf("message-%02d", i), LineCount: 1})
+		m.TranscriptBlocks = append(m.TranscriptBlocks, transcriptBlock{MsgIndex: int32(i), Text: fmt.Sprintf("message-%02d", i), LineCount: 1})
 	}
 	m.recomputeTranscriptLayout()
 	m.SetTranscriptYOffset(10)

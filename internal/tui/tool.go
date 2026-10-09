@@ -229,16 +229,7 @@ func (t *TUI) expandedBlockHasMainEntries() bool {
 // 就地展开的详情窗口只在块可见时接管滚动：块滚出视窗后，
 // 用户滚动意图是查看其它内容，继续消耗会让视窗"卡住"。
 func (t *TUI) expandedBlockVisible() bool {
-	block := t.chat.ExpandedBlock
-	if block == nil {
-		return false
-	}
-	for i, msg := range t.chat.Messages {
-		if msg.Content == block {
-			return t.chat.BlockVisible(i)
-		}
-	}
-	return false
+	return t.chat.ToolBlockVisible(t.chat.ExpandedBlock)
 }
 
 // wheelDelta 把滚轮方向转成滚动增量（与 viewport 的步长一致）。
@@ -258,9 +249,7 @@ func isSubtask(te *toolEntry) bool {
 func isSubtaskChild(te *toolEntry) bool {
 	return toolview.IsSubtaskChild(te)
 }
-func (t *TUI) findTool(id string) *toolEntry { return t.chat.FindTool(id) }
-func (t *TUI) visibleSubtaskIDs() []string   { return t.chat.VisibleSubtaskIDs() }
-func (t *TUI) runningToolCount() int         { return t.chat.RunningToolCount() }
+func (t *TUI) runningToolCount() int { return t.chat.RunningToolCount() }
 func (t *TUI) markToolRejected(id string) {
 	t.chat.MarkToolRejected(id, t.tr("tui.guard.rejected"), time.Now())
 }

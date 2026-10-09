@@ -114,10 +114,16 @@ func (t *TUI) layoutChat() {
 	}
 	oldWidth := t.chat.Viewport.Width()
 	oldHeight := t.chat.Viewport.Height()
+	// 提示块可能只改变高度而不改变正文；必须在 resize 前保存贴底意图，暂停阅读时仍保留原偏移。
+	followBottom := !t.chat.ManualScrollPaused && (t.chat.FollowBottom || t.chat.TranscriptAtBottom())
 	t.chat.Viewport.SetWidth(t.width)
 	t.chat.Viewport.SetHeight(layout.ViewportHeight)
 	if oldWidth != t.width || oldHeight != layout.ViewportHeight {
-		t.chat.SetTranscriptYOffset(t.chat.TranscriptYOffset)
+		offset := t.chat.TranscriptYOffset
+		if followBottom {
+			offset = t.chat.TranscriptMaxYOffset()
+		}
+		t.chat.SetTranscriptYOffset(offset)
 	}
 	t.chat.Textarea.SetWidth(layout.InputWidth)
 }

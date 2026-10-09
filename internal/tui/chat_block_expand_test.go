@@ -72,7 +72,7 @@ func TestSubtaskPanelActivatesAfterRunEndViaExpand(t *testing.T) {
 	if !tui.hasActiveSubtaskPanel() {
 		t.Fatalf("hasActiveSubtaskPanel() = false after Ctrl+T, want active")
 	}
-	if ids := tui.visibleSubtaskIDs(); len(ids) != 1 {
+	if ids := tui.chat.VisibleSubtaskIDs(); len(ids) != 1 {
 		t.Fatalf("visibleSubtaskIDs() = %v, want the expanded block entries", ids)
 	}
 }

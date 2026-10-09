@@ -68,6 +68,8 @@ var (
 	bodyFill lipgloss.Style
 )
 
+var themeGeneration uint64
+
 var currentTheme = themesys.Adapt(ThemeDefault, themesys.DefaultColors(), themesys.DarkBackground)
 
 // init 用内置 default 初始化全部样式，保证任何渲染路径（含测试）都不会遇到零值样式。
@@ -83,6 +85,7 @@ func clearMarkdownCache() {
 // applyThemePalette 把适配后的调色板铺到全部样式变量上。
 func applyThemePalette(p themesys.Palette) {
 	currentTheme = p
+	themeGeneration++
 	ColorAccent, ColorDim, ColorInfo = p.Accent, p.Dim, p.Info
 	ColorSuccess, ColorWarning, ColorError, ColorText = p.Success, p.Warning, p.Error, p.Text
 	styleUser = lipgloss.NewStyle().Bold(true).Foreground(ColorInfo)
@@ -167,6 +170,7 @@ func (t *TUI) setTheme(name string) {
 func (t *TUI) applyResolvedTheme() {
 	applyThemePalette(themesys.Resolve(t.theme, t.themeSpecs, t.terminalBackground))
 	t.applyConfigInputTheme()
+	t.invalidateChatTheme()
 	if t.mode == uipage.Chat {
 		t.applyTextAreaTheme()
 		t.refreshNativeLists()
@@ -178,6 +182,15 @@ func (t *TUI) applyResolvedTheme() {
 		}
 	}
 	t.chat.Spinner.Style = lipgloss.NewStyle().Foreground(ColorAccent)
+}
+
+// invalidateChatTheme 只在调色板变更时清理消息缓存，避免逐帧扫描历史。
+func (t *TUI) invalidateChatTheme() {
+	for i := range t.chat.Messages {
+		t.chat.Messages[i].Render = msgRenderCache{}
+	}
+	t.chat.InvalidateTranscript()
+	t.chatThemeGeneration = themeGeneration
 }
 
 // takeTranscriptSyncCmd 取出待办的重建请求并转成命令。

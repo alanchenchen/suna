@@ -8,6 +8,7 @@ import (
 
 func (t *TUI) handleProtocolResultMsg(msg tea.Msg) tea.Cmd {
 	// method response 在这里转成 TUI 本地状态更新；daemon notification 仍走 notification pump，保持协议语义分层。
+	before := t.notificationBodyState()
 	schedule := false
 	switch m := msg.(type) {
 	case steerResultMsg:
@@ -120,7 +121,10 @@ func (t *TUI) handleProtocolResultMsg(msg tea.Msg) tea.Cmd {
 		if t.mode == uipage.Welcome {
 			t.initWelcomeList()
 		}
-		if schedule || t.mode == uipage.Chat {
+		if t.mode == uipage.Chat {
+			t.layoutChat()
+		}
+		if schedule || before != t.notificationBodyState() {
 			return t.scheduleTranscriptSync()
 		}
 	}

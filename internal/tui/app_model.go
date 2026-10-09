@@ -149,6 +149,7 @@ type TUI struct {
 	// 不能在 Update 内直接 program.Send：bubbletea 的消息 channel 无缓冲，
 	// 事件循环处理 Update 时不会回读，会永久阻塞（连 Ctrl+C 都会失效）。
 	transcriptSyncPending bool
+	chatThemeGeneration   uint64
 
 	// selectionDirty 标记拖动中选区范围变化（内容未变）：帧门 flush 时走轻量路径
 	// （只重写窗口行，不重建块列表），与 transcriptSyncDirty（内容变化）区分。

@@ -90,24 +90,27 @@ func (m *Model) ToggleVisibleBlockDetail() (TranscriptAnchor, bool) {
 	if m == nil {
 		return TranscriptAnchor{}, false
 	}
-	m.ensureMessageIDs()
+	if !m.transcript.ready {
+		m.ensureMessageIDs()
+	}
 	viewportStart := m.TranscriptYOffset
 	viewportEnd := viewportStart + m.Viewport.Height()
 	if m.Viewport.Height() <= 0 {
 		viewportEnd = m.TranscriptTotalLines
 	}
 
-	cursor := 0
+	first, last, cursor := m.transcriptRange(viewportStart, viewportEnd)
 	bestBlock := (*toolview.Block)(nil)
 	bestBoxKind := ""
 	bestMsgIndex := -1
 	bestStart := 0
 	bestDistance := 0
-	for _, block := range m.TranscriptBlocks {
+	for slot := first; slot < last; slot = m.nextTranscriptSlot(slot, cursor) {
+		block := m.TranscriptBlocks[slot]
 		blockStart := cursor
 		blockEnd := cursor + block.LineCount
 		cursor = blockEnd
-		if block.MsgIndex < 0 || block.MsgIndex >= len(m.Messages) || blockEnd <= viewportStart || blockStart >= viewportEnd {
+		if block.MsgIndex < 0 || int(block.MsgIndex) >= len(m.Messages) || blockEnd <= viewportStart || blockStart >= viewportEnd {
 			continue
 		}
 		msg := &m.Messages[block.MsgIndex]
@@ -120,7 +123,7 @@ func (m *Model) ToggleVisibleBlockDetail() (TranscriptAnchor, bool) {
 		}
 		// 同一个 tool 消息渲染出两个相邻盒子，各自独立展开：
 		// tool 盒子需要主条目，subtask 面板需要子任务条目。
-		boxKind := block.BoxKind
+		boxKind := block.BoxKind.name()
 		if boxKind == boxKindTool && len(toolview.VisibleMainEntries(tb)) == 0 {
 			continue
 		}
@@ -134,7 +137,7 @@ func (m *Model) ToggleVisibleBlockDetail() (TranscriptAnchor, bool) {
 		if bestBlock == nil || distance < bestDistance || (distance == bestDistance && blockStart > bestStart) {
 			bestBlock = tb
 			bestBoxKind = boxKind
-			bestMsgIndex = block.MsgIndex
+			bestMsgIndex = int(block.MsgIndex)
 			bestStart = blockStart
 			bestDistance = distance
 		}

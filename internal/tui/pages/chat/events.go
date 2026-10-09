@@ -65,12 +65,15 @@ func (m *Model) StartTool(p protocol.ToolStartParams, id string, now time.Time) 
 	}
 	m.ActiveTools[id] = te
 	m.ToolStartTimes[id] = te.StartedAt
-	m.EnsureToolBlock().Add(te)
+	block := m.EnsureToolBlock()
+	block.Add(te)
+	m.markBlockDirty(block)
 	return te
 }
 
 func (m *Model) ApplyToolGuard(p protocol.ToolGuardParams) {
 	if te := m.FindTool(p.ToolCallID); te != nil {
+		m.markToolDirty(p.ToolCallID)
 		te.Guard = &toolview.GuardInfo{ReadOnly: p.ReadOnly, Decision: p.Decision, Source: p.Source, Reason: p.Reason, ReviewCode: p.ReviewCode, ReviewMessage: p.ReviewMessage}
 	}
 }
@@ -81,6 +84,9 @@ func (m *Model) EndTool(p protocol.ToolEndParams, id string, now time.Time) {
 		// AskUser 等等待用户输入的工具会先让 Chat 退出 running 状态，active map 可能已清空；
 		// tool_end 回来时仍要回到历史 transcript 里的 tool entry，把 running 更新为 done/error。
 		te = m.FindTool(id)
+	}
+	if te != nil {
+		m.markToolEntryDirty(te)
 	}
 	if te != nil && te.Status == toolview.StatusCancelled {
 		// run 终态已经将未结束工具固定为 cancelled，迟到的 tool_end 不能再覆盖该终态。

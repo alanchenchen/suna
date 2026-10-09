@@ -8,11 +8,12 @@ import (
 
 func (m *Model) EnsureToolBlock() *toolview.Block {
 	if m.CanAppendToCurrentToolBlock() {
+		m.markBlockDirty(m.CurrentToolBlock)
 		return m.CurrentToolBlock
 	}
 	block := &toolview.Block{Entries: make(map[string]*toolview.Entry)}
 	m.CurrentToolBlock = block
-	m.Messages = append(m.Messages, Msg{Role: "tool", Content: block})
+	m.appendMessage(Msg{Role: "tool", Content: block})
 	return block
 }
 
@@ -41,6 +42,7 @@ func (m *Model) HasRunningTools() bool {
 func (m *Model) MarkActiveToolsCancelling() {
 	for _, te := range m.ActiveTools {
 		if te != nil && te.Status == toolview.StatusRunning {
+			m.markToolEntryDirty(te)
 			te.Status = toolview.StatusCancelling
 		}
 	}
@@ -50,6 +52,7 @@ func (m *Model) MarkActiveToolsCancelling() {
 func (m *Model) RevertActiveToolsCancelling() {
 	for _, te := range m.ActiveTools {
 		if te != nil && te.Status == toolview.StatusCancelling {
+			m.markToolEntryDirty(te)
 			te.Status = toolview.StatusRunning
 		}
 	}
@@ -61,6 +64,7 @@ func (m *Model) FinishCancellingTools(now time.Time) {
 		if te == nil || (te.Status != toolview.StatusCancelling && te.Status != toolview.StatusRunning) {
 			continue
 		}
+		m.markToolEntryDirty(te)
 		te.Status = toolview.StatusCancelled
 		te.EndedAt = now
 		if start, ok := m.ToolStartTimes[id]; ok {
@@ -127,22 +131,8 @@ func (m *Model) SelectedExpandedEntry() *toolview.Entry {
 }
 
 func (m *Model) FindTool(id string) *toolview.Entry {
-	if id == "" {
-		return nil
-	}
-	if m.CurrentToolBlock != nil {
-		if te := m.CurrentToolBlock.Entries[id]; te != nil {
-			return te
-		}
-	}
-	for _, msg := range m.Messages {
-		if block, ok := msg.Content.(*toolview.Block); ok && block != nil {
-			if te := block.Entries[id]; te != nil {
-				return te
-			}
-		}
-	}
-	return nil
+	entry, _ := m.findToolOwner(id)
+	return entry
 }
 
 // VisibleSubtaskIDs 返回 subtask 面板要展示的子任务条目。
@@ -210,6 +200,7 @@ func (m *Model) MarkToolRejected(id, rejectedText string, now time.Time) bool {
 	if te == nil {
 		return false
 	}
+	m.markToolDirty(id)
 	te.Status = toolview.StatusError
 	te.Result = rejectedText
 	te.EndedAt = now

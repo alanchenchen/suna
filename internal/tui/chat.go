@@ -80,7 +80,11 @@ func (t *TUI) initChatComponents() tea.Cmd {
 }
 
 func (t *TUI) syncContent() {
+	if t.chatThemeGeneration != themeGeneration {
+		t.invalidateChatTheme()
+	}
 	t.transcriptSyncDirty = false
+	t.selectionDirty = false
 	// 同步选区到 chat 包：内容层应用选区样式（strip ANSI + 反色），
 	// 避免行内 markdown 背景色覆盖选区背景。无选区时置 -1（零开销）。
 	if t.selection.HasAny() && t.selection.Region == SelectionRegionTranscript {
@@ -93,13 +97,15 @@ func (t *TUI) syncContent() {
 		t.chat.SelectionEnd = -1
 	}
 	t.chat.SyncTranscript(chatpage.TranscriptDeps{
-		Width:         t.width,
-		MarkdownWidth: max(24, t.width-8),
-		Theme:         currentTheme.Name,
-		ReasoningMode: t.chat.ReasoningMode,
-		SunaLabel:     t.tr("tui.chat.suna"),
-		AskHelp:       t.tr("tui.ask.help"),
-		AskChoiceHelp: t.tr("tui.ask.choice_help"),
+		Width:           t.width,
+		MarkdownWidth:   max(20, t.width-6),
+		Theme:           currentTheme.Name,
+		SubtaskKeys:     t.canToggleSubtaskDetailWithEnter(),
+		ReasoningHeight: t.height,
+		ReasoningMode:   t.chat.ReasoningMode,
+		SunaLabel:       t.tr("tui.chat.suna"),
+		AskHelp:         t.tr("tui.ask.help"),
+		AskChoiceHelp:   t.tr("tui.ask.choice_help"),
 		RenderSunaHeader: func(label string) string {
 			return "\n  " + styleAgentLine.Render("● "+label) + "\n"
 		},
@@ -147,6 +153,11 @@ func (t *TUI) syncSelectionRange() {
 
 func (t *TUI) scheduleTranscriptSync() tea.Cmd {
 	t.transcriptSyncDirty = true
+	return t.scheduleChatFrame()
+}
+
+// scheduleChatFrame 共用帧门，但不把输入区或选区变化误标成正文变化。
+func (t *TUI) scheduleChatFrame() tea.Cmd {
 	if t.transcriptSyncScheduled {
 		return nil
 	}
