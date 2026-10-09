@@ -771,9 +771,8 @@ func (t *TUI) handleConfigStateNotification(p protocol.ConfigParams) {
 	if t.configState.Locale != "" {
 		t.i18n.SetLocale(LocaleID(t.configState.Locale))
 		t.chat.InvalidateTranscript()
-		if t.mode == uipage.Chat {
-			t.transcriptSyncPending = true
-		}
+		// 非聊天页也保留待办，由返回 Chat 后的 Update 边界安排重建。
+		t.transcriptSyncPending = true
 		t.refreshNativeLists()
 	}
 	if t.configState.Theme != "" {

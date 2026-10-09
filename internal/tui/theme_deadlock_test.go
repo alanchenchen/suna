@@ -2,6 +2,7 @@ package tui
 
 import (
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,29 +21,37 @@ import (
 // config.state 广播（主题被改动）。事件循环必须处理完这条广播并继续运行；
 // 若回归为同步 Send，Update 永不返回，事件循环停转。
 func TestThemeSwitchKeepsEventLoopAlive(t *testing.T) {
+	old := currentTheme
+	t.Cleanup(func() { applyThemePalette(old) })
 	tui := newChatThemeTUI(t)
+	tui.appendNonToolMessage(chatMsg{Role: "assistant", Content: strings.Repeat("Long **theme refresh** body.\n", 200)})
+	tui.syncContent()
 
-	applied := make(chan string, 8)
-	prog := tea.NewProgram(&probeTUI{TUI: tui, applied: applied}, tea.WithoutRenderer(), tea.WithInput(nil), tea.WithOutput(io.Discard))
+	alive := make(chan struct{}, 1)
+	prog := tea.NewProgram(&probeTUI{TUI: tui, alive: alive}, tea.WithoutRenderer(), tea.WithInput(nil), tea.WithOutput(io.Discard))
 	tui.program = prog
-	go func() { _, _ = prog.Run() }()
-	defer prog.Kill()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = prog.Run()
+	}()
+	defer func() {
+		// 先终止并等待事件循环退出，再由 Cleanup 恢复全局主题，避免渲染并发读样式。
+		prog.Kill()
+		<-done
+	}()
 
-	// 等事件循环起来，再投递 config.state（主题变更广播）。
-	time.Sleep(50 * time.Millisecond)
-	prog.Send(configStateMsg{Params: protocol.ConfigParams{Theme: "probe"}})
-
-	// 主题值只在 program goroutine 内读取并经 channel 传出，避免数据竞争。
-	deadline := time.After(2 * time.Second)
-	for {
-		select {
-		case got := <-applied:
-			if got == "probe" {
-				return
-			}
-		case <-deadline:
-			t.Fatal("event loop stalled after theme switch: Update must not call program.Send synchronously")
-		}
+	// Send 在独立 goroutine 等待事件循环接收，不依赖固定启动延迟。
+	go func() {
+		prog.Send(configStateMsg{Params: protocol.ConfigParams{Theme: "probe"}})
+		// 显式结算正文帧后再探活，不能只凭主题字段更新就认定重建没有阻塞。
+		prog.Send(transcriptSyncMsg{})
+		prog.Send(themeAliveMsg{})
+	}()
+	select {
+	case <-alive:
+	case <-time.After(2 * time.Second):
+		t.Fatal("event loop stalled after theme switch: Update must not call program.Send synchronously")
 	}
 }
 
@@ -81,17 +90,21 @@ func newChatThemeTUI(t *testing.T) *TUI {
 	return tui
 }
 
-// probeTUI 在每次 Update 后把当前主题经 channel 传出，用于判定事件循环是否停转。
+type themeAliveMsg struct{}
+
+// probeTUI 在正文帧结算后确认后续消息仍可处理，状态只在事件循环内检查。
 type probeTUI struct {
 	*TUI
-	applied chan string
+	alive chan struct{}
 }
 
 func (p *probeTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	_, cmd := p.TUI.Update(msg)
-	select {
-	case p.applied <- p.theme:
-	default:
+	if _, ok := msg.(themeAliveMsg); ok && p.theme == "probe" && !p.transcriptSyncDirty && strings.Contains(p.chat.Viewport.GetContent(), "theme refresh") {
+		select {
+		case p.alive <- struct{}{}:
+		default:
+		}
 	}
 	// 必须返回探针自身，否则后续 Update 会绕过计数直接落到内层 *TUI。
 	return p, cmd

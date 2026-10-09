@@ -83,6 +83,7 @@ func (t *TUI) syncContent() {
 	if t.chatThemeGeneration != themeGeneration {
 		t.invalidateChatTheme()
 	}
+	t.transcriptSyncPending = false
 	t.transcriptSyncDirty = false
 	t.selectionDirty = false
 	// 同步选区到 chat 包：内容层应用选区样式（strip ANSI + 反色），

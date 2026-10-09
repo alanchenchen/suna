@@ -92,3 +92,23 @@ func BenchmarkChatHistoryChangedFrame(b *testing.B) {
 		}
 	}
 }
+
+// 主题变化需要重建样式，与稳定帧分开测量，避免把普通增量更新当作切主题性能。
+func BenchmarkChatHistoryThemeRefresh(b *testing.B) {
+	old := currentTheme
+	b.Cleanup(func() { applyThemePalette(old) })
+	for _, kind := range []string{"text", "mixed"} {
+		for _, turns := range []int{100, 1000} {
+			b.Run(fmt.Sprintf("%s/%d", kind, turns), func(b *testing.B) {
+				ui := chatHistoryBenchmarkFixture(turns, kind)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					applyThemePalette(currentTheme)
+					ui.syncContent()
+					chatHistoryBenchmarkOutput = ui.viewChat()
+				}
+			})
+		}
+	}
+}

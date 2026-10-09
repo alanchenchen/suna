@@ -25,6 +25,10 @@ func (t *TUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (t *TUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if _, ok := msg.(transcriptSyncMsg); ok && t.mode != uipage.Chat {
+		// 帧门可能在切页后到达；解除已排帧状态，但保留 dirty 等待返回聊天页。
+		return t, t.flushScheduledTranscriptSync()
+	}
 	if background, ok := msg.(tea.BackgroundColorMsg); ok {
 		t.applyDetectedBackground(background)
 		return t, nil

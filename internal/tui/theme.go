@@ -170,13 +170,13 @@ func (t *TUI) setTheme(name string) {
 func (t *TUI) applyResolvedTheme() {
 	applyThemePalette(themesys.Resolve(t.theme, t.themeSpecs, t.terminalBackground))
 	t.applyConfigInputTheme()
-	t.invalidateChatTheme()
+	// 非聊天页保留旧窗口，实际缓存失效由下一次正文同步统一结算。
+	// 待办跨页面保留，避免返回原会话后必须点击才能恢复正文。
+	t.transcriptSyncPending = true
 	if t.mode == uipage.Chat {
 		t.applyTextAreaTheme()
 		t.refreshNativeLists()
-		if t.program != nil {
-			t.transcriptSyncPending = true
-		} else {
+		if t.program == nil {
 			// 测试环境没有 program，同步重建以保持可断言性。
 			t.syncContent()
 		}
@@ -196,11 +196,18 @@ func (t *TUI) invalidateChatTheme() {
 // takeTranscriptSyncCmd 取出待办的重建请求并转成命令。
 // 必须在 Update 返回路径调用：命令由事件循环执行，而不是在 Update 内同步投递。
 func (t *TUI) takeTranscriptSyncCmd() tea.Cmd {
-	if !t.transcriptSyncPending {
+	if t.mode != uipage.Chat {
 		return nil
 	}
-	t.transcriptSyncPending = false
-	return t.scheduleTranscriptSync()
+	if t.transcriptSyncPending {
+		t.transcriptSyncPending = false
+		return t.scheduleTranscriptSync()
+	}
+	// 已排帧在其他页面到达后会解除 scheduled；未结算的正文或选区必须重新排帧。
+	if t.transcriptSyncDirty || t.selectionDirty {
+		return t.scheduleChatFrame()
+	}
+	return nil
 }
 
 // applyDetectedBackground 记录终端背景并重新应用主题（所有主题都依赖它做适配）。
