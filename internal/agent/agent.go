@@ -52,7 +52,6 @@ type Agent struct {
 	cwd           string
 	modelRef      string
 	turnCount     int
-	guardGate     sync.Mutex
 	sessionState  string
 	toolSummary   memory.ToolSummary
 

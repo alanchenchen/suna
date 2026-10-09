@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -385,7 +386,7 @@ func TestExecuteSpawnToolRejectsModelHiddenBySubtaskFor(t *testing.T) {
 	}
 }
 
-func TestMainGuardGateMakesApprovedReceiptVisibleToNextReview(t *testing.T) {
+func TestMainGuardReviewsEachConcurrentExec(t *testing.T) {
 	mgr := tools.NewManager()
 	mgr.RegisterProvider(builtin.NewProvider())
 	if err := mgr.Reload(context.Background()); err != nil {
@@ -393,9 +394,9 @@ func TestMainGuardGateMakesApprovedReceiptVisibleToNextReview(t *testing.T) {
 	}
 	a := &Agent{guard: guard.NewGuardWithMode(nil, "test", guard.ModeSmart), tools: mgr}
 
-	var reviewCount int
+	var reviewCount atomic.Int32
 	a.guard.SetLLMReviewer(func(ctx context.Context, req guard.ReviewRequest) (string, error) {
-		reviewCount++
+		reviewCount.Add(1)
 		return `{"decision":"approve","reason":"approved continuation"}`, nil
 	})
 
@@ -411,8 +412,8 @@ func TestMainGuardGateMakesApprovedReceiptVisibleToNextReview(t *testing.T) {
 	first := call("first", t.TempDir()+"/first.txt")
 	second := call("second", t.TempDir()+"/second.txt")
 
-	// 两个 exec 各自要拉起一个 shell 进程，Guard 审查又由 guardGate 串行化，
-	// Windows 上进程创建明显更慢。超时只影响失败路径（成功时 select 立即返回），
+	// 两个 exec 各自要拉起一个 shell 进程，Windows 上进程创建明显更慢。
+	// 超时只影响失败路径（成功时 select 立即返回），
 	// 因此给足余量而不做平台分支。
 	for _, result := range []<-chan tools.Result{first, second} {
 		select {
@@ -424,8 +425,8 @@ func TestMainGuardGateMakesApprovedReceiptVisibleToNextReview(t *testing.T) {
 			t.Fatal("tool execution did not complete")
 		}
 	}
-	if reviewCount != 2 {
-		t.Fatalf("review count = %d, want 2", reviewCount)
+	if got := reviewCount.Load(); got != 2 {
+		t.Fatalf("review count = %d, want 2", got)
 	}
 }
 

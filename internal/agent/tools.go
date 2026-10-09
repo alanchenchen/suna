@@ -35,6 +35,9 @@ func (e mainExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecution
 }
 
 func (a *Agent) executeTool(ctx context.Context, call runner.ToolExecution, events chan<- Event) tools.Result {
+	if err := ctx.Err(); err != nil {
+		return tools.ErrorResult(err.Error())
+	}
 	id, name, params := call.ID, call.Name, call.Params
 	if _, ok := a.tools.Get(name); !ok {
 		return tools.ErrorResult(fmt.Sprintf("tool %q not found", name))
@@ -46,9 +49,7 @@ func (a *Agent) executeTool(ctx context.Context, call runner.ToolExecution, even
 		}
 	}
 	if a.shouldGuardTool(name) {
-		// Guard 决策必须按顺序完成，确保用户刚刚作出的确认或拒绝先写入任务事实。
-		// gate 只覆盖 review/确认阶段；通过后立即释放，工具执行仍由 Runner 并发调度。
-		a.guardGate.Lock()
+		// 各调用独立审核；用户确认通过独立回复通道配对，展示排队由客户端负责。
 		result := a.guard.Check(ctx, name, params, a.buildGuardReviewContext(call))
 		a.emitToolGuard(events, id, name, result)
 		allowed := true
@@ -57,7 +58,10 @@ func (a *Agent) executeTool(ctx context.Context, call runner.ToolExecution, even
 		} else if result.Decision == guard.Confirm {
 			allowed = a.confirmGuard(ctx, id, call, result, events)
 		}
-		a.guardGate.Unlock()
+		// 取消与审核结果可能同时到达；取消后的批准不能继续执行工具。
+		if err := ctx.Err(); err != nil {
+			return tools.ErrorResult(err.Error())
+		}
 		if !allowed {
 			if result.Decision == guard.Reject {
 				return tools.ErrorResult("blocked: " + result.Reason)
@@ -78,6 +82,9 @@ func (a *Agent) executeTool(ctx context.Context, call runner.ToolExecution, even
 	if name == agenttools.ToolAskUser || name == agenttools.ToolSpawn {
 		execCtx = agenttools.WithEvents(ctx, events)
 		execCtx = agenttools.WithRuntime(execCtx, a)
+	}
+	if err := ctx.Err(); err != nil {
+		return tools.ErrorResult(err.Error())
 	}
 	result := a.tools.Execute(execCtx, tools.Call{ID: id, Name: name, Params: params, Intent: call.Intent, AssistantContext: call.AssistantContext})
 	if events != nil {
@@ -284,6 +291,9 @@ type subtaskExecutor struct {
 }
 
 func (e subtaskExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecution) tools.Result {
+	if err := ctx.Err(); err != nil {
+		return tools.ErrorResult(err.Error())
+	}
 	name, params := call.Name, call.Params
 	spec, ok := e.agent.tools.Get(name)
 	if !ok {
@@ -297,9 +307,6 @@ func (e subtaskExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecut
 	}
 	if e.agent.shouldGuardTool(name) {
 		eventID := e.namespaced(call.ID)
-		// subtask 也通过同一会话的 Guard gate，避免与主任务在同一 TUI 上交错确认。
-		// 它不记录到主任务回执，保持 subtask 的意图上下文隔离。
-		e.agent.guardGate.Lock()
 		result := e.agent.guard.Check(ctx, name, params, e.agent.buildSubtaskGuardReviewContext(call, e.task))
 		e.agent.emitToolGuard(e.events, eventID, name, result)
 		allowed := true
@@ -308,7 +315,10 @@ func (e subtaskExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecut
 		} else if result.Decision == guard.Confirm {
 			allowed = e.agent.confirmGuard(ctx, eventID, call, result, e.events)
 		}
-		e.agent.guardGate.Unlock()
+		// 取消与审核结果可能同时到达；取消后的批准不能继续执行工具。
+		if err := ctx.Err(); err != nil {
+			return tools.ErrorResult(err.Error())
+		}
 		if !allowed {
 			if result.Decision == guard.Reject {
 				return tools.ErrorResult("blocked: " + result.Reason)
@@ -318,6 +328,9 @@ func (e subtaskExecutor) ExecuteTool(ctx context.Context, call runner.ToolExecut
 	}
 	if err := sensitiveReadError(name, params); err != "" {
 		return tools.ErrorResult(err)
+	}
+	if err := ctx.Err(); err != nil {
+		return tools.ErrorResult(err.Error())
 	}
 	res := e.agent.tools.Execute(ctx, tools.Call{ID: call.ID, Name: name, Params: params, Intent: call.Intent, AssistantContext: call.AssistantContext})
 	if !res.IsError {
