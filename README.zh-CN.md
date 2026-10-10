@@ -1,18 +1,16 @@
 # Suna
 
-[![Go](https://img.shields.io/badge/Go-1.26-blue)](https://go.dev) [![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue)](LICENSE) [![Release](https://img.shields.io/github/v/release/alanchenchen/suna)](https://github.com/alanchenchen/suna/releases)
+[![Go](https://img.shields.io/badge/Go-1.26-blue)](https://go.dev) [![License](https://img.shields.io/badge/License-MIT-blue)](LICENSE) [![Release](https://img.shields.io/github/v/release/alanchenchen/suna)](https://github.com/alanchenchen/suna/releases)
 
-> Local-first Agent Runtime：隔离 Subtask、分层 Guard、本地记忆、Skill、MCP，以及内置终端 TUI。
+> 本地优先的通用 AI Agent：自由选择模型，按任务分工，在终端或官方 Web 客户端中处理文件、代码、资料与自动化。
 
-Suna 以 [PolyForm Noncommercial License](LICENSE) 发布——个人与非商业用途免费。
+Suna 在本机运行 Agent、工具和会话管理。你可以配置 OpenAI、Anthropic 或兼容协议的模型服务，让主 Agent 把边界清晰的工作委派给不同模型，并明确每个子任务获得的上下文和工具。
 
-[English README](README.md) · [文档索引](docs/README.md) · [TCP 客户端接入](docs/tcp-client.md) · [Subtask 设计](docs/subtask.md)
+使用内置 TUI，或通过 **[Suna App](https://github.com/alanchenchen/suna-app)** 官方 Web 客户端连接同一个 Runtime。
 
-Suna 不只是“又一个终端聊天 Agent”。它更像一个运行在本地的 Agent Runtime：主 Agent 可以把任务委派给**隔离的 Subtask**，为每个子任务单独指定模型、上下文、图片和工具权限；高风险操作仍然经过**分层 Guard** 审查。
+[快速开始](#快速开始) · [官方 Web 客户端](#官方-web-客户端) · [文档](docs/README.md) · [English README](README.md)
 
-“Suna” 来自 śūnya，意为“空”：出厂无形，遇缘则生。这个名字也对应 Suna 的设计取向：轻量、克制，不预设复杂工作流，而是在本地 runtime、工具链路、记忆和 Skill 中逐渐贴合你的使用方式。
-
-内置 TUI 是默认客户端。相同 daemon 可通过 `suna serve --json` 获取 TCP JSON-RPC/NDJSON endpoint，接给第三方桌面端、IDE 插件、本地 Web UI 或脚本。
+本地优先指 Runtime 和持久化状态位于本机；模型请求仍会把上下文发送到你配置的模型服务。Suna 使用 [MIT 许可证](LICENSE)，允许商业使用。
 
 <p align="center">
   <img src="docs/assets/tui-overview.png" alt="Suna 终端 UI：Agent 对话、工具活动与用量状态" width="74%" />
@@ -20,240 +18,153 @@ Suna 不只是“又一个终端聊天 Agent”。它更像一个运行在本地
 
 > 真实 Suna 会话：流式输出、工具活动、Guard 决策和用量状态。
 
-> Suna 目前处于快速开发状态。如果升级或使用过程中遇到功能失效，建议先升级到最新版本，并在备份必要数据后清理 Suna 数据目录中的 `.db` 文件。
+## 为什么选择 Suna？
 
-## 为什么是 Suna？
+### 自己选择模型，按任务分工
 
-### 隔离 Subtask
+每个会话保持自己选择的模型。主 Agent 可以为子任务选择另一已配置模型：让一个模型探索资料，另一个实现修改，再由另一个独立审查。`strengths` 描述模型适合的工作，`subtask_for` 控制哪些会话模型能看到它作为子任务候选。
 
-很多终端 Agent 是“一个模型 + 一份共享上下文 + 一套全局工具”。Suna 的主 Agent 可以在运行中创建边界清晰的子任务：
+这是任务级委派，不是悄悄替换主对话模型的黑盒路由。
 
-- 为某个子任务选择不同模型；
-- 只传入明确的任务、上下文和图片；
-- 只授权指定工具，甚至不授权任何工具；
-- 默认不继承主对话完整历史和用户长期记忆；
-- 子任务结束后返回状态、结果、错误和副作用披露，由主 Agent 汇总决策。
+### 每次委派，边界明确
 
-这样 Subtask 不是失控的“第二个 Agent”，而是可解释、可审查、可限制的委派单元。
+每次 `spawn` 都必须指定模型、自包含的任务和工具白名单。只传入子任务需要的上下文和图片，授权指定工具，或不给任何工具、只做分析。子任务不默认继承主对话完整历史和用户记忆。
 
-<p align="center">
-  <img src="docs/assets/tui-subtasks.png" alt="Suna 终端 UI：隔离 Subtask 时间线" width="66%" />
-</p>
+结果连同状态和副作用披露回到主 Agent。例如，让只读子任务浏览文件，再让无工具子任务评估方案，最后由主 Agent 汇总并决定下一步。
 
-> 隔离 Subtask 的任务时间线、工具活动和结果会清晰回流主会话。
+这里的隔离是模型上下文和工具授权隔离，不是独立文件系统沙箱。执行边界见 [Subtask](docs/subtask.md)。
 
-### Guard：硬规则 + 模式策略
+### 终端与 Web，共用一个本地 Runtime
 
-Suna 的 Guard 是静态安全层，分三层。硬规则（结构性高危命令、blocked 模式、Workspace 边界、敏感文件）在所有模式下始终生效。精确的只读分析决定哪些操作需要审查：`smart` 模式让 LLM 以二元 approve/reject 门审查 exec 调用（只判断操作本身的风险，不猜用户意图）；`ask` 模式对每个非只读操作请求用户确认；`auto` 模式在硬规则之外完全信任模型；`readonly` 拒绝任何改变状态的操作。
+内置 TUI 和官方 Suna App 连接同一个 Runtime，由 Runtime 管理会话、Agent 运行、工具、Guard 和持久化。你也可以通过[公开协议](docs/tcp-client.md)开发自己的客户端。
 
-### Runtime-first 架构
+Runtime 提供 macOS、Linux 和 Windows 的 Go 二进制；使用预构建版本无需额外安装 Node.js 或桌面运行环境。Suna App 独立安装和发版。
 
-Suna 把 UI 与共享的本地 Runtime 分开。daemon 持有模型目录、Provider、工具、Guard、记忆、附件和持久化会话状态；每个 session 则持有自己选择的模型和工作对话状态：
+TUI 使用增量渲染和窗口化布局，减少长会话中的重复计算；可复现基准和已知限制见[性能文档](docs/performance.md)。
 
-```text
-内置 TUI / 第三方 UI / 脚本
-        ↓ local 或 TCP transport 上的 JSON-RPC
-Daemon / 共享 Runtime
-    ├─ 模型目录、Provider、工具、Guard、记忆、Skill、MCP
-    └─ sessions
-        ├─ 已选模型 + 对话 / working state
-        ├─ 附件、用量和运行生命周期
-        └─ 隔离 Subtask
-             ├─ explicit model
-             ├─ explicit context
-             └─ explicit tool permissions
-```
+### 工具活动与审查决定可查看
 
-内置 TUI 只是一个客户端。默认模型只在新建会话时使用；已有 session 会保持自己选择的模型，即使重启或其他 session 切换模型也不会改变。
+TUI 展示工具调用、结果、子任务活动和 Guard 决策。Guard 结合硬检查、只读分析和可配置模式；`smart` 模式让 LLM 审查非只读 `exec` 调用。Skill 用于复用工作方式，MCP 用于连接外部工具。
 
-## Suna 适合谁？
-
-Suna 适合希望在本地使用 AI 处理文件、文档、代码、命令、API、图片和自定义工具的人，同时保留对风险操作的审查权。
-
-如果你关心这些，Suna 可能适合你：
-
-- 希望终端 AI 能理解和处理本地上下文；
-- 希望写文件、执行命令前有可审查的 Guard；
-- 希望复杂任务可以交给隔离 Subtask，而不是全部塞进一个大上下文；
-- 希望 Agent Runtime 不绑定在一个 UI 里，可以接 Web UI、IDE、桌面端或脚本；
-- 希望记忆、Skill、MCP 和工具都在本地可控。
-
-## 常见使用场景
-
-你可以用 Suna：
-
-- 整理笔记、会议记录和调研材料；
-- 读取本地文件夹，提炼关键信息；
-- 比较多个方案，并让 Subtask 先给独立意见；
-- 清理文档或配置文件，并在写入前确认；
-- 执行诊断、测试、构建和自动化命令；
-- 查询 HTTP API，并把响应整理成可读摘要；
-- 把重复工作流沉淀成可复用 Skill；
-- 通过 MCP 接入外部工具，或通过 TCP daemon 接第三方客户端。
-
-## Suna 和常见终端 Agent 有什么不同？
-
-| 能力 | 常见终端 Agent | Suna |
-|---|---|---|
-| 模型选择 | 一次运行一个活跃模型 | 每个 session 保持自己选择的模型；Subtask 可显式选择另一已配置模型 |
-| 子任务上下文 | 常常共享或隐式继承 | 只接收主 Agent 显式传入的上下文 |
-| 工具权限 | 通常是全局工具集 | 每个 Subtask 单独设置工具白名单 |
-| 用户记忆 | 容易混进整段上下文 | 轻量用户画像，靠近最新输入注入 |
-| 安全审查 | 确认、自动或粗粒度 allowlist | 硬规则 + 只读分析 + 模式策略（smart/ask/auto/readonly） |
-| Skill 生命周期 | Prompt 或文件注入 | 静态检查、可选 LLM Review、用户确认后启用 |
-| UI 架构 | CLI/TUI 应用本身 | 本地 daemon/runtime + protocol + TUI 客户端 |
-| 第三方 UI | 通常不是稳定边界 | `suna serve --json` + JSON-RPC/NDJSON |
+Guard 是应用层防护，不是 OS sandbox。MCP server 属于需要用户信任的外部进程，当前 MCP 工具不经过 Guard 检查。启用前请阅读[安全边界](#安全边界)。
 
 ## 快速开始
 
 ### 安装
 
-推荐优先使用 GitHub Release 的预构建二进制：
+从 [GitHub Releases](https://github.com/alanchenchen/suna/releases) 下载预构建二进制：
 
-1. 打开 [Releases](https://github.com/alanchenchen/suna/releases)。
-2. 下载与你的系统和架构匹配的压缩包，例如：
-   - macOS Apple Silicon：`suna-darwin-arm64.zip`
-   - macOS Intel：`suna-darwin-amd64.zip`
-   - Linux x86_64：`suna-linux-amd64.tar.gz`
-   - Linux arm64：`suna-linux-arm64.tar.gz`
-   - Windows x86_64：`suna-windows-amd64.zip`
-3. 解压后把 `suna`（Windows 为 `suna.exe`）放到 `PATH` 中。
-4. 运行：
+- macOS Apple Silicon：`suna-darwin-arm64.zip`
+- macOS Intel：`suna-darwin-amd64.zip`
+- Linux x86_64：`suna-linux-amd64.tar.gz`
+- Linux arm64：`suna-linux-arm64.tar.gz`
+- Windows x86_64：`suna-windows-amd64.zip`
+
+解压后把 `suna`（Windows 为 `suna.exe`）放到 `PATH` 中，然后运行：
 
 ```bash
 suna
 ```
 
-如果你已经安装 Go，也可以直接安装：
+如果已经安装 Go，也可以从源码安装：
 
 ```bash
 go install github.com/alanchenchen/suna@latest
 suna
 ```
 
-如果 `suna` 命令找不到，请确认 Go bin 已加入 `PATH`：
+请确认 Go bin 已加入 `PATH`：
 
 ```bash
 export PATH="$(go env GOPATH)/bin:$PATH"
 ```
 
-不要使用 `go run .` 启动 Suna。daemon / TUI 的本地进程管理依赖稳定的可执行文件路径。
+不要使用 `go run .` 启动 Suna。daemon / TUI 的进程管理依赖稳定的可执行文件路径。
 
-### 更新 Suna
+### 配置模型
 
-退出 TUI 后运行：
+1. 启动 `suna`，没有模型配置时进入 Config / Setup。
+2. 添加模型连接，选择协议：
+   - **OpenAI**：OpenAI Responses。
+   - **Anthropic**：Anthropic Messages。
+   - **OpenAI Compatible**：兼容 OpenAI Chat Completions 的模型服务。
+3. 按服务的真实限制填写模型名、Endpoint、API Key、`context_window` 和 `max_output_tokens`。
+4. 设置新会话默认模型，然后开始对话。
 
-```bash
-suna update
-```
+通过 `/config` 修改设置，通过 `/model` 只切换当前会话模型。修改默认模型不会改变已有会话。`strengths`、`subtask_for` 和推理参数见[配置说明](docs/configuration.md)。
 
-`update` 会检查最新 GitHub Release、展示 release notes，并在确认后下载对应平台资产、校验 checksum、替换当前 `suna` 可执行文件。
+主题可在 **配置 → 通用 → 主题** 中切换。内置 `default` 主题按终端背景自动适配，自定义主题从 `~/.suna/themes/*.toml` 读取。详见[主题](docs/themes.md)。
 
-如果 daemon 仍在运行，先退出 TUI 或执行：
+### 更新
+
+退出正在使用 Runtime 的客户端，停止仍在运行的 daemon，再更新：
 
 ```bash
 suna stop
+suna update
 ```
 
-## 首次使用
+更新器展示发布说明，并在确认后下载、校验 checksum 和替换二进制。
 
-1. 启动 `suna`。
-2. 如果还没有模型配置，进入 Config / Setup 页面。
-3. 添加一个 Model Connection。
-4. 选择 Provider 协议：
-   - **OpenAI**：OpenAI Responses 协议。
-   - **Anthropic**：Anthropic Messages 协议。
-   - **OpenAI Compatible**：兼容 OpenAI Chat Completions 的第三方服务或网关。
-5. 填写模型名、Endpoint、API Key、`context_window`、`max_output_tokens` 和可选能力标签。
-6. 将它设为新会话默认模型，再回到 Welcome / New Conversation 开始对话。
+Suna 仍在积极开发中。升级或排障前请备份重要本地数据，不要把删除数据库作为常规恢复步骤。诊断可从 `~/.suna/logs/` 下的日志开始。
 
-常用设置都可以在 TUI 中通过 `/config` 修改。`context_window` 和 `max_output_tokens` 必须按当前模型服务的真实限制填写。`strengths` 用于告诉主 Agent 模型擅长什么；`subtask_for` 可选地控制哪些 session 模型能看到该模型作为 Subtask 候选。
+## 官方 Web 客户端
 
-主题可在 **配置 → 通用 → 主题** 中切换。Suna 内置一个 `default` 主题（按终端背景自动适配），并从 `~/.suna/themes/*.toml` 读取自定义主题（文件名即主题名）。自定义主题的编写与分享见[主题](docs/themes.md)，字段说明和模板见自动生成的 `~/.suna/themes/README.md`。
+[Suna App](https://github.com/alanchenchen/suna-app) 是连接已安装 Suna Runtime 的官方浏览器客户端。Go Gateway 通过公开本地协议连接 Runtime；浏览器只与 Gateway 通信，不直接访问 Runtime 的 TCP socket。它不包含第二套 Agent 实现。
 
-`/model` 只切换当前会话的模型；Config 中的默认模型只影响之后新建的会话。
+安装、构建和兼容要求见 [Suna App README](https://github.com/alanchenchen/suna-app#readme)。App 与 Runtime 独立发版，兼容性取决于 Runtime 协议和公开能力，不要求版本号相同。不要默认所有 TUI 功能都已经在 Web 客户端中提供。
 
-## 试试这些 Prompt
+## 试试这些任务
 
-这些例子故意写得简单一些，用来展示 Suna 如何委派任务、限制工具权限，以及在风险操作前确认。
+Suna 可以处理本地文档、代码、调研、诊断、API 和自动化，不只用于修改代码仓库。下面的例子展示如何明确分工与审查。
 
 ### 1. 找一个独立视角
 
 ```text
-我需要在两个方案之间做选择。你先让一个 subtask 不使用任何工具，独立给出第二意见，然后你再给我最终建议。
+我需要在两个方案之间做选择。让一个子任务不使用工具，独立给出第二意见，然后你再给我建议。只传给它两个方案和评价标准。
 ```
 
-你应该能看到一次 `spawn` 调用：这个 Subtask 没有工具，只能看到主 Agent 明确传给它的上下文。
+你可以查看工具白名单为空的 `spawn` 调用；子任务只收到明确提供的上下文。
 
-### 2. 安全地浏览本地文件
+### 2. 探索资料，再审查结论
 
 ```text
-帮我理解这个文件夹里的资料。你可以派一个只读 subtask 用 listdir、readfile 和 search 先看看，然后你再总结重点。
+帮我理解这个文件夹。把探索交给适合调研的模型，只授权 listdir、readfile 和 search。汇总发现后，再请另一个可用模型不使用工具，独立审查这份总结。
 ```
 
-你应该能看到主 Agent 只给 Subtask 授权读文件和搜索类工具，最终判断仍由主对话完成。
+配置多个模型后可体验跨模型委派。主 Agent 从可见候选中选择模型，并整合结果。
 
-### 3. 改文件前先确认
+<p align="center">
+  <img src="docs/assets/tui-subtasks.png" alt="Suna 终端 UI：隔离 Subtask 时间线" width="66%" />
+</p>
+
+> 在主会话查看子任务的工具活动和结果。
+
+### 3. 改文件前确认
+
+要在工具层确认非只读操作，请在 `/config` 选择 Guard 的 `ask` 模式，并确认没有匹配的 allowed 规则绕过确认。默认 `smart` 模式不会逐次确认普通文件写入。
 
 ```text
-帮我整理这份笔记，并保存成更清晰的版本。写入之前先告诉我你准备改什么，让我确认。
+帮我整理这份笔记，保存成更清晰的版本。先解释准备改什么，等待我确认后再写入。
 ```
 
-你应该能看到写文件或改文件操作经过 Suna 的 Guard，而不是静默执行。
+这条 Prompt 要求 Agent 先讨论变更；`ask` 模式则在工具执行时另行要求确认。
 
-## Suna 可以做什么？
-
-```text
-整理笔记、会议记录和调研材料
-比较多个方案，并形成可执行计划
-读取本地文件夹，提炼关键信息
-分析截图、图片或粘贴的图片附件
-查询 HTTP API，并把响应整理成可读摘要
-检查文档、配置或脚本中的冲突和风险
-修改文件，并说明变更影响
-执行诊断、测试、构建和自动化命令
-按路径、结构入口或正文搜索本地文件
-使用已配置的 stdio MCP tools
-创建、检查并启用 Skill
-把长对话压缩成 Session State
-把有边界的子任务委派给其它已配置模型
-```
-
-Suna 不是纯 coding agent，但它适合处理本地资料、代码、文档、研究、自动化和开发工作流。写文件、执行命令、文件系统操作、HTTP 写请求等行动类操作会经过 Guard。
-
-## 内置工具
-
-| 类型 | 工具 | 用途 |
-|---|---|---|
-| 感知 | `readfile` | 按行范围、tail 或 base64 读取本地文件 |
-| 感知 | `read_image` | 加载图片（本地路径、URL 或历史附件引用）供多模态模型查看；历史对话中的 `[image: ...]` 摘要携带 `source=` 值，可传给本工具读回原图 |
-| 感知 | `listdir` | 列目录，支持递归、分页和 include/exclude 过滤 |
-| 感知 | `search` | 结构化本地搜索，支持路径、结构入口和正文搜索 |
-| 行动 | `exec` | 执行或管理有界 shell 命令；持续任务可显式转为后台，并通过 job ID 查询或停止 |
-| 行动 | `writefile` | 创建、覆盖或追加文件 |
-| 行动 | `editfile` | 对单个文件原子应用精确文本替换 |
-| 行动 | `filesystem` | `stat` / `mkdir` / `move` / `copy` / `remove` 文件系统路径 |
-| 行动 | `http` | 发送 HTTP 请求；GET/HEAD 只读放行，写方法按模式处置 |
-
-工具通过统一 Provider 暴露。Guard 决策由 Agent 统一处理，不塞进 UI 或零散工具 wrapper。
-
-## TUI 快速上手
-
-常用快捷键：
+## TUI 快速参考
 
 ```text
 Enter              发送 / 确认
 Shift+Enter        输入换行
 Ctrl+J             输入换行
 Esc                取消运行、返回或关闭浮层
-↑ / ↓             输入框为空时召回上一条 / 下一条历史输入
+↑ / ↓              输入框为空时召回上一条 / 下一条历史输入
 Ctrl+T             展开 / 折叠视窗内的工具块
 Ctrl+R             展开 / 折叠 reasoning 详情
 ?                  打开或关闭帮助
 PgUp / PgDn        滚动；手动滚动后暂停跟随
 Home               输入框为空时查看当前长回复的本轮开头
 End                回到最新内容并恢复跟随
-Ctrl+V             尝试粘贴文本；若终端未传入文本且剪贴板含图片，则添加图片附件
+Ctrl+V             粘贴文本；终端未传入文本时可添加剪贴板图片
 Ctrl+C             退出
 ```
 
@@ -263,8 +174,8 @@ Ctrl+C             退出
 /new              以新会话替换当前独占且空闲的会话
 /sessions         加入其他位置的活跃会话或删除空闲会话
 /model            打开当前会话的模型选择器
-/model <ref>      切换当前会话模型，例如 /model openai/gpt-4o-mini
-/memory           查看 user profile memory
+/model <ref>      切换当前模型，例如 /model openai/gpt-4o-mini
+/memory           查看用户画像记忆
 /mcp              打开 MCP 面板
 /skills           打开 Skill 面板
 /compact          手动压缩当前上下文
@@ -274,85 +185,71 @@ Ctrl+C             退出
 
 未注册的 `/文本` 会作为普通消息发送。
 
+## 工具与扩展
+
+| 工具 | 用途 |
+|---|---|
+| `readfile`、`listdir`、`search` | 按行范围、路径、结构或正文读取和探索本地文件 |
+| `read_image` | 从本地路径、URL 或历史附件引用加载图片 |
+| `writefile`、`editfile` | 写文件，或对单个文件原子应用精确替换 |
+| `filesystem` | 查看、创建、移动、复制或删除文件系统路径 |
+| `exec` | 执行命令；显式启动、查询或停止受管后台任务 |
+| `http` | 发送 HTTP 请求并查看响应 |
+
+[Skill](docs/configuration.md) 提供可复用指令和工作流；全局 Skill 导入经过静态检查、可选 LLM 审查和用户确认后启用。[MCP 配置](docs/configuration.md)用于接入可信 stdio server 提供的工具。
+
 ## 安全边界
 
-Guard Mode 可在 `/config` 中切换：
+对经过 Guard 的调用，硬检查先于 allowed 规则和模式策略；匹配的 allowed 规则可以在模式决策前批准调用。未匹配时：
 
 ```text
-smart     默认。只读调用放行；exec 调用由 LLM 审核（approve/reject）；其他写操作放行
-ask       只读调用放行；每个非只读操作请求确认
-auto      除硬性拦截规则外自动放行
-readonly  只允许只读操作
+smart     默认。只读调用放行；非只读 exec 调用由 LLM 审核；其他写操作放行
+ask       只读调用放行；非只读调用要求确认
+auto      除硬性拦截外自动放行
+readonly  只允许静态判定为只读的调用
 ```
 
-Workspace 是可选目录边界：设置后，本地文件和命令操作会限制在该目录内。Suna 自己的数据目录仍允许用于配置、日志、附件和 Skill 管理；credentials 等敏感路径仍会被内置规则拦截。
+Workspace 是应用层的可选路径边界，覆盖已接入的本地工具和命令中可识别的路径。Suna 默认数据目录仍可访问，但受敏感路径检查约束。当前 `read_image` 的本地来源未接入 Guard 的 workspace 检查。
 
-注意：Workspace、Guard、Skill 和 MCP 都不是完整 OS sandbox。外部命令或 MCP server 启动后，仍拥有其进程本身的系统权限；启用前应确认你信任相关命令、脚本和 server。
+Guard 不是 OS sandbox：命令分析不能限制脚本或程序运行时访问的全部路径。MCP 工具当前跳过 Guard，server 拥有其进程权限，只应启用可信 server。子任务工具白名单限制的是可调用工具，不是已授权命令或外部工具的全部副作用。
 
-## 数据目录
+其他当前限制：
 
-默认数据目录：
+- 客户端在运行中断开后，没有完整事件回放；恢复会话不等于完整工具和思考输出归档。
+- TUI 尚无完整历史搜索、向量知识库或完整多会话管理界面。
+- 尚无完整定时任务、Trigger、文件监听或主动执行能力。
+- MCP 仅支持 tools-only stdio 接入，不是完整 resources / prompts / sampling / OAuth 支持。
+- 尚无 Skill sandbox、市场、完整 OS sandbox 或完整模型服务价格核算。
+
+## 本地数据
 
 ```text
-~/.suna/config.toml        # 主配置
+~/.suna/config.toml        # 模型与 Runtime 配置
 ~/.suna/credentials.toml   # API Key
-~/.suna/memory.db          # 记忆、会话、用量等本地数据
-~/.suna/skills/            # 全局 Skill 目录
+~/.suna/memory.db          # 记忆、会话状态、用量和审计记录
+~/.suna/skills/            # 全局 Skill
 ~/.suna/attachments/       # 图片和二进制附件
-~/.suna/mcp-workdirs/      # stdio MCP server 的默认工作目录
-~/.suna/logs/app.log       # 日志
+~/.suna/mcp-workdirs/      # stdio MCP server 默认工作目录
+~/.suna/logs/              # 分类日志
 ```
 
-排查问题时优先查看 `~/.suna/logs/app.log`。
+持久化会话保留到用户明确删除，但不代表完整正文事件回放。Guard 审计明细和逐请求用量保留 30 天。SQLite 复用释放页面、不自动执行 `VACUUM`，因此清理后数据库文件不一定立即缩小。
 
-持久化 Session 会一直保留到用户明确删除；Suna 不会因为 Session 长期未使用或内容为空而自动删除。Guard 审计明细和逐请求模型用量属于运维数据，只保留最近 30 天。清理后 SQLite 会复用释放的页面，但不会自动执行 `VACUUM`，因此 `memory.db` 的磁盘体积不一定立即缩小。
+项目 Skill 在会话 runtime 创建时，从其 cwd 到 Git worktree 根之间的兼容目录发现；由项目管理，不能在 Suna 中 toggle。
 
-全局 Skill 使用 `~/.suna/skills/`。项目 Skill 会在 Session runtime 创建时，从 Session cwd 到 Git worktree 根之间的 `.agents/skills` 或兼容 Agent 目录发现一次；项目 Skill 由项目管理，不能在 Suna 中 toggle。
+## 开发客户端或阅读代码
 
-## 第三方客户端 TCP daemon
-
-启动或发现本地 daemon，并输出 TCP endpoint：
-
-```bash
-suna serve --json
-```
-
-TCP endpoint 默认是 `127.0.0.1:7632`，在 `runtime.hello` 后接受 JSON-RPC 风格的 NDJSON。它适用于可信的本地第三方 UI、桌面端、IDE 插件、本地 Web gateway 与脚本；未提供认证前不支持远程监听。
-
-建议先看：
-
-- [Protocol](docs/protocol.md)
-- [配置说明](docs/configuration.md)
-
-## 开发者阅读入口
-
-如果你想了解 Suna 的关键设计、架构、性能取舍和代码位置，建议从 docs 入口开始：
+执行 `suna serve --json` 启动或发现 Runtime，并获取其权威 TCP endpoint。本地协议在 `runtime.hello` 后使用 JSON-RPC 风格 NDJSON，供可信本地客户端接入，不用于未经认证的远程暴露。
 
 - [文档索引](docs/README.md)
-- [Subtask 设计](docs/subtask.md)
-- [关键设计](docs/design.md)
-- [架构说明](docs/architecture.md)
-- [代码地图](docs/code-map.md)
-- [当前实现](docs/current-implementation.md)
+- [客户端接入指南](docs/tcp-client.md)与 [Protocol](docs/protocol.md)
 - [配置说明](docs/configuration.md)
-- [TUI 架构](docs/tui.md)
+- [Subtask](docs/subtask.md)
+- [架构说明](docs/architecture.md)与[关键设计](docs/design.md)
+- [性能](docs/performance.md)
+- [代码地图](docs/code-map.md)与[当前实现](docs/current-implementation.md)
 - [开发指南](docs/development.md)
-- [English README](README.md)
-
-## 当前边界
-
-以下能力目前不要按完整产品能力依赖：
-
-- Trigger、定时任务、文件监听等主动感知链路。
-- 多会话管理 UI、完整历史搜索、向量记忆或知识库。
-- 完整 MCP：远程 transport、resources、prompts、sampling、OAuth、sandbox 等尚未完成。
-- Skill sandbox、市场和复杂生命周期 hooks。
-- 成本统计与价格计算。
-- 复杂权限 UI 或完整 OS sandbox。
-- TUI 断开后对正在运行任务的完整事件回放/恢复。
 
 ## 许可证
 
-Suna 使用 [PolyForm Noncommercial License 1.0.0](LICENSE)。
-
-你可以在非商业目的下使用、学习、修改和分发 Suna；商业使用需要获得版权持有者的单独授权。分发原始或修改版本时，必须保留许可证条款和 required notice。
+Suna 使用 [MIT 许可证](LICENSE)，允许按其条款进行商业与非商业使用、修改和再分发。软件副本或实质性部分中须保留版权与许可声明。

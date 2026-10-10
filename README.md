@@ -1,16 +1,16 @@
 # Suna
 
-[![Go](https://img.shields.io/badge/Go-1.26-blue)](https://go.dev) [![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue)](LICENSE) [![Release](https://img.shields.io/github/v/release/alanchenchen/suna)](https://github.com/alanchenchen/suna/releases)
+[![Go](https://img.shields.io/badge/Go-1.26-blue)](https://go.dev) [![License](https://img.shields.io/badge/License-MIT-blue)](LICENSE) [![Release](https://img.shields.io/github/v/release/alanchenchen/suna)](https://github.com/alanchenchen/suna/releases)
 
-> Local-first agent runtime with isolated subtasks, layered Guard, memory, Skills, MCP, and a terminal UI.
+> A local-first, general-purpose AI agent: choose your models, delegate bounded work, and use the terminal or official Web client for files, code, research, and automation.
 
-Suna is released under the [PolyForm Noncommercial License](LICENSE) — free for personal and non-commercial use.
+Suna runs the Agent, tools, and session management on your machine. Connect OpenAI, Anthropic, or OpenAI-compatible model services, and let the main Agent delegate focused tasks to different models with explicit context and tool access.
 
-[中文 README](README.zh-CN.md) · [Documentation](docs/README.md) · [Subtasks](docs/subtask.md)
+Use the built-in TUI or [Suna App](https://github.com/alanchenchen/suna-app), the official Web client for the same Runtime.
 
-Suna is not just another terminal chat agent. It is a local agent runtime where a main agent can delegate work to **isolated subtasks** with different models, explicit context, selected images, and a per-task tool whitelist — while risky actions still go through a **layered Guard**.
+[Quick start](#quick-start) · [Official Web client](#official-web-client) · [Documentation](docs/README.md) · [中文 README](README.zh-CN.md)
 
-The built-in TUI is the default client. Third-party desktop apps, IDE extensions, local web UIs, or scripts can connect to the same daemon through TCP JSON-RPC/NDJSON after `suna serve --json`.
+Local-first means the Runtime and persistent state live on your machine; model requests still send context to your configured model service. Suna is available under the [MIT License](LICENSE), including for commercial use.
 
 <p align="center">
   <img src="docs/assets/tui-overview.png" alt="Suna terminal UI showing an agent conversation, tool activity, and usage status" width="74%" />
@@ -18,91 +18,39 @@ The built-in TUI is the default client. Third-party desktop apps, IDE extensions
 
 > A real Suna session with streaming output, tool activity, Guard decisions, and usage status.
 
-> Suna is under active development. If an upgrade breaks local state, update to the latest release first and back up important data before removing `.db` files under the Suna data directory.
+## Why choose Suna?
 
-## Why Suna?
+### Choose models and divide the work
 
-### Isolated Subtasks
+Each session keeps its selected model. The main Agent can choose another configured model for a subtask: use one for exploration, another for implementation, and another for an independent review. Model `strengths` describe suitable work; `subtask_for` controls which session models can see a model as a subtask candidate.
 
-Most terminal agents run one model with one shared context and one shared toolset. Suna lets the main agent create bounded workers at runtime:
+This is task-level delegation, not an opaque router that silently changes the model behind your conversation.
 
-- choose a different model for a specific subtask;
-- pass only explicit task/context/images;
-- grant only selected tools, or no tools at all;
-- keep user memory and main conversation history out of the subtask by default;
-- return structured status, result text, error, and side-effect disclosure to the main agent.
+### Make each delegation explicit
 
-This makes delegation explainable and auditable instead of becoming an uncontrolled second agent.
+Every `spawn` call specifies a model, a self-contained task, and a tool allowlist. Pass only the context and images the worker needs, grant selected tools, or grant no tools for analysis-only work. Subtasks do not automatically inherit the main conversation history or user memory.
 
-<p align="center">
-  <img src="docs/assets/tui-subtasks.png" alt="Suna terminal UI showing an isolated subtask timeline" width="66%" />
-</p>
+Results return to the main Agent with status and side-effect disclosure. For example, a read-only worker can inspect files while a no-tool worker evaluates a proposal; the main Agent combines their findings and decides what to do next.
 
-> An isolated subtask keeps its task timeline, tool activity, and result visible to the main session.
+This isolation covers model context and tool authorization, not separate filesystem sandboxes. See [Subtasks](docs/subtask.md) for the execution boundaries.
 
-### Guard: hard rules + mode policy
+### Terminal and Web, one local Runtime
 
-Suna's Guard is a static safety layer with three layers. Hard rules (systemically dangerous commands, blocked patterns, workspace boundaries, sensitive files) are always enforced in every mode. A precise read-only analysis then decides what needs review: `smart` mode lets an LLM review exec calls as a binary approve/reject gate (it judges the operation's own risk, not user intent), `ask` mode asks the user for every non-read-only action, `auto` trusts the model beyond hard rules, and `readonly` rejects anything that changes state.
+The built-in TUI and official Suna App connect to the same Runtime, which owns sessions, Agent runs, tools, Guard, and persistence. You can also build clients against the [public protocol](docs/tcp-client.md).
 
-### Runtime-first architecture
+The Runtime ships as a Go binary for macOS, Linux, and Windows: prebuilt releases require no separate Node.js or desktop runtime. Suna App is installed and versioned separately.
 
-Suna separates UI from a shared local runtime. The daemon owns the model catalog, providers, tools, Guard, memory, attachments, and persistent session state; each session owns its selected model and working conversation state:
+The TUI uses incremental rendering and windowed layout to reduce repeated work in long sessions. Reproducible benchmarks and known limits are documented in [Performance](docs/performance.md).
 
-```text
-Built-in TUI / third-party UI / script
-        ↓ JSON-RPC over local or TCP transport
-Daemon / shared runtime
-    ├─ model catalog, providers, tools, Guard, memory, Skills, MCP
-    └─ sessions
-        ├─ selected model + conversation / working state
-        ├─ attachments, usage, and run lifecycle
-        └─ isolated subtasks
-             ├─ explicit model
-             ├─ explicit context
-             └─ explicit tool permissions
-```
+### Inspect tool activity and review decisions
 
-The built-in TUI is only one client. A default model is used when creating a new conversation; each existing session keeps its own selected model, including after restart or when another session changes model.
+The TUI shows tool calls, results, subtask activity, and Guard decisions. Guard combines hard checks, read-only analysis, and configurable modes; in `smart` mode, non-read-only `exec` calls are reviewed by an LLM. Skills make workflows reusable, and MCP connects external tools.
 
-## Who is Suna for?
+Guard is application-level protection, not an OS sandbox. MCP servers are trusted external processes and currently bypass Guard checks. See [Safety boundary](#safety-boundary) before enabling external tools.
 
-Suna is for people who want a local AI workbench that can work with files, documents, code, commands, APIs, images, and custom tools — while keeping risky actions reviewable.
+## Quick start
 
-It may fit you if you want:
-
-- a terminal AI assistant that understands local context;
-- safer file and command operations with Guard;
-- isolated subtasks instead of one giant shared context;
-- a runtime that can be reused by Web UIs, IDEs, desktop apps, or scripts;
-- memory, Skills, MCP, and tools under your own control.
-
-## Common workflows
-
-Use Suna to:
-
-- organize notes, meeting records, and research material;
-- read a local folder and summarize what matters;
-- compare options and ask a subtask for an independent second opinion;
-- clean up documents or config files with confirmation before writing;
-- run local commands for diagnostics, tests, builds, and automation;
-- call HTTP APIs and turn responses into readable summaries;
-- create reusable Skills for repeated workflows;
-- connect external tools through MCP or third-party clients through the TCP daemon.
-
-## What makes Suna different?
-
-| Capability | Typical terminal agent | Suna |
-|---|---|---|
-| Model choice | One active model per run | Each session keeps its selected model; subtasks can explicitly use another configured model |
-| Subagent context | Shared or implicit | Explicit, isolated context only |
-| Tool permissions | Usually global | Per-subtask tool whitelist |
-| User memory | Often mixed into the whole context | Lightweight profile memory near the latest user input |
-| Safety | Confirm, auto, or coarse allowlist | Hard rules + read-only analysis + mode policy (smart/ask/auto/readonly) |
-| Skill lifecycle | Prompt/file injection | Static check, optional LLM review, then user confirmation |
-| UI architecture | CLI/TUI app | Local daemon/runtime plus protocol plus TUI client |
-| Third-party UI | Usually not a stable boundary | `suna serve --json` with JSON-RPC/NDJSON |
-
-## Install
+### Install
 
 Download a prebuilt binary from [GitHub Releases](https://github.com/alanchenchen/suna/releases):
 
@@ -133,121 +81,90 @@ export PATH="$(go env GOPATH)/bin:$PATH"
 
 Do not use `go run .` to launch Suna. The daemon/TUI process manager depends on a stable executable path.
 
-## Update
+### Configure a model
 
-Quit the TUI, then run:
+1. Start `suna` and open Config / Setup if no model is configured.
+2. Add a model connection and choose its protocol:
+   - **OpenAI**: OpenAI Responses API.
+   - **Anthropic**: Anthropic Messages API.
+   - **OpenAI Compatible**: OpenAI Chat Completions compatible services.
+3. Fill in the model name, endpoint, API key, `context_window`, and `max_output_tokens` using the service's actual limits.
+4. Set the default model for new conversations, then start a conversation.
 
-```bash
-suna update
-```
+Use `/config` for settings and `/model` to change only the current conversation's model. Changing the default model does not change existing sessions. See [Configuration](docs/configuration.md) for `strengths`, `subtask_for`, and reasoning settings.
 
-`update` checks the latest release, shows release notes, downloads the matching asset, verifies checksums, and replaces the current binary after confirmation.
+Themes can be changed from Config → General → Theme. The built-in `default` theme adapts to your terminal background; custom themes are read from `~/.suna/themes/*.toml`. See [Themes](docs/themes.md).
 
-If the daemon is still running, stop it first:
+### Update
+
+Quit the clients using the Runtime, stop the daemon if it is still running, then update:
 
 ```bash
 suna stop
+suna update
 ```
 
-## First run
+The updater shows release notes and asks before downloading, verifying checksums, and replacing the binary.
 
-1. Start `suna`.
-2. Open Config / Setup if no model is configured.
-3. Add a model connection.
-4. Choose a provider protocol:
-   - **OpenAI**: OpenAI Responses API.
-   - **Anthropic**: Anthropic Messages API.
-   - **OpenAI Compatible**: OpenAI Chat Completions compatible providers or gateways.
-5. Fill in model name, endpoint, API key, `context_window`, `max_output_tokens`, and optional capability labels.
-6. Set it as the default model for new conversations, then start a new conversation.
+Suna is under active development. Back up important local data before upgrades or troubleshooting; do not delete database files as a routine recovery step. For diagnosis, start with the logs under `~/.suna/logs/`.
 
-You can change most settings from the TUI with `/config`. `context_window` and `max_output_tokens` must match the real limits of your model provider. `strengths` tell the main agent what a model is good at. `subtask_for` optionally controls which session models may see a model as a subtask candidate.
+## Official Web client
 
-`/model` changes only the current conversation. The default model in Config is used only for conversations created afterwards.
+[Suna App](https://github.com/alanchenchen/suna-app) is the official browser client for an installed Suna Runtime. Its Go Gateway connects through the public local protocol; the browser talks to the Gateway, not directly to the Runtime's TCP socket. It does not contain a second Agent implementation.
 
-Themes can be changed from Config → General → Theme. Suna ships a single built-in `default` theme that adapts to your terminal background, and reads custom themes from `~/.suna/themes/*.toml` (the file name is the theme name). See [Themes](docs/themes.md) for how to write and share custom themes, or the generated `~/.suna/themes/README.md` for the field reference and templates.
+Start with the [Suna App README](https://github.com/alanchenchen/suna-app#readme) for setup, builds, and compatibility requirements. App and Runtime releases are independent; compatibility depends on the Runtime protocol and advertised capabilities, not matching version numbers. Do not assume every TUI feature is already available in the Web client.
 
-## Try these prompts
+## Try these tasks
 
-These prompts are intentionally simple. They are meant to show how Suna delegates work, limits tool access, and asks before risky actions.
+Suna is useful for local documents, code, research, diagnostics, APIs, and automation—not only repository edits. These examples show how to make delegation and review concrete.
 
-### 1. Get a second opinion
+### 1. Get an independent second opinion
 
 ```text
-I need to decide between two options. First, ask a subtask to give an independent second opinion without using any tools. Then give me your final recommendation.
+I need to decide between two options. Ask a subtask for an independent second opinion without using tools, then give me your recommendation. Pass it only the options and evaluation criteria.
 ```
 
-You should see a `spawn` tool call where the subtask has no tools and only receives the context the main agent explicitly passes to it.
+Look for a `spawn` call with an empty tool allowlist. The worker receives only explicitly supplied context.
 
-### 2. Explore local files safely
+### 2. Explore files, then review the findings
 
 ```text
-Help me understand the documents in this folder. You can ask a read-only subtask to look around with listdir, readfile, and search, then summarize the important points for me.
+Help me understand this folder. Delegate exploration to a model suited to research, granting only listdir, readfile, and search. Summarize the findings, then ask another available model to review the summary without tools.
 ```
 
-You should see the main agent grant only read/search tools to the subtask and keep final judgment in the main conversation.
+Configure multiple models to try cross-model delegation. The main Agent chooses from the candidates available to it and integrates the results.
 
-### 3. Make a small change with confirmation
+<p align="center">
+  <img src="docs/assets/tui-subtasks.png" alt="Suna terminal UI showing an isolated subtask timeline" width="66%" />
+</p>
+
+> Inspect a subtask's tool activity and result from the main session.
+
+### 3. Make a change with confirmation
+
+For tool-level confirmation of non-read-only operations, select Guard's `ask` mode in `/config` and check that no matching allowed rule bypasses confirmation. The default `smart` mode does not ask before ordinary file writes.
 
 ```text
-Please clean up this note and save the improved version. Before writing anything, tell me what you plan to change and let me confirm it.
+Clean up this note and save a clearer version. Explain the planned changes first, and wait for my confirmation before writing.
 ```
 
-You should see file edits go through Suna's Guard instead of being silently executed.
-
-## What can Suna do?
-
-```text
-Organize notes, meeting records, and research material
-Compare options and turn rough ideas into a practical plan
-Read a local folder and summarize what matters
-Analyze screenshots or pasted images
-Call HTTP APIs and turn responses into readable summaries
-Check documents, configs, or scripts for conflicts and risks
-Modify files with exact edits and explain the impact
-Run commands for diagnostics, tests, builds, and automation
-Search local files by path, symbol-like entries, or content
-Use MCP tools from configured stdio servers
-Create, review, and enable Skills
-Compact long sessions into Session State
-Delegate bounded subtasks to other configured models
-```
-
-Action tools such as writing files, running commands, filesystem operations, and HTTP write requests go through Guard.
-
-## Built-in tools
-
-| Category | Tool | Purpose |
-|---|---|---|
-| Perception | `readfile` | Read files by line range, tail, or base64 |
-| Perception | `listdir` | List directories with recursion, pagination, include/exclude filters |
-| Perception | `search` | Structured local search across paths, headings/symbol-like entries, and content |
-| Perception | `read_image` | Load an image (local path, URL, or historical attachment ref) so a multimodal model can see it; historical `[image: ...]` summaries carry a `source=` value that can be passed here to re-read |
-| Action | `exec` | Run or manage bounded shell commands; long-running work can be started explicitly in the background and queried or stopped by job ID |
-| Action | `writefile` | Create, overwrite, or append files |
-| Action | `editfile` | Atomically apply exact text replacements to a single file |
-| Action | `filesystem` | `stat`, `mkdir`, `move`, `copy`, or `remove` paths |
-| Action | `http` | Send HTTP requests; read methods are lower risk than write methods |
-
-Tools are exposed through a stable provider system. Guard decisions are handled by the Agent, not by UI code or ad-hoc tool wrappers.
+The prompt asks the Agent to discuss the change; `ask` mode separately enforces confirmation at tool execution.
 
 ## TUI quick reference
-
-Common keys:
 
 ```text
 Enter              Send / confirm
 Shift+Enter        Newline
 Ctrl+J             Newline
 Esc                Cancel run, go back, or close overlay
-↑ / ↓             Recall previous / next input when the composer is empty
+↑ / ↓              Recall previous / next input when the composer is empty
 Ctrl+T             Expand or collapse the tool block in view
 Ctrl+R             Toggle reasoning detail
 ?                  Toggle help
 PgUp / PgDn        Scroll; manual scrolling pauses follow
 Home               View the start of the current long response when the composer is empty
 End                Return to latest content and resume follow
-Ctrl+V             Paste text; if no terminal text is provided and clipboard has an image, attach image
+Ctrl+V             Paste text; attach a clipboard image if no terminal text is provided
 Ctrl+C             Quit
 ```
 
@@ -257,7 +174,7 @@ Common slash commands:
 /new              Replace the current idle exclusive session with a new one
 /sessions         Join active sessions elsewhere or remove idle ones
 /model            Open model picker for the current conversation
-/model <ref>      Switch the current conversation model, e.g. /model openai/gpt-4o-mini
+/model <ref>      Switch the current model, e.g. /model openai/gpt-4o-mini
 /memory           View user profile memory
 /mcp              Open MCP panel
 /skills           Open Skill panel
@@ -268,82 +185,71 @@ Common slash commands:
 
 Unknown `/text` input is sent as a normal message.
 
+## Tools and extensions
+
+| Tool | Purpose |
+|---|---|
+| `readfile`, `listdir`, `search` | Read and explore local files by line range, path, structure, or content |
+| `read_image` | Load an image from a local path, URL, or historical attachment reference |
+| `writefile`, `editfile` | Write files or atomically apply exact replacements to one file |
+| `filesystem` | Stat, create, move, copy, or remove filesystem paths |
+| `exec` | Run commands; explicitly start, inspect, or stop managed background jobs |
+| `http` | Send HTTP requests and inspect responses |
+
+[Skills](docs/configuration.md) add reusable instructions and workflows; global Skill import uses static checks, optional LLM review, and user confirmation before enabling. [MCP configuration](docs/configuration.md) connects tools from trusted stdio servers.
+
 ## Safety boundary
 
-Guard modes:
+For calls subject to Guard, hard checks precede allowed rules and mode policy. Matching allowed rules can approve calls before the mode-specific decision. Otherwise:
 
 ```text
-smart     Default. Read-only calls pass; exec calls are reviewed by an LLM (approve/reject); other writes pass
-ask       Read-only calls pass; every non-read-only action asks for confirmation
-auto      Allow actions except hard-blocked ones
-readonly  Only allow read-only actions
+smart     Default. Read-only calls pass; non-read-only exec calls get LLM review; other writes pass
+ask       Read-only calls pass; non-read-only calls require confirmation
+auto      Allow calls except hard-blocked ones
+readonly  Allow only statically classified read-only calls
 ```
 
-Workspace is an optional directory boundary. When set, local file and command operations are limited to that workspace. Suna's own data directory remains accessible for configuration, logs, attachments, and Skills, while credentials and other sensitive paths are still blocked by built-in rules.
+Workspace is an optional application-level path boundary for supported local tools and recognizable paths in commands. Suna's default data directory remains accessible, subject to sensitive-path checks. Local `read_image` sources currently do not receive the Guard workspace check.
 
-Workspace, Guard, Skills, and MCP are not an OS sandbox. External commands and MCP servers still run with their process permissions. Only enable tools and servers you trust.
+Guard is not an OS sandbox: command analysis cannot constrain every path accessed by a script or program at runtime. MCP tools currently skip Guard, and MCP servers run with their process permissions. Only enable servers you trust. A subtask tool allowlist limits callable tools, not all effects of an authorized command or external tool.
 
-## Data directory
+Other current limits:
 
-Default data directory:
+- No complete event replay after a client disconnects during a running task. Restored sessions are not a full archive of tool and reasoning output.
+- No complete history search, vector knowledge base, or full multi-session management UI in the TUI.
+- No complete scheduled-task, trigger, file-watching, or proactive execution feature.
+- MCP is tools-only stdio integration, not full resources/prompts/sampling/OAuth support.
+- No Skill sandbox or marketplace, full OS sandbox, or complete provider price accounting.
+
+## Local data
 
 ```text
-~/.suna/config.toml        # main config
+~/.suna/config.toml        # model and Runtime configuration
 ~/.suna/credentials.toml   # API keys
-~/.suna/memory.db          # memory, session state, usage
+~/.suna/memory.db          # memory, session state, usage, and audit records
 ~/.suna/skills/            # global Skills
 ~/.suna/attachments/       # images and binary attachments
-~/.suna/mcp-workdirs/      # default working directories for stdio MCP servers
-~/.suna/logs/app.log       # logs
+~/.suna/mcp-workdirs/      # default stdio MCP server working directories
+~/.suna/logs/              # categorized logs
 ```
 
-For troubleshooting, check `~/.suna/logs/app.log` first.
+Persisted sessions remain until explicitly deleted; this does not imply complete transcript replay. Guard audit entries and per-request usage records are retained for 30 days. SQLite reuses freed pages without automatic `VACUUM`, so cleanup may not immediately shrink the database file.
 
-Persisted Sessions are kept until you explicitly delete them; Suna does not remove Sessions because they are old or empty. Guard audit entries and per-request model usage records are operational details retained for the most recent 30 days. Cleanup reuses freed SQLite pages and does not automatically run `VACUUM`, so `memory.db` may not immediately shrink on disk.
+Project Skills are discovered when a session runtime is created, from compatible directories between its cwd and Git worktree root. They are project-managed, not toggled in Suna.
 
-Global Skills use `~/.suna/skills/`. Project Skills are discovered once per Session runtime from `.agents/skills` or compatible agent directories between the Session cwd and Git worktree root; project Skills are project-managed and cannot be toggled in Suna.
+## Build a client or explore the code
 
-## TCP daemon for third-party clients
-
-Start or discover the local daemon and print its TCP endpoint:
-
-```bash
-suna serve --json
-```
-
-The TCP endpoint defaults to `127.0.0.1:7632` and accepts JSON-RPC-style NDJSON after `runtime.hello`. It is intended for trusted local desktop apps, IDE plugins, local web gateways, and scripts; remote listening is not supported without a future authenticated transport.
-
-Start here:
-
-- [Protocol reference](docs/protocol.md)
-- [Configuration reference](docs/configuration.md)
-
-## Documentation
+Run `suna serve --json` to start or discover the Runtime and obtain its authoritative TCP endpoint. The local-only protocol uses JSON-RPC-style NDJSON after `runtime.hello`; it is for trusted local clients, not unauthenticated remote exposure.
 
 - [Documentation index](docs/README.md)
-- [Subtask design](docs/subtask.md)
-- [Architecture](docs/architecture.md)
-- [Design notes](docs/design.md)
+- [Client integration guide](docs/tcp-client.md) and [Protocol reference](docs/protocol.md)
+- [Configuration](docs/configuration.md)
+- [Subtasks](docs/subtask.md)
+- [Architecture](docs/architecture.md) and [Design notes](docs/design.md)
 - [Performance](docs/performance.md)
-- [Code map](docs/code-map.md)
-- [Current implementation](docs/current-implementation.md)
+- [Code map](docs/code-map.md) and [Current implementation](docs/current-implementation.md)
 - [Development guide](docs/development.md)
-- [Chinese README](README.zh-CN.md)
-
-## Current boundaries
-
-Do not rely on these as complete product features yet:
-
-- triggers, scheduled jobs, file watching, or proactive perception;
-- multi-session management UI, full history search, vector memory, or knowledge base;
-- full MCP support beyond tools-only stdio MCP server integration;
-- Skill sandbox, Skill marketplace, or complex lifecycle hooks;
-- complete cost accounting and provider price calculation;
-- full OS sandbox;
-- complete event replay after TUI disconnects during a running task.
 
 ## License
 
-Suna is released under the [PolyForm Noncommercial License 1.0.0](LICENSE).
-
-You may use, study, modify, and distribute Suna for noncommercial purposes. Commercial use requires separate permission from the copyright holder. When distributing original or modified versions, keep the license terms and required notice.
+Suna is released under the [MIT License](LICENSE). Commercial and noncommercial use, modification, and redistribution are permitted under its terms. Keep the copyright and permission notice in copies or substantial portions of the software.
