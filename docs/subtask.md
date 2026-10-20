@@ -58,7 +58,7 @@ Subtask 的初始 working memory 是新建的，只包含本次 `task` 和显式
 
 ## 动态模型分配
 
-Suna 支持配置多个模型连接。主 Agent 的 system prompt 会看到可用于 Subtask 的模型列表，包括模型引用、能力信息和上下文窗口等摘要。`models.subtask_for` 可作为候选可见性过滤器：未配置时对所有主模型开放，配置后只有 active model ref 匹配任一 glob 时才展示；模型始终可作为自己的子任务模型。运行时，主 Agent 可以根据任务选择模型，例如：
+Suna 支持配置多个模型连接。主 Agent 的 system prompt 会看到可用于 Subtask 的模型列表，包括模型引用、能力信息和上下文窗口等摘要。`models.subtask_for` 可作为候选可见性过滤器：未配置时对所有主模型开放，配置后只有 active model ref 匹配任一 glob 时才展示；模型始终可作为自己的子任务模型。glob 写法（`*` 不跨 `/`、`**` 可跨 `/`、多 pattern 为“或”关系）见 [subtask_for 候选过滤写法](configuration.md#subtask_for-候选过滤写法)。运行时，主 Agent 可以根据任务选择模型，例如：
 
 ```text
 主对话模型：低成本快速模型

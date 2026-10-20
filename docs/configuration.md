@@ -217,7 +217,7 @@ api_key = "<API_KEY>"
 | `models.context_window` | int | 是 | 无 | 模型服务声明的总上下文窗口，按 `input + output` 理解；用于 status、usage 展示和 compact 预算。 |
 | `models.max_output_tokens` | int | 是 | 无 | 模型服务允许的最大单次输出；所有 LLM 请求默认使用该值作为输出预算，且必须小于 `context_window`。 |
 | `models.strengths` | string[] | 否 | 空 | 模型能力描述，会给主 Agent 参考，用于选择 subtask 模型。 |
-| `models.subtask_for` | string[] | 否 | 空 | 子任务候选可见性过滤器；留空表示所有主 session 模型可用，非空时当前 session model ref 匹配任一 glob 才展示，模型始终可作为自己的子任务模型。`*` 不跨 `/`，`**` 可跨 `/`。 |
+| `models.subtask_for` | string[] | 否 | 空 | 子任务候选可见性过滤器；留空表示所有主 session 模型可用，非空时当前 session model ref 匹配任一 glob 才展示，模型始终可作为自己的子任务模型。`*` 不跨 `/`，`**` 可跨 `/`。写法见 [subtask_for 候选过滤写法](#subtask_for-候选过滤写法)。 |
 | `models.reasoning` | object | 否 | 空 | 透传到 provider 请求体的额外 reasoning/thinking 字段；Suna 不理解 preset，是否有效取决于上游。 |
 | `[guard].mode` | string | 否 | `smart` | `readonly` / `ask` / `auto` / `smart`。空或非法值按 `smart` 使用；`smart` 只对 exec 调用做二元安全审查，其他非只读工具静态放行。 |
 | `[guard].workspace` | string | 否 | 空 | 本地文件和 exec 的目录硬边界；非空时必须是存在目录，会展开 `~/` 并规范化为绝对路径。 |
@@ -372,6 +372,126 @@ reasoning = { thinking = { type = "disabled" } }
 # 错误：model 是 Suna 生成的请求字段，会冲突。
 reasoning = { model = "other-model" }
 ```
+
+### subtask_for 候选过滤写法
+
+`models.subtask_for` 决定「这个模型在哪些主 session 模型下才作为 subtask 候选出现」。它只影响候选可见性，不改变模型能力、工具授权或调用方式。
+
+#### 匹配对象：主 session 模型的 ref
+
+ref 格式为 `provider/model`。注意上游模型 ID 本身可能带斜杠，所以 ref 的段数不固定：
+
+| 配置 | ref | 段数 |
+|---|---|:---:|
+| `provider = "openai"` + `model = "gpt-4o-mini"` | `openai/gpt-4o-mini` | 2 |
+| `provider = "openai"` + `model = "gpt-4.1-mini"` | `openai/gpt-4.1-mini` | 2 |
+| `provider = "deepseek"` + `model = "deepseek-reasoner"` | `deepseek/deepseek-reasoner` | 2 |
+| `provider = "openai"` + `model = "vendor/model-x"` | `openai/vendor/model-x` | 3 |
+
+写 pattern 前先确认目标 ref 有几段。
+
+#### 通配符
+
+| 符号 | 含义 | 跨 `/` |
+|---|---|:---:|
+| `*` | 任意字符，不含 `/`，恰好匹配一段 | 否 |
+| `**` | 任意字符，可含 `/`，匹配剩下的所有段 | 是 |
+| `?` | 单个字符，不含 `/` | 否 |
+
+其余字符按字面量匹配。segment 之间的分隔符就是 `/`。
+
+关键对照（✅ 命中 / ❌ 不命中）：
+
+| pattern | `openai/gpt-4o-mini` | `openai/vendor/model-x` |
+|---|:---:|:---:|
+| `openai/*` | ✅ | ❌ |
+| `openai/*/*` | ❌ | ✅ |
+| `openai/**` | ✅ | ✅ |
+
+`openai/**` 覆盖任意段数，通常是最省事的写法。
+
+#### 常用配方
+
+| 目标 | 写法 |
+|---|---|
+| 只在本 provider 内可见 | `provider/**` |
+| 只在某个具体主模型下可见 | `provider/具体模型名` |
+| 只在模型名带指定后缀的主模型下可见 | `provider/**/*后缀` |
+| 所有 provider 都可见 | `*` |
+| 跨 provider，但限定后缀 | `**:后缀` |
+
+多条 pattern 之间是「或」关系，命中任意一条即可。
+
+#### 完整示例：按 provider 隔离
+
+让每个 provider 的模型只在自己 provider 内互见：
+
+```toml
+[[models]]
+provider = "openai"
+protocol = "openai_chat"
+model = "gpt-4o-mini"
+base_url = "https://api.openai.com/v1"
+context_window = 128000
+max_output_tokens = 8192
+subtask_for = ["openai/**"]
+
+[[models]]
+provider = "anthropic"
+protocol = "anthropic"
+model = "claude-sonnet-4-20250514"
+base_url = "https://api.anthropic.com"
+context_window = 200000
+max_output_tokens = 64000
+subtask_for = ["anthropic/**"]
+
+[[models]]
+provider = "deepseek"
+protocol = "openai_chat"
+model = "deepseek-reasoner"
+base_url = "https://api.deepseek.com/v1"
+context_window = 64000
+max_output_tokens = 8192
+subtask_for = ["deepseek/**"]
+```
+
+#### 完整示例：同一 provider 内按后缀分组
+
+同一 provider 下再按模型 ID 后缀细分：带 `:free` 的模型只在带 `:free` 的主模型下出现，付费模型看不到它。
+
+```toml
+[[models]]
+provider = "openai"
+protocol = "openai_chat"
+model = "gpt-4o-mini"
+base_url = "https://api.openai.com/v1"
+context_window = 128000
+max_output_tokens = 8192
+subtask_for = ["openai/gpt-4o-mini"]
+
+[[models]]
+provider = "openai"
+protocol = "openai_chat"
+model = "vendor/model-free:free"
+base_url = "https://api.openai.com/v1"
+context_window = 128000
+max_output_tokens = 8192
+subtask_for = ["openai/**/*:free"]
+```
+
+对应可见性：
+
+| 主 session 模型 | `openai/gpt-4o-mini` | `openai/vendor/model-free:free` |
+|---|:---:|:---:|
+| `openai/gpt-4o-mini` | ✅ | ❌ |
+| `openai/vendor/model-free:free` | ❌ | ✅ |
+
+#### 常见误区
+
+- **段数对不上**：pattern 的段数必须与目标 ref 对得上。ref 是 3 段时，`provider/*` 匹配不到，应写 `provider/**` 或 `provider/*/*`。
+- **`*` 不跨斜杠**：需要跨层时用 `**`。
+- **provider 后已经有一层**：ref 永远是 `provider/model` 两段起步，`provider` 后面第一个 `*` 对应的就是 model 段。
+- **模型始终可作为自己的子任务模型**：主 session 模型本身对应的 ref 永远可见，不受 `subtask_for` 限制。
 
 ## Guard 配置细节
 
