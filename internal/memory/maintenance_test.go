@@ -18,8 +18,8 @@ func TestPruneOperationalLogsKeepsRecentRowsAndSessions(t *testing.T) {
 	now := time.Date(2026, time.August, 16, 12, 0, 0, 0, time.FixedZone("test", 8*60*60))
 	oldLocal := now.Add(-OperationalLogRetention - time.Second)
 	boundaryLocal := now.Add(-OperationalLogRetention)
-	oldUTC := oldLocal.UTC().Format("2006-01-02 15:04:05")
-	boundaryUTC := boundaryLocal.UTC().Format("2006-01-02 15:04:05")
+	oldUTC := dbTime(oldLocal)
+	boundaryUTC := dbTime(boundaryLocal)
 
 	for _, row := range []struct {
 		id        string
@@ -27,14 +27,14 @@ func TestPruneOperationalLogsKeepsRecentRowsAndSessions(t *testing.T) {
 	}{
 		{id: "audit-old", timestamp: oldUTC},
 		{id: "audit-boundary", timestamp: boundaryUTC},
-		{id: "audit-recent", timestamp: now.UTC().Format("2006-01-02 15:04:05")},
+		{id: "audit-recent", timestamp: dbTime(now)},
 	} {
 		if _, err := store.DB().ExecContext(ctx, `INSERT INTO audit_log (id, timestamp, tool) VALUES (?, ?, 'exec')`, row.id, row.timestamp); err != nil {
 			t.Fatalf("insert audit row %q error = %v", row.id, err)
 		}
 	}
 	for _, createdAt := range []time.Time{oldLocal, boundaryLocal, now} {
-		if _, err := store.DB().ExecContext(ctx, `INSERT INTO usage_log (model, created_at) VALUES ('test-model', ?)`, createdAt); err != nil {
+		if _, err := store.DB().ExecContext(ctx, `INSERT INTO usage_log (model, created_at) VALUES ('test-model', ?)`, dbTime(createdAt)); err != nil {
 			t.Fatalf("insert usage row error = %v", err)
 		}
 	}

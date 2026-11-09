@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 
@@ -44,19 +45,15 @@ func (s *Store) checkUpgradeBaseline() error {
 	return nil
 }
 
-func (s *Store) migrateSessionMessages() error {
-	legacy, err := s.columnExists("session_state", "compacted_state")
+func (s *Store) migrateSessionMessages(tx *sql.Tx) error {
+	var legacy int
+	err := tx.QueryRow(`SELECT count(*) FROM pragma_table_info('session_state') WHERE name='compacted_state'`).Scan(&legacy)
 	if err != nil {
 		return err
 	}
-	if !legacy {
+	if legacy == 0 {
 		return nil
 	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	// 改列、正文规范化和删除旧聚合共享一次事务，坏数据使整个升级回滚。
 	for _, query := range []string{`ALTER TABLE session_state RENAME COLUMN compacted_state TO summary`, `ALTER TABLE session_state RENAME COLUMN last_messages TO messages`, `ALTER TABLE session_state DROP COLUMN tool_summary`} {
 		if _, err = tx.Exec(query); err != nil {
@@ -112,5 +109,5 @@ func (s *Store) migrateSessionMessages() error {
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }

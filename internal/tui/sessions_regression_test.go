@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -12,6 +13,15 @@ import (
 	uipage "github.com/alanchenchen/suna/internal/tui/pages/page"
 	welcomepage "github.com/alanchenchen/suna/internal/tui/pages/welcome"
 )
+
+func TestRelativeSessionTimeDisplaysClientLocalDate(t *testing.T) {
+	original := time.Local
+	time.Local = time.FixedZone("test", 8*60*60)
+	t.Cleanup(func() { time.Local = original })
+	if got := relativeSessionTime("2020-01-01T20:30:00.000000000Z"); got != "Jan 2 04:30" {
+		t.Fatalf("relativeSessionTime = %q, want Jan 2 04:30", got)
+	}
+}
 
 func TestWelcomeSeparatesOtherCWDSessions(t *testing.T) {
 	cwd, err := os.Getwd()

@@ -99,7 +99,7 @@ func (w *Worker) hasHighPending() bool {
 		return false
 	}
 	var n int
-	_ = w.db.QueryRow(`SELECT COUNT(*) FROM memory_queue WHERE user_id = ? AND processed_at IS NULL AND significance = ? AND attempts < ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)`, DefaultUserID, SignificanceHigh, maxQueueAttempts, time.Now()).Scan(&n)
+	_ = w.db.QueryRow(`SELECT COUNT(*) FROM memory_queue WHERE user_id = ? AND processed_at IS NULL AND significance = ? AND attempts < ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)`, DefaultUserID, SignificanceHigh, maxQueueAttempts, dbTime(time.Now())).Scan(&n)
 	return n > 0
 }
 

@@ -36,8 +36,8 @@ func Init(dataDir string) {
 	_ = os.MkdirAll(defaultLogger.dir, 0755)
 	file, err := os.OpenFile(config.DataDirLogPath(dataDir), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err == nil {
-		log.SetOutput(file)
-		log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
+		log.SetOutput(utcLogWriter{file})
+		log.SetFlags(0)
 	}
 }
 
@@ -73,9 +73,26 @@ func write(level, category, event string, fields Event) {
 	_, _ = f.WriteString(line + "\n")
 }
 
+const logTimeLayout = "2006-01-02T15:04:05.000000000Z"
+
+// 标准库日志也带明确 UTC 标识，不能只设 LUTC 留下无时区的时间文本。
+type utcLogWriter struct{ io.Writer }
+
+func (w utcLogWriter) Write(p []byte) (int, error) {
+	line := append([]byte(time.Now().UTC().Format(logTimeLayout)+" "), p...)
+	n, err := w.Writer.Write(line)
+	if err != nil {
+		return 0, err
+	}
+	if n != len(line) {
+		return 0, io.ErrShortWrite
+	}
+	return len(p), nil
+}
+
 func formatLine(level, category, event string, fields Event) string {
 	parts := []string{
-		time.Now().Format("2006-01-02 15:04:05.000"),
+		time.Now().UTC().Format(logTimeLayout),
 		level,
 		event,
 	}

@@ -816,6 +816,6 @@ func relativeSessionTime(value string) string {
 	case d < 48*time.Hour:
 		return "yesterday"
 	default:
-		return parsed.Format("Jan 2 15:04")
+		return parsed.Local().Format("Jan 2 15:04")
 	}
 }

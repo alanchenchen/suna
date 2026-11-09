@@ -64,7 +64,7 @@ func (s *MemoryStore) list(ctx context.Context, db interface {
 		FROM user_profile_memory
 		WHERE user_id = ? AND (expires_at IS NULL OR expires_at > ?)
 		ORDER BY is_core DESC, priority DESC, confidence DESC, COALESCE(last_used_at, updated_at) DESC, updated_at DESC, id ASC
-		LIMIT ?`, userID, time.Now(), limit)
+		LIMIT ?`, userID, dbTime(time.Now()), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (s *MemoryStore) Count(ctx context.Context, userID string) (active, core in
 	if userID == "" {
 		userID = DefaultUserID
 	}
-	now := time.Now()
+	now := dbTime(time.Now())
 	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_profile_memory WHERE user_id = ? AND (expires_at IS NULL OR expires_at > ?)`, userID, now).Scan(&active)
 	_ = s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_profile_memory WHERE user_id = ? AND is_core = 1 AND (expires_at IS NULL OR expires_at > ?)`, userID, now).Scan(&core)
 	return active, core
@@ -149,7 +149,7 @@ func (s *MemoryStore) MarkUsed(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	now := time.Now()
+	now := dbTime(time.Now())
 	for _, id := range ids {
 		_, _ = s.db.ExecContext(ctx, `UPDATE user_profile_memory SET use_count = use_count + 1, last_used_at = ?, updated_at = ? WHERE id = ?`, now, now, id)
 	}
@@ -235,7 +235,7 @@ func replaceAllTx(ctx context.Context, tx *sql.Tx, userID string, newList []User
 	}
 
 	keep := map[string]bool{}
-	now := time.Now()
+	now := dbTime(time.Now())
 	for _, m := range normalizeMemoryList(userID, newList) {
 		// compactor 输出完整的新用户画像列表，不是增量 patch；这里复用旧 id，避免同一画像重复生成。
 		if m.ID == "" || existing[m.ID].ID == "" {
@@ -489,18 +489,6 @@ func unmarshalStringSlice(s string) []string {
 	return out
 }
 
-func parseDBTime(s string) time.Time {
-	if s == "" {
-		return time.Time{}
-	}
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05", "2006-01-02T15:04:05Z07:00"} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t
-		}
-	}
-	return time.Time{}
-}
-
 func clampPriority(v int) int {
 	if v < 0 {
 		return 0
@@ -519,13 +507,6 @@ func clampConfidence(v float64) float64 {
 		return 1
 	}
 	return v
-}
-
-func nullableTime(t time.Time) any {
-	if t.IsZero() {
-		return nil
-	}
-	return t
 }
 
 func truncateRunes(s string, max int) string {

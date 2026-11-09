@@ -22,8 +22,7 @@ func (s *Store) PruneOperationalLogs(ctx context.Context, now time.Time) (Operat
 	if now.IsZero() {
 		now = time.Now()
 	}
-	localCutoff := now.Add(-OperationalLogRetention)
-	utcCutoff := localCutoff.UTC()
+	cutoff := dbTime(now.Add(-OperationalLogRetention))
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -31,11 +30,11 @@ func (s *Store) PruneOperationalLogs(ctx context.Context, now time.Time) (Operat
 	}
 	defer tx.Rollback()
 
-	auditResult, err := tx.ExecContext(ctx, `DELETE FROM audit_log WHERE timestamp < ?`, utcCutoff.Format("2006-01-02 15:04:05"))
+	auditResult, err := tx.ExecContext(ctx, `DELETE FROM audit_log WHERE timestamp < ?`, cutoff)
 	if err != nil {
 		return OperationalPruneResult{}, fmt.Errorf("prune operational logs: delete audit log: %w", err)
 	}
-	usageResult, err := tx.ExecContext(ctx, `DELETE FROM usage_log WHERE created_at < ?`, localCutoff)
+	usageResult, err := tx.ExecContext(ctx, `DELETE FROM usage_log WHERE created_at < ?`, cutoff)
 	if err != nil {
 		return OperationalPruneResult{}, fmt.Errorf("prune operational logs: delete usage log: %w", err)
 	}

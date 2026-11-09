@@ -1,15 +1,49 @@
 package logging
 
 import (
+	"bytes"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizeCategoryAllowsIPC(t *testing.T) {
 	if got, want := normalizeCategory("ipc"), "ipc"; got != want {
 		t.Fatalf("normalizeCategory(ipc) = %q, want %q", got, want)
+	}
+}
+
+func TestLogTimestampsUseExplicitUTC(t *testing.T) {
+	var app bytes.Buffer
+	message := []byte("standard log\n")
+	n, err := (utcLogWriter{&app}).Write(message)
+	if err != nil || n != len(message) {
+		t.Fatalf("Write = %d, %v, want %d, nil", n, err, len(message))
+	}
+	for _, line := range []string{app.String(), formatLine("INFO", "app", "test", Event{"id": "one"})} {
+		stamp, _, ok := strings.Cut(line, " ")
+		parsed, err := time.Parse(logTimeLayout, stamp)
+		if !ok || err != nil || parsed.Location() != time.UTC || time.Since(parsed).Abs() > time.Minute {
+			t.Fatalf("log = %q, parse error = %v, want current explicit UTC", line, err)
+		}
+	}
+	if !strings.HasSuffix(app.String(), string(message)) {
+		t.Fatalf("standard log = %q, want unchanged message", app.String())
+	}
+}
+
+type shortLogWriter struct{}
+
+func (shortLogWriter) Write(p []byte) (int, error) { return len(p) - 1, nil }
+
+func TestStandardLogReportsShortWrite(t *testing.T) {
+	n, err := (utcLogWriter{shortLogWriter{}}).Write([]byte("message"))
+	if n != 0 || !errors.Is(err, io.ErrShortWrite) {
+		t.Fatalf("Write = %d, %v, want 0, short write", n, err)
 	}
 }
 

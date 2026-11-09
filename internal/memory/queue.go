@@ -61,7 +61,7 @@ func (q *ExtractQueue) Push(ctx context.Context, userID, modelRef string, candid
 	// memory_queue 只保存结构化用户画像候选，不保存原始对话，避免 assistant 总结或任务日志进入长期记忆。
 	_, err := q.db.ExecContext(ctx, `
 		INSERT INTO memory_queue (id, user_id, model_ref, kind, content, tags, source, confidence, evidence, significance, created_at, next_attempt_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, uuid.New().String(), userID, modelRef, candidate.Kind, candidate.Content, marshalStringSlice(candidate.Tags), candidate.Source, candidate.Confidence, candidate.Evidence, string(candidate.Significance), time.Now(), time.Now())
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, uuid.New().String(), userID, modelRef, candidate.Kind, candidate.Content, marshalStringSlice(candidate.Tags), candidate.Source, candidate.Confidence, candidate.Evidence, string(candidate.Significance), dbTime(time.Now()), dbTime(time.Now()))
 	if err != nil {
 		logging.Error("memory", "queue_insert_failed", err, logging.Event{"model_ref": modelRef, "queue_kind": candidate.Kind, "significance": string(candidate.Significance)})
 		return false
@@ -137,7 +137,7 @@ func LoadDueQueue(ctx context.Context, db *sql.DB, userID string, limit int) ([]
 		FROM memory_queue
 		WHERE user_id = ? AND processed_at IS NULL AND attempts < ?
 		  AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
-		ORDER BY created_at ASC LIMIT ?`, userID, maxQueueAttempts, time.Now(), limit)
+		ORDER BY created_at ASC LIMIT ?`, userID, maxQueueAttempts, dbTime(time.Now()), limit)
 	if err != nil {
 		return nil, fmt.Errorf("load due memory queue: %w", err)
 	}
@@ -207,7 +207,7 @@ func RetryQueueItems(ctx context.Context, db *sql.DB, ids []string, cause error)
 			logging.Error("memory", "queue_drop_after_retries", cause, logging.Event{"attempts": nextAttempts, "queue_id": id})
 			continue
 		}
-		next := time.Now().Add(queueBackoff(nextAttempts))
+		next := dbTime(time.Now().Add(queueBackoff(nextAttempts)))
 		if _, err := tx.ExecContext(ctx, `UPDATE memory_queue SET attempts = ?, next_attempt_at = ?, last_error = ? WHERE id = ? AND processed_at IS NULL`, nextAttempts, next, errText, id); err != nil {
 			return fmt.Errorf("retry queue item %s: %w", id, err)
 		}
@@ -243,7 +243,7 @@ func QueueDueCount(ctx context.Context, db *sql.DB, userID string) int {
 		userID = DefaultUserID
 	}
 	var count int
-	now := time.Now()
+	now := dbTime(time.Now())
 	_ = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM memory_queue WHERE user_id = ? AND processed_at IS NULL AND attempts < ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)`, userID, maxQueueAttempts, now).Scan(&count)
 	return count
 }

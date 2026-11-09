@@ -35,7 +35,7 @@ func (s *SessionStore) Create(ctx context.Context, meta SessionMeta) error {
 	}
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO sessions (id, title, cwd, model_ref, message_count, created_at, updated_at, last_attached_at)
-		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, NULL)`, meta.ID, strings.TrimSpace(meta.Title), strings.TrimSpace(meta.CWD), strings.TrimSpace(meta.ModelRef), meta.MessageCount, meta.CreatedAt, meta.UpdatedAt)
+		VALUES (?, ?, ?, NULLIF(?, ''), ?, ?, ?, NULL)`, meta.ID, strings.TrimSpace(meta.Title), strings.TrimSpace(meta.CWD), strings.TrimSpace(meta.ModelRef), meta.MessageCount, dbTime(meta.CreatedAt), dbTime(meta.UpdatedAt))
 	return err
 }
 
@@ -80,7 +80,7 @@ func (s *SessionStore) UpdateMetadata(ctx context.Context, id, title string, tit
 	}
 	defer tx.Rollback()
 
-	now := time.Now()
+	now := dbTime(time.Now())
 	var result sql.Result
 	switch {
 	case titleSet && modelRefSet:
@@ -114,7 +114,7 @@ func (s *SessionStore) MaterializeModelRefIfEmpty(ctx context.Context, id, model
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE sessions
 		SET model_ref = ?, updated_at = ?
-		WHERE id = ? AND (model_ref IS NULL OR TRIM(model_ref) = '')`, strings.TrimSpace(modelRef), time.Now(), id)
+		WHERE id = ? AND (model_ref IS NULL OR TRIM(model_ref) = '')`, strings.TrimSpace(modelRef), dbTime(time.Now()), id)
 	if err != nil {
 		return false, err
 	}
@@ -126,12 +126,12 @@ func (s *SessionStore) MaterializeModelRefIfEmpty(ctx context.Context, id, model
 }
 
 func (s *SessionStore) TouchAttached(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET last_attached_at = ? WHERE id = ?`, time.Now(), id)
+	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET last_attached_at = ? WHERE id = ?`, dbTime(time.Now()), id)
 	return err
 }
 
 func (s *SessionStore) SetMessageCount(ctx context.Context, id string, count int) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET message_count = ?, updated_at = ? WHERE id = ?`, count, time.Now(), id)
+	_, err := s.db.ExecContext(ctx, `UPDATE sessions SET message_count = ?, updated_at = ? WHERE id = ?`, count, dbTime(time.Now()), id)
 	return err
 }
 
@@ -177,7 +177,7 @@ func (s *UsageStore) SaveUsage(ctx context.Context, sessionID, model string, inp
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO usage_log (session_id, model, input_tokens, output_tokens, created_at)
 		VALUES (?, ?, ?, ?, ?)`,
-		sessionID, model, inputTokens, outputTokens, time.Now(),
+		sessionID, model, inputTokens, outputTokens, dbTime(time.Now()),
 	)
 	return err
 }
@@ -189,7 +189,7 @@ func (s *UsageStore) UsageSummary(ctx context.Context, since time.Time) (*UsageS
 			COALESCE(SUM(output_tokens), 0),
 			COUNT(*)
 		FROM usage_log
-		WHERE created_at >= ?`, since)
+		WHERE created_at >= ?`, dbTime(since))
 	var out UsageSummary
 	if err := row.Scan(&out.InputTokens, &out.OutputTokens, &out.Requests); err != nil {
 		return nil, err

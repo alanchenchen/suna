@@ -46,7 +46,7 @@ func (s *SessionStateStore) Save(ctx context.Context, sessionID, summary string,
 		return fmt.Errorf("encode session messages: %w", err)
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO session_state (session_id, summary, messages, updated_at) VALUES (?, ?, ?, ?)
- ON CONFLICT(session_id) DO UPDATE SET summary=excluded.summary, messages=excluded.messages, updated_at=excluded.updated_at`, sessionID, summary, strings.TrimSuffix(raw.String(), "\n"), time.Now())
+ ON CONFLICT(session_id) DO UPDATE SET summary=excluded.summary, messages=excluded.messages, updated_at=excluded.updated_at`, sessionID, summary, strings.TrimSuffix(raw.String(), "\n"), dbTime(time.Now()))
 	return err
 }
 func (s *SessionStateStore) Clear(ctx context.Context, sessionID string) error {

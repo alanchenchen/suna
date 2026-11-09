@@ -87,8 +87,8 @@ func (s *Store) migrate() error {
 			last_used_at DATETIME,
 			evidence TEXT NOT NULL DEFAULT '',
 			expires_at DATETIME,
-			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-			updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
+			created_at DATETIME NOT NULL DEFAULT (` + dbTimeDefault + `),
+			updated_at DATETIME NOT NULL DEFAULT (` + dbTimeDefault + `)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_profile_memory_core ON user_profile_memory(user_id, is_core, priority)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_profile_memory_kind ON user_profile_memory(user_id, kind)`,
@@ -126,8 +126,8 @@ func (s *Store) migrate() error {
 			confidence REAL NOT NULL DEFAULT 0.7,
 			evidence TEXT NOT NULL DEFAULT '',
 			significance TEXT NOT NULL DEFAULT '',
-			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
-			next_attempt_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			created_at DATETIME NOT NULL DEFAULT (` + dbTimeDefault + `),
+			next_attempt_at DATETIME NOT NULL DEFAULT (` + dbTimeDefault + `),
 			attempts INTEGER NOT NULL DEFAULT 0,
 			last_error TEXT NOT NULL DEFAULT '',
 			processed_at DATETIME
@@ -144,14 +144,14 @@ func (s *Store) migrate() error {
 			model TEXT NOT NULL,
 			input_tokens INTEGER NOT NULL DEFAULT 0,
 			output_tokens INTEGER NOT NULL DEFAULT 0,
-			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+			created_at DATETIME NOT NULL DEFAULT (` + dbTimeDefault + `)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_usage_log_created_at ON usage_log(created_at)`,
 
 		// Guard 审计日志
 		`CREATE TABLE IF NOT EXISTS audit_log (
 			id TEXT PRIMARY KEY,
-			timestamp DATETIME NOT NULL DEFAULT (datetime('now')),
+			timestamp DATETIME NOT NULL DEFAULT (` + dbTimeDefault + `),
 			session_id TEXT NOT NULL DEFAULT '',
 			tool TEXT NOT NULL,
 			params TEXT NOT NULL DEFAULT '{}',
@@ -170,7 +170,7 @@ func (s *Store) migrate() error {
 			operation TEXT NOT NULL,
 			reason TEXT NOT NULL,
 			context TEXT NOT NULL DEFAULT '',
-			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+			created_at DATETIME NOT NULL DEFAULT (` + dbTimeDefault + `)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_failure_pattern ON failure_records(pattern)`,
 
@@ -189,7 +189,7 @@ func (s *Store) migrate() error {
 			signal_template TEXT NOT NULL DEFAULT '',
 			enabled INTEGER NOT NULL DEFAULT 1,
 			last_fire DATETIME,
-			created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+			created_at DATETIME NOT NULL DEFAULT (` + dbTimeDefault + `)
 		)`,
 	}
 
@@ -198,7 +198,7 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("exec migration: %w\nquery: %s", err, m)
 		}
 	}
-	return s.migrateSessionMessages()
+	return s.migrateState(migrations)
 }
 
 func (s *Store) tableExists(name string) (bool, error) {
