@@ -315,6 +315,7 @@ type regressionCompactBatch struct {
 }
 
 func regressionCompactServer(t *testing.T) (*httptest.Server, func() []regressionCompactBatch) {
+	t.Helper()
 	var batches []regressionCompactBatch
 	var batchMu sync.Mutex
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -327,7 +328,9 @@ func regressionCompactServer(t *testing.T) (*httptest.Server, func() []regressio
 			http.Error(w, fmt.Sprintf("invalid compact request: %v", err), http.StatusBadRequest)
 			return
 		}
-		parts := strings.SplitN(req.Messages[0].Content, "\nInput:\n", 2)
+		// Windows 检出的内嵌模板可能使用 CRLF；测试解析不能依赖模板文件的换行风格。
+		promptText := strings.ReplaceAll(req.Messages[0].Content, "\r\n", "\n")
+		parts := strings.SplitN(promptText, "\nInput:\n", 2)
 		if len(parts) != 2 {
 			http.Error(w, "missing input", http.StatusBadRequest)
 			return
@@ -571,6 +574,10 @@ func TestHardSlotWaitPublishesSameIDAndCancellationElapsed(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("slot wait was invisible")
 	}
+	// 固定已等待一秒，避免立即取消时依赖 Windows 的计时粒度，也无需 Sleep。
+	state.mu.Lock()
+	state.candidate.waitStarted = state.candidate.waitStarted.Add(-time.Second)
+	state.mu.Unlock()
 	cancel()
 	select {
 	case err := <-done:
@@ -581,7 +588,7 @@ func TestHardSlotWaitPublishesSameIDAndCancellationElapsed(t *testing.T) {
 		t.Fatal("slot wait did not cancel")
 	}
 	terminal := state.Snapshot()
-	if first.ID == "" || terminal.ID != first.ID || terminal.State != "cancelled" || terminal.WaitElapsed <= 0 || terminal.PrepareElapsed != 0 || requests.Load() != 0 {
+	if first.ID == "" || terminal.ID != first.ID || terminal.State != "cancelled" || terminal.WaitElapsed < time.Second || terminal.PrepareElapsed != 0 || requests.Load() != 0 {
 		t.Fatalf("waiting = %+v, terminal = %+v, requests = %d", first, terminal, requests.Load())
 	}
 }

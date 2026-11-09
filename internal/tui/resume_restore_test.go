@@ -2,13 +2,15 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
+	"testing"
+	"unicode/utf8"
+
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/protocol"
 	"github.com/alanchenchen/suna/internal/tui/components/toolview"
-	"strings"
-	"testing"
-	"unicode/utf8"
 )
 
 func TestSessionSwitchClearsNativeListState(t *testing.T) {
@@ -373,6 +375,7 @@ func TestRestoredUnknownSubtaskNeverRendersSpinnerOrSuccess(t *testing.T) {
 }
 
 func TestRestoreMediaReferencesPreservesMessageBlocks(t *testing.T) {
+	imagePath := filepath.Join(t.TempDir(), "screenshot")
 	first := model.MediaRef{Kind: model.MediaAttachment, Name: "first.png", MimeType: "image/png", Size: 1536}
 	second := model.MediaRef{Kind: model.MediaURL, Name: "second.jpg", MimeType: "image/jpeg", URL: "https://example.com/second.jpg"}
 	legacy := "[uploaded image: old.png, image/png, 2.0KB, source=attachment:old.png]"
@@ -404,9 +407,9 @@ func TestRestoreMediaReferencesPreservesMessageBlocks(t *testing.T) {
 		},
 		{
 			name:    "minimal reference without mime or size",
-			blocks:  []model.ContentBlock{ref(model.MediaRef{Kind: model.MediaPath, Name: "screenshot", Path: "/images/screenshot"})},
+			blocks:  []model.ContentBlock{ref(model.MediaRef{Kind: model.MediaPath, Name: "screenshot", Path: imagePath})},
 			want:    "📷 Image · screenshot",
-			sources: []string{"source=/images/screenshot"},
+			sources: []string{"source=" + imagePath},
 		},
 		{
 			name:    "text after images stays in place",
