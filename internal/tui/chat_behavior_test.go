@@ -390,100 +390,11 @@ func TestCompactLocksInputWithoutCancelHint(t *testing.T) {
 		t.Fatalf("inputLocked() = false during compact, want true")
 	}
 	view := stripANSIForTest(tui.renderInputArea().content)
-	if !strings.Contains(view, "上下文压缩中") {
+	if !strings.Contains(view, "正在为较早内容生成摘要") {
 		t.Fatalf("renderInputArea() = %q, want compact running placeholder", view)
 	}
 	if strings.Contains(view, "Esc") || strings.Contains(view, "取消") {
 		t.Fatalf("renderInputArea() = %q, should not advertise cancellation for compact", view)
-	}
-}
-
-func TestAutoCompactNotificationShowsRunning(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
-	tui.initChatComponents()
-
-	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: []byte(`{"running":true}`)})
-	if !tui.chat.Compacting {
-		t.Fatalf("compacting = false after compact running result, want true")
-	}
-	if !tui.chat.Loading {
-		t.Fatalf("loading = false after compact running result, want true")
-	}
-	if !tui.inputLocked() {
-		t.Fatalf("inputLocked() = false during compact, want true")
-	}
-	if len(tui.chat.Messages) != 0 {
-		t.Fatalf("messages = %d after compact running result, want no transient message", len(tui.chat.Messages))
-	}
-	tui.syncContent()
-	view := stripANSIForTest(tui.chat.Viewport.View())
-	if strings.Contains(view, "上下文压缩中") {
-		t.Fatalf("compact status line = %q, should not duplicate bottom loading status", view)
-	}
-	input := stripANSIForTest(tui.renderInputArea().content)
-	if !strings.Contains(input, "上下文压缩中") {
-		t.Fatalf("renderInputArea() = %q, want compact loading", input)
-	}
-}
-
-func TestAutoCompactRunningFalseClearsLoading(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
-	tui.initChatComponents()
-	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: []byte(`{"running":true}`)})
-
-	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: []byte(`{"running":false}`)})
-	if tui.chat.Compacting {
-		t.Fatalf("compacting = true after compact running false, want false")
-	}
-	if len(tui.chat.Messages) != 0 {
-		t.Fatalf("messages = %d after compact running false, want no transient message", len(tui.chat.Messages))
-	}
-}
-
-func TestCompactCancelRunningFalseClearsCancelling(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
-	tui.initChatComponents()
-	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: []byte(`{"running":true}`)})
-	tui.enterCancelling()
-
-	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: []byte(`{"running":false}`)})
-	if tui.cancelling {
-		t.Fatalf("cancelling = true after compact cancel running false, want false")
-	}
-	if tui.chat.Compacting || tui.chat.Loading {
-		t.Fatalf("compacting/loading = %v/%v after compact cancel, want false/false", tui.chat.Compacting, tui.chat.Loading)
-	}
-	if tui.inputLocked() {
-		t.Fatalf("inputLocked() = true after compact cancel, want false")
-	}
-}
-
-func TestAutoCompactErrorClearsLoadingAndShowsError(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
-	tui.initChatComponents()
-	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: []byte(`{"running":true}`)})
-
-	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: []byte(`{"running":false,"error":"自动上下文压缩失败，请尝试 /compact"}`)})
-	if tui.chat.Compacting {
-		t.Fatalf("compacting = true after compact error, want false")
-	}
-	if len(tui.chat.Messages) != 1 {
-		t.Fatalf("messages = %d after compact error, want only error", len(tui.chat.Messages))
-	}
-	view := stripANSIForTest(tui.chat.Messages[0].Content.(string))
-	if !strings.Contains(view, "自动上下文压缩失败") {
-		t.Fatalf("error message = %q, want compact error", view)
-	}
-}
-
-func TestAutoCompactRunningClearsWhenStreamStarts(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
-	tui.initChatComponents()
-	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: []byte(`{"running":true}`)})
-
-	tui.handleLocalNotification(localNotification{method: protocol.NotifyAgentDelta, params: []byte(`{"kind":"assistant","content":"hello"}`)})
-	if tui.chat.Compacting {
-		t.Fatalf("compacting = true after stream starts, want false")
 	}
 }
 
@@ -507,47 +418,12 @@ func TestManualCompactCommandShowsLoadingBeforeDeferredRequest(t *testing.T) {
 	}
 	tui.syncContent()
 	view := stripANSIForTest(tui.chat.Viewport.View())
-	if strings.Contains(view, "上下文压缩中") {
+	if strings.Contains(view, "正在为较早内容生成摘要") {
 		t.Fatalf("viewport = %q, should not duplicate bottom loading status", view)
 	}
 	input := stripANSIForTest(tui.renderInputArea().content)
-	if !strings.Contains(input, "上下文压缩中") {
+	if !strings.Contains(input, "正在为较早内容生成摘要") {
 		t.Fatalf("renderInputArea() = %q, want manual compact loading before result", input)
-	}
-}
-
-func TestManualCompactResultPanelClearsLoading(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
-	tui.initChatComponents()
-	tui.chat.Compacting = true
-	tui.chat.Loading = true
-	tui.chat.Phase = phaseFirstLLM
-
-	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: []byte(`{"before_tokens":100,"after_tokens":50,"context_window":1000}`)})
-	if tui.chat.Compacting || tui.chat.Loading {
-		t.Fatalf("compacting/loading = %v/%v after manual compact result, want false/false", tui.chat.Compacting, tui.chat.Loading)
-	}
-	if len(tui.chat.Messages) != 1 {
-		t.Fatalf("messages = %d after manual compact result, want 1 panel", len(tui.chat.Messages))
-	}
-	if got := tui.chat.Messages[0].Role; got != "panel" {
-		t.Fatalf("message role = %q, want panel", got)
-	}
-}
-
-func TestCompactResultUnlocksInput(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleZH), width: 80, height: 24}
-	tui.initChatComponents()
-	tui.chat.Compacting = true
-
-	data := []byte(`{"before_tokens":100,"after_tokens":50,"context_window":1000}`)
-	tui.handleLocalNotification(localNotification{method: protocol.NotifyCompactResult, params: data})
-
-	if tui.chat.Compacting {
-		t.Fatalf("compacting = true after compact result, want false")
-	}
-	if tui.inputLocked() {
-		t.Fatalf("inputLocked() = true after compact result, want false")
 	}
 }
 

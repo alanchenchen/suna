@@ -35,6 +35,10 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 		req.Purpose = "chat"
 	}
 	req.MaxTokens = r.resolveMaxTokens(req.Binding, req.MaxTokens)
+	if req.Memory == nil {
+		req.Memory = NewContextMemory("")
+		defer req.Memory.Cancel()
+	}
 	turns := 0
 	toolCallsExecuted := 0
 
@@ -49,84 +53,47 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			return result, fmt.Errorf("max turns exceeded (%d)", req.MaxTurns)
 		}
 		// 每次物理模型请求前吸收已排队消息，避免消息恰好在上一个安全边界后到达而多等一轮。
-		r.applySteering(ctx, req, false)
+		if _, err := r.applySteering(ctx, req, false); err != nil {
+			return result, err
+		}
 
 		messages := req.Working.Messages()
-		if req.Messages != nil {
-			messages = req.Messages(ctx)
+		var project func([]memory.Message) []model.Message
+		if req.Project != nil {
+			project = req.Project(ctx)
 		}
 		tools := buildToolDefs(req)
 		contextWindow := req.Binding.ContextWindow()
-		// 校准系数与校准状态在每轮开始时读取：Observe 会随真实 usage 演进，后续轮次自然用上更准的系数；
-		// calibrated 决定安全垫大小——已校准时收小、未校准或回退时维持厚垫兜底。
 		coef := r.calibrationCoefficient(modelRef)
 		calibrated := r.calibrationReady(modelRef)
-		completionReq := &model.CompletionRequest{
-			Model:        modelID,
-			Purpose:      req.Purpose,
-			RequestID:    uuid.New().String(),
-			Invocation:   req.Invocation,
-			System:       req.System,
-			SessionState: req.SessionState,
-			Messages:     messages,
-			Tools:        tools,
-			MaxTokens:    req.MaxTokens,
-			// 主 Agent 保持既有的 0.7 默认采样；内部确定性请求可显式传入 0。
-			Temperature: model.Float64Ptr(0.7),
-		}
+		completionReq := &model.CompletionRequest{Model: modelID, Purpose: req.Purpose, RequestID: uuid.NewString(), Invocation: req.Invocation, System: req.System, Tools: tools, MaxTokens: req.MaxTokens, Temperature: model.Float64Ptr(0.7)}
 		if req.AutoCompress {
-			completionReq.Messages = trimToolResultsForContext(completionReq.Messages)
-			needCompact := shouldCompactRequest(completionReq, contextWindow, coef, calibrated)
-			if needCompact && r.Sink != nil {
-				r.Sink.Status(StatusEvent{Kind: StatusCompactRunning})
-			}
-			var compactErr error
-			if needCompact {
-				req.SessionState, compactErr = r.compactForRequest(ctx, req.Binding, req.Working, completionReq, contextWindow, req.SessionState, coef, calibrated)
-				completionReq.SessionState = req.SessionState
-				if compactErr == nil && r.Hooks.OnCompactCommit != nil {
-					compactErr = r.Hooks.OnCompactCommit(ctx, req.SessionState)
+			q := CompactRequest{Binding: req.Binding, Invocation: req.Invocation, Working: req.Working, Request: *completionReq, Coefficient: coef, Calibrated: calibrated, Project: project, Commit: r.Hooks.CommitMemory, Usage: func(u *model.Usage) {
+				if r.UsageSink != nil {
+					r.UsageSink.RecordUsage(context.WithoutCancel(ctx), modelID, u)
 				}
-				if compactErr != nil {
-					if r.Sink != nil {
-						r.Sink.Status(StatusEvent{Kind: StatusCompactError, Message: "automatic context compression failed: " + compactErr.Error()})
-					}
-					return result, fmt.Errorf("automatic context compression failed: %w", compactErr)
+			}}
+			for {
+				if err := req.Memory.Maintain(ctx, r.Compressor, q, false); err != nil {
+					return result, err
 				}
-				if r.Sink != nil {
-					r.Sink.Status(StatusEvent{Kind: StatusCompactDone})
+				// hard 等待期间到达的纠正必须先落库再进入主请求；有新增则重算完整预算。
+				// 沿用本次背景与工具定义；仅真实越过硬边界才再维护，不因重算多发普通候选。
+				applied, err := r.applySteering(ctx, req, false)
+				if err != nil {
+					return result, err
+				}
+				if !applied || q.input(req.Working.Messages(), req.Memory.Summary()) < q.budget() {
+					break
 				}
 			}
 			messages = req.Working.Messages()
-			if req.Messages != nil {
-				messages = req.Messages(ctx)
-			}
-			completionReq.Messages = trimToolResultsForContext(messages)
-			if shouldCompactRequest(completionReq, contextWindow, coef, calibrated) {
-				estimated := estimateRequestTokens(completionReq, coef)
-				inputLimit := usableInputBudget(contextWindow, completionReq.MaxTokens)
-				logging.Error("memory", "session_compact_still_oversized", nil, logging.Event{"mode": "auto", "purpose": req.Purpose, "model": modelID, "context_window": contextWindow, "request_tokens": estimated, "input_limit": inputLimit, "compacted": needCompact})
-				if needCompact && r.Sink != nil {
-					r.Sink.Status(StatusEvent{Kind: StatusCompactError, Message: "automatic context compression could not reduce the request enough; try /compact manually, reduce the current input, or start a new session"})
-				}
-				return result, fmt.Errorf("context remains too large after compaction (%d tokens estimated, %d token input limit); start a new session or reduce the current input", estimated, inputLimit)
-			}
-			// Compact 提交后才吸收压缩期间到达的消息，保证它们不被折叠进刚生成的 Session State。
-			if r.applySteering(ctx, req, false) {
-				messages = req.Working.Messages()
-				if req.Messages != nil {
-					messages = req.Messages(ctx)
-				}
-				completionReq.Messages = trimToolResultsForContext(messages)
-				// 新消息可能再次越过输入预算；回到循环可按完整请求重新 Compact，且不会消耗物理模型 turn。
-				if shouldCompactRequest(completionReq, contextWindow, coef, calibrated) {
-					continue
-				}
-			}
 		}
-
-		if req.AutoCompress {
-			result.SessionState = req.SessionState
+		completionReq.SessionState = req.Memory.Summary()
+		if project != nil {
+			completionReq.Messages = project(messages)
+		} else {
+			completionReq.Messages = memory.ModelMessages(messages)
 		}
 
 		turns++
@@ -166,13 +133,23 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			}
 		}
 
-		if fullContent != "" && r.Hooks.OnAssistantText != nil {
-			r.Hooks.OnAssistantText(ctx, fullContent)
-		}
+		consumed := req.Working.MarkConsumed()
 
 		if len(toolCalls) == 0 {
 			if fullContent != "" {
-				req.Working.AddMessage(model.NewTextMessage(model.RoleAssistant, fullContent))
+				req.Working.AddMessage(memory.NewTextMessage(model.RoleAssistant, fullContent))
+				req.Memory.AddGrowth([]memory.Message{memory.NewTextMessage(model.RoleAssistant, fullContent)})
+				if err := r.checkpoint(ctx); err != nil {
+					return result, err
+				}
+				if r.Hooks.OnAssistantSaved != nil {
+					r.Hooks.OnAssistantSaved(ctx)
+				}
+			} else if consumed {
+				// 完整空响应不造空 assistant，但真实消费标记仍须在终态前保存。
+				if err := r.checkpoint(ctx); err != nil {
+					return result, err
+				}
 			}
 			if req.MaxTurns > 0 && turns >= req.MaxTurns {
 				if req.SealSteering != nil && req.SealSteering() {
@@ -182,7 +159,9 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 				result.ContextWindow = req.Binding.ContextWindow()
 				return result, nil
 			}
-			if r.applySteering(ctx, req, true) {
+			if applied, err := r.applySteering(ctx, req, true); err != nil {
+				return result, err
+			} else if applied {
 				continue
 			}
 			result.FinalText = fullContent
@@ -190,14 +169,29 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			return result, nil
 		}
 
+		// 检查点只能登记完整、可执行的声明；参数按统一工具接口要求为 JSON 对象，
+		// 空对象合法，不能把截断 JSON 经 ParseToolCallArguments 包成 raw 后执行。
+		for _, call := range toolCalls {
+			var args map[string]any
+			if call.ID == "" || call.Name == "" || json.Unmarshal([]byte(call.Arguments), &args) != nil || args == nil {
+				return result, fmt.Errorf("model returned an incomplete tool declaration")
+			}
+		}
 		preparedCalls, cleanToolCalls := r.prepareToolCalls(toolCalls, fullContent)
-		assistantMsg := model.Message{
+		assistantMsg := memory.Message{
 			Role:        model.RoleAssistant,
 			TextContent: fullContent,
 			Content:     []model.ContentBlock{{Type: model.ContentText, Text: fullContent}},
 			ToolCalls:   cleanToolCalls,
 		}
 		req.Working.AddMessage(assistantMsg)
+		req.Memory.AddGrowth([]memory.Message{assistantMsg})
+		if err := r.checkpoint(ctx); err != nil {
+			return result, err
+		}
+		if r.Hooks.OnAssistantSaved != nil {
+			r.Hooks.OnAssistantSaved(ctx)
+		}
 
 		for _, pc := range preparedCalls {
 			result.HadToolCall = true
@@ -211,43 +205,83 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 		toolCallsExecuted += len(preparedCalls)
 
 		workingSnapshot := req.Working.Messages()
-		results := r.executeToolCalls(ctx, preparedCalls, workingSnapshot, func(execResult toolExecResult) {
-			if r.Sink != nil {
-				r.Sink.ToolResult(ToolResultEvent{ID: execResult.tc.ID, Name: execResult.tc.Name, Result: execResult.result.Content, Error: execResult.result.IsError, Metadata: execResult.result.Metadata})
-			}
+		var saveErr error
+		var pendingResults []ToolResultEvent
+		base := workingSnapshot
+		received := make([]*memory.Message, len(preparedCalls))
+		r.executeToolCalls(ctx, preparedCalls, memory.ModelMessages(workingSnapshot), func(execResult toolExecResult) {
+			toolText := memory.TruncateToolOutputForContext(execResult.result.Content)
+			message := memory.NewTextMessage(model.RoleTool, toolText)
+			message.ToolCallID = execResult.tc.ID
+			message.ToolStatus = "completed"
 			if execResult.result.IsError {
+				message.ToolStatus = "failed"
 				result.HadToolError = true
 			}
-		})
-
-		for _, execResult := range results {
-			// TUI 事件仍拿原始工具结果展示；WorkingMemory 只保存面向模型的截断版本，避免单个工具输出直接撑爆上下文。
-			toolText := memory.TruncateToolOutputForContext(execResult.result.Content)
-			req.Working.AddMessage(model.Message{
-				Role:        model.RoleTool,
-				ToolCallID:  execResult.tc.ID,
-				TextContent: toolText,
-				Content:     []model.ContentBlock{{Type: model.ContentText, Text: toolText}},
-			})
-			// 收集工具产出的图片块，稍后统一注入 user 消息。
-			r.toolImages = append(r.toolImages, execResult.result.Images...)
-			if r.Hooks.OnToolResult != nil {
-				r.Hooks.OnToolResult(execResult.tc.Name, execResult.result)
+			message.Truncated = execResult.result.Truncated || toolText != execResult.result.Content
+			for _, image := range execResult.result.Images {
+				if image.Media != nil {
+					message.Content = append(message.Content, model.ContentBlock{Type: model.ContentText, Text: memory.ImageReference(*image.Media)})
+				}
 			}
+			if len(execResult.result.Images) > 0 {
+				message.TextContent = ""
+			}
+			received[execResult.index] = &message
+			ordered := make([]memory.Message, 0, len(base)+len(received))
+			ordered = append(ordered, base...)
+			for _, m := range received {
+				if m != nil {
+					ordered = append(ordered, *m)
+				}
+			}
+			req.Working.SetMessages(ordered)
+			req.Memory.AddGrowth([]memory.Message{message})
+			r.toolImages = append(r.toolImages, execResult.result.Images...)
+			pendingResults = append(pendingResults, ToolResultEvent{ID: execResult.tc.ID, Name: execResult.tc.Name, Result: execResult.result.Content, Error: execResult.result.IsError, Metadata: execResult.result.Metadata})
+			if err := r.checkpoint(ctx); err != nil {
+				if saveErr == nil {
+					saveErr = err
+				}
+				return
+			}
+			if r.Sink != nil {
+				for _, event := range pendingResults {
+					r.Sink.ToolResult(event)
+				}
+			}
+			pendingResults = nil
+		})
+		if saveErr != nil {
+			return result, saveErr
 		}
+
 		// 工具产出的图片（如 read_image）统一注入为一条 user 消息，图片块只参与当前 run；
 		// 注入前按 MediaRef 去重，避免同一图片在上下文里重复累积。
-		r.injectToolImages(req.Working)
+		if r.injectToolImages(req.Working) {
+			if err := r.checkpoint(ctx); err != nil {
+				return result, err
+			}
+		}
 		if req.MaxTurns <= 0 || turns < req.MaxTurns {
-			r.applySteering(ctx, req, false)
+			if _, err := r.applySteering(ctx, req, false); err != nil {
+				return result, err
+			}
 		}
 
 	}
 }
 
-func (r *Runner) applySteering(ctx context.Context, req Request, seal bool) bool {
+func (r *Runner) checkpoint(ctx context.Context) error {
+	if r.Hooks.Checkpoint != nil {
+		return r.Hooks.Checkpoint(ctx)
+	}
+	return nil
+}
+
+func (r *Runner) applySteering(ctx context.Context, req Request, seal bool) (bool, error) {
 	if req.TakeSteering == nil {
-		return false
+		return false, nil
 	}
 	inputs := req.TakeSteering(seal)
 	applied := false
@@ -255,13 +289,22 @@ func (r *Runner) applySteering(ctx context.Context, req Request, seal bool) bool
 		if input.Message.Role != model.RoleUser || len(input.Message.Content) == 0 {
 			continue
 		}
+		input.Message.Origin = memory.OriginUser
+		before := req.Working.Messages()
 		req.Working.AddMessage(input.Message)
+		if err := r.checkpoint(ctx); err != nil {
+			// 输入尚未用于模型或工具，保存失败仅回退本条；mailbox 保留认领，
+			// 由本轮失败收尾明确 reject，不能重新允许撤回或发 applied。
+			req.Working.SetMessages(before)
+			return false, err
+		}
+		req.Memory.AddGrowth([]memory.Message{input.Message})
 		applied = true
 		if r.Hooks.OnSteeringApplied != nil {
 			r.Hooks.OnSteeringApplied(ctx, input)
 		}
 	}
-	return applied
+	return applied, nil
 }
 
 func (r *Runner) completeWithRecovery(ctx context.Context, binding *model.ModelBinding, completionReq *model.CompletionRequest, req Request) (string, []model.ToolCall, *model.Usage, error) {
@@ -389,6 +432,7 @@ func (r *Runner) readStream(ctx context.Context, ch <-chan model.Chunk, streamTi
 	var toolCalls []model.ToolCall
 	var lastUsage *model.Usage
 	var visibleOutput bool
+	var finish *model.FinishInfo
 	timer := time.NewTimer(streamTimeout)
 	defer timer.Stop()
 
@@ -396,7 +440,7 @@ func (r *Runner) readStream(ctx context.Context, ch <-chan model.Chunk, streamTi
 		select {
 		case chunk, ok := <-ch:
 			if !ok {
-				return contentBuilder.String(), toolCalls, lastUsage, nil, visibleOutput
+				return contentBuilder.String(), toolCalls, lastUsage, fmt.Errorf("model stream closed before completion"), visibleOutput
 			}
 			if dynamicReasoningTimeout && chunk.ReasoningContent != "" {
 				streamTimeout = defaultReasoningIdleTimeout
@@ -432,7 +476,23 @@ func (r *Runner) readStream(ctx context.Context, ch <-chan model.Chunk, streamTi
 			if chunk.Usage != nil {
 				lastUsage = chunk.Usage
 			}
+			if chunk.Finish != nil {
+				finish = chunk.Finish
+			}
 			if chunk.Done {
+				// Done 只表示本地流结束；完整检查点还需供应商明确的完成标记。
+				if finish == nil || (finish.Status == "" && finish.Reason == "") {
+					return contentBuilder.String(), toolCalls, lastUsage, fmt.Errorf("model response has no completion marker"), visibleOutput
+				}
+				if finish.IncompleteReason != "" || (finish.Status != "" && finish.Status != "completed") {
+					return contentBuilder.String(), toolCalls, lastUsage, fmt.Errorf("model response was incomplete (%s %s)", finish.Status, finish.Reason), visibleOutput
+				}
+				switch finish.Reason {
+				case "", "stop", "end_turn", "stop_sequence", "tool_calls", "tool_use", "refusal":
+					// Anthropic 的 refusal 是完整拒绝答复，不是截断或请求失败。
+				default:
+					return contentBuilder.String(), toolCalls, lastUsage, fmt.Errorf("model response was incomplete (%s %s)", finish.Status, finish.Reason), visibleOutput
+				}
 				return contentBuilder.String(), toolCalls, lastUsage, nil, visibleOutput
 			}
 		case <-timer.C:
@@ -443,10 +503,10 @@ func (r *Runner) readStream(ctx context.Context, ch <-chan model.Chunk, streamTi
 	}
 }
 
-func (r *Runner) prepareToolCalls(toolCalls []model.ToolCall, fullContent string) ([]preparedToolCall, []model.ToolCall) {
+func (r *Runner) prepareToolCalls(toolCalls []model.ToolCall, fullContent string) ([]preparedToolCall, []memory.ToolCall) {
 	toolIntent := extractToolIntent(fullContent)
 	preparedCalls := make([]preparedToolCall, 0, len(toolCalls))
-	cleanToolCalls := make([]model.ToolCall, 0, len(toolCalls))
+	cleanToolCalls := make([]memory.ToolCall, 0, len(toolCalls))
 	for _, tc := range toolCalls {
 		params := model.ParseToolCallArguments(tc.Arguments)
 		intent := ""
@@ -456,11 +516,11 @@ func (r *Runner) prepareToolCalls(toolCalls []model.ToolCall, fullContent string
 		if intent == "" {
 			intent = toolIntent
 		}
-		cleanTC := tc
+		cleanTC := memory.ToolCall{ID: tc.ID, Name: tc.Name, Arguments: tc.Arguments, Intent: intent}
 		if b, err := json.Marshal(params); err == nil {
 			cleanTC.Arguments = string(b)
 		}
-		preparedCalls = append(preparedCalls, preparedToolCall{tc: cleanTC, params: params, intent: intent, assistantContext: strings.TrimSpace(fullContent)})
+		preparedCalls = append(preparedCalls, preparedToolCall{tc: model.ToolCall{ID: cleanTC.ID, Name: cleanTC.Name, Arguments: cleanTC.Arguments}, params: params, intent: intent, assistantContext: strings.TrimSpace(fullContent)})
 		cleanToolCalls = append(cleanToolCalls, cleanTC)
 	}
 	return preparedCalls, cleanToolCalls
@@ -500,16 +560,16 @@ func cloneMessages(msgs []model.Message) []model.Message {
 // injectToolImages 把本轮工具产出的图片块合并注入为一条 user 消息。
 // 注入层只做同批次去重（同一轮多次 read_image 同一张图只注入一次），
 // 跨轮重读放行：模型可以重看图片（含图片内容更新后的新版），
-// 跨轮的摘要去重由 agent 清理层在 run 结束时保证，不在这里拦截。
-func (r *Runner) injectToolImages(working *memory.WorkingMemory) {
+// 当前run结束时只在副本投影媒体引用，不按source文本删改其他消息。
+func (r *Runner) injectToolImages(working *memory.WorkingMemory) bool {
 	if working == nil {
-		return
+		return false
 	}
 	images := collectResultImages(r.toolImages)
-	if len(images) == 0 {
-		return
-	}
 	r.toolImages = r.toolImages[:0]
+	if len(images) == 0 {
+		return false
+	}
 	unique := images[:0]
 	for _, img := range images {
 		// 同批次内重复也要去重：unique 是尚未注入 working 的候选，检查范围需包含它。
@@ -518,12 +578,14 @@ func (r *Runner) injectToolImages(working *memory.WorkingMemory) {
 		}
 	}
 	if len(unique) == 0 {
-		return
+		return false
 	}
-	working.AddMessage(model.Message{
+	working.AddMessage(memory.Message{
 		Role:    model.RoleUser,
+		Origin:  memory.OriginTool,
 		Content: unique,
 	})
+	return true
 }
 
 // collectResultImages 收集本轮工具结果中的图片块；同一结果里的图片保持顺序。

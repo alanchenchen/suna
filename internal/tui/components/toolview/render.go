@@ -51,6 +51,8 @@ type RenderLabels struct {
 	SearchTruncated      string
 	Cancelling           string
 	Cancelled            string
+	ResultUnknown        string
+	Compacted            string
 	ExecBadge            string
 	ExecRunCommand       string
 	ExecStartTask        string
@@ -117,21 +119,31 @@ func RenderBlock(block *Block, deps RenderDeps) string {
 	if len(entries) == 0 {
 		return ""
 	}
-	multi := len(entries) > 1
+	expandable := 0
+	for _, entry := range entries {
+		if !entry.Compacted {
+			expandable++
+		}
+	}
+	multi := expandable > 1
+	cursor := 0
 	var lines []string
-	for i, te := range entries {
+	for _, te := range entries {
 		entryLines := strings.Split(strings.TrimSuffix(RenderEntry(te, false, deps), "\n"), "\n")
 		for j, line := range entryLines {
 			trimmed := trimToolBlockIndent(line)
 			// 只在展开态且多条目时显示光标，避免单条目块出现无意义的选中标记。
-			if deps.Expanded && multi && j == 0 {
-				if i == deps.EntryCursor {
+			if deps.Expanded && multi && j == 0 && !te.Compacted {
+				if cursor == deps.EntryCursor {
 					trimmed = deps.Styles.HL.Render("▶ ") + trimmed
 				} else {
 					trimmed = "  " + trimmed
 				}
 			}
 			lines = append(lines, trimmed)
+		}
+		if !te.Compacted {
+			cursor++
 		}
 	}
 	if deps.Expanded && len(deps.DetailLines) > 0 {
@@ -162,6 +174,7 @@ func toolBlockStatusIcon(entries []*Entry, deps RenderDeps) string {
 	cancelling := 0
 	cancelled := 0
 	failed := 0
+	unknown := 0
 	for _, te := range entries {
 		if te == nil {
 			continue
@@ -175,6 +188,9 @@ func toolBlockStatusIcon(entries []*Entry, deps RenderDeps) string {
 			cancelled++
 		case StatusError:
 			failed++
+		case StatusDone:
+		default:
+			unknown++
 		}
 	}
 	if running > 0 || cancelling > 0 {
@@ -188,6 +204,9 @@ func toolBlockStatusIcon(entries []*Entry, deps RenderDeps) string {
 	}
 	if cancelled > 0 {
 		return "⊘"
+	}
+	if unknown > 0 {
+		return "?"
 	}
 	return "✓"
 }
@@ -248,6 +267,7 @@ func RenderEntry(te *Entry, nested bool, deps RenderDeps) string {
 		dur = " " + FormatCompactDuration(te.Duration)
 	}
 	s := deps.Styles
+	entryUnknown := false
 	switch te.Status {
 	case StatusDone:
 		statusIcon = s.OK.Render("✓")
@@ -255,14 +275,26 @@ func RenderEntry(te *Entry, nested bool, deps RenderDeps) string {
 		statusIcon = s.ToolDim.Render("⊘")
 	case StatusError:
 		statusIcon = s.Err.Render("✗")
-	default:
+	case StatusRunning, StatusCancelling:
 		statusIcon = s.Run.Render(runningStatusIcon(deps))
+	default:
+		statusIcon = s.ToolDim.Render("?")
+		entryUnknown = true
 	}
 	prefix := "      "
 	if nested {
 		prefix = "      " + s.Dim.Render("└─ ")
 	}
 	maxWidth := max(20, deps.width()-lipgloss.Width(prefix)-8)
+	if te.Compacted {
+		label := te.Name
+		if detail := compactLabelText(te.Intent); detail != "" {
+			label += " · " + detail
+		}
+		suffix := " · " + deps.Labels.Compacted
+		label = ansi.Truncate(label, max(4, maxWidth-lipgloss.Width(statusIcon)-lipgloss.Width(suffix)-1), "…")
+		return fmt.Sprintf("%s%s %s%s\n", prefix, statusIcon, s.HL.Render(label), s.Dim.Render(suffix))
+	}
 	// 首行必须为耗时预留空间，避免长命令或长路径把右侧 duration 挤出可视区域。
 	durWidth := lipgloss.Width(dur)
 	statusWidth := lipgloss.Width(statusIcon)
@@ -280,6 +312,9 @@ func RenderEntry(te *Entry, nested bool, deps RenderDeps) string {
 	}
 	if te.Status == StatusCancelled {
 		line += "\n" + prefix + "  " + s.ToolDim.Render(defaultLabel(deps.Labels.Cancelled, "Cancelled"))
+	}
+	if entryUnknown {
+		line += "\n" + prefix + "  " + s.ToolDim.Render(defaultLabel(deps.Labels.ResultUnknown, "Result unknown"))
 	}
 	if te.Status == StatusError && !HasExecSummary(te) {
 		if err := ShortToolError(te.Result); err != "" {

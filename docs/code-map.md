@@ -182,21 +182,20 @@ Guard mode：readonly / ask / auto / smart
 执行、拒绝、请求用户确认或 Smart Review
 ```
 
-### 上下文压缩流程
+### 后台压缩与历史保存
 
 ```text
-准备模型请求
-  ↓
-估算完整请求是否接近上下文窗口安全阈值
-  ↓
-未超过：直接请求模型
-  ↓
-超过：调用 compact prompt 生成新的 Session State
-  ↓
-compact 成功：保存 Session State，保留 budget-aware recent window
-  ↓
-compact 失败：停止本轮请求并提示错误
+准备下一次模型请求，计算完整占用和安全输入预算
+  ├─ 容量允许：前台继续；合适时在后台准备摘要候选
+  │              └─ 优先较早工具，必要时归纳较早历史
+  ├─ 候选可采用：复核来源与收益 → 先保存 → 更新内存／通知
+  └─ 达硬边界：复用／等待已有候选；仍不足才处理剩余安全来源
+                 └─ 失败或没有正收益：明确停止，不硬裁剪
 ```
+
+代码从 `memory/history.go`（单份历史与模型投影）、`memory/compact_plan.go`（选区与替换）、`memory/compress.go`（生成），再看 `runner/context_budget.go`、`runner/context_memory.go`（预算与候选）和 `agent/memory.go`（检查点／会话协调）。`memory/conversation.go`、`session_migration.go` 负责存取和迁移，`daemon/compact.go`、`tui/compact.go` 负责必要接线。
+
+通俗例子、流程图与集中规则见[记忆与后台压缩](memory.md)。
 
 ### Skill 流程
 

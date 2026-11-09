@@ -161,7 +161,7 @@ func TestSessionManagerDeleteRemovesPersistedStateAndAttachments(t *testing.T) {
 	if err := m.store.SetMessageCount(ctx, target.Session.ID, 1); err != nil {
 		t.Fatalf("SetMessageCount error = %v", err)
 	}
-	if err := m.root.SessionStateStore().Save(ctx, target.Session.ID, "state", nil, memory.ToolSummary{}); err != nil {
+	if err := m.root.SessionStateStore().Save(ctx, target.Session.ID, "state", nil); err != nil {
 		t.Fatalf("Save session state error = %v", err)
 	}
 	attachmentRoot := filepath.Join(m.root.Config().AttachmentsDir(), target.Session.ID)

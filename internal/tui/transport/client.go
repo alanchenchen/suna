@@ -13,7 +13,6 @@ import (
 
 const (
 	defaultRequestTimeout = 30 * time.Second
-	compactRequestTimeout = 5 * time.Minute
 )
 
 // Client 是 TUI 到 daemon 的 local transport 适配层；页面只能通过 tea.Cmd 间接调用它。
@@ -72,16 +71,7 @@ func (c *Client) Invoke(ctx context.Context, method string, params any, out any)
 	return json.Unmarshal(raw, out)
 }
 
-func requestTimeout(method string) time.Duration {
-	switch method {
-	case protocol.MethodCompact:
-		// 手动压缩可能调用当前模型总结较长历史；超时时间要长于轻量配置/状态请求，
-		// 避免 daemon 仍在处理时 TUI 先报本地 deadline。
-		return compactRequestTimeout
-	default:
-		return defaultRequestTimeout
-	}
-}
+func requestTimeout(string) time.Duration { return defaultRequestTimeout }
 
 func (c *Client) SendMessage(content string, attachments []attachment.Item) error {
 	parts := []protocol.MessagePart{{Type: "text", Text: content}}
@@ -224,10 +214,12 @@ func (c *Client) ReloadMCP(params protocol.MCPReloadParams) error {
 	return c.Invoke(ctx, protocol.MethodMCPReload, params, nil)
 }
 
-func (c *Client) Compact() error {
+func (c *Client) Compact() (protocol.CompactAccepted, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout(protocol.MethodCompact))
 	defer cancel()
-	return c.Invoke(ctx, protocol.MethodCompact, nil, nil)
+	var result protocol.CompactAccepted
+	err := c.Invoke(ctx, protocol.MethodCompact, nil, &result)
+	return result, err
 }
 
 func (c *Client) DaemonStatus() (protocol.DaemonStatusParams, error) {

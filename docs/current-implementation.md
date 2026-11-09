@@ -142,10 +142,12 @@ Workspace 是本地文件和明显 exec 路径的目录硬边界，不能被用�
 
 - `user_profile_memory`：长期 user profile memory，只保存少量跨会话稳定偏好、习惯、约束和纠错。
 - `sessions`：多 session 元数据，包含 title、cwd、`model_ref`、message_count、created/updated/last_attached 时间。旧 session 首次 attach 时会一次性固化当时默认模型；已有 session 不会因默认模型变化而切换。
-- `session_state`：每个 session 的 compacted state、最近可见 user/assistant 消息和 TUI-only 有界工具摘要。attach/create snapshot 会返回这些展示状态；不保存完整 tool timeline。
+- `session_state`：每个 session 的连续性摘要和完整有序有效历史，包含原始讨论、未压缩工具组和结构化工具观察。attach/create 快照从同一历史恢复对话和可用工具记录，不另存 UI-only 工具聚合，也不是完整原文／事件归档。
 - `memory_queue`：user profile memory 临时提取队列，持久化候选产生时的 `model_ref`，由单 worker 按该引用批量处理。
 
-自动 compact 在完整请求接近上下文窗口安全阈值时触发。阈值按 `context_window - max_output_tokens - margin` 计算，并在判断时使用 `compact_context_tokens = estimated_context_tokens + estimator_safety_tokens`；其中 `estimated_context_tokens` 是 Suna 请求前本地估算的输入上下文，`estimator_safety_tokens = max(8192, estimated_context_tokens / 16)`。compact 成功后，Session State 作为独立请求字段由 provider 注入模型上下文，working memory 只保留 budget-aware recent window，并在写回时复制消息 slice 以避免旧历史 backing array 被继续持有。compact 失败时不会使用伪摘要、overflow fallback retry 或硬裁剪继续，而是提示错误并停止本轮请求。
+主会话与子任务共用工具优先的后台压缩：先整理较早工具，必要时才归纳较早历史；近期现场和未消费材料受保护。后台只准备候选，安全边界复核后采用；主会话先保存再更新内存，子任务仅更新自身内存，新增后缀不被覆盖。普通后台生成失败不会阻断仍有容量的任务；手动 `/compact` 或硬容量等待失败时明确报告，不硬裁剪继续。
+
+主会话按完整用户消息、助手响应、工具声明和每条真实结果保存检查点；保存失败停止下一请求／新工具批次，已启动调用仍回收，不自动重跑副作用。恢复的是已保存的有效历史，思考链、失败半流和子任务内部现场不持久化。使用说明、容量规则、工具恢复与旧库升级注意事项见[记忆与后台压缩](memory.md)。
 
 ## 图片与附件
 

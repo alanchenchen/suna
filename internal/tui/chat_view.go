@@ -571,7 +571,7 @@ type inputRender struct {
 }
 
 // renderInputArea 渲染输入区并返回 textarea 光标的相对坐标。
-// 组装顺序：runStatus → steeringQueue → attachmentPanel → bar → help → confirm。
+// 组装顺序：runStatus → steeringQueue → attachmentPanel → bar → backgroundCompact → help → confirm。
 // textarea 光标在 bar 内的偏移 = 之前的逻辑行数（Line()）+ 当前逻辑行的软换行（RowOffset）；
 // 列偏移 = 行首装饰宽度 + CharOffset（视觉宽度，双宽字符计 2 列）。
 func (t *TUI) renderInputArea() inputRender {
@@ -646,6 +646,12 @@ func (t *TUI) renderInputArea() inputRender {
 		}
 	}
 	parts = append(parts, textutil.IndentLines(bar, "  "))
+	if label := t.backgroundCompactLabel(); label != "" {
+		// 后台准备始终次于前台状态，观察和空闲窗口也不接管输入或显示忙碌动画。
+		// 显式换行使布局与光标偏移保持一致。
+		label = textutil.IndentWrappedPlain(label, "  ", max(1, t.width-2))
+		parts = append(parts, styleMuted.Render(label))
+	}
 	if help := t.inputHelp(); help != "" && !inlineRunHelp {
 		parts = append(parts, "  "+styleMuted.Render(help))
 	}

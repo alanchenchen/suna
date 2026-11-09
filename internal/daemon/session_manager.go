@@ -713,16 +713,29 @@ func (m *sessionManager) infoFor(meta memory.SessionMeta) protocol.SessionInfo {
 func (m *sessionManager) snapshotForConn(connID string, meta memory.SessionMeta, rt *sessionRuntime, snap agent.SessionSnapshot) protocol.SessionSnapshot {
 	messages := make([]protocol.SnapshotMessage, 0, len(snap.Messages))
 	for _, msg := range snap.Messages {
-		text := strings.TrimSpace(msg.Text())
-		if text == "" {
+		text := msg.Text()
+		// 空白只用于过滤无展示内容的非工具消息，诊断正文与结果字节数必须原样保留。
+		if strings.TrimSpace(text) == "" && len(msg.ToolCalls) == 0 && msg.Observation == nil && msg.Role != model.RoleTool {
 			continue
 		}
-		messages = append(messages, protocol.SnapshotMessage{Role: string(msg.Role), Content: text, Kind: snapshotMessageKind(msg.Role, text)})
+		item := protocol.SnapshotMessage{Role: string(msg.Role), Content: text, Kind: snapshotMessageKind(msg.Role, text), ToolCallID: msg.ToolCallID, ToolStatus: msg.ToolStatus, Truncated: msg.Truncated}
+		for _, call := range msg.ToolCalls {
+			item.ToolCalls = append(item.ToolCalls, protocol.SnapshotToolCall{ID: call.ID, Name: call.Name, Arguments: call.Arguments, Intent: call.Intent})
+		}
+		if msg.Observation != nil {
+			for _, call := range msg.Observation.Calls {
+				item.ObservedTools = append(item.ObservedTools, protocol.SnapshotToolLabel{Name: call.Name, Intent: call.Intent, Status: call.Status})
+			}
+		}
+		messages = append(messages, item)
 	}
 	out := protocol.SessionSnapshot{Session: m.infoFor(meta), Messages: messages, Compacted: snap.Compacted}
-	if summary := toolSummaryPayload(snap.ToolSummary); summary != nil {
-		out.ToolSummary = summary
+	compact := rt.agent.CompactState()
+	if compact.ID != "" && (compact.State == "preparing" || compact.State == "ready") {
+		p := compactStatePayload(meta.ID, compact)
+		out.Compact = &p
 	}
+
 	m.mu.RLock()
 	if rt != nil && rt.status != sessionIdle {
 		runID := rt.runID

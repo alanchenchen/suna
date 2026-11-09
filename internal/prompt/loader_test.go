@@ -132,3 +132,27 @@ func TestRenderGuardReviewShowsStructuredParameterVisibility(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderHistoryCompressionPreservesMediaReferenceContract(t *testing.T) {
+	loader, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := `{"previous_summary":"[image: diagram.png, image/png, source=attachment:diagram.png]","history":[],"readonly_background":[]}`
+	got, err := loader.Render("compress", map[string]any{"Content": content})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"Preserve media references from previous_summary and history verbatim",
+		"including the complete source= value",
+		"Do not shorten, rewrite, or drop them",
+		"either the retained originals or the summary",
+		"Do not invent visual conclusions",
+		content,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered prompt missing %q", want)
+		}
+	}
+}

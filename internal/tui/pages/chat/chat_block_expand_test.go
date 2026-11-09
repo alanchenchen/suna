@@ -190,3 +190,28 @@ func TestExpandedBlockMainEntriesDistinguishesSubtaskOnly(t *testing.T) {
 		t.Fatal("expected subtask-only block to expose no main entries")
 	}
 }
+
+func TestCompactedRowsRemainVisibleButNeverOfferRemovedDetails(t *testing.T) {
+	m := newExpandTestModel(t)
+	block := appendToolBlock(m, map[string]*toolview.Entry{
+		"observed": {ID: "observed", RawName: "readfile", Status: toolview.StatusDone, Compacted: true},
+	}, "observed")
+	if _, changed := m.ToggleVisibleBlockDetail(); changed || m.ExpandedBlock != nil {
+		t.Fatal("compacted-only block offered a detail interaction")
+	}
+	block.Add(&toolview.Entry{ID: "native-a", RawName: "readfile", Status: toolview.StatusDone, Result: "A"})
+	block.Add(&toolview.Entry{ID: "native-b", RawName: "exec", Status: toolview.StatusError, Result: "B"})
+	if _, changed := m.ToggleVisibleBlockDetail(); !changed || m.ExpandedBlock != block {
+		t.Fatal("mixed block lost native detail interaction")
+	}
+	if entry := m.SelectedExpandedEntry(); entry == nil || entry.ID != "native-a" {
+		t.Fatalf("selected = %#v, want first native entry", entry)
+	}
+	m.MoveExpandedBlockCursor(1)
+	if entry := m.SelectedExpandedEntry(); entry == nil || entry.ID != "native-b" {
+		t.Fatalf("selected = %#v, want second native entry", entry)
+	}
+	if len(toolview.VisibleMainEntries(block)) != 3 {
+		t.Fatal("filtering details removed compacted display row")
+	}
+}

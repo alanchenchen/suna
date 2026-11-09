@@ -124,7 +124,7 @@ func (m *Model) ToggleVisibleBlockDetail() (TranscriptAnchor, bool) {
 		// 同一个 tool 消息渲染出两个相邻盒子，各自独立展开：
 		// tool 盒子需要主条目，subtask 面板需要子任务条目。
 		boxKind := block.BoxKind.name()
-		if boxKind == boxKindTool && len(toolview.VisibleMainEntries(tb)) == 0 {
+		if boxKind == boxKindTool && len(toolview.ExpandableMainEntries(tb)) == 0 {
 			continue
 		}
 		if boxKind == boxKindSubtask && !hasSubtaskEntries(tb) {

@@ -34,6 +34,10 @@ Results return to the main Agent with status and side-effect disclosure. For exa
 
 This isolation covers model context and tool authorization, not separate filesystem sandboxes. See [Subtasks](docs/subtask.md) for the execution boundaries.
 
+### Keep long tasks moving
+
+Suna prepares summaries in the background, condensing older tool output before summarizing earlier conversations. This helps preserve your original discussion and recent working details, reducing avoidable rereading and pauses as context grows. See [Memory and background compaction](docs/memory.md) for how it works and its limits.
+
 ### Terminal and Web, one local Runtime
 
 The built-in TUI and official Suna App connect to the same Runtime, which owns sessions, Agent runs, tools, Guard, and persistence. You can also build clients against the [public protocol](docs/tcp-client.md).
@@ -244,6 +248,7 @@ Run `suna serve --json` to start or discover the Runtime and obtain its authorit
 - [Documentation index](docs/README.md)
 - [Client integration guide](docs/tcp-client.md) and [Protocol reference](docs/protocol.md)
 - [Configuration](docs/configuration.md)
+- [Memory and background compaction](docs/memory.md)
 - [Subtasks](docs/subtask.md)
 - [Architecture](docs/architecture.md) and [Design notes](docs/design.md)
 - [Performance](docs/performance.md)

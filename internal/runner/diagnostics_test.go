@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/alanchenchen/suna/internal/model"
@@ -38,9 +37,6 @@ func TestEstimatorSafetyTokens(t *testing.T) {
 	if got, want := estimatorSafetyTokens(178335, false), 11145; got != want {
 		t.Fatalf("uncalibrated large estimate got %d, want %d", got, want)
 	}
-	if got, want := compactContextTokens(178335, false), 189480; got != want {
-		t.Fatalf("uncalibrated compact estimate got %d, want %d", got, want)
-	}
 	// 已校准：收到 1/40，最低 2048。
 	if got, want := estimatorSafetyTokens(1000, true), 2048; got != want {
 		t.Fatalf("calibrated small estimate got %d, want %d", got, want)
@@ -50,15 +46,10 @@ func TestEstimatorSafetyTokens(t *testing.T) {
 	}
 }
 
-func TestShouldCompactRequestUsesEstimatorSafety(t *testing.T) {
-	req := &model.CompletionRequest{
-		Messages:  []model.Message{model.NewTextMessage(model.RoleUser, strings.Repeat("a", 1000))},
-		MaxTokens: 128000,
-	}
-	estimated := estimateInputTokens(req, 1.0)
-	limit := compactContextTokens(estimated, false) - 1
-	contextWindow := req.MaxTokens + minContextMarginTokens + limit
-	if !shouldCompactRequest(req, contextWindow, 1.0, false) {
-		t.Fatal("expected request to compact when estimate plus safety exceeds usable budget")
+func TestContextBudgetDeductsOutputMarginAndSafetyOnce(t *testing.T) {
+	q := CompactRequest{Binding: testContextBinding(t), Request: model.CompletionRequest{MaxTokens: 12800}, Calibrated: true}
+	usable := usableInputBudget(q.Binding.ContextWindow(), q.Request.MaxTokens)
+	if got, want := q.budget(), usable-estimatorSafetyTokens(usable, true); got != want {
+		t.Fatalf("got budget %d, want %d", got, want)
 	}
 }

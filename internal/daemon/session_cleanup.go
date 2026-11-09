@@ -43,6 +43,8 @@ func (m *sessionManager) delete(ctx context.Context, connID, sessionID string) e
 		defer func() {
 			m.mu.Lock()
 			delete(m.deleting, sessionID)
+			// 失败后仍沿原空闲卸载政策；stateOps 收尾时 deleting 尚未清除，需在这里重新检查。
+			m.scheduleRuntimeUnloadNoLock(sessionID)
 			m.mu.Unlock()
 		}()
 	}
@@ -68,11 +70,19 @@ func (m *sessionManager) delete(ctx context.Context, connID, sessionID string) e
 		}
 		return fmt.Errorf("session not found")
 	}
+	if rt != nil {
+		// stateOps/deleting 已阻止新使用；先停候选和空闲提交，但删除失败仍允许原 runtime 保存。
+		rt.agent.StopMemory()
+	}
 	if err := m.deletePersistedSession(ctx, sessionID); err != nil {
 		if rt != nil {
 			m.finishStateOp(sessionID)
 		}
 		return err
+	}
+	if rt != nil {
+		// 只有持久化删除成功才永久退休，不能靠失败后 reopen 恢复生命周期。
+		rt.agent.DisposeMemory()
 	}
 	m.mu.Lock()
 	m.deleteVersion[sessionID]++

@@ -8,9 +8,9 @@ Suna 的性能目标不是通过降低交互体验来省资源，而是在保持
 
 - **业务语义不下放到 TUI**：TUI 只做交互和渲染，daemon / agent / runner 负责模型、工具、安全、记忆和持久化。
 - **稳定前缀优先**：system prompt、项目指令、Skill index 和 tool schema 尽量稳定，降低模型前缀缓存失效概率。
-- **长历史不全量重放或渲染**：模型上下文使用 Session State + recent window；TUI Chat transcript 使用业务层虚拟滚动、流式尾部窗口渲染和展示历史预算，不把完整历史交给 viewport。
+- **长历史分层整理、显示窗口化**：模型使用同一份有效历史的投影，较早工具优先转成观察，必要时再归纳较早对话；TUI transcript 使用业务层虚拟滚动、流式尾部窗口和展示预算，不把完整历史交给 viewport。
 - **关键事件不延迟**：stream/reasoning 文本可以短周期合并，tool、ask、guard、done、error、usage 等关键事件必须及时 flush。
-- **有界缓存和有界输出**：渲染缓存、工具结果、文件变化统计和 compact 输入都设置边界，避免大输出导致 CPU 或内存爆炸。
+- **有界缓存和有界输出**：渲染缓存、工具结果、文件变化统计和压缩请求都按各自预算限制，避免无意处理无限内容；这不代表大窗口请求没有 CPU、内存或 IO 成本。
 
 ## Daemon / IPC 流式传输
 
@@ -70,38 +70,52 @@ OpenAI Responses 和 OpenAI-compatible Chat streaming 使用 `openai-go` stream�
 
 ## 上下文与模型请求
 
-### Session State + recent window
+### 工具优先的后台压缩
 
-长对话不靠无限追加完整历史维持连续性。自动或手动 compact 后，Suna 使用：
+Suna 提前生成摘要候选，容量允许时前台继续工作；先整理较早工具，必要时才归纳较早对话，避免每次都把原始讨论压成短摘要。候选准备不改当前历史，采用前复核来源与收益，并保留准备期间新增的消息。
 
-```text
-稳定前缀：system / project instructions / skill index / tool schema
-低频变化：Session State
-近期内容：recent messages
-靠近最新用户输入：user profile memory
-```
+- 压缩使用完整请求预算，包含 system、工具定义、历史摘要、消息、画像和图片估算，不靠省略固定开销伪装能装下。
+- 每个独立上下文最多一个在途或就绪候选，主／子任务共用一个生成槽；普通无槽跳过，避免排队积压大快照。
+- 普通周期不为失败或无收益的同一来源立即付费重试；手动与硬容量等待复用已有候选。
+- 普通后台生成失败不阻断仍有容量的主任务；达到硬边界时等待或明确失败，不硬裁剪继续。
+- 替换历史时复制新的消息 slice，避免仍引用已退出历史的 backing array；不另建原文档案。
 
-关键点：
-
-- Session State 不拼进 system prompt，而是作为独立上下文字段注入 Adapter 请求。
-- compact 后 working memory 只保留 budget-aware recent window；写回 `WorkingMemory` 时复制新 slice，避免 Go subslice/backing array 继续持有被压缩掉的旧历史。
-- recent window 由代码按 token budget 选择，不能交给 LLM 随意决定。
-- compact 失败时不 fallback、不伪压缩、不硬裁剪继续，避免带着不可靠状态撞 Adapter context limit。
-- Suna 采用 proactive compaction：优先在安全边界前用 Session State 做高质量压缩，而不是把上下文塞到 Adapter 极限后依赖 overflow retry。
-- 基础输入预算按模型配置计算：`context_window - max_output_tokens - margin`，其中 `margin = max(2048, context_window / 200)`。`max_output_tokens` 会作为完整输出预留扣除，因此比只预留默认输出长度更安全，但也可能更早 compact。
-- 自动 compact 不直接使用 Adapter 返回的 `input_tokens` / `context_tokens`。这些 usage 只用于统计、对账和诊断；压缩判断使用 Suna 请求前的本地估算。
-- 实际判断使用 `compact_context_tokens = estimated_context_tokens + estimator_safety_tokens`，其中 `estimator_safety_tokens = max(8192, estimated_context_tokens / 16)`。TUI `ctx` 显示 raw `estimated_context_tokens`，不会把 safety 混入 UI 数字。
-- Suna 不再使用 `context_window * 0.8` 作为压缩阈值，也不提供单独的 `reserved_output_tokens` / `default_output_tokens`；如需降低 compact 频率，不能简单降低 `max_output_tokens`，因为它也会限制真实输出。
-- `max_output_tokens` 是所有 LLM 请求的默认硬输出上限，包括 chat、subtask、Guard review、Skill review、Session State compact 和 memory compact。
+水位、输出预留和估算安全垫的精确定义集中见[记忆与后台压缩](memory.md#容量和调度)，这里不重复维护公式。
 
 相关代码：
 
-- `internal/runner/compression.go`
-- `internal/memory/compress.go`
+- `internal/runner/context_budget.go`、`context_memory.go`
+- `internal/memory/compact_plan.go`、`compress.go`、`history.go`
+- `internal/agent/memory.go`
 - `internal/model/session_state.go`
-- `internal/model/openai_chat_adapter.go`
-- `internal/model/openai_responses_adapter.go`
-- `internal/model/anthropic_adapter.go`
+
+### 会话整理的本地开销
+
+后台生成摘要的模型耗时，与 Suna 本地 CPU／分配／磁盘成本需要分开看。目前已减少三项可避免开销：
+
+- token 估算不再对每个 ASCII 字符做冗余 Unicode 查询，估算结果不变；
+- 恢复后无文本缓存的单块正文直接复用字符串，不复制全文；
+- 检查点直接把 JSON 编码到字符串，减少中间字节副本，同时保持原持久化内容。
+
+本地隔离验证使用 Apple M4、darwin/arm64、Go 1.27.1：约 500k／1M token 历史，10 个立即返回的工具，实际 Runner／Agent／SQLite 链路，一轮含两次本地模拟响应和 13 次保存；没有真实模型耗时。前后交替运行三组的中位数如下：
+
+| 混合工具观察的历史 | 优化前 | 优化后 |
+|---|---:|---:|
+| 500k，单会话一轮 | 132ms | 105ms |
+| 1M，单会话一轮 | 257ms | 198ms |
+| 500k，3 会话同时完成一轮 | 307ms | 268ms |
+| 1M，3 会话同时完成一轮 | 582ms | 555ms |
+
+这些是一次隔离测量记录，不是所有机器的承诺，也不是 TUI 帧率或模型响应速度。临时全链路探针已清理；持续维护的微基准可以重新运行：
+
+```bash
+go test ./internal/model -run '^$' -bench 'Benchmark(EstimateTokensLargeText|MessageTextSingleBlock)$' -benchmem
+go test ./internal/memory -run '^$' -bench '^BenchmarkLargeSessionMemory$' -benchmem
+```
+
+三个约 1M 历史会话连续完成 780 次保存时，显式回收后的活跃堆约 7.7–7.8MiB、goroutine 数稳定，SQLite `quick_check` 正常；另一次独立压力进程峰值 RSS 约 171MiB。活跃堆、RSS、累计分配是不同口径，这些都不是完整 daemon＋TUI 的固定占用或长期无泄漏保证。
+
+**仍有真实成本：每个必要检查点会完整序列化并写入有效历史。**快工具、大历史和多会话同时写库会累积 CPU、GC、磁盘及写锁等待；本地取消也不能撤销已发生的 IO。不以减少必要保存、降低 SQLite 持久化可靠性或把失败隐藏到异步队列来换取更漂亮的数字。
 
 ### 缓存友好请求结构
 
@@ -133,27 +147,21 @@ user profile memory 不保存完整对话，也不保存项目任务日志。主
 - `internal/memory/active.go`
 - `internal/memory/store.go`
 
-### Tool summary 恢复快照
+### 同源历史恢复
 
-`session_state.tool_summary` 不是工具历史，也不参与模型上下文。daemon 只维护一个有界结构化摘要：累计 total / success / failed，最多保留最近 4 条工具名、最多 2 条失败摘要，以及变更类工具计数。session attach/create snapshot 会携带该结构，TUI 根据 locale 渲染文案；daemon 不生成中文/英文展示字符串。
+会话不再维护独立的 UI-only 工具聚合。`memory.Message` 保存单份有效历史，模型投影读取工具观察正文；UI 快照只读取工具名、意图和状态等标签，不复制观察全文。未压缩工具沿用既有详情展示上限；压缩后不保留原参数／结果供展开，恢复不伪造原生执行事件或激活子任务面板。
 
-相关代码：
-
-- `internal/memory/tool_summary.go`
-- `internal/memory/conversation.go`
-- `internal/daemon/service.go`
-- `internal/protocol/messages.go`
-- `internal/tui/chat_render.go`
+保存／恢复使用 `internal/memory/conversation.go`、`messages.go`，快照与展示使用 `internal/daemon/session_manager.go`、`internal/protocol/messages.go`、`internal/tui/compact.go`。
 
 ## 工具和大输出控制
 
 ### 工具结果上下文截断
 
-工具结果进入模型上下文前会做截断，避免 raw logs、大文件内容或超长命令输出吞掉上下文窗口。TUI 展示级工具结果也有单独大小限制，完整细节通过就地展开的工具块（Ctrl+T）查看，而不是塞进主 transcript。
+工具结果进入模型历史前有安全限额：不超过 50KiB 时原样保留，超过后按最多 500 行／50KiB 截断。它与后台语义摘要是两回事。TUI 实时及恢复结果沿用 16KiB 展示上限；Ctrl+T 能展开的是仍保留的详情，不能取回已截断或已被摘要替换的原结果。
 
 相关代码：
 
-- `internal/memory/compress.go`
+- `internal/memory/messages.go`
 - `internal/runner/runner.go`
 - `internal/daemon/service.go`
 - `internal/agent/tools.go`
@@ -175,7 +183,7 @@ user profile memory 不保存完整对话，也不保存项目任务日志。主
 - `exec` timeout、cancel、stop 和生命周期 cleanup 都使用固定有界的进程树终止、Wait 与 pipe drain 窗口，避免后代持有管道导致工具无限等待。
 - `http` 默认限制响应 body，可通过 `max_body_bytes` 调整。
 - `readfile` / tail 相关逻辑按行范围、tail 或块读取，避免无意读取超大内容。
-- `read_image` 受 `media.Store.ValidateImage` 约束（MIME 白名单、10MB 上限、attachment 目录约束、symlink 拒绝）；base64 只在模型请求阶段生成并立即回收，图片块只活一轮，run 结束时替换为摘要文本，重复读图不重复注入。
+- `read_image` 受 `media.Store.ValidateImage` 约束（MIME 白名单、10MB 上限、attachment 目录约束、symlink 拒绝）；base64 只在模型请求阶段临时生成。图片块保留在当前 run，结束后换成带来源的文字引用；同次工具批次去重，后续再次读取仍可重新发送图片。
 - `search` 支持目录和单文件搜索，`auto` 模式按 path / symbol / content 分组返回少量上下文；其中 symbol 是文档标题、配置段/key、常见定义/声明等轻量结构入口，不限于代码。仍默认排除常见依赖、构建、缓存和敏感文件，并限制单文件大小、扫描文件数、结果数和输出字节数。空结果或截断诊断写入正文，不破坏 TUI metadata contract。
 
 相关代码：
@@ -352,7 +360,7 @@ transcript viewport window 使用内容签名：window start/end、width/height�
 - **running buffer 峰值**：为了 Join active session，daemon 在运行中保存轻量 `CurrentRunView` buffer，包括 assistant / reasoning 当前输出。超长回复或多个长 run 并发时会增加短期内存峰值；run idle 后会清理。
 - **broadcast fan-out**：同一 session 多个 client attach 时，stream、tool、run、usage 等事件会按 client fan-out。Handoff 目标是少量窗口接力/观察，不按多人协同会议场景优化。
 - **TUI 长输出渲染成本**：Chat 已有窗口化渲染、增量 wrap cache 和有界 Markdown cache，但超长输出、多个 TUI 观察同一长 run 时仍会增加终端渲染压力。
-- **SQLite 写入竞争**：多 session 并行结束、compact 或写 memory 时共享同一个 SQLite，可能出现写锁等待或短时抖动。普通使用下风险较低。
+- **SQLite 写入竞争**：多 session 的用户消息、完整响应、工具结果和摘要采用共享同一个 SQLite。大历史与快速工具批次会放大完整检查点成本，可能出现写锁等待或短时抖动；见上方[本地开销](#会话整理的本地开销)。
 - **MCP / tools 全局瓶颈**：tools manager 和 MCP runtime 是 daemon-global；多个 session 同时调用同一 MCP server 时，瓶颈取决于该 server 的并发能力。
 - **附件目录 IO 峰值**：`attachment.clear` 和 `session.delete` 会删除当前 session 的附件目录；大量大文件会造成短时磁盘 IO。
 - **session.list 无分页**：v1 按设计不分页。几十/几百个 session 可接受；上千/上万个 session 会增加 DB 查询、JSON payload 和 TUI 列表渲染成本。

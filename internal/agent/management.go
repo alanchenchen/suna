@@ -7,10 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
-	"github.com/alanchenchen/suna/internal/runner"
 )
 
 func (a *Agent) MemoryStats(ctx context.Context) (active, core, queued int) {
@@ -120,64 +118,6 @@ func (a *Agent) ClearMemory(ctx context.Context) (int, error) {
 	return a.memories.Clear(ctx, memory.DefaultUserID)
 }
 
-func (a *Agent) Compact(ctx context.Context) (int, int, int, int, int, error) {
-	// Compact 不走 Run，但同样占用 session working state；用 runMu 与 Run/ResumeRun
-	// 串行化，避免覆盖其他执行中的取消函数或并发改写上下文。
-	a.runMu.Lock()
-	defer a.runMu.Unlock()
-
-	// 手动 compact 不经过 Run；仍需注册当前取消函数，保证最后一个 session
-	// attachment 离开时可终止模型请求并让 runtime 尽快卸载。
-	runCtx, cancel := context.WithCancel(ctx)
-	a.cancelMu.Lock()
-	a.cancelFn = cancel
-	a.cancelMu.Unlock()
-	defer func() {
-		a.cancelMu.Lock()
-		a.cancelFn = nil
-		a.cancelMu.Unlock()
-		cancel()
-	}()
-
-	// 手动 compact 不经过 Run；先同步 session 的共享运行时，避免配置重载后仍从旧 router 建立 binding。
-	a.syncRuntime()
-	// 本次 compact 从同一个局部快照读取并使用 modelRef，不能在校验后再次读取可变的 session 字段。
-	modelRef := a.modelRef
-	router := a.router
-	if router == nil || modelRef == "" {
-		return 0, 0, 0, 0, 0, fmt.Errorf("session model is not configured")
-	}
-	binding, err := router.Bind(modelRef)
-	if err != nil {
-		return 0, 0, 0, 0, 0, err
-	}
-	r := &runner.Runner{Compressor: a.compressor}
-	contextWindow := binding.ContextWindow()
-	outputBudget := binding.MaxOutputTokens()
-	started := time.Now()
-	beforeEstimate := 0
-	messageCount := 0
-	if a.working != nil {
-		beforeEstimate = a.working.EstimatedTokens()
-		messageCount = a.working.Len()
-	}
-	logging.Info("memory", "session_compact_start", logging.Event{"mode": "manual", "context_window": contextWindow, "output_budget": outputBudget, "before_tokens": beforeEstimate, "messages": messageCount})
-	before, after, turnsCompressed, truncated, state, err := r.Compact(runCtx, binding, model.Invocation{SessionScope: model.SessionScope(a.sessionID)}, a.working, a.sessionState)
-	if err != nil {
-		logging.Error("memory", "session_compact_failed", err, logging.Event{"mode": "manual", "context_window": contextWindow, "output_budget": outputBudget, "before_tokens": beforeEstimate, "messages": messageCount, "duration_ms": time.Since(started).Milliseconds()})
-		return 0, 0, 0, 0, 0, err
-	}
-	if state != "" {
-		if err := a.commitCompactState(ctx, state); err != nil {
-			return 0, 0, 0, 0, 0, err
-		}
-	} else {
-		a.saveConversationState(ctx)
-	}
-	logging.Info("memory", "session_compact_success", logging.Event{"mode": "manual", "context_window": contextWindow, "output_budget": outputBudget, "before_tokens": before, "after_tokens": after, "folded_messages": turnsCompressed, "truncated_tool_outputs": truncated, "duration_ms": time.Since(started).Milliseconds()})
-	return before, after, contextWindow, turnsCompressed, truncated, nil
-}
-
 func (a *Agent) AttachmentStatus() (root string, bytes int64, count int, err error) {
 	if a.mediaStore == nil {
 		return "", 0, 0, nil
@@ -216,6 +156,7 @@ func (a *Agent) CleanupToolSession(ctx context.Context, sessionID string) error 
 
 func (a *Agent) Close() {
 	a.closeOnce.Do(func() {
+		a.CancelMemory()
 		a.lifecycleMu.Lock()
 		a.closed = true
 		workerStarted := a.workerStarted
@@ -249,10 +190,13 @@ func (a *Agent) Close() {
 }
 
 func (a *Agent) CancelCurrentRun() {
+	// 先关闭run准入上下文，再推进候选代次；排槽/规划中的请求也必须观察到取消。
 	a.cancelMu.Lock()
-	defer a.cancelMu.Unlock()
-	if a.cancelFn != nil {
-		a.cancelFn()
-		a.cancelFn = nil
+	cancel := a.cancelFn
+	a.cancelFn = nil
+	a.cancelMu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
+	a.CancelMemory()
 }

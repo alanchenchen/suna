@@ -27,7 +27,7 @@ type interactionResolvedMsg = tuievents.InteractionResolvedMsg
 type toolStartMsg = tuievents.ToolStartMsg
 type toolGuardMsg = tuievents.ToolGuardMsg
 type toolEndMsg = tuievents.ToolEndMsg
-type compactResultMsg = tuievents.CompactResultMsg
+type compactStateMsg = tuievents.CompactStateMsg
 type memoryListMsg = tuievents.MemoryListMsg
 type daemonFullStatusMsg = tuievents.DaemonFullStatusMsg
 type configStateMsg = tuievents.ConfigStateMsg
@@ -137,8 +137,10 @@ func (t *TUI) handleNotificationMsg(msg notificationMsg) bool {
 		t.handleGuardConfirmNotification(m.Params)
 	case interactionResolvedMsg:
 		t.handleInteractionResolvedNotification(m.Params)
-	case compactResultMsg:
-		t.handleCompactResultNotification(m.Params)
+	case compactStateMsg:
+		manual := t.manualCompactPending
+		t.handleCompactStateNotification(m.Params)
+		changed = m.Params.State == "applied" || manual
 	case memoryListMsg:
 		t.handleMemoryListNotification(m.Params)
 	case daemonFullStatusMsg:
@@ -167,7 +169,7 @@ func (t *TUI) handleNotificationMsg(msg notificationMsg) bool {
 
 func isChatRuntimeNotification(msg notificationMsg) bool {
 	switch m := msg.(type) {
-	case agentDeltaMsg, agentRunMsg, steeringMsg, userMessageMsg, usageMsg, toolStartMsg, toolGuardMsg, toolEndMsg, askUserMsg, guardConfirmMsg, interactionResolvedMsg, compactResultMsg, memoryListMsg, skillLoadMsg, skillReviewMsg:
+	case agentDeltaMsg, agentRunMsg, steeringMsg, userMessageMsg, usageMsg, toolStartMsg, toolGuardMsg, toolEndMsg, askUserMsg, guardConfirmMsg, interactionResolvedMsg, compactStateMsg, memoryListMsg, skillLoadMsg, skillReviewMsg:
 		return true
 	case attachmentStatusMsg:
 		return m.Params.SessionID != ""
@@ -498,60 +500,6 @@ func (t *TUI) handleToolEndNotification(p protocol.ToolEndParams) bool {
 	return te != nil && te.Status != toolCancelled
 }
 
-func (t *TUI) handleCompactResultNotification(p protocol.CompactResult) {
-	if p.Running != nil {
-		if *p.Running {
-			t.finishStreamingMessages()
-			t.compactStartedAt = time.Now()
-			t.chat.Compacting = true
-			t.chat.Loading = true
-			t.chat.Phase = phaseFirstLLM
-			t.chat.PhaseStart = time.Now()
-			t.chat.Textarea.Blur()
-			t.scrollToBottomOnNextSync()
-			_ = t.syncInputFocus()
-			return
-		}
-		t.compactStartedAt = time.Time{}
-		if t.cancelling {
-			// 手动取消：清全部状态恢复可输入；daemon 侧取消静默不发 Error。
-			t.cancelling = false
-			t.resetPhase()
-			_ = t.syncInputFocus()
-			return
-		}
-		if strings.TrimSpace(p.Error) != "" {
-			t.resetPhase()
-			t.appendNonToolMessage(chatMsg{Role: "error", Content: p.Error})
-			_ = t.syncInputFocus()
-			return
-		}
-		if p.BeforeTokens > 0 || p.Noop {
-			// 手动完成：清状态并展示结果面板；结果字段是手动/自动的天然区分信号。
-			t.resetPhase()
-			t.applyContextStats(p.AfterTokens, p.ContextWindow)
-			t.appendNonToolMessage(chatMsg{Role: "panel", Content: t.renderCompactPanel(p)})
-			_ = t.syncInputFocus()
-			return
-		}
-		// 自动完成：只清 Compacting，保持 Loading（loop 继续，马上有 delta 和 usage）。
-		t.chat.Compacting = false
-		_ = t.syncInputFocus()
-		return
-	}
-	if strings.TrimSpace(p.Error) != "" {
-		t.chat.Compacting = false
-		t.compactStartedAt = time.Time{}
-		t.appendNonToolMessage(chatMsg{Role: "error", Content: p.Error})
-		_ = t.syncInputFocus()
-		return
-	}
-	t.resetPhase()
-	t.applyContextStats(p.AfterTokens, p.ContextWindow)
-	t.appendNonToolMessage(chatMsg{Role: "panel", Content: t.renderCompactPanel(p)})
-	_ = t.syncInputFocus()
-}
-
 func (t *TUI) handleMemoryListNotification(p protocol.MemoryListResult) {
 	t.chat.SetMemories(p.Memories)
 	if !t.chat.MemoryOverlayOpen {
@@ -674,6 +622,10 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) bool {
 		t.runStartedAt = time.Time{}
 		t.activeRunID = ""
 		t.runHadToolCall = false
+		t.compactState = protocol.CompactState{}
+		t.compactTerminalID = ""
+		t.manualCompactPending = false
+		t.manualCompactID = ""
 	}
 	t.currentSession = p.Session
 	t.applyCurrentSessionModelConfig()
@@ -705,6 +657,9 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) bool {
 	t.chat.ExpandedBlockDetailScroll = 0
 	t.chat.DisplayDiscard = chatpage.DisplayDiscardSummary{}
 	for _, m := range p.Messages {
+		if t.restoreToolMessage(m) {
+			continue
+		}
 		if m.Content == "" {
 			continue
 		}
@@ -715,11 +670,7 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) bool {
 		}
 		t.appendNonToolMessage(chatMsg{Role: m.Role, Content: m.Content})
 	}
-	if p.ToolSummary != nil {
-		if content := t.renderSessionRestoreToolSummary(*p.ToolSummary); content != "" {
-			t.appendNonToolMessage(chatMsg{Role: "restore_summary", Content: content})
-		}
-	}
+
 	if p.Compacted {
 		t.appendNonToolMessage(chatMsg{Role: "system", Content: t.tr("session.restore_compacted")})
 	}
@@ -741,6 +692,12 @@ func (t *TUI) applySessionSnapshot(p protocol.SessionSnapshot) bool {
 		}
 		if currentRun.AssistantBuffer != "" {
 			t.appendStreamMessage("assistant", currentRun.AssistantBuffer)
+		}
+	}
+	if p.Compact != nil {
+		// 快照只恢复当前候选小状态，不重放历史成果或旧占用。
+		if (p.Compact.State == "preparing" || p.Compact.State == "ready") && !t.manualCompactPending {
+			t.handleCompactStateNotification(*p.Compact)
 		}
 	}
 	t.trimDisplayHistoryIfNeeded()
@@ -898,6 +855,9 @@ func (t *TUI) handleAttachmentStatusNotification(p protocol.AttachmentStatusResu
 
 func (t *TUI) handleRequestErrorNotification(p requestErrorMsg) {
 	if p.Scope == notifyCompactError {
+		t.manualCompactPending = false
+		t.manualCompactID = ""
+		t.manualCompactEvents = nil
 		t.chat.Compacting = false
 		t.resetPhase()
 		t.appendNonToolMessage(chatMsg{Role: "error", Content: p.Message})

@@ -30,30 +30,35 @@ import (
 
 type Agent struct {
 	// runtime 指向共享全局运行时；nil 表示当前对象就是运行时根 Agent。
-	runtime       *Agent
-	cfg           *config.Config
-	router        *model.Router
-	tools         *tools.Manager
-	guard         *guard.Guard
-	working       *memory.WorkingMemory
-	usage         *memory.UsageStore
-	sessionStore  *memory.SessionStore
-	stateStore    *memory.SessionStateStore
-	memories      *memory.MemoryStore
-	mediaStore    *media.Store
-	compressor    *memory.Compressor
-	calibrator    *model.TokenCalibrator
-	prompts       *prompt.Loader
-	store         *memory.Store
-	skills        *skill.Runtime
-	projectSkills *skill.Catalog
-	mcp           *mcp.Runtime
-	sessionID     string
-	cwd           string
-	modelRef      string
-	turnCount     int
-	sessionState  string
-	toolSummary   memory.ToolSummary
+	runtime        *Agent
+	cfg            *config.Config
+	router         *model.Router
+	tools          *tools.Manager
+	guard          *guard.Guard
+	working        *memory.WorkingMemory
+	usage          *memory.UsageStore
+	sessionStore   *memory.SessionStore
+	stateStore     *memory.SessionStateStore
+	memories       *memory.MemoryStore
+	mediaStore     *media.Store
+	compressor     *memory.Compressor
+	calibrator     *model.TokenCalibrator
+	prompts        *prompt.Loader
+	store          *memory.Store
+	skills         *skill.Runtime
+	projectSkills  *skill.Catalog
+	mcp            *mcp.Runtime
+	sessionID      string
+	cwd            string
+	modelRef       string
+	turnCount      int
+	summary        string
+	contextMemory  *runner.ContextMemory
+	stateMu        sync.Mutex
+	saveErr        error
+	memoryRetired  bool
+	idleMemoryDone chan struct{}
+	compactNotify  func(runner.CompactState)
 
 	extractQueue   *memory.ExtractQueue
 	extractWorker  *memory.Worker
@@ -181,14 +186,14 @@ func (a *Agent) BindModel(ref string) (*model.ModelBinding, error) {
 }
 
 func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
-	a.syncRuntime()
 	events := make(chan Event, eventBuffer)
-	if !a.runMu.TryLock() {
+	if !a.tryRunLock(ctx) {
 		events <- Event{Type: EventStatus, Content: "agent is already running", Error: true}
 		close(events)
 		return events
 	}
 
+	a.syncRuntime()
 	runCtx, cancel := context.WithCancel(ctx)
 	runCtx, runIdentity := a.ensureRunExecutionContext(runCtx)
 	a.ensureSteeringMailbox(runIdentity.RunID)
@@ -205,8 +210,8 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 			return
 		}
 
-		userMessage := input.Message(model.RoleUser)
-		storedUserMessage := input.StoredMessage(model.RoleUser)
+		inputMessage := input.Message(model.RoleUser)
+		userMessage := memory.Message{Role: inputMessage.Role, Content: inputMessage.Content, TextContent: inputMessage.TextContent}
 		inputText := userMessage.Text()
 		if len(userMessage.Content) == 0 {
 			a.rejectSteeringBeforeFailure(runIdentity.RunID, events)
@@ -214,13 +219,22 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 			return
 		}
 
+		if err := a.prepareMemory(runCtx); err != nil {
+			a.rejectSteeringBeforeFailure(runIdentity.RunID, events)
+			events <- Event{Type: EventStatus, Content: err.Error(), Error: true}
+			return
+		}
+		defer a.finishMemory()
+		userMessage.Origin = memory.OriginUser
 		a.working.AddMessage(userMessage)
-		// 多模态 raw media 只允许参与当前 agent run；run 结束后立即替换为轻量 metadata，避免进入下一轮上下文或会话快照。
-		defer func() {
-			a.replaceRunInputMessage(userMessage, storedUserMessage)
-			a.replaceToolImagesWithSummaries()
-			a.saveConversationState(runCtx)
-		}()
+		a.contextMemory.AddGrowth([]memory.Message{userMessage})
+		if err := a.saveConversationState(runCtx); err != nil {
+			a.rejectSteeringBeforeFailure(runIdentity.RunID, events)
+			events <- Event{Type: EventStatus, Content: err.Error(), Error: true}
+			return
+		}
+		events <- Event{Type: EventUserSaved, UserInput: &input}
+
 		a.turnCount++
 		a.enqueueMemoryEvent(runCtx, model.RoleUser, inputText, false, false, false, false)
 
@@ -230,15 +244,15 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 }
 
 func (a *Agent) ResumeRun(ctx context.Context) <-chan Event {
-	a.syncRuntime()
 	// resume 只恢复未完成的当前 turn，不新增 user message；用于模型/服务中断后的干净重试。
 	events := make(chan Event, eventBuffer)
-	if !a.runMu.TryLock() {
+	if !a.tryRunLock(ctx) {
 		events <- Event{Type: EventStatus, Content: "agent is already running", Error: true}
 		close(events)
 		return events
 	}
 
+	a.syncRuntime()
 	runCtx, cancel := context.WithCancel(ctx)
 	runCtx, runIdentity := a.ensureRunExecutionContext(runCtx)
 	a.ensureSteeringMailbox(runIdentity.RunID)
@@ -248,7 +262,12 @@ func (a *Agent) ResumeRun(ctx context.Context) <-chan Event {
 
 	go func() {
 		defer a.finishRun(events, cancel, runIdentity)
-		defer a.saveConversationState(runCtx)
+		defer a.finishMemory()
+		if err := a.prepareMemory(runCtx); err != nil {
+			a.rejectSteeringBeforeFailure(runIdentity.RunID, events)
+			events <- Event{Type: EventStatus, Content: err.Error(), Error: true}
+			return
+		}
 
 		if a.router == nil {
 			a.rejectSteeringBeforeFailure(runIdentity.RunID, events)
@@ -307,6 +326,7 @@ func (a *Agent) finishRun(events chan Event, cancel context.CancelFunc, runIdent
 	a.clearSteeringMailbox(runIdentity.RunID)
 	close(events)
 	a.runMu.Unlock()
+	a.tryIdleMemory()
 }
 
 func (a *Agent) modelUnavailableRunError() *RunError {
@@ -357,12 +377,12 @@ func (a *Agent) runCurrentWorking(runCtx context.Context, inputText string, even
 		Invocation:    model.Invocation{SessionScope: model.SessionScope(a.sessionID)},
 		System:        systemPrompt,
 		Working:       a.working,
-		Messages:      a.buildRequestMessages,
+		Project:       a.requestProjection,
+		Memory:        a.contextMemory,
 		ToolDefs:      a.buildToolDefs,
 		EmitStream:    true,
 		EmitReasoning: true,
 		AutoCompress:  true,
-		SessionState:  a.sessionState,
 		TakeSteering: func(seal bool) []runner.SteeringInput {
 			return a.takeSteering(runIdentity.RunID, seal)
 		},
@@ -384,7 +404,7 @@ func (a *Agent) runCurrentWorking(runCtx context.Context, inputText string, even
 		return
 	}
 
-	a.sessionState = res.SessionState
+	a.summary = a.contextMemory.Summary()
 	// 长期用户画像只从用户信号提取；assistant 输出属于当前会话结果，应进入 Session State/recent，而不是跨会话画像。
 	events <- Event{Type: EventStatus, Status: StatusDone, ContextWindow: res.ContextWindow}
 }
@@ -412,7 +432,7 @@ func (a *Agent) canResumeRunLocked() bool {
 func (a *Agent) lastUserTextLocked() string {
 	msgs := a.working.Messages()
 	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == model.RoleUser {
+		if memory.IsUserMessage(msgs[i]) {
 			return msgs[i].Text()
 		}
 	}
@@ -427,13 +447,14 @@ func (a *Agent) newRunner(events chan<- Event) *runner.Runner {
 		Sink:       eventSink{events: events},
 		UsageSink:  a,
 		Hooks: runner.Hooks{
-			CleanToolParams: a.cleanToolParams,
-			OnToolResult:    a.addToolSummary,
+			CleanToolParams:  a.cleanToolParams,
+			Checkpoint:       a.saveConversationState,
+			CommitMemory:     a.commitMemory,
+			OnAssistantSaved: func(context.Context) { events <- Event{Type: EventAssistantSaved} },
 			OnSteeringApplied: func(ctx context.Context, input runner.SteeringInput) {
 				item := a.onSteeringApplied(ctx, input)
 				events <- Event{Type: EventSteering, Steering: &item}
 			},
-			OnCompactCommit: a.commitCompactState,
 		},
 	}
 }
@@ -518,12 +539,12 @@ func (a *Agent) ReloadTools(ctx context.Context) error {
 }
 
 func (a *Agent) RecordUsage(ctx context.Context, modelID string, usage *model.Usage) {
-	if a.usage == nil || usage == nil {
+	if a.root().usage == nil || usage == nil {
 		return
 	}
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	if err := a.usage.SaveUsage(saveCtx, a.sessionID, modelID, usage.InputTokens, usage.OutputTokens); err != nil {
+	if err := a.root().usage.SaveUsage(saveCtx, a.sessionID, modelID, usage.InputTokens, usage.OutputTokens); err != nil {
 		logging.Error("agent", "save_usage_failed", err, logging.Event{"session_id": a.sessionID, "model": modelID})
 	}
 }
@@ -561,12 +582,6 @@ type eventSink struct {
 func (s eventSink) Status(status runner.StatusEvent) {
 	// runner 只描述模型循环内部状态；agent 在这里转换成自身事件，避免 daemon 越过 agent 依赖 runner 细节。
 	switch status.Kind {
-	case runner.StatusCompactRunning:
-		s.events <- Event{Type: EventStatus, Status: StatusCompactRunning}
-	case runner.StatusCompactDone:
-		s.events <- Event{Type: EventStatus, Status: StatusCompactDone}
-	case runner.StatusCompactError:
-		s.events <- Event{Type: EventStatus, Status: StatusCompactError, Content: status.Message}
 	case runner.StatusWaitingLLM:
 		s.events <- Event{Type: EventStatus, Status: StatusWaitingLLM}
 	case runner.StatusLLMRetrying:

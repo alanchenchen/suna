@@ -36,6 +36,18 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 	if p.State == protocol.AgentRunRunning && !t.cancelling {
 		t.currentRunCanControl = p.CanControl
 	}
+	// 手动压缩复用owner/取消语义，但不伪造一次对话成果或重复错误。
+	// hard 等待也使用 compact 阶段；不能仅凭 phase 吞掉普通任务的失败与取消收尾。
+	manualCompact := t.manualCompactPending || t.compactState.Wait == "manual"
+	if manualCompact && p.Phase == protocol.AgentRunPhaseCompact && isTerminalAgentRunState(p.State) {
+		t.completedRunID = p.RunID
+		t.currentRunCanControl = false
+		t.cancelling = false
+		t.runStartedAt = time.Time{}
+		t.activeRunID = ""
+		t.resetPhase()
+		return
+	}
 	switch p.State {
 	case protocol.AgentRunCancelling:
 		t.enterCancelling()
@@ -59,10 +71,9 @@ func (t *TUI) handleAgentRunNotification(p protocol.AgentRunParams) {
 				t.appendNonToolMessage(chatMsg{Role: "error", Content: t.tr("model_error.cancelled")})
 			}
 		} else {
-			if t.cancelling {
-				t.chat.FinishCancellingTools(time.Now())
-				t.chatSpinnerTicking = false
-			}
+			// 检查点失败可能只有 tool.start 而无 tool.end；收为未知终态，不推断成功或已取消。
+			t.chat.MarkToolsInterrupted(time.Now())
+			t.chatSpinnerTicking = false
 			t.cancelling = false
 			t.appendNonToolMessage(chatMsg{Role: "error", Content: t.formatModelError(p)})
 		}

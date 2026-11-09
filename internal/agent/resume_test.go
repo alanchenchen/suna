@@ -10,13 +10,13 @@ import (
 func TestCanResumeRunUsesIncompleteWorkingTail(t *testing.T) {
 	tests := []struct {
 		name string
-		msgs []model.Message
+		msgs []memory.Message
 		want bool
 	}{
 		{name: "empty", want: false},
-		{name: "last user", msgs: []model.Message{model.NewTextMessage(model.RoleUser, "hello")}, want: true},
-		{name: "last tool", msgs: []model.Message{model.NewTextMessage(model.RoleUser, "hello"), {Role: model.RoleTool, TextContent: "done"}}, want: true},
-		{name: "last assistant", msgs: []model.Message{model.NewTextMessage(model.RoleUser, "hello"), model.NewTextMessage(model.RoleAssistant, "ok")}, want: false},
+		{name: "last user", msgs: []memory.Message{memory.NewTextMessage(model.RoleUser, "hello")}, want: true},
+		{name: "last tool", msgs: []memory.Message{memory.NewTextMessage(model.RoleUser, "hello"), {Role: model.RoleTool, TextContent: "done"}}, want: true},
+		{name: "last assistant", msgs: []memory.Message{memory.NewTextMessage(model.RoleUser, "hello"), memory.NewTextMessage(model.RoleAssistant, "ok")}, want: false},
 	}
 
 	for _, tt := range tests {

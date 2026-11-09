@@ -99,7 +99,11 @@ func (t *TUI) renderSkillLoadMessage(p *chatpage.SkillLoadView) string {
 	labelKey := "tui.skill.loaded"
 	icon := "✓"
 	accent := ColorSuccess
-	if p.Status == "cancelled" {
+	if p.Status == "unknown" {
+		labelKey = "tui.tool.result_unknown"
+		icon = "?"
+		accent = ColorDim
+	} else if p.Status == "cancelled" {
 		labelKey = "tui.skill.cancelled"
 		icon = "⊘"
 		accent = ColorDim
@@ -155,9 +159,6 @@ func (t *TUI) renderSkillReviewMessage(p protocol.SkillReviewParams) string {
 	}
 	return textutil.IndentLines(boxStyle.BorderForeground(ColorAccent).Width(width).Padding(1, 2).Render(content), "  ")
 }
-func (t *TUI) compactRunningLabel() string {
-	return t.tr("compact.running")
-}
 func (t *TUI) currentInputStatusLabel() string {
 	if t.chat.Loading && !t.chat.Compacting {
 		if label := t.currentStatusLabel(); label != "" {
@@ -177,7 +178,7 @@ func (t *TUI) withRunElapsed(label string) string {
 }
 func (t *TUI) currentStatusLabel() string {
 	if t.chat.Compacting {
-		return t.compactRunningLabel()
+		return t.tr("compact.running")
 	}
 	if t.chat.StatusLabel != "" {
 		return t.chat.StatusLabel
@@ -253,60 +254,6 @@ func clipHeadLinesBytes(s string, maxLines, maxBytes int) string {
 	return strings.Join(lines[:maxLines], "\n")
 }
 
-func (t *TUI) renderSessionRestoreToolSummary(summary protocol.ToolSummaryPayload) string {
-	if summary.Total <= 0 && len(summary.Recent) == 0 && len(summary.Failures) == 0 && len(summary.Changes) == 0 {
-		return ""
-	}
-	var lines []string
-	lines = append(lines, t.tr("session.restore_tools_title"))
-	if summary.Failed <= 0 {
-		lines = append(lines, t.i18n.Tf("session.restore_tools_all_success", summary.Total))
-	} else {
-		lines = append(lines, t.i18n.Tf("session.restore_tools_stats", summary.Total, summary.Success, summary.Failed))
-	}
-	if len(summary.Failures) > 0 {
-		parts := make([]string, 0, len(summary.Failures))
-		for _, item := range summary.Failures {
-			part := strings.TrimSpace(item.Tool)
-			if item.Summary != "" {
-				part += " · " + truncateRunesForUI(item.Summary, 72)
-			}
-			if part != "" {
-				parts = append(parts, part)
-			}
-		}
-		if len(parts) > 0 {
-			lines = append(lines, t.i18n.Tf("session.restore_tools_failures", strings.Join(parts, "; ")))
-		}
-	}
-	if len(summary.Changes) > 0 {
-		parts := make([]string, 0, len(summary.Changes))
-		for _, item := range summary.Changes {
-			if item.Tool != "" && item.Count > 0 {
-				parts = append(parts, fmt.Sprintf("%s ×%d", item.Tool, item.Count))
-			}
-		}
-		if len(parts) > 0 {
-			lines = append(lines, t.i18n.Tf("session.restore_tools_changes", strings.Join(parts, ", ")))
-		}
-	}
-	if len(summary.Recent) > 0 {
-		names := make([]string, 0, len(summary.Recent))
-		for _, item := range summary.Recent {
-			if item.Tool != "" {
-				names = append(names, item.Tool)
-			}
-		}
-		if len(names) > 0 {
-			lines = append(lines, t.i18n.Tf("session.restore_tools_recent", strings.Join(names, " → ")))
-		}
-	}
-	if summary.Omitted > 0 {
-		lines = append(lines, t.i18n.Tf("session.restore_tools_omitted", summary.Omitted))
-	}
-	return strings.Join(lines, "\n")
-}
-
 func truncateRunesForUI(s string, maxRunes int) string {
 	if maxRunes <= 0 {
 		return ""
@@ -316,40 +263,6 @@ func truncateRunesForUI(s string, maxRunes int) string {
 		return s
 	}
 	return string(runes[:maxRunes]) + "..."
-}
-
-func (t *TUI) renderRestoreSummaryBox(content string) string {
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return ""
-	}
-	width := max(36, min(76, t.width-6))
-	inner := max(20, width-8)
-	lines := strings.Split(content, "\n")
-	if len(lines) > 0 {
-		first := strings.TrimSpace(lines[0])
-		if first == t.tr("session.restore_tools_title") || strings.HasPrefix(first, "上一轮工具操作摘要") {
-			lines = lines[1:]
-		}
-	}
-	if len(lines) > 5 {
-		lines = append(lines[:4], "...")
-	}
-	var body []string
-	for _, line := range lines {
-		line = strings.TrimSpace(strings.TrimPrefix(line, "-"))
-		if line == "" {
-			continue
-		}
-		for _, wrapped := range textutil.WrapLine(line, inner) {
-			body = append(body, styleMuted.Render(wrapped))
-		}
-	}
-	if len(body) == 0 {
-		body = []string{styleMuted.Render(content)}
-	}
-	title := styleHL.Render(t.tr("session.restore_tools_title"))
-	return textutil.IndentLines(boxStyle.Width(width).Padding(1, 2).Render(title+"\n"+strings.Join(body, "\n")), "  ")
 }
 
 func renderInlineUserMessage(content string, width int) string {

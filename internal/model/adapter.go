@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
 const adapterChunkBuffer = 2048
@@ -99,12 +100,20 @@ func (m Message) Text() string {
 	if m.TextContent != "" {
 		return m.TextContent
 	}
+	// 恢复后的纯文本没有缓存；单块正文可直接复用字符串，不必复制整段历史文本。
+	if len(m.Content) == 1 && m.Content[0].Type == ContentText {
+		return m.Content[0].Text
+	}
+	var text strings.Builder
 	for _, b := range m.Content {
 		if b.Type == ContentText {
-			return b.Text
+			if text.Len() > 0 {
+				text.WriteByte('\n')
+			}
+			text.WriteString(b.Text)
 		}
 	}
-	return ""
+	return text.String()
 }
 
 // ToolDef 是暴露给模型的工具 schema，来自 internal/tools.Manager。

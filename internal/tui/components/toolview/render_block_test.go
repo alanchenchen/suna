@@ -432,3 +432,12 @@ func mustDuration(t *testing.T, value string) time.Duration {
 	}
 	return d
 }
+
+func TestCompactedEntryKeepsBadgeAndRealStatusAtNarrowWidth(t *testing.T) {
+	deps := RenderDeps{Width: 52, Labels: RenderLabels{Compacted: "Compacted"}}
+	entry := &Entry{Name: "Exec", RawName: "exec", Intent: strings.Repeat("verify a long build ", 20), Status: StatusError, Compacted: true}
+	got := RenderEntry(entry, false, deps)
+	if !strings.Contains(got, "Compacted") || !strings.Contains(got, "✗") || strings.Contains(got, "Run command") {
+		t.Fatalf("compacted row = %q, want real status and visible compacted badge", got)
+	}
+}

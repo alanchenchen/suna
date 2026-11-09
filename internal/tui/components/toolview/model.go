@@ -11,6 +11,7 @@ const (
 	StatusCancelled
 	StatusDone
 	StatusError
+	StatusUnknown
 )
 
 // GuardInfo 是工具调用的安全审核展示数据。
@@ -42,6 +43,7 @@ type Entry struct {
 	Result          string
 	ResultTruncated bool
 	ResultBytes     int
+	Compacted       bool
 	Metadata        map[string]any
 	Guard           *GuardInfo
 }

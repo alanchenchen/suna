@@ -243,9 +243,29 @@ const (
 )
 
 type SnapshotMessage struct {
-	Role    string              `json:"role"`
-	Content string              `json:"content"`
-	Kind    SnapshotMessageKind `json:"kind"`
+	Role          string              `json:"role"`
+	Content       string              `json:"content"`
+	Kind          SnapshotMessageKind `json:"kind"`
+	ToolCalls     []SnapshotToolCall  `json:"tool_calls,omitempty"`
+	ToolCallID    string              `json:"tool_call_id,omitempty"`
+	ToolStatus    string              `json:"tool_status,omitempty"`
+	ObservedTools []SnapshotToolLabel `json:"observed_tools,omitempty"`
+	Truncated     bool                `json:"truncated,omitempty"`
+}
+
+// SnapshotToolLabel 仅描述已压缩历史的工具事实，不携带观察全文或已删除的参数和结果。
+// 条目按消息内顺序定位；展示 key 由 TUI 临时生成，不冒充原生调用 ID。
+type SnapshotToolLabel struct {
+	Name   string `json:"name"`
+	Intent string `json:"intent,omitempty"`
+	Status string `json:"status,omitempty"`
+}
+
+type SnapshotToolCall struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+	Intent    string `json:"intent,omitempty"`
 }
 
 type RunWaitingType string
@@ -269,32 +289,11 @@ type CurrentRunView struct {
 }
 
 type SessionSnapshot struct {
-	Session     SessionInfo         `json:"session"`
-	Messages    []SnapshotMessage   `json:"messages,omitempty"`
-	Compacted   bool                `json:"compacted,omitempty"`
-	ToolSummary *ToolSummaryPayload `json:"tool_summary,omitempty"`
-	CurrentRun  *CurrentRunView     `json:"current_run,omitempty"`
-}
-
-type ToolSummaryPayload struct {
-	Total    int               `json:"total"`
-	Success  int               `json:"success"`
-	Failed   int               `json:"failed"`
-	Changes  []ToolChangeItem  `json:"changes,omitempty"`
-	Failures []ToolSummaryItem `json:"failures,omitempty"`
-	Recent   []ToolSummaryItem `json:"recent,omitempty"`
-	Omitted  int               `json:"omitted,omitempty"`
-}
-
-type ToolChangeItem struct {
-	Tool  string `json:"tool"`
-	Count int    `json:"count"`
-}
-
-type ToolSummaryItem struct {
-	Tool    string `json:"tool"`
-	Status  string `json:"status"`
-	Summary string `json:"summary,omitempty"`
+	Session    SessionInfo       `json:"session"`
+	Messages   []SnapshotMessage `json:"messages,omitempty"`
+	Compacted  bool              `json:"compacted,omitempty"`
+	Compact    *CompactState     `json:"compact,omitempty"`
+	CurrentRun *CurrentRunView   `json:"current_run,omitempty"`
 }
 
 type UsageParams struct {
@@ -516,18 +515,25 @@ type UsagePeriod struct {
 	Requests     int `json:"requests"`
 }
 
+type CompactState struct {
+	SessionID        string         `json:"session_id"`
+	CompactID        string         `json:"compact_id"`
+	Kind             string         `json:"kind,omitempty"`
+	State            string         `json:"state"`
+	Wait             string         `json:"wait,omitempty"`
+	PrepareElapsedMs int64          `json:"prepare_elapsed_ms,omitempty"`
+	WaitElapsedMs    int64          `json:"wait_elapsed_ms,omitempty"`
+	Result           *CompactResult `json:"result,omitempty"`
+	Reason           string         `json:"reason,omitempty"`
+	Error            string         `json:"error,omitempty"`
+}
 type CompactResult struct {
-	// SessionID 标识事件所属 session，供多 session 并存的客户端区分事件归属。
-	SessionID        string `json:"session_id,omitempty"`
-	BeforeTokens     int    `json:"before_tokens"`
-	AfterTokens      int    `json:"after_tokens"`
-	ContextWindow    int    `json:"context_window"`
-	TurnsCompressed  int    `json:"turns_compressed"`
-	SummaryTokens    int    `json:"summary_tokens"`
-	TruncatedOutputs int    `json:"truncated_outputs"`
-	Noop             bool   `json:"noop,omitempty"`
-	Running          *bool  `json:"running,omitempty"`
-	Error            string `json:"error,omitempty"`
+	BeforeTokens  int `json:"before_tokens"`
+	AfterTokens   int `json:"after_tokens"`
+	ContextWindow int `json:"context_window"`
+}
+type CompactAccepted struct {
+	CompactID string `json:"compact_id"`
 }
 
 type AttachmentStatusResult struct {

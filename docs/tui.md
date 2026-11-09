@@ -68,7 +68,7 @@ Chat transcript 遵循“完整数据在页面 model、渲染只取可见窗口�
 - streaming assistant 继续走纯文本渲染，完成后再 Markdown 渲染，避免半截 Markdown 导致行数抖动和高频重排；流式阶段原文进入 append-only buffer，渲染缓存只保留尾部窗口，降低超长单回复每帧 join 全文的 CPU 和内存压力。
 - TUI notification pump 仍按短间隔合并文本事件；Chat transcript 自身再用约 16ms 的 dirty sync frame 把正文视觉同步限制在约 60fps。这个限制只作用于 TUI viewport 同步，不改变 daemon 收流和关键事件语义。
 - TUI 展示历史有固定内存预算：超过阈值后从最顶部按完整 turn 释放到低水位，裁后第一条真实消息仍是 user，并在顶部保留一个累计摘要块；这个裁剪只影响当前 TUI 展示，不影响 daemon 的 WorkingMemory / Session State，也不持久化。
-- session attach/create snapshot 只把真实 user/assistant 作为最近可见消息恢复到 transcript；结构化工具摘要通过 snapshot `tool_summary` 返回，由 TUI 根据 locale 渲染成本地化 summary block，不要求 daemon 生成展示文案。
+- session attach/create snapshot 从已提交的有效历史恢复原文、未压缩工具声明／结果和已压缩工具的 `observed_tools` 标签；不重放工具事件，不造 loading 或计时，已压缩条目不展开已删除的参数／结果。较早对话摘要只提示存在，不新增全文查看入口。恢复不是完整事件归档，详见[记忆与后台压缩](memory.md#退出后还能恢复哪些内容)。
 - 文本流活跃时，spinner tick 不额外触发完整 transcript sync；文本流停顿或等待首 token 时，spinner 仍正常刷新等待状态。
 - 鼠标模式固定为 Bubble Tea 的 cell motion：内容区按住左键拖动即选中（选区锚定内容行，滚动跟随不丢失），`y` 复制纯文本到剪贴板，单击/Esc 清除；拖到内容区边缘自动滚动跨页。输入区同样支持拖选复制草稿。
 - window signature 完全一致时跳过重复 `SetContentLines`；这不是帧率限制，不应改成基于时间的节流。
@@ -138,7 +138,7 @@ Chat transcript 遵循“完整数据在页面 model、渲染只取可见窗口�
 - 不绕过 daemon 调用核心包。
 - request 必须由 root 通过 `tea.Cmd` 间接调用，避免阻塞 Bubble Tea `Update` 主循环。
 
-轻量请求使用默认超时；`compact` 这类可能触发模型总结的请求使用更长超时，避免 daemon 仍在处理时 TUI 先报本地 deadline。
+`session.compact` 快速返回 `compact_id`，摘要进度与终态由 `session.compact_state` 异步通知，不靠延长 RPC 超时等待模型生成。TUI 按 ID 合并 response／notification，终态不被迟到进度覆盖；RPC 不确定时不自动重发可能收费的压缩。普通后台 `preparing/ready` 不接管 busy、输入或焦点；只有 `wait=manual/hard_limit` 表示阻塞等待，`applied` 才更新占用和成果提示。
 
 ## Update / Cmd 约定
 

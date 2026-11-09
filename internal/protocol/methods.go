@@ -93,7 +93,7 @@ const (
 )
 
 const (
-	NotifyCompactResult = "session.compact_result"
+	NotifyCompactState = "session.compact_state"
 )
 
 const (

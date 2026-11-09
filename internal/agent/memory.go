@@ -3,14 +3,11 @@ package agent
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
-	"github.com/alanchenchen/suna/internal/logging"
-	"github.com/alanchenchen/suna/internal/media"
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
-	"github.com/alanchenchen/suna/internal/tools"
+	"github.com/alanchenchen/suna/internal/runner"
 )
 
 func (a *Agent) enqueueMemoryEvent(ctx context.Context, role model.Role, content string, hadToolCall, toolFailed, guardBlocked, userCorrection bool) {
@@ -24,215 +21,244 @@ func (a *Agent) enqueueMemoryEvent(ctx context.Context, role model.Role, content
 	a.extractQueue.Push(ctx, memory.DefaultUserID, a.modelRef, candidate)
 }
 
-func (a *Agent) replaceRunInputMessage(original, replacement model.Message) {
-	if !messageHasImage(original) {
+func (a *Agent) newContextMemory(summary string) *runner.ContextMemory {
+	state := runner.NewContextMemory(summary)
+	state.Notify = func(event runner.CompactState) {
+		a.stateMu.Lock()
+		notify := a.compactNotify
+		a.stateMu.Unlock()
+		if notify != nil {
+			notify(event)
+		}
+	}
+	state.Ready = a.tryIdleMemory
+
+	return state
+}
+func (a *Agent) tryIdleMemory() {
+	a.stateMu.Lock()
+	if !a.runMu.TryLock() {
+		a.stateMu.Unlock()
 		return
 	}
-	msgs := a.working.Messages()
-	for i := range msgs {
-		if msgs[i].Role == model.RoleUser && msgs[i].Text() == original.Text() && messageHasImage(msgs[i]) {
-			msgs[i] = replacement
-			a.working.SetMessages(msgs)
+	a.idleMemoryDone = make(chan struct{})
+	a.stateMu.Unlock()
+	defer func() {
+		a.stateMu.Lock()
+		a.runMu.Unlock()
+		close(a.idleMemoryDone)
+		a.idleMemoryDone = nil
+		a.stateMu.Unlock()
+	}()
+	state := a.CompactState()
+	a.stateMu.Lock()
+	failed := a.saveErr != nil
+	retired := a.memoryRetired
+	a.stateMu.Unlock()
+	if state.State != "ready" || failed || retired {
+		return
+	}
+	if a.contextMemory != nil {
+		binding, err := a.BindModel(a.modelRef)
+		if err != nil {
+			a.contextMemory.Cancel()
 			return
 		}
+		a.contextMemory.Bind(binding)
+		a.contextMemory.ApplyReady(context.Background(), a.compressor)
 	}
 }
 
-// replaceToolImagesWithSummaries 把 working 中所有带图片块的 user 消息替换为纯文本摘要，
-// 覆盖用户传图（含多图）与 read_image 注入的图片消息。图片块只参与当前 run，
-// 摘要文本（带 source）作为历史引用保留，供后续轮次通过 read_image 读回。
-// 跨轮摘要去重在这里保证：同一图片已有摘要时替换而非追加，
-// 摘要始终反映最近一次读取（size/mime 可能随图片更新变化），且不累积。
-func (a *Agent) replaceToolImagesWithSummaries() {
-	msgs := a.working.Messages()
-	changed := false
-	for i := range msgs {
-		if msgs[i].Role != model.RoleUser || !messageHasImage(msgs[i]) {
-			continue
-		}
-		// 保留原有文本（如用户输入），图片块替换为摘要文本；无文本时摘要直接作为消息内容。
-		text := strings.TrimSpace(msgs[i].Text())
-		summaries := imageSummaries(msgs[i].Content)
-		if len(summaries) > 0 {
-			text = mergeImageSummaries(text, summaries)
-		}
-		msgs[i] = model.NewTextMessage(model.RoleUser, text)
-		changed = true
+func (a *Agent) SetMemoryNotifications(compact func(runner.CompactState)) {
+	a.stateMu.Lock()
+	a.compactNotify = compact
+	a.stateMu.Unlock()
+}
+func (a *Agent) CompactState() runner.CompactState {
+	a.stateMu.Lock()
+	state := a.contextMemory
+	a.stateMu.Unlock()
+	if state == nil {
+		return runner.CompactState{}
 	}
-	if changed {
-		a.working.SetMessages(msgs)
+	return state.Snapshot()
+}
+func (a *Agent) CancelMemory() {
+	a.stateMu.Lock()
+	state := a.contextMemory
+	a.stateMu.Unlock()
+	if state != nil {
+		state.Cancel()
 	}
 }
-
-// mergeImageSummaries 把本轮摘要合并进消息文本：
-// 已有同 source 的摘要替换为新摘要（反映最新读取），没有的追加，保证同一图片只有一条摘要。
-func mergeImageSummaries(text string, summaries []string) string {
-	for _, s := range summaries {
-		source := imageSummarySource(s)
-		if source == "" {
-			continue
-		}
-		if start, end, found := findImageSummary(text, source); found {
-			text = text[:start] + s + text[end:]
-			continue
-		}
-		if text != "" {
-			text += "\n"
-		}
-		text += s
+func (a *Agent) prepareMemory(ctx context.Context) error {
+	a.stateMu.Lock()
+	retired := a.memoryRetired
+	dirty := a.saveErr != nil
+	a.stateMu.Unlock()
+	if retired {
+		return fmt.Errorf("session memory has been disposed")
 	}
-	return text
+	if a.working != nil {
+		a.working.SetMessages(memory.RecoverMessages(a.working.Messages()))
+	}
+	if dirty {
+		if err := a.saveConversationState(ctx); err != nil {
+			return fmt.Errorf("session cannot continue until known results are saved: %w", err)
+		}
+	}
+	if a.contextMemory == nil {
+		a.stateMu.Lock()
+		a.contextMemory = a.newContextMemory(a.summary)
+		a.stateMu.Unlock()
+	}
+	return nil
 }
-
-// imageSummarySource 提取摘要文本中的 source 引用（如 source=attachment:xxx.png）。
-func imageSummarySource(summary string) string {
-	start := strings.Index(summary, "source=")
-	if start < 0 {
-		return ""
-	}
-	source := summary[start:]
-	if end := strings.IndexAny(source, "]\n"); end >= 0 {
-		source = source[:end]
-	}
-	return strings.TrimSuffix(source, "]")
-}
-
-// findImageSummary 在文本中定位包含指定 source 的摘要行，返回其起止字节偏移。
-func findImageSummary(text, source string) (int, int, bool) {
-	for _, line := range strings.Split(text, "\n") {
-		if strings.Contains(line, source) {
-			start := strings.Index(text, line)
-			return start, start + len(line), true
-		}
-	}
-	return 0, 0, false
-}
-
-// imageSummaries 把图片块转换为带 source 的摘要文本，格式与 daemon 端 attachmentSummary 一致。
-func imageSummaries(blocks []model.ContentBlock) []string {
-	var out []string
-	for _, b := range blocks {
-		if b.Type != model.ContentImage || b.Media == nil {
-			continue
-		}
-		ref := b.Media
-		parts := []string{fmt.Sprintf("[image: %s", ref.Name)}
-		if ref.MimeType != "" {
-			parts = append(parts, ref.MimeType)
-		}
-		if ref.Size > 0 {
-			parts = append(parts, media.FormatSize(ref.Size))
-		}
-		switch ref.Kind {
-		case model.MediaAttachment:
-			if ref.Name != "" {
-				parts = append(parts, "source=attachment:"+ref.Name)
-			}
-		case model.MediaPath:
-			if ref.Path != "" {
-				parts = append(parts, "source="+ref.Path)
-			}
-		case model.MediaURL:
-			if ref.URL != "" {
-				parts = append(parts, "source="+ref.URL)
-			}
-		}
-		out = append(out, strings.Join(parts, ", ")+"]")
-	}
-	return out
-}
-
-func messageHasImage(msg model.Message) bool {
-	for _, block := range msg.Content {
-		if block.Type == model.ContentImage && block.Media != nil {
-			return true
-		}
-	}
-	return false
-}
-
-func (a *Agent) saveConversationState(ctx context.Context) {
-	if a.stateStore == nil || a.working == nil || a.sessionID == "" {
+func (a *Agent) finishMemory() {
+	if a.working == nil {
 		return
 	}
-	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-	defer cancel()
-	msgs := a.working.Messages()
-	if err := a.stateStore.Save(saveCtx, a.sessionID, strings.TrimSpace(a.sessionState), msgs, a.toolSummary); err != nil {
-		logging.Error("agent", "save_session_state_failed", err, nil)
-	}
-	if a.sessionStore != nil {
-		if err := a.sessionStore.SetMessageCount(saveCtx, a.sessionID, len(visibleMessagesForCount(msgs))); err != nil {
-			logging.Error("agent", "save_session_meta_failed", err, nil)
-		}
-	}
+	// 当前 run 结束后才替换 RAM 图片；DB 检查点早已使用同一文字投影。
+	a.working.SetMessages(memory.ProjectMessages(a.working.Messages()))
 }
 
-func (a *Agent) commitCompactState(ctx context.Context, sessionState string) error {
-	sessionState = strings.TrimSpace(sessionState)
-	if sessionState == "" {
-		return nil
+func (a *Agent) saveConversationState(ctx context.Context) error {
+	summary := a.summary
+	if a.contextMemory != nil {
+		summary = a.contextMemory.Summary()
 	}
-	a.sessionState = sessionState
-	if a.stateStore == nil || a.working == nil || a.sessionID == "" {
+	err := a.persistMemory(ctx, summary, a.working.Messages())
+	a.stateMu.Lock()
+	a.saveErr = err
+	a.stateMu.Unlock()
+	return err
+}
+func (a *Agent) persistMemory(ctx context.Context, summary string, messages []memory.Message) error {
+	if a.stateStore == nil || a.sessionID == "" {
 		return nil
 	}
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	if err := a.stateStore.Save(saveCtx, a.sessionID, a.sessionState, a.working.Messages(), a.toolSummary); err != nil {
-		logging.Error("agent", "save_compact_state_failed", err, nil)
+	if err := a.stateStore.Save(saveCtx, a.sessionID, summary, messages); err != nil {
 		return err
 	}
 	if a.sessionStore != nil {
-		if err := a.sessionStore.SetMessageCount(saveCtx, a.sessionID, len(visibleMessagesForCount(a.working.Messages()))); err != nil {
-			logging.Error("agent", "save_session_meta_failed", err, nil)
-			return err
-		}
+		a.sessionStore.SetMessageCount(saveCtx, a.sessionID, len(visibleMessagesForCount(messages)))
 	}
 	return nil
 }
 
-func visibleMessagesForCount(msgs []model.Message) []model.Message {
-	visible := make([]model.Message, 0, len(msgs))
-	for _, msg := range msgs {
-		if (msg.Role == model.RoleUser || msg.Role == model.RoleAssistant) && strings.TrimSpace(msg.Text()) != "" {
-			visible = append(visible, msg)
+func (a *Agent) commitMemory(ctx context.Context, summary string, messages []memory.Message) error {
+	if err := a.persistMemory(ctx, summary, messages); err != nil {
+		return err
+	}
+	a.summary = summary
+	return nil
+}
+func visibleMessagesForCount(messages []memory.Message) []memory.Message {
+	out := make([]memory.Message, 0, len(messages))
+	for _, m := range messages {
+		if (m.Role == model.RoleUser || m.Role == model.RoleAssistant) && (m.Text() != "" || m.Observation != nil) {
+			out = append(out, m)
 		}
 	}
-	return visible
+	return out
+}
+func (a *Agent) maintainMemory(ctx context.Context, manual bool) error {
+	if err := a.prepareMemory(ctx); err != nil {
+		return err
+	}
+	binding, err := a.router.Bind(a.modelRef)
+	if err != nil {
+		return err
+	}
+	system, err := a.buildSystemPrompt(ctx)
+	if err != nil {
+		return err
+	}
+	project := a.requestProjection(ctx)
+	req := model.CompletionRequest{System: system, Tools: a.buildToolDefs(), MaxTokens: binding.MaxOutputTokens()}
+	return a.contextMemory.Maintain(ctx, a.compressor, runner.CompactRequest{Binding: binding, Invocation: model.Invocation{SessionScope: model.SessionScope(a.sessionID)}, Working: a.working, Request: req, Project: project, Coefficient: a.calibrator.Coefficient(binding.Ref()), Calibrated: a.calibrator.Calibrated(binding.Ref()), Commit: a.commitMemory, Usage: func(u *model.Usage) { a.RecordUsage(context.WithoutCancel(ctx), binding.ModelID(), u) }}, manual)
 }
 
-func (a *Agent) addToolSummary(name string, result tools.Result) {
-	if name == "" {
-		return
+func (a *Agent) ReserveCompact(ctx context.Context) (string, func() error, error) {
+	if !a.tryRunLock(ctx) {
+		return "", nil, fmt.Errorf("session is already running")
 	}
-	status := "success"
-	if result.IsError {
-		status = "error"
+	a.syncRuntime()
+	if err := a.prepareMemory(ctx); err != nil {
+		a.runMu.Unlock()
+		return "", nil, err
 	}
-	summary := summarizeToolResult(result.Content)
-	if summary == "" {
-		summary = "completed"
+	// 预留ID之前先失效旧模型候选，避免后续Bind取消掉已回给客户端的ID。
+	binding, err := a.router.Bind(a.modelRef)
+	if err != nil {
+		a.runMu.Unlock()
+		return "", nil, err
 	}
-	a.toolSummary = a.toolSummary.Add(memory.ToolSummaryItem{Name: name, Status: status, Summary: summary})
+	a.contextMemory.Bind(binding)
+	id := a.contextMemory.ReserveManual()
+	runCtx, cancel := context.WithCancel(ctx)
+	a.cancelMu.Lock()
+	a.cancelFn = cancel
+	a.cancelMu.Unlock()
+	run := func() error {
+		defer a.runMu.Unlock()
+		defer cancel()
+		defer func() { a.cancelMu.Lock(); a.cancelFn = nil; a.cancelMu.Unlock() }()
+		return a.maintainMemory(runCtx, true)
+	}
+	return id, run, nil
+}
+func (a *Agent) Compact(ctx context.Context) error {
+	_, run, err := a.ReserveCompact(ctx)
+	if err != nil {
+		return err
+	}
+	return run()
 }
 
-func summarizeToolResult(content string) string {
-	content = strings.TrimSpace(content)
-	if content == "" {
-		return ""
+// StopMemory 在既有 stateOps 保护下结束候选和已开始的短空闲提交，不永久退休。
+// 删除尚可能失败、卸载尚需复验时使用；调用期间不能再准入新的 run。
+func (a *Agent) StopMemory() {
+	a.stateMu.Lock()
+	state := a.contextMemory
+	a.stateMu.Unlock()
+	if state != nil {
+		state.Stop()
 	}
-	lines := strings.Split(content, "\n")
-	compact := make([]string, 0, 2)
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+	a.runMu.Lock()
+	a.runMu.Unlock()
+}
+
+func (a *Agent) DisposeMemory() {
+	a.stateMu.Lock()
+	a.memoryRetired = true
+	a.stateMu.Unlock()
+	a.StopMemory()
+}
+
+func (a *Agent) HasUnsavedMemory() bool {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	return a.saveErr != nil
+}
+
+// tryRunLock 只等待已开始的短空闲提交；活跃run仍即时拒绝，不能排第二份任务。
+func (a *Agent) tryRunLock(ctx context.Context) bool {
+	for {
+		a.stateMu.Lock()
+		idle := a.idleMemoryDone
+		if idle == nil {
+			ok := a.runMu.TryLock()
+			a.stateMu.Unlock()
+			return ok
 		}
-		compact = append(compact, line)
-		if len(compact) >= 2 {
-			break
+		a.stateMu.Unlock()
+		select {
+		case <-idle:
+		case <-ctx.Done():
+			return false
 		}
 	}
-	return strings.Join(compact, " | ")
 }

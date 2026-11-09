@@ -49,6 +49,9 @@ func (t *TUI) handleCommand(input string) tea.Cmd {
 	case "/sessions":
 		return t.handleSessions(parts)
 	case "/compact":
+		t.manualCompactPending = true
+		t.manualCompactID = ""
+		t.manualCompactEvents = nil
 		t.compactStartedAt = time.Now()
 		t.chat.Compacting = true
 		t.chat.Loading = true

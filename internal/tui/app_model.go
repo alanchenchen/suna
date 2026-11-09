@@ -123,7 +123,13 @@ type TUI struct {
 	showHelp bool
 
 	// Compact 计时，只用于压缩阶段的状态行展示。
-	compactStartedAt time.Time
+	compactStartedAt     time.Time
+	compactState         protocol.CompactState
+	compactReceivedAt    time.Time
+	manualCompactID      string
+	manualCompactPending bool
+	manualCompactEvents  []protocol.CompactState
+	compactTerminalID    string
 
 	// Usage/context 统计，只用于状态栏展示。
 	sessionInputTok  int

@@ -84,6 +84,39 @@ func (m *Model) FinishCancellingTools(now time.Time) {
 	}
 }
 
+// MarkToolsInterrupted 收尾缺少已保存结果的调用，只表示结果未确认，不伪报取消或成功。
+func (m *Model) MarkToolsInterrupted(now time.Time) {
+	finish := func(entry *toolview.Entry) {
+		if entry == nil || (entry.Status != toolview.StatusRunning && entry.Status != toolview.StatusCancelling) {
+			return
+		}
+		m.markToolEntryDirty(entry)
+		entry.Status = toolview.StatusUnknown
+		entry.EndedAt = now
+		if !entry.StartedAt.IsZero() {
+			entry.Duration = now.Sub(entry.StartedAt)
+		}
+		if entry.RawName == "skill_load" {
+			if view := m.findSkillLoad(entry.ID); view != nil {
+				view.Status, view.EndedAt, view.Duration = "unknown", now, entry.Duration
+			}
+		}
+		delete(m.ActiveTools, entry.ID)
+		delete(m.ToolStartTimes, entry.ID)
+	}
+	for _, entry := range m.ActiveTools {
+		finish(entry)
+	}
+	// attach 恢复的条目不登记为正在执行，但 failed 仍要结束其临时展示。
+	for _, message := range m.Messages {
+		if block, ok := message.Content.(*toolview.Block); ok {
+			for _, entry := range block.Entries {
+				finish(entry)
+			}
+		}
+	}
+}
+
 // MoveExpandedBlockCursor 在展开的工具块内移动条目光标，并重置详情滚动位置。
 // 只有展开态有意义；未展开或块内没有可展开条目时不做任何事。
 func (m *Model) MoveExpandedBlockCursor(delta int) {
@@ -108,7 +141,7 @@ func (m *Model) ExpandedBlockEntries() []*toolview.Entry {
 	if m == nil || m.ExpandedBlock == nil {
 		return nil
 	}
-	if entries := toolview.VisibleMainEntries(m.ExpandedBlock); len(entries) > 0 {
+	if entries := toolview.ExpandableMainEntries(m.ExpandedBlock); len(entries) > 0 {
 		return entries
 	}
 	entries := make([]*toolview.Entry, 0, len(m.ExpandedBlock.Order))

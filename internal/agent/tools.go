@@ -12,6 +12,7 @@ import (
 
 	"github.com/alanchenchen/suna/internal/guard"
 	"github.com/alanchenchen/suna/internal/logging"
+	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/prompt"
 	"github.com/alanchenchen/suna/internal/runner"
@@ -349,7 +350,7 @@ func (e subtaskExecutor) namespaced(id string) string {
 func (a *Agent) buildGuardReviewContext(call runner.ToolExecution) guard.ReviewContext {
 	messages := call.WorkingMessages
 	if len(messages) == 0 && a.working != nil {
-		messages = a.working.Messages()
+		messages = memory.ModelMessages(a.working.Messages())
 	}
 	return guard.ReviewContext{Evidence: buildGuardEvidence(messages, guardExecutionRationale(call))}
 }

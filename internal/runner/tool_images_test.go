@@ -28,7 +28,7 @@ func imageBlock(path string) model.ContentBlock {
 
 func TestInjectToolImagesAddsSingleUserMessage(t *testing.T) {
 	working := memory.NewWorkingMemory()
-	working.AddMessage(model.NewTextMessage(model.RoleUser, "analyze"))
+	working.AddMessage(memory.NewTextMessage(model.RoleUser, "analyze"))
 	r := &Runner{Executor: imageExecutor{results: []tools.Result{
 		{Content: "image loaded", Images: []model.ContentBlock{imageBlock("/a/shot.png")}},
 		{Content: "image loaded", Images: []model.ContentBlock{imageBlock("/b/other.png")}},
@@ -52,7 +52,7 @@ func TestInjectToolImagesAddsSingleUserMessage(t *testing.T) {
 
 func TestInjectToolImagesDeduplicatesBySource(t *testing.T) {
 	working := memory.NewWorkingMemory()
-	working.AddMessage(model.NewTextMessage(model.RoleUser, "analyze"))
+	working.AddMessage(memory.NewTextMessage(model.RoleUser, "analyze"))
 	r := &Runner{}
 	r.toolImages = append(r.toolImages, imageBlock("/a/shot.png"), imageBlock("/a/shot.png"))
 	r.injectToolImages(working)
@@ -70,7 +70,7 @@ func TestInjectToolImagesDeduplicatesBySource(t *testing.T) {
 func TestInjectToolImagesInjectsAcrossTurns(t *testing.T) {
 	working := memory.NewWorkingMemory()
 	// 历史里已有同 source 的摘要（上一轮 read_image 后摘要化的结果）。
-	working.AddMessage(model.NewTextMessage(model.RoleUser, "see [image: shot.png, image/png, source=/a/shot.png]"))
+	working.AddMessage(memory.NewTextMessage(model.RoleUser, "see [image: shot.png, image/png, source=/a/shot.png]"))
 	r := &Runner{}
 	r.toolImages = append(r.toolImages, imageBlock("/a/shot.png"))
 	r.injectToolImages(working)

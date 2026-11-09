@@ -11,6 +11,23 @@ func (t *TUI) handleProtocolResultMsg(msg tea.Msg) tea.Cmd {
 	before := t.notificationBodyState()
 	schedule := false
 	switch m := msg.(type) {
+	case compactAcceptedMsg:
+		if t.manualCompactPending && (m.SessionID == "" || m.SessionID == t.currentSession.ID) {
+			t.manualCompactID = m.ID
+			var saved protocol.CompactState
+			for _, state := range t.manualCompactEvents {
+				if state.CompactID == m.ID {
+					saved = state
+					break
+				}
+			}
+			t.manualCompactEvents = nil
+			if saved.CompactID != "" {
+				t.handleCompactStateNotification(saved)
+				schedule = true
+			}
+		}
+
 	case steerResultMsg:
 		clientMsgID := m.Message.ClientMsgID
 		if clientMsgID == "" {

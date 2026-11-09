@@ -136,7 +136,7 @@ daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 
 | `agent.interaction_resolved` | ask/guard 已处理，其他 UI 应关闭残留交互。 |
 | `session.user_message` | 同 session 新增的正式 user turn；运行中消息只有在 applied 后才通过该通知出现。 |
 | `session.updated` | 全局轻量 Session Catalog 增量；session metadata/status/client_count 变化时向所有已连接且完成握手的客户端广播。 |
-| `session.compact_result` | compact running / done / error / result 状态；带 `session_id` 标识归属。 |
+| `session.compact_state` | 摘要候选的 preparing / ready / applied / skipped / failed / cancelled；通过 `wait` 区分后台与阻塞等待，带 `session_id` 和 `compact_id`。 |
 | `config.state` | 配置变更后的主动状态通知。 |
 | `config.models_result` | `config.discoverModels` 的异步结果；只发给发起请求的连接。 |
 | `memory.state` | memory 变更后的主动状态通知；只发给发起请求的连接。 |
@@ -148,7 +148,7 @@ daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 
 
 每个 notification 的完整 payload 字段、类型、语义和客户端职责见下方 [Notification 字段参考](#notification-字段参考)。
 
-`agent.delta`、`agent.run`、`agent.steering`、`agent.usage`、`agent.tool_start`、`agent.tool_guard`、`agent.tool_end` 与 `session.compact_result` 均携带 `session_id` 字段。单 session 客户端可忽略该字段；多 session 并存的客户端用它区分事件归属，避免把不同 session 的事件路由到错误视图。
+`agent.delta`、`agent.run`、`agent.steering`、`agent.usage`、`agent.tool_start`、`agent.tool_guard`、`agent.tool_end` 与 `session.compact_state` 均携带 `session_id` 字段。单 session 客户端可忽略该字段；多 session 并存的客户端用它区分事件归属，避免把不同 session 的事件路由到错误视图。
 
 `mcp.list` 与 `mcp.updated` 采用相同的 snapshot + delta 语义。MCP server 的 `state` 只能是 `disabled / starting / active / error`；daemon core ready 不等待 MCP，只有 `active` server 的工具进入模型 Tool Catalog。多个 server 短时间完成时，Agent 会合并刷新目录，并在目录发布完成后再发送 `active` 增量。
 
@@ -243,15 +243,15 @@ daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 
 | | | `client_msg_id` | string? | 客户端幂等 ID。 | 与本地请求关联。 |
 | | | `parts` | array? | 消息内容 parts（`type` / `text` / `source`）。 | 展示用户消息；**直接发送时本连接不会收到**（发送方应本地渲染）；steering applied 时所有 attached 客户端都会收到。 |
 | `session.updated` | 全局 | `session` | object | `SessionInfo`：`id` / `title` / `cwd` / `model_ref` / `message_count` / `created_at` / `updated_at` / `last_attached_at` / `status` / `client_count`。 | 按 `id` 合并 metadata、`status` 与 `client_count`。 |
-| `session.compact_result` | session / 请求方 | `session_id` | string? | 事件归属 session。 | 多 session 客户端据此路由。 |
-| | | `running` | bool? | 是否正在压缩。 | `true` 进入压缩展示，`false` 退出。 |
-| | | `error` | string? | 压缩错误信息。 | 展示错误。 |
-| | | `before_tokens` / `after_tokens` | int | 压缩前后 token；仅压缩完成时有效。 | 展示压缩效果。 |
-| | | `context_window` | int | 模型上下文窗口；仅压缩完成时有效。 | 计算比例。 |
-| | | `turns_compressed` | int | 压缩的轮数；仅压缩完成时有效。 | 展示统计。 |
-| | | `summary_tokens` | int | Session State 摘要 token；仅压缩完成时有效。 | 展示统计。 |
-| | | `truncated_outputs` | int | 被截断的工具输出数；仅压缩完成时有效。 | 展示统计。 |
-| | | `noop` | bool? | 是否无需压缩。 | 展示提示。 |
+| `session.compact_state` | session | `session_id` | string | 事件归属 session。 | 按 session 路由。 |
+| | | `compact_id` | string | 候选／本次手动操作的关联 ID。 | 按 ID 合并，终态不被迟到进度覆盖。 |
+| | | `kind` | string? | `tools` / `history`；尚未选到来源时可缺省。 | 区分工具摘要与较早对话摘要。 |
+| | | `state` | string | `preparing` / `ready` / `applied` / `skipped` / `failed` / `cancelled`。 | 只有 `applied` 表示历史已替换；后四项为终态。 |
+| | | `wait` | string? | 缺省表示可选后台；`manual` / `hard_limit` 表示当前阻塞等待原因。 | 不因后台 preparing/ready 抢 busy、焦点或 Loading。 |
+| | | `prepare_elapsed_ms` / `wait_elapsed_ms` | int? | 准备耗时／阻塞等待耗时，毫秒。 | 不混作前台模型响应速度。 |
+| | | `result` | object? | 仅 `applied` 携带 `{before_tokens, after_tokens, context_window}`；为完整输入占用的估算前后值和模型总窗口。 | 此时才更新空间成果；ready 不下调 ctx。 |
+| | | `reason` | string? | 跳过原因，如 `no_source` / `no_gain` / `source_changed`。 | 未知值只展示通用未采用，不解析自由文本。 |
+| | | `error` | string? | 生成或保存诊断。 | 保留原诊断；普通后台生成失败不等于主 run 失败，历史保存失败需停止后续工作。 |
 | `config.state` | 全局 | `models` | array | 模型条目数组。 | 重建模型列表。 |
 | | | `active_model` | string | 当前默认模型 ref。 | 更新当前模型展示。 |
 | | | `locale` / `theme` / `guard_mode` / `workspace` | string? | 通用配置。 | 同步 UI 设置。 |
@@ -326,7 +326,7 @@ Feature `agent.steer.text` 支持 current run owner 在运行期间调用 `agent
 - 完整模型响应结束后才可能应用；Thinking 结束不是独立注入点。
 - 模型返回 Tool Calls 时，必须等同一批全部 Tool Result 写回后再应用，不能破坏调用配对。
 - 模型返回纯文本且队列非空时，先保留该 assistant 响应，再应用消息并继续同一个 run。
-- 自动 Compact 期间可以排队；消息在 Compact 提交后进入 Working Memory，不会被折叠进刚生成的 Session State。
+- 后台摘要准备不改变排队规则；新用户要求尚未被模型消费时，普通候选暂缓采用。硬容量等待结束后、下一主请求前会再次吸收队列，新增消息不被候选旧快照覆盖。
 - AskUser / Guard 等待、cancelling 和终态不接受新消息；立即停止仍使用 `agent.cancel`。
 
 `agent.steer` 第一版只接受 text parts。`client_msg_id` 在单个 run 内用于幂等：相同 ID 与相同文本返回 canonical 状态，不重复排队；相同 ID 与不同文本返回冲突。daemon 通过 `runtime.hello.limits` 声明消息数和总字节上限。
@@ -479,9 +479,11 @@ agent.run state=failed
 `session.attach` 是 Resume 和 Join Active 的共同原语，method response 直接返回 snapshot：
 
 - `session`：session metadata，包括 cwd、`model_ref`、status、client_count 和 message_count。
-- `messages`：最近可见 user/assistant 文本消息。每条含 `role`（user/assistant）、`content`（文本）与 `kind`（展示语义：`text`/`media`）。`kind=media` 表示媒体引用摘要（如 `[image: ...]`），文本含 `source` 供模型通过 `read_image` 工具读回原图，UI 应展示为媒体样式（如图片图标 + 文件名）而非普通对话文本；`role` 表达对话结构（谁说的），`kind` 表达消息性质（普通文本还是媒体摘要），两者正交，`assistant` 消息恒为 `text`。
-- `compacted`：较早上下文是否已压缩为 Session State。
-- `tool_summary`：上一轮有界工具摘要，仅供 UI 展示。
+- `messages`：当前有效历史的展示投影，不是仅最近几条文本，也不是完整事件录像。按原顺序包含 `user` / `assistant` / `tool`；通用字段为 `role / content / kind`，`kind=text/media` 区分普通文本和带 `source` 的媒体引用。
+  - 未压缩声明含 `tool_calls[{id,name,arguments,intent?}]`；工具结果含 `tool_call_id / tool_status / truncated`。客户端按 ID 配对，结果展示应沿实时工具的上限，不把缺失状态猜成成功。
+  - 已压缩工具只含 `observed_tools[{name,intent?,status?}]` 和保留的助手正文，不含观察全文、旧参数／结果或可永久复用的调用 ID。按消息内顺序展示简洁工具条目，不制造工具开始／结束事件、计时或子任务运行。
+- `compacted`：是否存在较早历史的连续性摘要；不等同于“曾整理过工具”。不返回摘要全文供 UI 展开。
+- `compact`：可选 `CompactState`，只恢复当前 `preparing/ready` 轻量状态，不重放旧成果。
 - `current_run`：Join running session 时的轻量当前 run 视图，含稳定 `run_id`、`state` 和实时 `can_control`；`state=cancelling` 时 `can_control=false`。客户端应避免让同一 `run_id` 的迟到快照重新激活已终态运行。`assistant_buffer`/`reasoning_buffer` 是 attach 时刻的流式缓冲快照；`waiting_type`（`ask`/`guard`）表示 run 正在等待的交互类型。
 
 `session.attach.require_active=true` 只用于 Join Active 的陈旧 UI 防护；Resume 应传 false 或省略。
@@ -494,9 +496,23 @@ snapshot 不保证完整 tool timeline / event replay。
 
 ### `session.compact`
 
-`session.compact_result` 当前继续承载手动 compact 结果和 auto compact 的 running/error 状态。
+当前 attached session 空闲且通过既有运行控制准入时，调用 `session.compact`（无参数或 `{}`）。method 只做准入并快速返回：
 
-未来如果引入持久 Run/任务队列，可以把 compact lifecycle 逐步迁移到 `agent.run phase=compact`，但当前不强制合并，避免破坏现有 TUI compact 语义。
+```json
+{"compact_id":"COMPACT_ID"}
+```
+
+随后通过 `session.compact_state` 接收生成、等待和终态。优先复用已有候选；无候选才选来源，不保证产生新模型请求或成功释放空间。手动运行的控制权／取消仍走 `agent.run phase=compact` 和 `agent.cancel`，具体摘要结果以 `CompactState` 为准，不从 run 的 `done` 推断一定已采用。
+
+客户端必须处理：
+
+- response 与 notification 可能乱序，按 `compact_id` 关联；同 ID 的终态不得被迟到 preparing/ready 覆盖。
+- `preparing/ready` 且无 `wait` 只是后台维护，不把主任务改成 busy，也不更新 ctx。`applied` 才说明已保存并替换历史。
+- 主任务触及硬容量时，`wait=hard_limit` 可能伴随该主 run 的 `phase=compact`；它不是独立手动请求。真正失败仍通过原 run 的失败语义报告。
+- `skipped/failed/cancelled` 不代表已释放空间；取消也不能撤销已经完成的采用。
+- RPC 超时或断线不自动重发可能收费的压缩；重连先读取快照，缺少在途状态不等于应自动补发。
+
+当前 Catalog 使用 `session.compact_state`；旧 `session.compact_result` 不再发送。客户端按 `runtime.hello.catalog.notifications` 判断，不按 Runtime 版本号猜测。用户层流程见[记忆与后台压缩](memory.md)。
 
 ---
 

@@ -13,7 +13,7 @@ func (m *sessionManager) runtimeCanUnloadNoLock(sessionID string, rt *sessionRun
 		!m.deleting[sessionID] &&
 		len(rt.clients) == 0 &&
 		rt.status == sessionIdle &&
-		rt.stateOps == 0
+		rt.stateOps == 0 && !rt.agent.HasUnsavedMemory()
 }
 
 // invalidateRuntimeUnloadNoLock 使此前安排的延迟卸载失效。
@@ -53,14 +53,28 @@ func (m *sessionManager) unloadRuntimeAfter(sessionID string, rt *sessionRuntime
 	<-timer.C
 
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.runtimeUnloadVersion[sessionID] != version || !m.runtimeCanUnloadNoLock(sessionID, rt) {
+		m.mu.Unlock()
 		return
 	}
-	// session state 已在 run 结束时持久化；删除 runtime map 引用即可让 Agent、working memory
-	// 和 transcript 在后续 GC 中释放。重新 attach 时会从 SQLite 恢复，不删除 session/state/附件。
+	// 沿用 stateOps 阻止新 run/delete；取消可等待正在落库的空闲提交，不能占全局 manager 锁。
+	rt.stateOps++
+	m.mu.Unlock()
+	rt.agent.StopMemory()
+
+	m.mu.Lock()
+	rt.stateOps--
+	if m.runtimeUnloadVersion[sessionID] != version || !m.runtimeCanUnloadNoLock(sessionID, rt) {
+		m.scheduleRuntimeUnloadNoLock(sessionID)
+		m.mu.Unlock()
+		return
+	}
+	// 候选与短提交已结束，且原卸载条件仍成立；先移除 map，后续 attach 只会创建新 runtime。
+	// 已有持久状态和附件不删除；锁外永久退休只作用于旧对象，不会阻塞其他 session。
 	delete(m.runtime, sessionID)
 	delete(m.runtimeUnloadVersion, sessionID)
+	m.mu.Unlock()
+	rt.agent.DisposeMemory()
 }
 
 func (m *sessionManager) finishStateOpNoLock(sessionID string, rt *sessionRuntime) {

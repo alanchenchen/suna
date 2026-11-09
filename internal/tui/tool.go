@@ -20,7 +20,7 @@ func (t *TUI) renderToolBlock(block *toolBlock) string {
 	// 保证块渲染静态可缓存（滚动时 transcript 窗口签名仍可复用）。
 	// 纯 subtask 块没有主条目，RenderBlock 会返回空（面板由 renderSubtaskBlock 负责），
 	// 因此不为它构建详情，避免白算一次长结果的行索引。
-	hasMain := block != nil && len(toolview.VisibleMainEntries(block)) > 0
+	hasMain := block != nil && len(toolview.ExpandableMainEntries(block)) > 0
 	if block != nil && block == t.chat.ExpandedBlock && t.chat.ExpandedBoxKind == "tool" && hasMain {
 		deps.Expanded = true
 		deps.ExpandedHint = t.tr("tui.tool.detail_expanded")
@@ -65,6 +65,8 @@ func (t *TUI) toolRenderDeps() toolview.RenderDeps {
 			SearchTruncated:      t.tr("tui.tool.search.truncated"),
 			Cancelling:           t.tr("tui.tool.cancelling"),
 			Cancelled:            t.tr("tui.tool.cancelled"),
+			ResultUnknown:        t.tr("tui.tool.result_unknown"),
+			Compacted:            t.tr("tui.tool.compacted"),
 			ExecBadge:            t.tr("tui.tool.exec.badge"),
 			ExecRunCommand:       t.tr("tui.tool.exec.run_command"),
 			ExecStartTask:        t.tr("tui.tool.exec.start_task"),
@@ -222,7 +224,7 @@ func (t *TUI) moveExpandedBlockCursor(delta int) { t.chat.MoveExpandedBlockCurso
 // 纯 subtask 块的 tool 盒子不渲染详情窗口，导航由 subtask 面板自身承担。
 func (t *TUI) expandedBlockHasMainEntries() bool {
 	block := t.chat.ExpandedBlock
-	return block != nil && t.chat.ExpandedBoxKind == "tool" && len(toolview.VisibleMainEntries(block)) > 0
+	return block != nil && t.chat.ExpandedBoxKind == "tool" && len(toolview.ExpandableMainEntries(block)) > 0
 }
 
 // expandedBlockVisible 报告展开块当前是否在 transcript 视窗内。

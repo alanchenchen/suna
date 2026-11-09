@@ -308,22 +308,14 @@ Suna 不根据 provider 名称或 endpoint 自动猜测，也不会在 401 后�
 
 ```text
 context_window = input tokens + output tokens 的总窗口
-max_output_tokens = 单次请求可用的最大输出预算，也是输入预算里的完整输出预留
-usable_input_budget ≈ context_window - max_output_tokens - margin
-compact_context_tokens = estimated_context_tokens + estimator_safety_tokens
+max_output_tokens = 普通模型请求的硬输出上限，也是输入预算里的完整输出预留
 ```
 
-其中 `margin` 是小的 context 边界余量：`max(2048, context_window / 200)`。自动 compact 判断不会直接使用 provider 返回的 usage，而是使用 Suna 请求前估算的输入上下文：
+Suna 会扣除输出预留、边界余量和估算安全垫，再规划可用输入空间。计量包含 system、工具定义、历史摘要、消息、画像背景和图片；本地估算由实际 input usage 校准，而不是等服务报告超窗再删内容。
 
-```text
-estimated_context_tokens = Suna 对本次请求输入上下文的本地估算
-estimator_safety_tokens = max(8192, estimated_context_tokens / 16)
-compact_context_tokens = estimated_context_tokens + estimator_safety_tokens
-```
+自动维护会提前准备摘要：先整理较早工具，必要时才归纳较早对话；不会等到输入预算用尽才开始。具体水位、校准公式和硬容量等待规则统一见[记忆与后台压缩](memory.md#容量和调度)。TUI `ctx` 的分母仍是总窗口 `context_window`，不等于安全输入预算，因此界面百分比不能直接对照准备水位。
 
-当 `compact_context_tokens > usable_input_budget` 时，Suna 会主动 compact。TUI 的 `ctx` 展示使用 raw `estimated_context_tokens`；provider 返回的 `input_tokens` / `context_tokens` 保留用于 usage 统计、计费对账和诊断。Suna 不再使用 `context_window * 0.8` 这类大比例保守阈值，也不依赖 provider context overflow 后的 fallback retry 作为常规策略。
-
-所有 LLM 请求都会默认使用当前模型配置的 `max_output_tokens`，包括主 chat、subtask、Guard smart review、Skill review、Session State compact 和用户画像 memory compact。prompt/schema 负责约束内部请求输出格式；`max_output_tokens` 表示硬输出上限，同时也是上下文预算里的完整输出预留。这个策略更安全但会更早触发 compact；Suna 当前不提供单独的 `reserved_output_tokens` / `default_output_tokens` 字段。
+主 chat、subtask、Guard／Skill review 和用户画像整理等请求默认使用模型的 `max_output_tokens`。会话摘要生成则取模型最大输出与该次压缩请求剩余安全容量的较小值，避免来源与输出合起来超窗。Suna 当前没有单独的 `reserved_output_tokens` / `default_output_tokens` 或压缩水位配置项。
 
 填写建议：
 

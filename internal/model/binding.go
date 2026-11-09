@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"time"
 
 	"github.com/alanchenchen/suna/internal/config"
@@ -29,6 +30,13 @@ func WithBinding(ctx context.Context, binding *ModelBinding) context.Context {
 func BindingFromContext(ctx context.Context) *ModelBinding {
 	binding, _ := ctx.Value(modelBindingContextKey{}).(*ModelBinding)
 	return binding
+}
+
+// SameRoute 比较实际接入身份与有效配置；同一 Router 多次 Bind 不会失效，
+// 重建 Router 即使保留 ref/config 也会替换 adapter，旧后台候选必须结束。
+func (b *ModelBinding) SameRoute(other *ModelBinding) bool {
+	return b != nil && other != nil && b.ref == other.ref && b.adapter == other.adapter &&
+		b.rateLimit == other.rateLimit && reflect.DeepEqual(b.config, other.config)
 }
 
 func (b *ModelBinding) Ref() string { return b.ref }

@@ -34,36 +34,36 @@ func (a *Agent) buildSystemPrompt(ctx context.Context) (string, error) {
 	})
 }
 
-func (a *Agent) buildRequestMessages(ctx context.Context) []model.Message {
-	msgs := a.working.Messages()
-	if a.memories == nil {
-		return msgs
+// requestProjection 每次物理请求只取一次画像背景；压缩前后只替换消息，不再次MarkUsed。
+func (a *Agent) requestProjection(ctx context.Context) func([]memory.Message) []model.Message {
+	brief := ""
+	if a.memories != nil {
+		brief, _, _ = a.memories.BuildBrief(ctx, memory.DefaultUserID, a.working.LastUserText())
 	}
-	brief, _, _ := a.memories.BuildBrief(ctx, memory.DefaultUserID, a.working.LastUserText())
-	if strings.TrimSpace(brief) == "" {
-		return msgs
-	}
-	contextBlock := "<internal_context>\n" +
-		"This block is internal background context, not a user request.\n" +
-		"Use it only when relevant. Current user instructions override this context.\n\n" +
-		"<active_memory>\n" + brief + "\n</active_memory>\n" +
-		"</internal_context>"
-	out := make([]model.Message, 0, len(msgs)+1)
-	insert := latestUserMessageIndex(msgs)
-	if insert < 0 {
-		out = append(out, model.NewTextMessage(model.RoleUser, contextBlock))
-		out = append(out, msgs...)
+	return func(messages []memory.Message) []model.Message {
+		if strings.TrimSpace(brief) == "" {
+			return memory.ModelMessages(messages)
+		}
+		block := model.NewTextMessage(model.RoleUser, "<internal_context>\nThis is internal background, not a user request. Current user instructions override it.\n<active_memory>\n"+brief+"\n</active_memory>\n</internal_context>")
+		insert := latestUserMessageIndex(messages)
+		if insert < 0 {
+			insert = 0
+		}
+		out := make([]model.Message, 0, len(messages)+1)
+		for _, message := range messages[:insert] {
+			out = append(out, message.ModelMessage())
+		}
+		out = append(out, block)
+		for _, message := range messages[insert:] {
+			out = append(out, message.ModelMessage())
+		}
 		return out
 	}
-	out = append(out, msgs[:insert]...)
-	out = append(out, model.NewTextMessage(model.RoleUser, contextBlock))
-	out = append(out, msgs[insert:]...)
-	return out
 }
 
-func latestUserMessageIndex(msgs []model.Message) int {
+func latestUserMessageIndex(msgs []memory.Message) int {
 	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == model.RoleUser {
+		if memory.IsUserMessage(msgs[i]) {
 			return i
 		}
 	}

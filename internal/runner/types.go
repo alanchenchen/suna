@@ -15,7 +15,8 @@ type Request struct {
 	System        string
 	Purpose       string
 	Working       *memory.WorkingMemory
-	Messages      func(context.Context) []model.Message
+	Memory        *ContextMemory
+	Project       func(context.Context) func([]memory.Message) []model.Message
 	ToolDefs      func() []model.ToolDef
 	MaxTokens     int
 	StreamTimeout time.Duration
@@ -23,7 +24,6 @@ type Request struct {
 	EmitStream    bool
 	EmitReasoning bool
 	AutoCompress  bool
-	SessionState  string
 
 	MaxTurns     int
 	MaxToolCalls int
@@ -38,7 +38,7 @@ type SteeringInput struct {
 	ID          string
 	ClientMsgID string
 	Sequence    uint64
-	Message     model.Message
+	Message     memory.Message
 }
 
 type Result struct {
@@ -46,18 +46,14 @@ type Result struct {
 	HadToolCall   bool
 	HadToolError  bool
 	ContextWindow int
-	SessionState  string
 	Usage         *model.Usage
 }
 
 type StatusKind string
 
 const (
-	StatusCompactRunning StatusKind = "compact_running"
-	StatusCompactDone    StatusKind = "compact_done"
-	StatusCompactError   StatusKind = "compact_error"
-	StatusWaitingLLM     StatusKind = "waiting_llm"
-	StatusLLMRetrying    StatusKind = "llm_retrying"
+	StatusWaitingLLM  StatusKind = "waiting_llm"
+	StatusLLMRetrying StatusKind = "llm_retrying"
 )
 
 type StatusEvent struct {
@@ -127,12 +123,10 @@ type UsageSink interface {
 
 type Hooks struct {
 	CleanToolParams   func(name string, params map[string]any) (map[string]any, string)
-	OnAssistantText   func(ctx context.Context, content string)
-	OnToolResult      func(name string, result tools.Result)
-	OnSteeringApplied func(ctx context.Context, input SteeringInput)
-	// OnCompactCommit 在自动 compact 成功并改写 WorkingMemory 后同步提交独立 Session State。
-	// 返回错误时 runner 不继续请求模型，避免 recent window 已裁剪但会话状态未持久化。
-	OnCompactCommit func(ctx context.Context, sessionState string) error
+	Checkpoint        func(context.Context) error
+	CommitMemory      func(context.Context, string, []memory.Message) error
+	OnAssistantSaved  func(context.Context)
+	OnSteeringApplied func(context.Context, SteeringInput)
 }
 
 type Runner struct {

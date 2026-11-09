@@ -255,11 +255,11 @@ func TestCompactingRunSnapshotRestoresCompactComposer(t *testing.T) {
 		CurrentRun: &protocol.CurrentRunView{RunID: "run-1", State: protocol.AgentRunRunning, Status: protocol.SessionStatusCompacting, CanControl: true},
 	}
 	tui.applySessionSnapshot(snapshot)
-	if !tui.chat.Compacting || tui.compactStartedAt.IsZero() || tui.inputLocked() {
+	if !tui.chat.Compacting || tui.compactStartedAt.IsZero() || !tui.inputLocked() {
 		t.Fatalf("compact snapshot state = compacting %v, started %v, locked %v", tui.chat.Compacting, tui.compactStartedAt, tui.inputLocked())
 	}
 	view := stripANSIForTest(tui.renderInputArea().content)
-	if !strings.Contains(view, "上下文压缩中") || !strings.Contains(view, strings.TrimSpace(stripANSIForTest(tui.chat.Spinner.View()))) {
+	if !strings.Contains(view, "正在为较早内容生成摘要") || !strings.Contains(view, strings.TrimSpace(stripANSIForTest(tui.chat.Spinner.View()))) {
 		t.Fatalf("compact snapshot composer = %q, want compact spinner status", view)
 	}
 }
@@ -278,7 +278,7 @@ func TestAutomaticCompactUsesIndependentElapsedTimeAndKeepsComposerEditable(t *t
 	tui.initChatComponents()
 	tui.chat.Loading = true
 	tui.runStartedAt = time.Now().Add(-5 * time.Minute)
-	tui.handleCompactResultNotification(protocol.CompactResult{Running: boolPtrForTUI(true)})
+	tui.handleCompactStateNotification(protocol.CompactState{CompactID: "compact-1", State: "preparing", Wait: "hard_limit"})
 	tui.compactStartedAt = time.Now().Add(-61 * time.Second)
 	if tui.inputLocked() {
 		t.Fatal("automatic compact inputLocked() = true, want steering composer")
@@ -287,7 +287,7 @@ func TestAutomaticCompactUsesIndependentElapsedTimeAndKeepsComposerEditable(t *t
 	if !strings.Contains(view, strings.TrimSpace(stripANSIForTest(tui.chat.Spinner.View()))) {
 		t.Fatalf("compact composer = %q, want spinner in editable compact status", view)
 	}
-	if !strings.Contains(view, "上下文压缩中") || !strings.Contains(view, "1m1s") || strings.Contains(view, "5m") {
+	if !strings.Contains(view, "正在为较早内容生成摘要") || !strings.Contains(view, "1m1s") || strings.Contains(view, "5m") {
 		t.Fatalf("compact composer = %q, want independent compact duration", view)
 	}
 }

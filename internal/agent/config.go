@@ -12,7 +12,6 @@ import (
 	"github.com/alanchenchen/suna/internal/config"
 	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/media"
-	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/protocol"
 )
@@ -477,10 +476,7 @@ func (a *Agent) publishConfigLocked(cfg *config.Config, router *model.Router, mo
 	a.cfg = cfg
 	a.router = router
 	a.configModTime = modTime
-	a.compressor = memory.NewCompressor()
-	if a.prompts != nil {
-		a.compressor.SetPrompts(a.prompts)
-	}
+	// 压缩器持有主/子任务共享槽，配置发布不能换实例绕过旧请求。
 	if a.extractWorker != nil {
 		if router == nil {
 			a.extractWorker.SetResolver(nil)

@@ -2,13 +2,11 @@ package memory
 
 import (
 	"sync"
-
-	"github.com/alanchenchen/suna/internal/model"
 )
 
 type WorkingMemory struct {
 	mu        sync.RWMutex
-	messages  []model.Message
+	messages  []Message
 	taskState map[string]any
 }
 
@@ -18,38 +16,38 @@ func NewWorkingMemory() *WorkingMemory {
 	}
 }
 
-func (w *WorkingMemory) AddMessage(msg model.Message) {
+func (w *WorkingMemory) AddMessage(msg Message) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.messages = append(w.messages, msg)
 }
 
-func (w *WorkingMemory) Messages() []model.Message {
+func (w *WorkingMemory) Messages() []Message {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
-	cp := make([]model.Message, len(w.messages))
+	cp := make([]Message, len(w.messages))
 	copy(cp, w.messages)
 	return cp
 }
 
-func (w *WorkingMemory) SetMessages(msgs []model.Message) {
+func (w *WorkingMemory) SetMessages(msgs []Message) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	// SetMessages 是 compact 后改写上下文的内存边界；必须复制 slice，避免保留旧历史的 backing array。
-	cp := make([]model.Message, len(msgs))
+	cp := make([]Message, len(msgs))
 	copy(cp, msgs)
 	w.messages = cp
 }
 
-func (w *WorkingMemory) LastN(n int) []model.Message {
+func (w *WorkingMemory) LastN(n int) []Message {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	if len(w.messages) <= n {
-		cp := make([]model.Message, len(w.messages))
+		cp := make([]Message, len(w.messages))
 		copy(cp, w.messages)
 		return cp
 	}
-	cp := make([]model.Message, n)
+	cp := make([]Message, n)
 	copy(cp, w.messages[len(w.messages)-n:])
 	return cp
 }
@@ -83,15 +81,26 @@ func (w *WorkingMemory) Clear() {
 func (w *WorkingMemory) EstimatedTokens() int {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
-	return model.EstimateMessagesTokens(w.messages)
+	return EstimateMessagesTokens(w.messages)
 }
 
-// LastUserText 返回最后一条用户消息的文本内容
+// MarkConsumed 只在完整模型响应后标记本次已读取的来源。
+func (w *WorkingMemory) MarkConsumed() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	changed := false
+	for i := range w.messages {
+		changed = changed || !w.messages[i].Consumed
+		w.messages[i].Consumed = true
+	}
+	return changed
+}
+
 func (w *WorkingMemory) LastUserText() string {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	for i := len(w.messages) - 1; i >= 0; i-- {
-		if w.messages[i].Role == model.RoleUser {
+		if IsUserMessage(w.messages[i]) {
 			return w.messages[i].Text()
 		}
 	}

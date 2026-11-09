@@ -82,14 +82,17 @@ func (s *Subtask) Run(ctx context.Context, r *runner.Runner) (Result, error) {
 	// 必须复用本次请求的同一不可变模型快照。
 	ctx = model.WithBinding(ctx, s.req.Binding)
 
+	contextMemory := runner.NewContextMemory("")
+	defer contextMemory.Cancel()
 	working := memory.NewWorkingMemory()
-	working.AddMessage(model.Message{Role: model.RoleUser, TextContent: s.req.Task, Content: []model.ContentBlock{{Type: model.ContentText, Text: s.req.Task}}})
+	working.AddMessage(memory.Message{Role: model.RoleUser, Origin: memory.OriginUser, TextContent: s.req.Task, Content: []model.ContentBlock{{Type: model.ContentText, Text: s.req.Task}}})
 	res, err := r.Run(ctx, runner.Request{
 		Binding:       s.req.Binding,
 		Purpose:       "subtask",
 		Invocation:    s.req.Invocation,
 		System:        s.req.System,
 		Working:       working,
+		Memory:        contextMemory,
 		ToolDefs:      s.toolDefs,
 		EmitStream:    false,
 		EmitReasoning: false,

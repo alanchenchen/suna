@@ -6,235 +6,86 @@ import (
 	"testing"
 )
 
-func TestMigrateLegacyConversationStateWithoutSessionStateColumn(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "memory.db")
-	db, err := sql.Open("sqlite", dbPath)
+func TestSessionColumnsUpgradeTransactionAndPreserveData(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory.db")
+	store, err := NewStore(path)
 	if err != nil {
-		t.Fatalf("open sqlite error = %v", err)
+		t.Fatal(err)
 	}
-	_, err = db.Exec(`CREATE TABLE conversation_state (
-		last_messages TEXT NOT NULL DEFAULT '[]',
-		tool_summary TEXT NOT NULL DEFAULT '[]',
-		updated_at DATETIME
-	)`)
+	_, err = store.DB().Exec(`ALTER TABLE session_state RENAME COLUMN summary TO compacted_state; ALTER TABLE session_state RENAME COLUMN messages TO last_messages; ALTER TABLE session_state ADD COLUMN tool_summary TEXT NOT NULL DEFAULT '[]'; INSERT INTO sessions(id,created_at,updated_at) VALUES ('s',datetime('now'),datetime('now')); INSERT INTO session_state(session_id,compacted_state,last_messages,tool_summary,updated_at) VALUES ('s','old memory','[{"role":"user","content":[{"type":"text","text":"original"}]}]','[]','2026-01-01')`)
 	if err != nil {
-		t.Fatalf("create legacy table error = %v", err)
+		t.Fatal(err)
 	}
-	_, err = db.Exec(`INSERT INTO conversation_state (last_messages, tool_summary, updated_at) VALUES (?, ?, ?)`, `[{"role":"user","content":"hello"}]`, `[]`, `2025-01-02T03:04:05Z`)
+	store.Close()
+	store, err = NewStore(path)
 	if err != nil {
-		t.Fatalf("insert legacy row error = %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("close legacy db error = %v", err)
-	}
-
-	store, err := NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewStore error = %v", err)
+		t.Fatal(err)
 	}
 	defer store.Close()
-
-	exists, err := store.tableExists("conversation_state")
+	var summary, messages, updated string
+	if err = store.DB().QueryRow(`SELECT summary,messages,updated_at FROM session_state WHERE session_id='s'`).Scan(&summary, &messages, &updated); err != nil {
+		t.Fatal(err)
+	}
+	if summary != "old memory" || messages == "" || updated == "" {
+		t.Fatal("migration lost data")
+	}
+	if ok, err := store.columnExists("session_state", "tool_summary"); err != nil || ok {
+		t.Fatalf("tool_summary exists=%v err=%v", ok, err)
+	}
+	if err = store.migrate(); err != nil {
+		t.Fatal(err)
+	}
+}
+func TestUnsupportedOldSchemaFailsWithoutDroppingLegacyData(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory.db")
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
-		t.Fatalf("tableExists error = %v", err)
+		t.Fatal(err)
 	}
-	if exists {
-		t.Fatal("conversation_state still exists after migration")
+	if _, err = db.Exec(`CREATE TABLE conversation_state(value TEXT);INSERT INTO conversation_state VALUES ('preserved')`); err != nil {
+		t.Fatal(err)
 	}
-
-	var sessionID string
-	var messageCount int
-	if err := store.DB().QueryRow(`SELECT id, message_count FROM sessions`).Scan(&sessionID, &messageCount); err != nil {
-		t.Fatalf("read migrated session error = %v", err)
+	db.Close()
+	if store, err := NewStore(path); err == nil {
+		store.Close()
+		t.Fatal("unsupported old schema opened")
 	}
-	if sessionID == "" {
-		t.Fatal("migrated session id is empty")
+	db, err = sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if messageCount != 1 {
-		t.Fatalf("message_count = %d, want 1", messageCount)
-	}
-
-	var compacted string
-	if err := store.DB().QueryRow(`SELECT compacted_state FROM session_state WHERE session_id = ?`, sessionID).Scan(&compacted); err != nil {
-		t.Fatalf("read migrated session_state error = %v", err)
-	}
-	if compacted != "" {
-		t.Fatalf("compacted_state = %q, want empty", compacted)
+	defer db.Close()
+	var value string
+	if err = db.QueryRow(`SELECT value FROM conversation_state`).Scan(&value); err != nil || value != "preserved" {
+		t.Fatalf("value=%q err=%v", value, err)
 	}
 }
 
-func TestMigrateMemoryQueueOwnershipForExistingDatabase(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "memory.db")
-	db, err := sql.Open("sqlite", dbPath)
+func TestSessionMigrationRollsBackAllColumnChangesOnInvalidMessages(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory.db")
+	store, err := NewStore(path)
 	if err != nil {
-		t.Fatalf("open sqlite error = %v", err)
+		t.Fatal(err)
 	}
-	_, err = db.Exec(`CREATE TABLE memory_queue (
-		id TEXT PRIMARY KEY,
-		user_id TEXT NOT NULL,
-		kind TEXT NOT NULL,
-		content TEXT NOT NULL,
-		tags TEXT NOT NULL DEFAULT '[]',
-		source TEXT NOT NULL DEFAULT 'inferred',
-		confidence REAL NOT NULL DEFAULT 0.7,
-		evidence TEXT NOT NULL DEFAULT '',
-		significance TEXT NOT NULL DEFAULT '',
-		created_at DATETIME NOT NULL,
-		next_attempt_at DATETIME NOT NULL,
-		attempts INTEGER NOT NULL DEFAULT 0,
-		last_error TEXT NOT NULL DEFAULT '',
-		processed_at DATETIME
-	)`)
+	_, err = store.DB().Exec(`ALTER TABLE session_state RENAME COLUMN summary TO compacted_state; ALTER TABLE session_state RENAME COLUMN messages TO last_messages; ALTER TABLE session_state ADD COLUMN tool_summary TEXT NOT NULL DEFAULT '[]'; INSERT INTO sessions(id,created_at,updated_at) VALUES ('s',datetime('now'),datetime('now')); INSERT INTO session_state(session_id,compacted_state,last_messages,updated_at) VALUES ('s','retained','broken-json',datetime('now'))`)
 	if err != nil {
-		t.Fatalf("create legacy memory_queue error = %v", err)
+		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO memory_queue (id, user_id, kind, content, created_at, next_attempt_at) VALUES ('queue-1', 'default', 'preference', 'legacy event', datetime('now'), datetime('now'))`); err != nil {
-		t.Fatalf("insert legacy queue row error = %v", err)
+	store.Close()
+	if store, err = NewStore(path); err == nil {
+		store.Close()
+		t.Fatal("malformed history was accepted")
 	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("close legacy db error = %v", err)
-	}
-
-	store, err := NewStore(dbPath)
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
-		t.Fatalf("NewStore error = %v", err)
+		t.Fatal(err)
 	}
-	defer store.Close()
-	exists, err := store.columnExists("memory_queue", "model_ref")
-	if err != nil {
-		t.Fatalf("columnExists(model_ref) error = %v", err)
+	defer db.Close()
+	var summary, messages, tools string
+	if err = db.QueryRow(`SELECT compacted_state,last_messages,tool_summary FROM session_state WHERE session_id='s'`).Scan(&summary, &messages, &tools); err != nil {
+		t.Fatal(err)
 	}
-	if !exists {
-		t.Fatal("memory_queue.model_ref was not migrated")
-	}
-	var modelRef string
-	if err := store.DB().QueryRow(`SELECT model_ref FROM memory_queue WHERE id = 'queue-1'`).Scan(&modelRef); err != nil {
-		t.Fatalf("read migrated queue model_ref error = %v", err)
-	}
-	if modelRef != "" {
-		t.Fatalf("legacy model_ref = %q, want empty", modelRef)
-	}
-	if err := store.migrateMemoryQueueModelRef(); err != nil {
-		t.Fatalf("repeat migration error = %v", err)
-	}
-}
-
-func TestMigrateSessionModelRefForExistingDatabase(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "memory.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("open sqlite error = %v", err)
-	}
-	_, err = db.Exec(`CREATE TABLE sessions (
-		id TEXT PRIMARY KEY,
-		title TEXT NOT NULL DEFAULT '',
-		cwd TEXT NOT NULL DEFAULT '',
-		message_count INTEGER NOT NULL DEFAULT 0,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL,
-		last_attached_at DATETIME
-	)`)
-	if err != nil {
-		t.Fatalf("create legacy sessions error = %v", err)
-	}
-	if _, err := db.Exec(`INSERT INTO sessions (id, cwd, created_at, updated_at) VALUES ('session-1', '/tmp', datetime('now'), datetime('now'))`); err != nil {
-		t.Fatalf("insert legacy session error = %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("close legacy db error = %v", err)
-	}
-
-	store, err := NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewStore error = %v", err)
-	}
-	defer store.Close()
-
-	hasModelRef, err := store.columnExists("sessions", "model_ref")
-	if err != nil {
-		t.Fatalf("columnExists error = %v", err)
-	}
-	if !hasModelRef {
-		t.Fatal("sessions.model_ref was not migrated")
-	}
-	var modelRef sql.NullString
-	if err := store.DB().QueryRow(`SELECT model_ref FROM sessions WHERE id = 'session-1'`).Scan(&modelRef); err != nil {
-		t.Fatalf("read migrated model_ref error = %v", err)
-	}
-	if modelRef.Valid {
-		t.Fatalf("migrated model_ref = %q, want NULL", modelRef.String)
-	}
-
-	if err := store.migrateSessionModelRef(); err != nil {
-		t.Fatalf("repeat migration error = %v", err)
-	}
-}
-
-// 存量库带 risk_level / risk_adjustment 列时，迁移应删除这两列（Guard 重构后
-// risk 三级退化为只读布尔，列不再写入）。新库建表本身不带这两列。
-func TestMigrateDropsLegacyGuardRiskColumns(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "memory.db")
-	db, err := sql.Open("sqlite", dbPath)
-	if err != nil {
-		t.Fatalf("open sqlite error = %v", err)
-	}
-	if _, err := db.Exec(`CREATE TABLE audit_log (
-		id TEXT PRIMARY KEY,
-		timestamp DATETIME NOT NULL DEFAULT (datetime('now')),
-		session_id TEXT NOT NULL DEFAULT '',
-		tool TEXT NOT NULL,
-		params TEXT NOT NULL DEFAULT '{}',
-		risk_level TEXT NOT NULL DEFAULT '',
-		guard_decision TEXT NOT NULL DEFAULT '',
-		guard_reason TEXT NOT NULL DEFAULT ''
-	)`); err != nil {
-		t.Fatalf("create legacy audit_log error = %v", err)
-	}
-	if _, err := db.Exec(`INSERT INTO audit_log (id, tool, risk_level, guard_decision) VALUES ('a-1', 'exec', 'high', 'confirm')`); err != nil {
-		t.Fatalf("insert legacy audit_log error = %v", err)
-	}
-	if _, err := db.Exec(`CREATE TABLE trust_rules (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		pattern TEXT NOT NULL,
-		tool TEXT NOT NULL DEFAULT '',
-		risk_adjustment TEXT NOT NULL DEFAULT '',
-		reason TEXT NOT NULL DEFAULT '',
-		learned_from TEXT NOT NULL DEFAULT ''
-	)`); err != nil {
-		t.Fatalf("create legacy trust_rules error = %v", err)
-	}
-	if err := db.Close(); err != nil {
-		t.Fatalf("close legacy db error = %v", err)
-	}
-
-	store, err := NewStore(dbPath)
-	if err != nil {
-		t.Fatalf("NewStore error = %v", err)
-	}
-	defer store.Close()
-
-	for _, tc := range []struct{ table, column string }{
-		{"audit_log", "risk_level"},
-		{"trust_rules", "risk_adjustment"},
-	} {
-		exists, err := store.columnExists(tc.table, tc.column)
-		if err != nil {
-			t.Fatalf("columnExists(%s.%s) error = %v", tc.table, tc.column, err)
-		}
-		if exists {
-			t.Fatalf("%s.%s was not dropped by migration", tc.table, tc.column)
-		}
-	}
-	// 存量数据保留（只删列不删行）。
-	var decision string
-	if err := store.DB().QueryRow(`SELECT guard_decision FROM audit_log WHERE id = 'a-1'`).Scan(&decision); err != nil {
-		t.Fatalf("read migrated audit_log error = %v", err)
-	}
-	if decision != "confirm" {
-		t.Fatalf("migrated guard_decision = %q, want confirm", decision)
-	}
-
-	if err := store.migrateDropGuardRiskColumns(); err != nil {
-		t.Fatalf("repeat migration error = %v", err)
+	if summary != "retained" || messages != "broken-json" || tools != "[]" {
+		t.Fatal("failed migration altered original data")
 	}
 }

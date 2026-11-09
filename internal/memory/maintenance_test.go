@@ -41,7 +41,7 @@ func TestPruneOperationalLogsKeepsRecentRowsAndSessions(t *testing.T) {
 	if _, err := store.DB().ExecContext(ctx, `INSERT INTO sessions (id, title, cwd, message_count, created_at, updated_at) VALUES ('session-old', 'keep', '.', 1, ?, ?)`, oldLocal, oldLocal); err != nil {
 		t.Fatalf("insert session error = %v", err)
 	}
-	if _, err := store.DB().ExecContext(ctx, `INSERT INTO session_state (session_id, compacted_state, updated_at) VALUES ('session-old', 'keep state', ?)`, oldLocal); err != nil {
+	if _, err := store.DB().ExecContext(ctx, `INSERT INTO session_state (session_id, summary, updated_at) VALUES ('session-old', 'keep state', ?)`, oldLocal); err != nil {
 		t.Fatalf("insert session state error = %v", err)
 	}
 

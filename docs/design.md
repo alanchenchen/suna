@@ -144,7 +144,7 @@ Suna 的上下文设计兼顾可恢复性、长对话和模型前缀缓存。dae
 ```text
 稳定前缀：system / project instructions / skill index / tool schema
 低频变化：Session State
-近期内容：recent messages
+有序内容：保留的原始讨论 / 较早工具观察 / 近期原生工具记录
 靠近最新用户输入：user profile memory
 ```
 
@@ -152,12 +152,15 @@ Suna 的上下文设计兼顾可恢复性、长对话和模型前缀缓存。dae
 
 - **稳定前缀**：system prompt、项目指令、Skill 索引和工具 schema 尽量稳定，减少不必要的前缀缓存失效。
 - **Session State 不塞进 system prompt**：compact 生成的当前会话状态作为独立上下文字段参与请求，避免 system prompt 频繁变化。
-- **recent window 而不是完整历史**：恢复和后续请求使用 Session State + 最近对话窗口，而不是无上限重放所有原始 tool call/result。
-- **主动 compact 而不是极限塞满上下文**：Suna 用本地估算、完整输出预留和 estimator safety 在安全边界前触发 compact，优先保证长工具任务连续性，不把 provider context overflow fallback 作为常规路径。
-- **compact 失败不硬继续**：上下文压缩失败时，Suna 会停止本轮请求并提示错误，不使用不可靠摘要或强行裁剪继续。
+- **工具优先，少动讨论**：先把较早、完整、已消费的工具组换成原位证据摘要，保留对应助手原说明；工具难以提供合理空间时才归纳较早的连续历史，并由程序复制所选用户原话。
+- **提前准备，安全采用**：摘要候选在后台生成，容量允许时前台继续；采用前复核来源与实际收益，先保存再替换，保留准备期间新增的消息。
+- **单份有效历史**：内存和数据库使用 `memory.Message`；模型请求与 UI 快照各自投影，不保留第二份原文或 UI-only 工具聚合。恢复不等于完整事件回放。
+- **按失败影响处理**：普通后台生成失败保留原历史，不阻断仍有容量的主任务；手动／硬容量等待明确报告失败，不伪造摘要或硬裁剪继续。
 - **工具 schema 稳定性**：工具名称、描述、参数和排序变化会影响模型缓存和行为，修改时需要谨慎。
 
 ## 记忆设计
+
+任务过程由当前会话的有效历史和连续性摘要承担，与跨会话画像分开。具体例子、两种压缩流程和恢复边界见[记忆与后台压缩](memory.md)。
 
 Suna 的 user profile memory 是轻量长期记忆，不是知识库。
 
@@ -168,7 +171,7 @@ Suna 的 user profile memory 是轻量长期记忆，不是知识库。
 - 明确约束。
 - 反复纠正过的事实。
 
-它不用于保存完整聊天历史、项目知识库或向量检索结果。当前会话的任务状态主要由 Session State 和 recent messages 承担。
+它不用于保存完整聊天历史、项目知识库或向量检索结果。
 
 记忆提取通过队列和 worker 批量处理。daemon 退出时不会强制 drain 未处理队列，pending item 会保留在 SQLite 中，下次启动后继续处理。
 

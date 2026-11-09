@@ -2,365 +2,174 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
+	"time"
 
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/prompt"
 )
 
-const (
-	maxToolOutputLines           = 500
-	maxToolOutputBytes           = 50 * 1024
-	maxCompressAssistantBytes    = 6 * 1024
-	maxCompressToolResultBytes   = 4 * 1024
-	maxCompressToolArgumentBytes = 2 * 1024
-	maxSessionStateTokens        = 3000
-	minSessionStateTokens        = 1200
-	minContextMarginTokens       = 2048
-	recentChatUserTurns          = 6
-	recentToolUserTurns          = 2
-	maxRecentMessages            = 48
-)
+const CompactDeadline = 20 * time.Minute
 
 type Compressor struct {
 	prompts *prompt.Loader
+	slot    chan struct{}
 }
 
-func NewCompressor() *Compressor {
-	return &Compressor{}
+func NewCompressor() *Compressor                       { return &Compressor{slot: make(chan struct{}, 1)} }
+func (c *Compressor) SetPrompts(loader *prompt.Loader) { c.prompts = loader }
+func (c *Compressor) EstimateTokens(messages []Message) int {
+	return EstimateMessagesTokens(messages)
 }
-
-func (c *Compressor) SetPrompts(p *prompt.Loader) {
-	c.prompts = p
-}
-
-// EstimateTokens 返回消息列表的估算 token 数。
-func (c *Compressor) EstimateTokens(messages []model.Message) int {
-	return model.EstimateMessagesTokens(messages)
-}
-
-func TruncateToolOutputForContext(content string) string {
-	if len(content) <= maxToolOutputBytes {
-		return content
-	}
-	lines := strings.Split(content, "\n")
-	if len(lines) <= maxToolOutputLines {
-		return truncateUTF8(content, maxToolOutputBytes) + "\n... (truncated; full tool output omitted from model context)"
-	}
-	kept := lines[:maxToolOutputLines]
-	result := strings.Join(kept, "\n")
-	if len(result) > maxToolOutputBytes {
-		result = truncateUTF8(result, maxToolOutputBytes)
-	}
-	return fmt.Sprintf("%s\n... (truncated, %d lines total; full tool output omitted from model context)", result, len(lines))
-}
-
-func truncateUTF8(s string, maxBytes int) string {
-	if maxBytes <= 0 || len(s) <= maxBytes {
-		return s
-	}
-	for i := range s {
-		if i > maxBytes {
-			return s[:i]
-		}
-	}
-	return s
-}
-
-func formatCompressInput(messages []model.Message) string {
-	var sb strings.Builder
-	for i, m := range messages {
-		if sb.Len() > 0 {
-			sb.WriteString("\n")
-		}
-		sb.WriteString(formatCompressMessage(i+1, m))
-	}
-	return sb.String()
-}
-
-func formatCompressMessage(index int, m model.Message) string {
-	var sb strings.Builder
-	role := string(m.Role)
-	text := strings.TrimSpace(m.Text())
-	switch m.Role {
-	case model.RoleUser:
-		if text != "" {
-			sb.WriteString(fmt.Sprintf("<user_message index=%q>\n%s\n</user_message>\n", fmt.Sprint(index), text))
-		}
-	case model.RoleAssistant:
-		if text != "" {
-			sb.WriteString(fmt.Sprintf("<assistant_message index=%q note=\"assistant proposal or response; preserve only if accepted or still relevant\">\n%s\n</assistant_message>\n", fmt.Sprint(index), truncateMiddle(text, maxCompressAssistantBytes)))
-		}
-	case model.RoleTool:
-		if text != "" {
-			sb.WriteString(fmt.Sprintf("<tool_result index=%q call_id=%q note=\"convert into action facts; do not keep raw logs\">\n%s\n</tool_result>\n", fmt.Sprint(index), m.ToolCallID, truncateMiddle(text, maxCompressToolResultBytes)))
-		}
+func (c *Compressor) TryBackground() bool {
+	select {
+	case c.slot <- struct{}{}:
+		return true
 	default:
-		if text != "" {
-			sb.WriteString(fmt.Sprintf("<%s_message index=%q>\n%s\n</%s_message>\n", role, fmt.Sprint(index), truncateMiddle(text, maxCompressAssistantBytes), role))
-		}
-	}
-	for _, tc := range m.ToolCalls {
-		sb.WriteString(fmt.Sprintf("<tool_call index=%q name=%q>\n%s\n</tool_call>\n", fmt.Sprint(index), tc.Name, truncateMiddle(tc.Arguments, maxCompressToolArgumentBytes)))
-	}
-	return sb.String()
-}
-
-func truncateMiddle(s string, maxBytes int) string {
-	if maxBytes <= 0 || len(s) <= maxBytes {
-		return s
-	}
-	half := maxBytes / 2
-	if half <= 0 {
-		return "... (truncated)"
-	}
-	prefix := truncateUTF8(s, half)
-	suffixBudget := maxBytes - len(prefix)
-	if suffixBudget <= 0 {
-		return prefix + "\n... (truncated)"
-	}
-	suffixStart := len(s) - suffixBudget
-	if suffixStart < 0 {
-		suffixStart = 0
-	}
-	for suffixStart < len(s) && !isUTF8Boundary(s[suffixStart]) {
-		suffixStart++
-	}
-	return prefix + fmt.Sprintf("\n... (truncated, %d bytes omitted) ...\n", len(s)-len(prefix)-len(s[suffixStart:])) + s[suffixStart:]
-}
-
-func isUTF8Boundary(b byte) bool {
-	return b&0xC0 != 0x80
-}
-
-func (c *Compressor) CompressHistoryWithStateBudget(ctx context.Context, binding *model.ModelBinding, invocation model.Invocation, messages []model.Message, previousState string, contextWindow, outputBudget, recentTokenBudget int) ([]model.Message, string, int, error) {
-	return c.compressHistoryKeepingState(ctx, binding, invocation, messages, previousState, chooseRecentKeepWithBudget(messages, contextWindow, recentTokenBudget), contextWindow, outputBudget)
-}
-
-func (c *Compressor) compressHistoryKeepingState(ctx context.Context, binding *model.ModelBinding, invocation model.Invocation, messages []model.Message, previousState string, keepRecent int, contextWindow, outputBudget int) ([]model.Message, string, int, error) {
-	if len(messages) == 0 {
-		return messages, "", 0, nil
-	}
-	cleanMessages := messages
-	if len(cleanMessages) == 0 {
-		return cleanMessages, "", 0, nil
-	}
-
-	keep := keepRecent
-	if keep <= 0 {
-		keep = chooseRecentKeep(cleanMessages, contextWindow)
-	}
-	if len(cleanMessages) <= keep {
-		keep = len(cleanMessages) - 1
-	}
-	if keep < 1 {
-		keep = 1
-	}
-
-	keepStart := len(cleanMessages) - keep
-	if keepStart <= 0 {
-		if strings.TrimSpace(previousState) == "" {
-			return cleanMessages, "", 0, nil
-		}
-		// 已有 Session State 时，即使当前消息很少，也继续让压缩器合并最新上下文，避免状态长期停留在旧 compact 结果。
-		keepStart = len(cleanMessages) - 1
-		if keepStart < 1 {
-			keepStart = 1
-		}
-	}
-	keepStart = expandRecentStartForToolCalls(cleanMessages, keepStart)
-	compressRegion := cleanMessages[:keepStart]
-	keepRegion := cleanMessages[keepStart:]
-
-	compressInput := formatCompressInput(compressRegion)
-	if strings.TrimSpace(compressInput) == "" && strings.TrimSpace(previousState) == "" {
-		return messages, "", 0, nil
-	}
-	if binding == nil {
-		return nil, "", 0, fmt.Errorf("compressor model binding is not configured")
-	}
-
-	if c.prompts == nil {
-		return nil, "", 0, fmt.Errorf("compress prompt loader is not configured")
-	}
-	// compress prompt 是 Session State 正确性的边界；模板渲染失败时不能静默退化，否则 previous state 可能丢失。
-	promptText, err := c.prompts.RenderCompressWithState(previousState, compressInput)
-	if err != nil {
-		return nil, "", 0, fmt.Errorf("render compress prompt: %w", err)
-	}
-	if strings.TrimSpace(promptText) == "" {
-		return nil, "", 0, fmt.Errorf("render compress prompt: empty prompt")
-	}
-	req := &model.CompletionRequest{
-		Invocation: invocation,
-		Purpose:    "compress",
-		Messages: []model.Message{
-			model.NewTextMessage(model.RoleUser, promptText),
-		},
-		MaxTokens: outputBudget,
-	}
-	ch, err := binding.Complete(ctx, *req)
-	if err != nil {
-		return nil, "", 0, err
-	}
-	state, err := model.ReadStreamTextWithIdle(ctx, ch, model.LLMCompactIdleTimeout, "compact LLM stream timeout")
-	if err != nil {
-		return nil, "", 0, err
-	}
-	state = strings.TrimSpace(state)
-	if state == "" {
-		return nil, "", 0, fmt.Errorf("compressor returned empty session state")
-	}
-
-	return keepRegion, state, len(compressRegion), nil
-}
-
-func expandRecentStartForToolCalls(messages []model.Message, keepStart int) int {
-	if keepStart <= 0 || keepStart >= len(messages) {
-		return keepStart
-	}
-	for {
-		retainedCalls := make(map[string]struct{})
-		for _, msg := range messages[keepStart:] {
-			if msg.Role != model.RoleAssistant {
-				continue
-			}
-			for _, tc := range msg.ToolCalls {
-				if strings.TrimSpace(tc.ID) != "" {
-					retainedCalls[tc.ID] = struct{}{}
-				}
-			}
-		}
-
-		newStart := keepStart
-		for _, msg := range messages[keepStart:] {
-			if msg.Role != model.RoleTool || strings.TrimSpace(msg.ToolCallID) == "" {
-				continue
-			}
-			if _, ok := retainedCalls[msg.ToolCallID]; ok {
-				continue
-			}
-			if parent := findToolCallParent(messages, keepStart, msg.ToolCallID); parent >= 0 && parent < newStart {
-				newStart = parent
-			}
-		}
-		if newStart == keepStart {
-			return keepStart
-		}
-		keepStart = newStart
-	}
-}
-
-func findToolCallParent(messages []model.Message, before int, id string) int {
-	for i := before - 1; i >= 0; i-- {
-		msg := messages[i]
-		if msg.Role != model.RoleAssistant {
-			continue
-		}
-		for _, tc := range msg.ToolCalls {
-			if tc.ID == id {
-				return i
-			}
-		}
-	}
-	return -1
-}
-
-func sessionStateMaxTokens(contextWindow int) int {
-	return SessionStateTokenBudget(contextWindow)
-}
-
-func SessionStateTokenBudget(contextWindow int) int {
-	if contextWindow <= 0 {
-		return 2000
-	}
-	n := contextWindow / 100
-	if n < minSessionStateTokens {
-		n = minSessionStateTokens
-	}
-	if n > maxSessionStateTokens {
-		n = maxSessionStateTokens
-	}
-	return n
-}
-
-func chooseRecentKeep(messages []model.Message, contextWindow int) int {
-	return chooseRecentKeepWithBudget(messages, contextWindow, 0)
-}
-
-func chooseRecentKeepWithBudget(messages []model.Message, contextWindow, budget int) int {
-	if len(messages) <= 1 {
-		return len(messages)
-	}
-	// recent window 由代码按用户 turn 选择，不能交给 LLM 决定；这样 compact 后上下文稳定、可测试，且不破坏缓存命中。
-	targetTurns := recentChatUserTurns
-	if isToolHeavy(messages) {
-		// tool-heavy 场景中 tool call/result 会快速挤占消息数，因此按更少用户 turn 保留当前工具链附近上下文。
-		targetTurns = recentToolUserTurns
-	}
-	if budget <= 0 {
-		budget = recentWindowTokenBudget(contextWindow, 0)
-	}
-	turns := 0
-	keep := 0
-	tokens := 0
-	for i := len(messages) - 1; i >= 0 && keep < maxRecentMessages; i-- {
-		msgTokens := model.EstimateMessagesTokens([]model.Message{messages[i]})
-		// 至少保留最新一条消息；之后严格服从预算，避免 compact 后仍因 recent window 过大而超限。
-		if keep > 0 && budget > 0 && tokens+msgTokens > budget {
-			break
-		}
-		tokens += msgTokens
-		keep++
-		if messages[i].Role == model.RoleUser {
-			turns++
-			if turns >= targetTurns {
-				break
-			}
-		}
-	}
-	if keep >= len(messages) {
-		keep = len(messages) - 1
-	}
-	if keep < 1 {
-		keep = 1
-	}
-	return keep
-}
-
-func recentWindowTokenBudget(contextWindow, outputBudget int) int {
-	if contextWindow <= 0 {
-		return 0
-	}
-	budget := contextWindow - outputBudget - sessionStateMaxTokens(contextWindow) - contextMargin(contextWindow)
-	if budget < 1 {
-		return 1
-	}
-	return budget
-}
-
-func contextMargin(contextWindow int) int {
-	margin := contextWindow / 200
-	if margin < minContextMarginTokens {
-		return minContextMarginTokens
-	}
-	return margin
-}
-
-func isToolHeavy(messages []model.Message) bool {
-	if len(messages) == 0 {
 		return false
 	}
-	start := len(messages) - 24
-	if start < 0 {
-		start = 0
+}
+func (c *Compressor) Acquire(ctx context.Context) error {
+	select {
+	case c.slot <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	toolLike := 0
-	for _, m := range messages[start:] {
-		if m.Role == model.RoleTool || len(m.ToolCalls) > 0 {
-			toolLike++
+}
+func (c *Compressor) ReleaseBackground() { <-c.slot }
+
+func (c *Compressor) Generate(ctx context.Context, binding *model.ModelBinding, invocation model.Invocation, plan *CompactPlan) (CompactOutput, *model.Usage, error) {
+	// 槽直到本地流真正退出才释放；取消立即返回，至多一个排空者隔离不服从取消的流。
+	// 排空者不保留来源、请求或候选，也绝不提前放行另一笔收费请求。
+	var chunks <-chan model.Chunk
+	defer func() {
+		if chunks == nil {
+			c.ReleaseBackground()
+			return
+		}
+		go func(stream <-chan model.Chunk) {
+			for range stream {
+			}
+			c.ReleaseBackground()
+		}(chunks)
+	}()
+	var result CompactOutput
+	if c.prompts == nil {
+		return result, nil, fmt.Errorf("compress prompt loader is not configured")
+	}
+	payload, err := json.Marshal(struct {
+		Summary    string      `json:"previous_summary"`
+		Groups     []ToolGroup `json:"groups,omitempty"`
+		History    []Message   `json:"history,omitempty"`
+		Background []Message   `json:"readonly_background"`
+	}{plan.Summary, plan.Groups, compactSources(plan.Prefix), compactSources(plan.Background)})
+	if err != nil {
+		return result, nil, err
+	}
+	name := "compress"
+	if plan.Kind == CompactTools {
+		name = "compress_tools"
+	}
+	text, err := c.prompts.Render(name, map[string]any{"Content": string(payload)})
+	if err != nil || text == "" {
+		return result, nil, fmt.Errorf("render compression prompt: %v", err)
+	}
+	// OutputBudget 是选区估算的结果正文空间，不是包含 reasoning 的生成总上限。
+	// 实际请求使用 binding 允许且窗口容得下的总输出额度；不另猜模型的推理占比。
+	inputTokens := model.ApplyCoefficient(model.EstimateTokens(text), plan.coefficient)
+	generationBudget := min(binding.MaxOutputTokens(), plan.inputLimit-inputTokens)
+	if generationBudget < plan.OutputBudget {
+		return result, nil, fmt.Errorf("compression request exceeds planned capacity")
+	}
+	ctx, cancel := context.WithTimeout(ctx, CompactDeadline)
+	defer cancel()
+	chunks, err = binding.Complete(ctx, model.CompletionRequest{Purpose: "compress_" + string(plan.Kind), Invocation: invocation, Messages: []model.Message{model.NewTextMessage(model.RoleUser, text)}, MaxTokens: generationBudget, Temperature: model.Float64Ptr(0)})
+	if err != nil {
+		return result, nil, err
+	}
+	timer := time.NewTimer(model.LLMCompactIdleTimeout)
+	defer timer.Stop()
+	var output strings.Builder
+	var usage *model.Usage
+	var finish *model.FinishInfo
+	var streamErr error
+	done := false
+	completed := false
+	for !done {
+		select {
+		case chunk, ok := <-chunks:
+			if !ok {
+				done = true
+				break
+			}
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(model.LLMCompactIdleTimeout)
+			if chunk.Usage != nil {
+				usage = chunk.Usage
+			}
+			if chunk.Finish != nil {
+				finish = chunk.Finish
+			}
+			if chunk.Error != nil {
+				streamErr = chunk.Error
+				done = true
+				break
+			}
+			if output.Len()+len(chunk.Content) > generationBudget*16 {
+				streamErr = fmt.Errorf("compression output exceeds bounded buffer")
+				done = true
+				break
+			}
+			output.WriteString(chunk.Content)
+			if chunk.Done {
+				completed = true
+				done = true
+			}
+		case <-timer.C:
+			streamErr = fmt.Errorf("compression stream idle timeout")
+			done = true
+		case <-ctx.Done():
+			streamErr = ctx.Err()
+			done = true
 		}
 	}
-	return toolLike >= 3
+	cancel()
+	if streamErr != nil {
+		return result, usage, streamErr
+	}
+	if !completed || !completeCompactFinish(finish) {
+		return result, usage, fmt.Errorf("compression did not report a complete response")
+	}
+	decoder := json.NewDecoder(strings.NewReader(output.String()))
+	decoder.DisallowUnknownFields()
+	if err = decoder.Decode(&result); err != nil {
+		return result, usage, fmt.Errorf("decode compression output: %w", err)
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return result, usage, fmt.Errorf("compression returned extra JSON values")
+	}
+	return result, usage, nil
+}
+
+func completeCompactFinish(f *model.FinishInfo) bool {
+	if f == nil || f.IncompleteReason != "" || (f.Status != "" && f.Status != "completed") {
+		return false
+	}
+	switch f.Reason {
+	case "stop", "end_turn", "stop_sequence":
+		return true
+	case "":
+		return f.Status == "completed"
+	default:
+		return false
+	}
 }

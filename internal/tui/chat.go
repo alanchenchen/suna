@@ -118,7 +118,6 @@ func (t *TUI) syncContent() {
 		RenderToolBlock:      t.renderToolBlock,
 		RenderSubtaskBlock:   t.renderSubtaskBlock,
 		RenderError:          t.renderErrorMessage,
-		RenderRestoreSummary: t.renderRestoreSummaryBox,
 		RenderSkillLoad:      t.renderSkillLoadMessage,
 		RenderSkillReview:    t.renderSkillReviewMessage,
 		RenderSystem: func(content string) string {
@@ -238,7 +237,7 @@ func (t *TUI) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return t, nil
 
 	case spinner.TickMsg:
-		if t.chat.Loading || t.chat.Compacting {
+		if t.chat.Loading || t.chat.Compacting || t.backgroundCompactLabel() != "" {
 			t.refreshRunRetryStatus(time.Now())
 			var cmd tea.Cmd
 			t.chat.Spinner, cmd = t.chat.Spinner.Update(msg)

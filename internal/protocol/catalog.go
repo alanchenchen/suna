@@ -62,7 +62,7 @@ var runtimeCatalogNotifications = []string{
 	NotifyConfigState,
 	NotifyMCPUpdated,
 	NotifyMemoryState,
-	NotifyCompactResult,
+	NotifyCompactState,
 	NotifySessionUpdated,
 	NotifySessionUserMessage,
 	NotifySkillLoad,

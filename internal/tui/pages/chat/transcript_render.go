@@ -92,12 +92,6 @@ func (m *Model) renderTranscriptMessage(deps TranscriptDeps, i, start int, inSun
 			addBlock(i, msg.Streaming, "\n"+deps.RenderError(content)+"\n")
 		}
 		inSunaBlock = false
-	case "restore_summary":
-		content, _ := msg.Content.(string)
-		if deps.RenderRestoreSummary != nil {
-			addBlock(i, msg.Streaming, "\n"+deps.RenderRestoreSummary(content)+"\n")
-		}
-		inSunaBlock = false
 	case "panel":
 		content, _ := msg.Content.(string)
 		addBlock(i, msg.Streaming, "\n"+content+"\n")

@@ -241,45 +241,114 @@ func truncateMiddle(s string, maxWidth int) string {
 	return attachmentmodel.TruncateMiddle(s, maxWidth)
 }
 
-// renderMediaSummary 把媒体引用摘要（如 [image: name.png, image/png, 1.2MB, source=...]）
-// 渲染为对用户友好的展示内容。摘要文本对模型始终可见（含 source 供 read_image 读回），
-// 这里只做展示层转换：提取名称与大小，丢弃技术性 source 细节。
-// 注意：● 点前缀与缩进由 renderInlineUserMessage 统一添加（media 摘要的 role 恒为 user，
-// 走普通用户消息渲染路径），这里只返回内容部分，避免双重 ● 点。
+// renderMediaSummary 只转换快照标记为 media 的消息开头的连续图片引用。
+// ProjectMessages 以换行连接图片与文本块；正文中的类似引用可能是用户原文，
+// 不能全文搜索替换。首个非引用行及其后的内容保持原样，source 仍保留在模型历史中。
+// ● 点和缩进由 renderInlineUserMessage 添加，这里只返回内容部分。
 func (t *TUI) renderMediaSummary(summary string) string {
-	name, size := parseMediaSummary(summary)
-	line := styleDim.Render("📷") + " " + styleMuted.Render(t.tr("tui.chat.media_image"))
-	if name != "" {
-		line += " · " + styleMuted.Render(name)
-	}
-	if size != "" {
-		line += " · " + styleMuted.Render(size)
-	}
-	return line
-}
-
-// parseMediaSummary 从媒体引用摘要中提取展示信息：名称与大小。
-// 格式为系统确定性生成（[image: name, mime, size, source=...]），解析失败时安全降级为空。
-func parseMediaSummary(summary string) (name, size string) {
-	inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(summary, "["), "]"))
-	parts := strings.Split(inner, ",")
-	if len(parts) < 2 {
-		return "", ""
-	}
-	name = strings.TrimSpace(parts[0])
-	// 名称可能含冒号（如 [image: photo.png），取冒号后部分。
-	if idx := strings.Index(name, ":"); idx >= 0 {
-		name = strings.TrimSpace(name[idx+1:])
-	}
-	for _, p := range parts[1:] {
-		p = strings.TrimSpace(p)
-		if strings.HasPrefix(p, "source=") {
-			continue
+	var out strings.Builder
+	remaining := summary
+	for {
+		end := strings.IndexByte(remaining, '\n')
+		if end < 0 {
+			end = len(remaining)
 		}
-		if strings.ContainsAny(p, "0123456789") && !strings.Contains(p, "/") {
-			size = p
+		line := remaining[:end]
+		name, size, ok := parseMediaReference(line)
+		if !ok {
+			out.WriteString(remaining)
 			break
 		}
+		out.WriteString(styleDim.Render("📷") + " " + styleMuted.Render(t.tr("tui.chat.media_image")))
+		if name != "" {
+			out.WriteString(" · " + styleMuted.Render(name))
+		}
+		if size != "" {
+			out.WriteString(" · " + styleMuted.Render(size))
+		}
+		if end == len(remaining) {
+			break
+		}
+		out.WriteByte('\n')
+		remaining = remaining[end+1:]
 	}
+	return out.String()
+}
+
+// parseMediaSummary 保留单条引用的展示信息接口；不完整或非引用文本不被转换。
+func parseMediaSummary(summary string) (name, size string) {
+	name, size, _ = parseMediaReference(summary)
 	return name, size
+}
+
+// parseMediaReference 只接受单行的既有图片引用格式，不从正文中截取子串。
+// 格式本身不记录块来源，和引用完全同形的用户文字仍无法区分。
+func parseMediaReference(line string) (name, size string, ok bool) {
+	var inner string
+	legacy := false
+	switch {
+	case strings.HasPrefix(line, "[image: "):
+		inner = strings.TrimPrefix(line, "[image: ")
+	case strings.HasPrefix(line, "[uploaded image: "):
+		inner = strings.TrimPrefix(line, "[uploaded image: ")
+		legacy = true
+	default:
+		return "", "", false
+	}
+	if !strings.HasSuffix(inner, "]") || strings.ContainsAny(inner, "\r\n") {
+		return "", "", false
+	}
+	inner = strings.TrimSuffix(inner, "]")
+	sourceIndex := strings.Index(inner, ", source=")
+	if sourceIndex < 0 || sourceIndex != strings.LastIndex(inner, ", source=") {
+		return "", "", false
+	}
+	source := strings.TrimSpace(inner[sourceIndex+len(", source="):])
+	// 未转义的 ] 可能是引用之后的正文；不能将其连同正文一起隐藏。
+	if source == "" || strings.Contains(source, "]") {
+		return "", "", false
+	}
+	fields := inner[:sourceIndex]
+	if idx := strings.LastIndex(fields, ", "); idx >= 0 && isMediaSize(fields[idx+2:]) {
+		size = fields[idx+2:]
+		fields = fields[:idx]
+	}
+	hasMime := false
+	if idx := strings.LastIndex(fields, ", "); idx >= 0 && strings.HasPrefix(fields[idx+2:], "image/") && len(fields[idx+2:]) > len("image/") {
+		fields = fields[:idx]
+		hasMime = true
+	}
+	// 无 MIME 的引用仍可由明确的 attachment、URL 或绝对路径识别。
+	// 任意 source= 文字不足以证明这是图片引用。
+	if !hasMime && !strings.HasPrefix(source, "attachment:") && !strings.HasPrefix(source, "http://") && !strings.HasPrefix(source, "https://") && !filepath.IsAbs(source) && !(legacy && source == "attachment") {
+		return "", "", false
+	}
+	name = strings.TrimSpace(fields)
+	if name == "" {
+		return "", "", false
+	}
+	return name, size, true
+}
+
+// isMediaSize 识别 media.FormatSize 生成的 B、KB、MB 大小，避免把文件名中的数字当作大小。
+func isMediaSize(value string) bool {
+	switch {
+	case strings.HasSuffix(value, "KB"), strings.HasSuffix(value, "MB"):
+		value = value[:len(value)-2]
+	case strings.HasSuffix(value, "B"):
+		value = value[:len(value)-1]
+	default:
+		return false
+	}
+	digits, dot := 0, false
+	for _, c := range value {
+		if c >= '0' && c <= '9' {
+			digits++
+		} else if c == '.' && !dot && digits > 0 {
+			dot = true
+		} else {
+			return false
+		}
+	}
+	return digits > 0 && !strings.HasSuffix(value, ".")
 }

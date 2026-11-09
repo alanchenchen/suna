@@ -317,14 +317,16 @@ func (t *TUI) listMCPCmd() tea.Cmd {
 }
 
 func (t *TUI) compactCmd() tea.Cmd {
+	sessionID := t.currentSession.ID
 	return func() tea.Msg {
 		if t.localCli == nil {
 			return ipcErrorNotification(notifyCompactError, fmt.Errorf("%s", t.tr("error.not_connected")))
 		}
-		if err := t.localCli.Compact(); err != nil {
+		if result, err := t.localCli.Compact(); err != nil {
 			return ipcErrorNotification(notifyCompactError, err)
+		} else {
+			return compactAcceptedMsg{ID: result.CompactID, SessionID: sessionID}
 		}
-		return nil
 	}
 }
 

@@ -479,7 +479,7 @@ func (t *TUI) subtaskStatusCounts(block *toolBlock, ids []string) (done, running
 			done++
 		case te.Status == toolview.StatusError || te.Status == toolview.StatusCancelled:
 			failed++
-		default:
+		case te.Status == toolview.StatusRunning || te.Status == toolview.StatusCancelling:
 			running++
 		}
 	}
@@ -511,6 +511,8 @@ func (t *TUI) subtaskStatusIcon(te *toolEntry) string {
 		return styleToolErr.Render("✗")
 	case toolview.StatusCancelled:
 		return styleDim.Render("⊘")
+	case toolview.StatusUnknown:
+		return styleDim.Render("?")
 	default:
 		return styleToolRun.Render(spinnerPlaceholder)
 	}
@@ -519,6 +521,9 @@ func (t *TUI) subtaskStatusIcon(te *toolEntry) string {
 func (t *TUI) subtaskActivity(block *toolBlock, te *toolEntry, width int) string {
 	if te == nil || block == nil {
 		return ""
+	}
+	if te.Status == toolview.StatusUnknown {
+		return t.tr("tui.tool.result_unknown")
 	}
 	if te.Status == toolview.StatusError {
 		return t.subtaskFailureReason(te)

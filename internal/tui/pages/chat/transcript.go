@@ -46,7 +46,6 @@ type TranscriptDeps struct {
 	RenderToolBlock      func(*toolview.Block) string
 	RenderSubtaskBlock   func(*toolview.Block) string
 	RenderError          func(string) string
-	RenderRestoreSummary func(string) string
 	RenderSkillLoad      func(*SkillLoadView) string
 	RenderSkillReview    func(protocol.SkillReviewParams) string
 	RenderSystem         func(string) string

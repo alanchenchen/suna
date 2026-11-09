@@ -33,6 +33,18 @@ func VisibleMainEntries(block *Block) []*Entry {
 	return entries
 }
 
+// ExpandableMainEntries 与可见行分开；压缩行仍参与分组和状态，但没有已删除的详情。
+func ExpandableMainEntries(block *Block) []*Entry {
+	entries := VisibleMainEntries(block)
+	out := entries[:0]
+	for _, entry := range entries {
+		if !entry.Compacted {
+			out = append(out, entry)
+		}
+	}
+	return out
+}
+
 func VisibleEntries(block *Block) []*Entry {
 	if block == nil {
 		return nil
@@ -106,7 +118,7 @@ func ShouldShowGuardSummary(info *GuardInfo) bool {
 }
 
 func IsSubtask(te *Entry) bool {
-	return te != nil && te.RawName == "spawn" && te.ParentID == ""
+	return te != nil && !te.Compacted && te.RawName == "spawn" && te.ParentID == ""
 }
 
 func IsSubtaskChild(te *Entry) bool {

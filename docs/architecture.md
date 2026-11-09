@@ -129,12 +129,12 @@ Suna 当前是单 daemon、多 session 形态。全局 config/runtime 共享；s
 
 - `user_profile_memory`：长期 user profile memory，只保存少量跨会话稳定的用户偏好、习惯、约束和纠错。
 - `sessions`：session 元数据，包含 title、cwd、`model_ref`、message_count 和时间戳；`model_ref` 是该 session 实际使用的模型，不随 `active_model` 后续变化。
-- `session_state`：每个 session 的 Session State、最近可见 user/assistant 消息和 TUI-only 有界工具摘要；attach/create snapshot 返回这些展示状态，不回放完整 tool timeline。
+- `session_state`：每个 session 的 `summary` 和完整有序有效历史 `messages`；包含保留的原文、未压缩工具声明／结果及原位工具观察。模型与 attach/create 快照从同一份历史各自投影，不维护独立的 UI-only 工具摘要或原文档案。
 - `memory_queue`：user profile memory 的临时提取队列，每条 item 只记录不可变的 `model_ref`，不绑定 `session_id`；daemon worker 按批量策略处理后删除；daemon 退出不会为未开始的队列强制触发记忆提取，pending item 会留在 SQLite 中等待下次启动恢复。
 
-模型请求的缓存友好结构为：稳定 system/project/skill/tool schema 前缀 + 低频变化的 Session State + append-only recent messages + 靠近 latest user 的 user profile memory。Session State 不拼进 system prompt；user profile memory 也不放在 prior conversation 前面。
+模型请求尽量保持稳定 system/project/skill/tool schema 前缀，随后是历史连续性摘要与有序有效消息，user profile memory 靠近 latest user。摘要仍由 `CompletionRequest.SessionState` 承载，不拼进 system prompt；工具观察在消息的模型投影中展开，本地调用标签不发送给模型。
 
-自动 compact 按模型能力参数计算输入预算：`context_window - max_output_tokens - margin`，其中 `margin = max(2048, context_window / 200)`；触发判断使用 `estimated_context_tokens + estimator_safety_tokens`，`estimator_safety_tokens = max(8192, estimated_context_tokens / 16)`。compact 成功后，`session_state.compacted_state` / `CompletionRequest.SessionState` 保存新的会话状态，working memory 只保留 budget-aware recent window；改写 `WorkingMemory` 时会复制新的消息 slice，避免 compact 后的 recent window 继续持有旧历史 backing array。compact 失败时不使用 fallback、不硬裁剪继续，并通过 TUI 显示错误。
+后台压缩先整理较早工具，必要时才归纳较早历史。`memory` 负责历史、存取、选区、替换和生成；Runner 负责完整预算、水位、候选与安全边界；Agent 负责具体会话的检查点、恢复、取消和空闲协调。后台只产候选，采用时先保存再更新内存，不能用旧快照覆盖新增后缀。普通后台生成失败不阻断仍有安全容量的主任务；真正到硬容量边界才等待或明确失败，不硬裁剪继续。流程、参数和迁移边界集中见[记忆与后台压缩](memory.md)。
 
 ## 文档分工
 
@@ -146,6 +146,7 @@ Suna 当前是单 daemon、多 session 形态。全局 config/runtime 共享；s
 - `docs/architecture.md`：稳定架构、模块边界和 daemon 生命周期。
 - `docs/code-map.md`：功能到代码位置、主要包职责和核心流程。
 - `docs/current-implementation.md`：当前实现事实和未完成边界。
+- `docs/memory.md`：记忆与后台压缩的工作方式、保存恢复和维护规则。
 - `docs/configuration.md`：配置字段和示例。
 - `docs/development.md`：构建、测试和维护约定。
 - `plans/`：下一代通用 Agent Runtime 的长期方向、待验证假设和演进原则，不作为当前实现依据。

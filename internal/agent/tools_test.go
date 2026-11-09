@@ -182,12 +182,12 @@ func TestGuardEvidenceIgnoresQueuedSteeringUntilAppliedMessageExists(t *testing.
 	if _, _, err := a.EnqueueSteering("run-1", "client-1", "do not delete"); err != nil {
 		t.Fatalf("EnqueueSteering() error = %v", err)
 	}
-	ctx := a.buildGuardReviewContext(runner.ToolExecution{WorkingMessages: a.working.Messages()})
+	ctx := a.buildGuardReviewContext(runner.ToolExecution{WorkingMessages: memory.ModelMessages(a.working.Messages())})
 	if strings.Contains(ctx.Evidence, "do not delete") {
 		t.Fatalf("queued steering entered evidence: %q", ctx.Evidence)
 	}
-	a.working.AddMessage(model.NewTextMessage(model.RoleUser, "do not delete"))
-	ctx = a.buildGuardReviewContext(runner.ToolExecution{WorkingMessages: a.working.Messages()})
+	a.working.AddMessage(memory.NewTextMessage(model.RoleUser, "do not delete"))
+	ctx = a.buildGuardReviewContext(runner.ToolExecution{WorkingMessages: memory.ModelMessages(a.working.Messages())})
 	if !strings.Contains(ctx.Evidence, "do not delete") {
 		t.Fatalf("applied steering missing from evidence: %q", ctx.Evidence)
 	}
@@ -349,7 +349,7 @@ func TestBuildToolDefsStableAndIncludesAgentTools(t *testing.T) {
 
 func testWorkingMemory(userText string) *memory.WorkingMemory {
 	w := memory.NewWorkingMemory()
-	w.AddMessage(model.NewTextMessage(model.RoleUser, userText))
+	w.AddMessage(memory.NewTextMessage(model.RoleUser, userText))
 	return w
 }
 

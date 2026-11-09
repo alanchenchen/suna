@@ -163,6 +163,12 @@ runner 使用指定 model 运行子任务
 - `internal/prompt/templates/subtask_system.md`：Subtask 的隔离规则和输出要求。
 - `internal/tools/types.go`：`CanGrantToSubtask` 工具授权边界。
 
+## 上下文整理与持久化
+
+子任务与主会话共用[后台压缩规则](memory.md)：先整理较早工具，必要时才归纳较早历史，各自使用所选模型和独立上下文。主／子任务共用生成槽，不互相读取历史；子任务结束或取消时回收自己的候选。
+
+这不新增子任务历史库或恢复系统。主会话保留外层 `spawn` 的调用信息与返回报告，包括结果、不确定性和副作用范围；不会自动存入子任务内部的完整对话或思考链。
+
 ## Subtask 结果与副作用披露
 
 Subtask 的最终回答由 runtime 包装为 JSON 结果返回给主 Agent：

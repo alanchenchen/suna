@@ -40,7 +40,7 @@ func TestSessionIDSerializedOnRunEvents(t *testing.T) {
 		t.Fatalf("tool payload = %s, want session_id", tool)
 	}
 
-	compact, err := json.Marshal(CompactResult{SessionID: "session-1", BeforeTokens: 10, AfterTokens: 5})
+	compact, err := json.Marshal(CompactState{SessionID: "session-1", State: "applied", Result: &CompactResult{BeforeTokens: 10, AfterTokens: 5}})
 	if err != nil {
 		t.Fatalf("marshal CompactResult error = %v", err)
 	}

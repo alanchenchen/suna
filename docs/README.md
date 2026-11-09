@@ -1,6 +1,6 @@
 # Suna 文档
 
-这里存放 Suna 当前代码实际支持的设计、架构、配置和维护文档。根目录 `README.md` 是英文项目门面，突出 isolated subtasks、layered Guard、runtime-first architecture、快速开始和常用功能；`README.zh-CN.md` 是中文项目门面；`docs/` 面向希望深入理解 Suna 的读者，目前以中文为主。
+这里存放 Suna 当前代码实际支持的设计、架构、配置和维护文档。根目录 `README.md` 是英文项目门面，简述模型分工、后台压缩、本地 Runtime、快速开始和常用功能；`README.zh-CN.md` 是中文项目门面；`docs/` 面向希望深入理解 Suna 的读者，目前以中文为主。文档对应仓库当前实现，已发布版本的可用能力还需核对发行说明和 Runtime Catalog。
 
 `plans/` 只记录面向未来的长期方向、待验证假设和演进原则；理解当前行为时仍应以代码和 `docs/` 为准。
 
@@ -26,6 +26,7 @@
 
 ### 配置和使用细节
 
+- [记忆与后台压缩](memory.md)：用例子和流程图了解长会话如何保留线索、何时整理、怎样恢复，以及 `/compact` 与 `/memory` 的区别。
 - [配置说明](configuration.md)：`config.toml`、`credentials.toml` 的字段、示例和限制。
 - [主题](themes.md)：自定义主题的编写、选择与分享。
 - [TUI 架构](tui.md)：`internal/tui` 目录结构、Bubble Tea 约定和维护边界。
@@ -41,6 +42,7 @@
 - `docs/tcp-client.md`：第三方 UI / 客户端通过 `suna serve --json` 和 TCP protocol 接入 daemon 的开发者手册。
 - `docs/protocol.md`：统一 protocol 语义，说明 method、notification、事件和错误边界。
 - `docs/design.md`：关键设计和取舍，解释“为什么这样做”。
+- `docs/memory.md`：记忆与后台压缩的使用说明、流程图、恢复与升级边界，以及集中的实现规则。
 - `docs/performance.md`：daemon、模型流、上下文、工具和 TUI 的当前性能优化。
 - `docs/subtask.md`：Subtask、独立上下文、动态模型分配和动态工具分配。
 - `docs/architecture.md`：稳定架构和模块边界，解释“系统怎么分层”。

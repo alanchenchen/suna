@@ -39,15 +39,15 @@ func (t *TUI) currentInputPolicy() chatpage.InputPolicy {
 }
 
 func (t *TUI) compactElapsedLabel() string {
-	label := t.compactRunningLabel()
+	label := t.tr("compact.running")
 	if t.compactStartedAt.IsZero() {
 		return label
 	}
-	return label + " · " + toolview.FormatCompactDuration(time.Since(t.compactStartedAt))
+	return t.tr("compact.waiting", toolview.FormatCompactDuration(time.Since(t.compactStartedAt)))
 }
 
 func (t *TUI) canSteerCurrentRun() bool {
-	return t.chat.Loading && t.currentRunCanControl && t.activeRunID != "" && !t.cancelling && !t.observingRun() && t.chat.ActiveInteractionKind() == chatpage.InteractionNone
+	return !t.manualCompactPending && t.currentSession.Status != protocol.SessionStatusCompacting && t.chat.Loading && t.currentRunCanControl && t.activeRunID != "" && !t.cancelling && !t.observingRun() && t.chat.ActiveInteractionKind() == chatpage.InteractionNone
 }
 
 func activeAskAllowCustom(ask *chatpage.AskUserView) bool {
@@ -59,6 +59,9 @@ func (t *TUI) inputLocked() bool {
 }
 
 func (t *TUI) allowLockedInputKey(ks string) bool {
+	if ks == "esc" && t.chat.Compacting && t.currentRunCanControl {
+		return true
+	}
 	return chatpage.AllowLockedInputKey(ks, t.chat.Compacting)
 }
 
@@ -378,10 +381,6 @@ func (t *TUI) updateChatKeyNormal(ks string, msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, nil
 		}
 	case ks == "ctrl+r":
-		if t.chat.Compacting {
-			// 压缩中 transcript 正在重建，展开锚点会失效。
-			return t, nil
-		}
 		anchor, changed := t.chat.ToggleVisibleReasoningDetail()
 		if !changed {
 			return t, nil

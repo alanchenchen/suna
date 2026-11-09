@@ -19,21 +19,21 @@ const (
 	EventSkillLoad
 	EventSkillReview
 	EventSteering
+	EventAssistantSaved
+	EventUserSaved
 )
 
 type EventStatusKind string
 
 const (
-	StatusCompactRunning EventStatusKind = "compact_running"
-	StatusCompactDone    EventStatusKind = "compact_done"
-	StatusCompactError   EventStatusKind = "compact_error"
-	StatusWaitingLLM     EventStatusKind = "waiting_llm"
-	StatusLLMRetrying    EventStatusKind = "llm_retrying"
-	StatusDone           EventStatusKind = "done"
+	StatusWaitingLLM  EventStatusKind = "waiting_llm"
+	StatusLLMRetrying EventStatusKind = "llm_retrying"
+	StatusDone        EventStatusKind = "done"
 )
 
 type Event struct {
-	Type EventType
+	UserInput *Input
+	Type      EventType
 
 	Content string
 	Error   bool

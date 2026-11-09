@@ -18,7 +18,7 @@ func New() (*Loader, error) {
 		templates: make(map[string]*template.Template),
 	}
 	files := []string{
-		"system", "guard_review", "skill_review", "compress", "extract_batch", "subtask_system",
+		"system", "guard_review", "skill_review", "compress", "compress_tools", "extract_batch", "subtask_system",
 	}
 	for _, name := range files {
 		data, err := templatesFS.ReadFile("templates/" + name + ".md")
@@ -58,13 +58,6 @@ func (l *Loader) RenderSystem(data SystemPromptData) (string, error) {
 		"ProjectConfig":       data.ProjectConfig,
 		"ProjectConfigSource": data.ProjectConfigSource,
 		"Skills":              data.Skills,
-	})
-}
-
-func (l *Loader) RenderCompressWithState(previousState, content string) (string, error) {
-	return l.Render("compress", map[string]any{
-		"PreviousState": previousState,
-		"Content":       content,
 	})
 }
 

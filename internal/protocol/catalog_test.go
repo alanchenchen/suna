@@ -50,7 +50,7 @@ func TestRuntimeCatalogCoversAllPublicNotifications(t *testing.T) {
 		NotifySessionUpdated, NotifyUsage, NotifyToolStart, NotifyToolGuard,
 		NotifyToolEnd, NotifyAskUser, NotifyGuardConfirm, NotifyInteractionResolved,
 		NotifyMCPUpdated, NotifyConfigState, NotifyConfigModelsResult,
-		NotifyCompactResult, NotifyMemoryState, NotifySkillLoad, NotifySkillReview,
+		NotifyCompactState, NotifyMemoryState, NotifySkillLoad, NotifySkillReview,
 	} {
 		if internal[notification] {
 			continue

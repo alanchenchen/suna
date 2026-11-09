@@ -234,6 +234,8 @@ disabled / starting / active / error
 {"session_id":"SESSION_ID","require_active":true}
 ```
 
+Attach 的 `messages` 来自已保存的有效历史：包含对话正文、未压缩工具声明／结果，以及已压缩工具的 `observed_tools` 标签。不要再依赖旧 `tool_summary`；标签只用于恢复简洁条目，不含观察全文或已删除的参数／结果，不应伪造执行事件、计时或激活子任务面板。`compacted=true` 表示有较早对话摘要，`compact` 可选字段仅恢复在途 `preparing/ready` 状态。完整字段见 [Protocol 的快照说明](protocol.md#sessionattach)。
+
 Attach response 中的 `current_run`、`run_id`、`assistant_buffer` 与 `reasoning_buffer` 用于恢复正在进行的展示；`pending_steering` 是 daemon 已接受但尚未应用的运行中消息，客户端按 `sequence` 显示并按 `can_control` 决定是否允许撤回。同一 `run_id` 已收到终态后，客户端不得被迟到快照重新切回运行态。
 
 未 attach 的客户端只通过 `session.updated` 观察轻量 Catalog 状态。只有 attach 到目标 session 后，才会收到该 session 的 `agent.run`、`agent.delta`、tool、AskUser、Guard、`session.user_message` 等详细事件。
@@ -257,9 +259,10 @@ Attach response 中的 `current_run`、`run_id`、`assistant_buffer` 与 `reason
 | `agent.guard_confirm` | 展示安全确认，并由允许回复的 client 决策。 |
 | `agent.interaction_resolved` | 移除对应 AskUser / Guard UI。 |
 | `session.updated` | 合并全局 Session Catalog 中的 metadata、`status` 与 `client_count`；该通知会发送给所有已完成握手的客户端，包括未 attach 目标 session 的客户端。 |
+| `session.compact_state` | 按 `compact_id` 合并后台准备、就绪、采用和终态；只有 `applied` 才更新释放空间，普通后台不占用前台 busy。 |
 | `session.user_message` | 追加正式 user turn；运行中消息只有在 `applied` 后才由此进入 transcript。 |
 
-`agent.run`、`agent.delta`、`agent.steering`、`agent.usage`、`agent.tool_start`、`agent.tool_guard`、`agent.tool_end` 与 `session.compact_result` 均携带 `session_id` 字段。单 session 客户端可忽略；多 session 并存的客户端用它区分事件归属。
+`agent.run`、`agent.delta`、`agent.steering`、`agent.usage`、`agent.tool_start`、`agent.tool_guard`、`agent.tool_end` 与 `session.compact_state` 均携带 `session_id` 字段。单 session 客户端可忽略；多 session 并存的客户端用它区分事件归属。
 
 各通知的关键可选字段（未列出的字段一律忽略）：
 
@@ -284,7 +287,7 @@ Attach response 中的 `current_run`、`run_id`、`assistant_buffer` 与 `reason
 {"message":{"id":"STEERING_ID","run_id":"RUN_ID","client_msg_id":"CLIENT_GENERATED_ID","state":"queued","sequence":1,"can_control":true,"parts":[{"type":"text","text":"不要修改配置，只检查问题。"}]}}
 ```
 
-消息不会打断正在进行的模型请求或 Tool Call。daemon 只在完整模型响应结束、或同一批 Tool Result 全部写回后的安全边界应用；自动 Compact 期间到达的消息会在 Compact 提交后应用。`queued` 时不要把它渲染成正式用户消息，收到 `applied` 后再等待 `session.user_message` 追加 transcript。
+消息不会打断正在进行的模型请求或 Tool Call。daemon 在完整响应、或同批 Tool Result 全部写回后的安全边界应用；后台摘要准备不改变这一点，未消费的新用户要求会推迟普通候选采用。硬容量等待结束后，下一模型请求前也会再次接收队列，候选不覆盖新增消息。`queued` 时不要把它渲染成正式用户消息，收到 `applied` 后再等待 `session.user_message` 追加 transcript。
 
 撤回尚未应用的消息：
 
@@ -326,6 +329,25 @@ queued / applied / removed / rejected
 ### agent.cancel / agent.resumeRun
 
 两者都不接受 params（传 `{}` 或省略），成功时 result 为空对象。`agent.cancel` 请求取消当前 run；进入 `cancelling` 后重复取消幂等。`agent.resumeRun` 只在最近一次 `agent.run` 携带 `resume_available=true` 后可用，否则返回 `session_busy`。
+
+### session.compact
+
+仅在已 attach 的空闲会话调用，无参数或传 `{}`。先检查 Catalog 同时支持 `session.compact` 与 `session.compact_state`。
+
+```json
+{"jsonrpc":"2.0","id":8,"method":"session.compact","params":{}}
+```
+
+成功 result 快速返回 `{"compact_id":"COMPACT_ID"}`，不是完整模型生成结果。后续通知例如：
+
+```json
+{"jsonrpc":"2.0","method":"session.compact_state","params":{"session_id":"SESSION_ID","compact_id":"COMPACT_ID","kind":"tools","state":"preparing","wait":"manual"}}
+{"jsonrpc":"2.0","method":"session.compact_state","params":{"session_id":"SESSION_ID","compact_id":"COMPACT_ID","kind":"tools","state":"applied","result":{"before_tokens":180000,"after_tokens":130000,"context_window":400000}}}
+```
+
+`state` 为 `preparing / ready / applied / skipped / failed / cancelled`，后四项是终态。无 `wait` 是后台维护；`manual` 是手动等待；`hard_limit` 是主任务容量等待。只有 `applied.result` 表示已采用，不能把 `ready` 当成空间已经释放。控制权与取消仍走 `agent.run` / `agent.cancel`。
+
+response 与 notification 可能乱序，需按 ID 合并并防止终态倒退。请求超时或断线后不自动重发压缩；重连读取快照，再由用户决定下一步。更多字段和错误边界见 [Protocol](protocol.md#sessioncompact)，用户使用说明见[记忆与后台压缩](memory.md)。
 
 ### session.update
 

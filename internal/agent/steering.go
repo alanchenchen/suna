@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/runner"
 )
@@ -131,6 +132,12 @@ func (a *Agent) takeSteering(runID string, seal bool) []runner.SteeringInput {
 
 func (a *Agent) onSteeringApplied(ctx context.Context, input runner.SteeringInput) SteeringItem {
 	text := input.Message.Text()
+	a.steeringMu.RLock()
+	mailbox := a.steering
+	a.steeringMu.RUnlock()
+	if mailbox != nil {
+		mailbox.applied(input.ID)
+	}
 	a.turnCount++
 	a.enqueueMemoryEvent(ctx, model.RoleUser, text, false, false, false, false)
 	return SteeringItem{ID: input.ID, ClientMsgID: input.ClientMsgID, Text: text, State: SteeringApplied, Sequence: input.Sequence}
@@ -142,11 +149,13 @@ type steeringMailbox struct {
 	sealed           bool
 	interactionCount int
 	items            []SteeringItem
-	byClient         map[string]SteeringItem
-	byID             map[string]SteeringItem
-	acceptedBytes    int
-	nextSequence     uint64
-	lastAppliedText  string
+	// claimed 是已被 Runner 认领、尚待检查点确认的队首长度；不增加对外状态。
+	claimed         int
+	byClient        map[string]SteeringItem
+	byID            map[string]SteeringItem
+	acceptedBytes   int
+	nextSequence    uint64
+	lastAppliedText string
 }
 
 func newSteeringMailbox(runID string) *steeringMailbox {
@@ -209,7 +218,8 @@ func (m *steeringMailbox) remove(runID, id string) (SteeringItem, string, bool, 
 	if m.interactionCount > 0 {
 		return SteeringItem{}, "", false, fmt.Errorf("interaction_pending")
 	}
-	for i := len(m.items) - 1; i >= 0; i-- {
+	// 认领与撤回共用短锁；已交给 Runner 的副本不能再报告撤回成功。
+	for i := len(m.items) - 1; i >= m.claimed; i-- {
 		if m.items[i].ID != id {
 			continue
 		}
@@ -246,22 +256,18 @@ func (m *steeringMailbox) take(seal bool) []runner.SteeringInput {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if len(m.items) == 0 {
-		if seal {
+	if len(m.items) == m.claimed {
+		if seal && len(m.items) == 0 {
 			m.sealed = true
 		}
 		return nil
 	}
-	items := append([]SteeringItem(nil), m.items...)
-	m.items = nil
-	out := make([]runner.SteeringInput, 0, len(items))
-	for _, item := range items {
-		item.State = SteeringApplied
-		m.byClient[item.ClientMsgID] = item
-		m.byID[item.ID] = item
-		m.lastAppliedText = item.Text
-		out = append(out, runner.SteeringInput{ID: item.ID, ClientMsgID: item.ClientMsgID, Sequence: item.Sequence, Message: model.NewTextMessage(model.RoleUser, item.Text)})
+	// 在锁内一次认领，检查点与广播留在锁外；失败时仍由 rejectPending 明确退回。
+	out := make([]runner.SteeringInput, 0, len(m.items)-m.claimed)
+	for _, item := range m.items[m.claimed:] {
+		out = append(out, runner.SteeringInput{ID: item.ID, ClientMsgID: item.ClientMsgID, Sequence: item.Sequence, Message: memory.NewTextMessage(model.RoleUser, item.Text)})
 	}
+	m.claimed = len(m.items)
 	return out
 }
 
@@ -273,6 +279,7 @@ func (m *steeringMailbox) rejectPending() []SteeringItem {
 	defer m.mu.Unlock()
 	items := append([]SteeringItem(nil), m.items...)
 	m.items = nil
+	m.claimed = 0
 	m.sealed = true
 	for i := range items {
 		items[i].State = SteeringRejected
@@ -289,4 +296,21 @@ func (m *steeringMailbox) pending() []SteeringItem {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]SteeringItem(nil), m.items...)
+}
+
+func (m *steeringMailbox) applied(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, item := range m.items[:m.claimed] {
+		if item.ID != id {
+			continue
+		}
+		item.State = SteeringApplied
+		m.byClient[item.ClientMsgID] = item
+		m.byID[id] = item
+		m.lastAppliedText = item.Text
+		m.items = append(m.items[:i], m.items[i+1:]...)
+		m.claimed--
+		return
+	}
 }

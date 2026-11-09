@@ -41,7 +41,7 @@ type ToolStartMsg struct{ Params protocol.ToolStartParams }
 type ToolGuardMsg struct{ Params protocol.ToolGuardParams }
 type ToolEndMsg struct{ Params protocol.ToolEndParams }
 
-type CompactResultMsg struct{ Params protocol.CompactResult }
+type CompactStateMsg struct{ Params protocol.CompactState }
 type MemoryListMsg struct{ Params protocol.MemoryListResult }
 type DaemonFullStatusMsg struct{ Params protocol.DaemonStatusParams }
 type ConfigStateMsg struct{ Params protocol.ConfigParams }
@@ -74,7 +74,7 @@ func (InteractionResolvedMsg) isNotificationMsg() {}
 func (ToolStartMsg) isNotificationMsg()           {}
 func (ToolGuardMsg) isNotificationMsg()           {}
 func (ToolEndMsg) isNotificationMsg()             {}
-func (CompactResultMsg) isNotificationMsg()       {}
+func (CompactStateMsg) isNotificationMsg()        {}
 func (MemoryListMsg) isNotificationMsg()          {}
 func (DaemonFullStatusMsg) isNotificationMsg()    {}
 func (ConfigStateMsg) isNotificationMsg()         {}
@@ -114,8 +114,8 @@ func Decode(notif Notification) tea.Msg {
 		return decodeParams[protocol.GuardConfirmParams](notif, func(p protocol.GuardConfirmParams) tea.Msg { return GuardConfirmMsg{Params: p} })
 	case protocol.NotifyInteractionResolved:
 		return decodeParams[protocol.InteractionResolvedParams](notif, func(p protocol.InteractionResolvedParams) tea.Msg { return InteractionResolvedMsg{Params: p} })
-	case protocol.NotifyCompactResult:
-		return decodeParams[protocol.CompactResult](notif, func(p protocol.CompactResult) tea.Msg { return CompactResultMsg{Params: p} })
+	case protocol.NotifyCompactState:
+		return decodeParams[protocol.CompactState](notif, func(p protocol.CompactState) tea.Msg { return CompactStateMsg{Params: p} })
 	case NotifyCompactError, NotifyConfigError, NotifyMCPError:
 		var p struct {
 			Message string `json:"message"`

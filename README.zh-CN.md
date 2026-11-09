@@ -34,6 +34,10 @@ Suna 在本机运行 Agent、工具和会话管理。你可以配置 OpenAI、An
 
 这里的隔离是模型上下文和工具授权隔离，不是独立文件系统沙箱。执行边界见 [Subtask](docs/subtask.md)。
 
+### 长任务少中断，重要线索尽量保留
+
+Suna 提前在后台生成摘要，先整理较早的大段工具输出，必要时才归纳较早对话，尽量保留你的原始讨论和近期操作细节。让上下文持续增长时，少一些无谓重读和临时等待。工作方式与边界见[记忆与后台压缩](docs/memory.md)。
+
 ### 终端与 Web，共用一个本地 Runtime
 
 内置 TUI 和官方 Suna App 连接同一个 Runtime，由 Runtime 管理会话、Agent 运行、工具、Guard 和持久化。你也可以通过[公开协议](docs/tcp-client.md)开发自己的客户端。
@@ -244,6 +248,7 @@ Guard 不是 OS sandbox：命令分析不能限制脚本或程序运行时访问
 - [文档索引](docs/README.md)
 - [客户端接入指南](docs/tcp-client.md)与 [Protocol](docs/protocol.md)
 - [配置说明](docs/configuration.md)
+- [记忆与后台压缩](docs/memory.md)
 - [Subtask](docs/subtask.md)
 - [架构说明](docs/architecture.md)与[关键设计](docs/design.md)
 - [性能](docs/performance.md)

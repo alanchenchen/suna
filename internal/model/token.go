@@ -3,7 +3,6 @@ package model
 import (
 	"math"
 	"strings"
-	"unicode"
 )
 
 func EstimateTokens(text string) int {
@@ -12,8 +11,9 @@ func EstimateTokens(text string) int {
 	}
 	asciiCount := 0
 	nonASCIICount := 0
+	// 汉字已包含在非 ASCII 字符中，无需对每个 ASCII 字符再查 Unicode 范围表。
 	for _, r := range text {
-		if r > 127 || unicode.Is(unicode.Han, r) {
+		if r > 127 {
 			nonASCIICount++
 		} else {
 			asciiCount++

@@ -3,14 +3,10 @@ package memory
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
-
-	"github.com/google/uuid"
 
 	_ "modernc.org/sqlite"
 )
@@ -71,6 +67,9 @@ func (s *Store) Close() error {
 }
 
 func (s *Store) migrate() error {
+	if err := s.checkUpgradeBaseline(); err != nil {
+		return err
+	}
 	migrations := []string{
 		// ── User profile memory tables ──
 
@@ -110,9 +109,8 @@ func (s *Store) migrate() error {
 
 		`CREATE TABLE IF NOT EXISTS session_state (
 			session_id TEXT PRIMARY KEY,
-			compacted_state TEXT NOT NULL DEFAULT '',
-			last_messages TEXT NOT NULL DEFAULT '[]',
-			tool_summary TEXT NOT NULL DEFAULT '[]',
+			summary TEXT NOT NULL DEFAULT '',
+			messages TEXT NOT NULL DEFAULT '[]',
 			updated_at DATETIME NOT NULL,
 			FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
 		)`,
@@ -200,129 +198,7 @@ func (s *Store) migrate() error {
 			return fmt.Errorf("exec migration: %w\nquery: %s", err, m)
 		}
 	}
-	if err := s.migrateSessionModelRef(); err != nil {
-		return err
-	}
-	if err := s.migrateMemoryQueueModelRef(); err != nil {
-		return err
-	}
-	if err := s.migrateLegacyConversationState(); err != nil {
-		return err
-	}
-	if err := s.migrateDropGuardRiskColumns(); err != nil {
-		return err
-	}
-	return nil
-}
-
-// migrateDropGuardRiskColumns 删除已废弃的 risk 分级列：
-// Guard 重构后 risk 三级（low/medium/high）退化为只读布尔，audit_log.risk_level 与
-// trust_rules.risk_adjustment 不再写入。SQLite 3.35+ 支持 DROP COLUMN；
-// 旧库检测到列存在时删除，新库建表已不带这两列。
-func (s *Store) migrateDropGuardRiskColumns() error {
-	for _, tc := range []struct{ table, column string }{
-		{"audit_log", "risk_level"},
-		{"trust_rules", "risk_adjustment"},
-	} {
-		exists, err := s.columnExists(tc.table, tc.column)
-		if err != nil {
-			return fmt.Errorf("check %s.%s: %w", tc.table, tc.column, err)
-		}
-		if !exists {
-			continue
-		}
-		if _, err := s.db.Exec(`ALTER TABLE ` + tc.table + ` DROP COLUMN ` + tc.column); err != nil {
-			return fmt.Errorf("drop %s.%s: %w", tc.table, tc.column, err)
-		}
-	}
-	return nil
-}
-
-func (s *Store) migrateSessionModelRef() error {
-	exists, err := s.columnExists("sessions", "model_ref")
-	if err != nil {
-		return fmt.Errorf("check sessions.model_ref: %w", err)
-	}
-	if exists {
-		return nil
-	}
-	if _, err := s.db.Exec(`ALTER TABLE sessions ADD COLUMN model_ref TEXT`); err != nil {
-		return fmt.Errorf("add sessions.model_ref: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) migrateMemoryQueueModelRef() error {
-	const column = "model_ref"
-	exists, err := s.columnExists("memory_queue", column)
-	if err != nil {
-		return fmt.Errorf("check memory_queue.%s: %w", column, err)
-	}
-	if exists {
-		return nil
-	}
-	if _, err := s.db.Exec(`ALTER TABLE memory_queue ADD COLUMN model_ref TEXT NOT NULL DEFAULT ''`); err != nil {
-		return fmt.Errorf("add memory_queue.%s: %w", column, err)
-	}
-	return nil
-}
-
-func (s *Store) migrateLegacyConversationState() error {
-	exists, err := s.tableExists("conversation_state")
-	if err != nil || !exists {
-		return err
-	}
-	selectState := "''"
-	if ok, err := s.columnExists("conversation_state", "session_state"); err != nil {
-		return err
-	} else if ok {
-		selectState = "session_state"
-	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// session_state 列只存在于较新的单会话库；更旧库迁移时把 compacted state 当空串处理。
-	rows, err := tx.Query(fmt.Sprintf(`SELECT %s, last_messages, tool_summary, updated_at FROM conversation_state`, selectState))
-	if err != nil {
-		return fmt.Errorf("read legacy conversation_state: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var compacted, lastMessages, toolSummary string
-		var updated sql.NullString
-		if err := rows.Scan(&compacted, &lastMessages, &toolSummary, &updated); err != nil {
-			return err
-		}
-		if strings.TrimSpace(compacted) == "" && emptyJSONMessages(lastMessages) {
-			continue
-		}
-		id := uuid.New().String()
-		when := parseDBTime(updated.String)
-		if when.IsZero() {
-			when = time.Now()
-		}
-		count := countLegacyMessages(lastMessages)
-		cwd := ""
-		if wd, err := os.Getwd(); err == nil {
-			cwd = wd
-		}
-		if _, err := tx.Exec(`INSERT INTO sessions (id, title, cwd, message_count, created_at, updated_at) VALUES (?, '', ?, ?, ?, ?)`, id, cwd, count, when, when); err != nil {
-			return fmt.Errorf("create migrated session: %w", err)
-		}
-		if _, err := tx.Exec(`INSERT INTO session_state (session_id, compacted_state, last_messages, tool_summary, updated_at) VALUES (?, ?, ?, ?, ?)`, id, strings.TrimSpace(compacted), normalizeLegacyJSON(lastMessages, "[]"), normalizeLegacyJSON(toolSummary, "[]"), when); err != nil {
-			return fmt.Errorf("create migrated session state: %w", err)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`DROP TABLE conversation_state`); err != nil {
-		return fmt.Errorf("drop legacy conversation_state: %w", err)
-	}
-	return tx.Commit()
+	return s.migrateSessionMessages()
 }
 
 func (s *Store) tableExists(name string) (bool, error) {
@@ -357,24 +233,4 @@ func (s *Store) columnExists(table, column string) (bool, error) {
 		}
 	}
 	return false, rows.Err()
-}
-
-func emptyJSONMessages(raw string) bool {
-	raw = strings.TrimSpace(raw)
-	return raw == "" || raw == "[]" || raw == "null"
-}
-
-func normalizeLegacyJSON(raw, fallback string) string {
-	if strings.TrimSpace(raw) == "" {
-		return fallback
-	}
-	return raw
-}
-
-func countLegacyMessages(raw string) int {
-	var arr []json.RawMessage
-	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
-		return 0
-	}
-	return len(arr)
 }
