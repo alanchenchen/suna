@@ -53,9 +53,8 @@ func (t *TUI) updateProviderForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return t, nil
 		case "enter":
-			// model 字段 enter 打开模型选择浮层：用户在浮层内选择或输入；
-			// 其他字段 enter 保持原有导航语义。
-			if t.config.InputFocus == tuiconfig.ProviderFormModelIndex {
+			// 只有已保存的 provider 能拉取模型列表；新 provider 的 model 是普通输入框。
+			if t.config.InputFocus == tuiconfig.ProviderFormModelIndex && t.providerFormUsesModelPicker() {
 				return t, t.openModelPickerForForm()
 			}
 			if t.config.InputFocus == len(t.config.Inputs)-1 {
@@ -77,8 +76,8 @@ func (t *TUI) updateProviderForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return t, nil
 		}
 	}
-	if t.config.InputFocus == tuiconfig.ProviderFormProtocolIndex || t.config.InputFocus == tuiconfig.ProviderFormAuthModeIndex || t.config.InputFocus == tuiconfig.ProviderFormModelIndex {
-		// 选择行（protocol/auth_mode/model）不接收字符输入；model 的 enter 已在上方处理。
+	if t.providerFormInputIsChoice(t.config.InputFocus) {
+		// 选择行不接收字符输入；新 provider 的 model 仍接收普通输入与粘贴。
 		return t, nil
 	}
 	var cmd tea.Cmd
@@ -159,7 +158,9 @@ func (t *TUI) focusConfigInputWithDelta(idx, delta int) tea.Cmd {
 	var cmds []tea.Cmd
 	for i := range t.config.Inputs {
 		if i == t.config.InputFocus {
-			if i != tuiconfig.ProviderFormProtocolIndex && i != tuiconfig.ProviderFormAuthModeIndex && i != tuiconfig.ProviderFormModelIndex {
+			if t.providerFormInputIsChoice(i) {
+				t.config.Inputs[i].Blur()
+			} else {
 				cmds = append(cmds, t.config.Inputs[i].Focus())
 			}
 		} else {
@@ -167,6 +168,28 @@ func (t *TUI) focusConfigInputWithDelta(idx, delta int) tea.Cmd {
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+func (t *TUI) providerFormInputIsChoice(idx int) bool {
+	return idx == tuiconfig.ProviderFormProtocolIndex || idx == tuiconfig.ProviderFormAuthModeIndex ||
+		(idx == tuiconfig.ProviderFormModelIndex && t.providerFormUsesModelPicker())
+}
+
+// providerFormUsesModelPicker 只查已保存配置；未保存的 endpoint 和凭据不能用于拉取模型。
+func (t *TUI) providerFormUsesModelPicker() bool {
+	if len(t.config.Inputs) <= tuiconfig.ProviderFormProviderIndex {
+		return false
+	}
+	provider := strings.TrimSpace(t.config.Inputs[tuiconfig.ProviderFormProviderIndex].Value())
+	if provider == "" {
+		return false
+	}
+	for _, mc := range t.configState.Models {
+		if mc.Provider == provider {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *TUI) configInputEditable(idx int) bool {
@@ -482,19 +505,14 @@ func sameJSON(a, b map[string]any) bool {
 	return tuiconfig.SameJSON(a, b)
 }
 
-// openModelPickerForForm 在模型表单的 model 字段 enter 时打开同步选择浮层：
-// 缓存命中直接填充候选；未命中则异步拉取（daemon 不阻塞连接循环），
-// 结果通过 config.models_result 通知回填。选择器输入即过滤；
-// 拉取失败或列表为空时，输入值直接作为自定义模型名。
+// openModelPickerForForm 为已保存的 provider 打开模型选择浮层。
+// 模型列表异步拉取，结果通过 config.models_result 通知回填；选择器输入即过滤，
+// 拉取失败或列表为空时，仍可输入自定义模型名。
 func (t *TUI) openModelPickerForForm() tea.Cmd {
-	if len(t.config.Inputs) <= tuiconfig.ProviderFormModelIndex {
+	if len(t.config.Inputs) <= tuiconfig.ProviderFormModelIndex || !t.providerFormUsesModelPicker() {
 		return nil
 	}
 	provider := strings.TrimSpace(t.config.Inputs[tuiconfig.ProviderFormProviderIndex].Value())
-	if provider == "" {
-		t.config.Error = t.tr("tui.config.provider.required")
-		return nil
-	}
 	// 同步选择器：输入框即筛选框，无异步过滤链路；每次打开重置为空输入。
 	t.modelCombobox = combobox.New(t.tr("tui.config.picker.placeholder"))
 	t.modelCombobox.SetPrompt(t.tr("tui.config.picker.filter") + " ")

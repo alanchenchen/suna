@@ -361,7 +361,6 @@ func defaultTranslationKeys() map[string]map[LocaleID]string {
 		"tui.config.provider.add_model_to_provider": {LocaleEN: "Add model to provider", LocaleZH: "为提供商新增模型"},
 		"tui.config.provider.edit":                  {LocaleEN: "Edit Provider", LocaleZH: "编辑 Provider"},
 		"tui.config.provider.section":               {LocaleEN: "Provider", LocaleZH: "Provider"},
-		"tui.config.provider.required":              {LocaleEN: "Provider is required before loading models", LocaleZH: "拉取模型列表前需要先填写 Provider"},
 		"tui.config.provider.models_loading":        {LocaleEN: "Loading models...", LocaleZH: "正在拉取模型列表..."},
 		"tui.config.provider.models_empty":          {LocaleEN: "No models returned; type to enter a custom name", LocaleZH: "未获取到模型；直接输入自定义名称"},
 		"tui.config.model_connections":              {LocaleEN: "Model Connections", LocaleZH: "模型连接"},

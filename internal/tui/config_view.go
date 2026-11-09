@@ -212,7 +212,7 @@ func (t *TUI) viewProviderForm() string {
 			lines = append(lines, styleMuted.Render(t.tr("tui.config.provider.api_key")+": ")+styleMuted.Render(t.i18n.Tf("tui.config.api_key_reused", t.config.FormProvider)))
 			continue
 		}
-		if i == tuiconfig.ProviderFormModelIndex {
+		if i == tuiconfig.ProviderFormModelIndex && t.providerFormUsesModelPicker() {
 			lines = append(lines, t.providerModelChoiceView(in))
 			continue
 		}
@@ -252,7 +252,9 @@ func (t *TUI) providerFormHelp() string {
 func (t *TUI) providerFieldHint(idx int) string {
 	switch idx {
 	case tuiconfig.ProviderFormModelIndex:
-		return t.tr("tui.config.hint.model")
+		if t.providerFormUsesModelPicker() {
+			return t.tr("tui.config.hint.model")
+		}
 	case tuiconfig.ProviderFormProtocolIndex:
 		return t.tr("tui.config.hint.protocol")
 	case tuiconfig.ProviderFormAuthModeIndex:

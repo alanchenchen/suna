@@ -423,13 +423,10 @@ func renderGuardSummary(info *GuardInfo, prefix string, deps RenderDeps) string 
 	if deps.GuardDecisionLabel != nil {
 		decision = deps.GuardDecisionLabel(info)
 	}
-	readOnlyLabel := ""
-	if deps.ReadOnlyLabel != nil && info != nil {
-		readOnlyLabel = deps.ReadOnlyLabel(info.ReadOnly)
-	}
 	parts := []string{s.Dim.Render(deps.Labels.GuardBadge), renderGuardDecisionBadge(info, decision, s)}
-	if readOnlyLabel != "" {
-		parts = append(parts, readOnlyLabel)
+	// 默认卡片只保留明确的只读标记；非只读性质留在详情，避免重复展示 action。
+	if info.ReadOnly && deps.ReadOnlyLabel != nil {
+		parts = append(parts, deps.ReadOnlyLabel(true))
 	}
 	if reason := shortGuardReason(info.Reason); reason != "" {
 		parts = append(parts, s.ToolDim.Render(reason))

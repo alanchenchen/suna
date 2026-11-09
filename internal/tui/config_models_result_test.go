@@ -12,7 +12,7 @@ import (
 )
 
 func TestConfigModelsResultFillsPicker(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100, configState: protocolConfigStateWithModels(1)}
 	tui.openProviderForm("provider-a/model", &tuiconfig.ModelConfig{
 		Provider: "provider-a", Protocol: coreconfig.ModelProtocolOpenAIChat,
 		Model: "model", BaseURL: "https://api.example.com/v1",
@@ -31,7 +31,7 @@ func TestConfigModelsResultFillsPicker(t *testing.T) {
 // 浮层等待拉取结果时收到请求级错误（未连接、超时等）：必须在浮层内展示并清除
 // 加载态，否则加载指示永远卡住；错误也不能写到浮层背后的表单上。
 func TestConfigModelsRequestErrorClearsPickerLoading(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100, configState: protocolConfigStateWithModels(1)}
 	tui.openProviderForm("provider-a/model", &tuiconfig.ModelConfig{
 		Provider: "provider-a", Protocol: coreconfig.ModelProtocolOpenAIChat,
 		Model: "model", BaseURL: "https://api.example.com/v1",
@@ -53,7 +53,7 @@ func TestConfigModelsRequestErrorClearsPickerLoading(t *testing.T) {
 }
 
 func TestConfigModelsResultErrorShowsInPicker(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100, configState: protocolConfigStateWithModels(1)}
 	tui.openProviderForm("provider-a/model", &tuiconfig.ModelConfig{
 		Provider: "provider-a", Protocol: coreconfig.ModelProtocolOpenAIChat,
 		Model: "model", BaseURL: "https://api.example.com/v1",
@@ -71,7 +71,7 @@ func TestConfigModelsResultErrorShowsInPicker(t *testing.T) {
 }
 
 func TestConfigModelsResultIgnoredWhenPickerClosed(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100, configState: protocolConfigStateWithModels(1)}
 	tui.openProviderForm("provider-a/model", &tuiconfig.ModelConfig{
 		Provider: "provider-a", Protocol: coreconfig.ModelProtocolOpenAIChat,
 		Model: "model", BaseURL: "https://api.example.com/v1",

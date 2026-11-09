@@ -17,7 +17,7 @@ import (
 // 焦点停在 model 字段并按 enter 打开选择浮层。
 func newPickerFormTUI(t *testing.T, models []string) *TUI {
 	t.Helper()
-	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100, configState: protocolConfigStateWithModels(1)}
 	tui.openProviderForm("provider-a/model", &tuiconfig.ModelConfig{
 		Provider: "provider-a",
 		Protocol: coreconfig.ModelProtocolOpenAIChat,
@@ -46,8 +46,9 @@ func TestProviderFormModelEnterOpensPickerAndLoadsModels(t *testing.T) {
 // TestProviderFormModelFieldIsPlainValueRow 验证 model 字段渲染为纯值行：
 // 不用 ‹ › 箭头（那是循环切换语义）；未设置时显示提示，有值时显示模型名。
 func TestProviderFormModelFieldIsPlainValueRow(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
-	tui.openProviderForm("", nil)
+	tui := newPickerFormTUI(t, nil)
+	tui.closeProviderPicker()
+	tui.config.Inputs[tuiconfig.ProviderFormModelIndex].SetValue("")
 
 	view := stripANSIForTest(tui.viewProviderForm())
 	if !strings.Contains(view, "not set · Enter to pick or type") {
@@ -64,17 +65,103 @@ func TestProviderFormModelFieldIsPlainValueRow(t *testing.T) {
 	}
 }
 
-func TestProviderFormModelEnterRequiresProvider(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
-	tui.openProviderForm("", nil)
-	tui.config.InputFocus = tuiconfig.ProviderFormModelIndex
-
-	tui.updateProviderForm(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if tui.modelPickerOpen {
-		t.Fatal("modelPickerOpen = true without provider, want false")
+func TestProviderFormNewProviderModelAcceptsDirectInput(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		provider string
+		setup    bool
+	}{
+		{name: "first setup", provider: "provider-a", setup: true},
+		{name: "new provider", provider: "provider-b"},
+		{name: "provider not entered"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tui := &TUI{i18n: newTranslator(LocaleEN), width: 100, configState: protocolConfigStateWithModels(1)}
+			if tt.setup {
+				tui.configState = protocol.ConfigParams{}
+				tui.config.SetupMode = true
+			}
+			tui.openProviderForm("", nil)
+			tui.config.Inputs[tuiconfig.ProviderFormProviderIndex].SetValue(tt.provider)
+			tui.focusConfigInput(tuiconfig.ProviderFormModelIndex)
+			input := &tui.config.Inputs[tuiconfig.ProviderFormModelIndex]
+			if !input.Focused() {
+				t.Fatal("model input focused = false, want true")
+			}
+			tui.updateProviderForm(tea.KeyPressMsg{Code: 'm', Text: "m"})
+			tui.updateProviderForm(tea.PasteMsg{Content: "odel-custom"})
+			if got := input.Value(); got != "model-custom" {
+				t.Fatalf("model input = %q, want model-custom", got)
+			}
+			plain := stripANSIForTest(tui.viewProviderForm())
+			if !strings.Contains(plain, "type to fill") || strings.Contains(plain, "Enter picks from list") {
+				t.Fatalf("provider form = %q, want direct-input hint without picker hint", plain)
+			}
+			tui.updateProviderForm(tea.KeyPressMsg{Code: tea.KeyEnter})
+			if tui.modelPickerOpen || tui.modelPickerLoading || tui.config.Error != "" {
+				t.Fatalf("picker open/loading/error = %v/%v/%q, want false/false/empty", tui.modelPickerOpen, tui.modelPickerLoading, tui.config.Error)
+			}
+			if got := tui.config.InputFocus; got != tuiconfig.ProviderFormAPIKeyIndex {
+				t.Fatalf("InputFocus = %d, want API key field", got)
+			}
+			if got := tui.providerFormValues().Model; got != "model-custom" {
+				t.Fatalf("form model = %q, want model-custom", got)
+			}
+		})
 	}
-	if tui.config.Error == "" {
-		t.Fatal("config error = empty, want provider required message")
+}
+
+func TestProviderFormSavedProviderUsesPicker(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		openForm func(*TUI)
+	}{
+		{name: "add model to provider", openForm: func(tui *TUI) { tui.openProviderModelForm("provider-a") }},
+		{name: "existing provider entered", openForm: func(tui *TUI) {
+			tui.openProviderForm("", nil)
+			tui.config.Inputs[tuiconfig.ProviderFormProviderIndex].SetValue(" provider-a ")
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tui := &TUI{i18n: newTranslator(LocaleEN), width: 100, configState: protocolConfigStateWithModels(1)}
+			tt.openForm(tui)
+			tui.focusConfigInput(tuiconfig.ProviderFormModelIndex)
+			if tui.config.Inputs[tuiconfig.ProviderFormModelIndex].Focused() {
+				t.Fatal("model input focused = true, want picker choice without text cursor")
+			}
+			tui.updateProviderForm(tea.KeyPressMsg{Code: 'x', Text: "x"})
+			if got := tui.config.Inputs[tuiconfig.ProviderFormModelIndex].Value(); got != "" {
+				t.Fatalf("model field = %q, want empty before picker selection", got)
+			}
+			if hint := tui.providerFieldHint(tuiconfig.ProviderFormModelIndex); !strings.Contains(hint, "Enter picks from list") {
+				t.Fatalf("model hint = %q, want picker hint", hint)
+			}
+			tui.updateProviderForm(tea.KeyPressMsg{Code: tea.KeyEnter})
+			if !tui.modelPickerOpen || !tui.modelPickerLoading || tui.modelPickerProvider != "provider-a" {
+				t.Fatalf("picker open/loading/provider = %v/%v/%q, want true/true/provider-a", tui.modelPickerOpen, tui.modelPickerLoading, tui.modelPickerProvider)
+			}
+		})
+	}
+}
+
+func TestProviderFormChangingProviderSwitchesModelInputMode(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100, configState: protocolConfigStateWithModels(1)}
+	tui.openProviderForm("", nil)
+	tui.config.Inputs[tuiconfig.ProviderFormModelIndex].SetValue("model-custom")
+	for _, provider := range []string{"provider-a", "provider-b", "provider-a"} {
+		tui.focusConfigInput(tuiconfig.ProviderFormProviderIndex)
+		tui.config.Inputs[tuiconfig.ProviderFormProviderIndex].SetValue(provider)
+		tui.focusConfigInput(tuiconfig.ProviderFormModelIndex)
+		wantPicker := provider == "provider-a"
+		if got := tui.providerFormUsesModelPicker(); got != wantPicker {
+			t.Fatalf("provider %q picker = %v, want %v", provider, got, wantPicker)
+		}
+		if got := tui.config.Inputs[tuiconfig.ProviderFormModelIndex].Focused(); got == wantPicker {
+			t.Fatalf("provider %q input focused = %v, want %v", provider, got, !wantPicker)
+		}
+		if got := tui.providerFormValues().Model; got != "model-custom" {
+			t.Fatalf("provider %q model = %q, want model-custom preserved", provider, got)
+		}
 	}
 }
 
@@ -230,8 +317,7 @@ func TestProviderPickerWheelMovesCursor(t *testing.T) {
 // 候选被填充且保留用户已输入的筛选文本。
 func TestProviderPickerLoadingResultFillsItems(t *testing.T) {
 	tui := newPickerFormTUI(t, nil)
-	// helper 传入 nil 缓存时浮层未打开（enter 需要 provider 缓存命中才不拉取），
-	// 这里直接重开：无缓存 → 异步拉取 → loading。
+	// 模拟已打开的选择器仍在等待拉取结果。
 	tui.modelPickerOpen = true
 	tui.modelPickerLoading = true
 	tui.modelPickerProvider = "provider-a"
@@ -293,8 +379,8 @@ func TestProviderPickerViewShowsFilterAndFooter(t *testing.T) {
 // TestProviderFormDynamicHintFollowsFocus 验证表单底部说明的动态部分跟随
 // 焦点字段变化：model 字段提示 picker 能力，普通输入字段提示输入语义。
 func TestProviderFormDynamicHintFollowsFocus(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
-	tui.openProviderForm("", nil)
+	tui := newPickerFormTUI(t, nil)
+	tui.closeProviderPicker()
 
 	tui.config.InputFocus = tuiconfig.ProviderFormModelIndex
 	view := stripANSIForTest(tui.viewProviderForm())
@@ -311,7 +397,7 @@ func TestProviderFormDynamicHintFollowsFocus(t *testing.T) {
 // TestProviderPickerWheelMovesCursorInOverlay 验证滚轮在选择器内逐行移动光标。
 // 终端 resize 时浮层打开也不能丢失窗口尺寸更新，否则渲染宽度用旧值。
 func TestProviderPickerOverlayHandlesWindowSize(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100, height: 40}
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100, height: 40, configState: protocolConfigStateWithModels(1)}
 	tui.openProviderForm("provider-a/model", &tuiconfig.ModelConfig{
 		Provider: "provider-a", Protocol: coreconfig.ModelProtocolOpenAIChat,
 		Model: "model", BaseURL: "https://api.example.com/v1",
@@ -347,7 +433,7 @@ func TestProviderPickerWheelMovesCursorInCombobox(t *testing.T) {
 // TestProviderPickerDoesNotBlurChatInput 验证浮层打开/关闭不破坏 chat 输入框焦点：
 // config 页的浮层链路不得触碰 chat Textarea，否则回到 chat 后无法输入。
 func TestProviderPickerDoesNotBlurChatInput(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100, configState: protocolConfigStateWithModels(1)}
 	tui.initChatComponents()
 	tui.openProviderForm("provider-a/model", &tuiconfig.ModelConfig{
 		Provider: "provider-a",

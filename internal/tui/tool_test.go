@@ -200,26 +200,60 @@ func TestRenderToolEntryShowsFileChangeSummary(t *testing.T) {
 	}
 }
 
-func TestRenderToolEntryShowsGuardSummary(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
-	te := &toolEntry{
-		RawName: "editfile",
-		Name:    "editfile",
-		Intent:  "Update config",
-		Status:  toolRunning,
-		Guard: &guardInfo{
-			ReadOnly: false,
-			Decision: "approve",
-			Source:   "llm",
-			Reason:   "matches requested edit",
-		},
+func TestRenderToolEntryShowsGuardDecisionWithoutActionBadge(t *testing.T) {
+	for _, locale := range []LocaleID{LocaleEN, LocaleZH} {
+		for _, tt := range []struct {
+			name     string
+			source   string
+			decision string
+			labelKey string
+		}{
+			{name: "llm approve", source: "llm", decision: "approve", labelKey: "tui.tool.guard.llm_approved"},
+			{name: "llm reject", source: "llm", decision: "reject", labelKey: "tui.tool.guard.llm_blocked"},
+			{name: "user approve", source: "user", decision: "approve", labelKey: "tui.tool.guard.user_approved"},
+			{name: "user reject", source: "user", decision: "reject", labelKey: "tui.tool.guard.user_rejected"},
+			{name: "rule approve", source: "rule", decision: "approve", labelKey: "tui.tool.guard.rule_approved"},
+			{name: "rule reject", source: "rule", decision: "reject", labelKey: "tui.tool.guard.rule_blocked"},
+			{name: "auto approve", source: "static", decision: "approve", labelKey: "tui.tool.guard.auto_approved"},
+			{name: "policy reject", source: "static", decision: "reject", labelKey: "tui.tool.guard.policy_blocked"},
+			{name: "review unavailable", source: "fallback", decision: "reject", labelKey: "tui.tool.guard.review_unavailable"},
+		} {
+			t.Run(string(locale)+"/"+tt.name, func(t *testing.T) {
+				tui := &TUI{i18n: newTranslator(locale), width: 100}
+				te := &toolEntry{
+					RawName: "editfile", Name: "editfile", Intent: "Update config", Status: toolRunning,
+					Guard: &guardInfo{Decision: tt.decision, Source: tt.source, Reason: "review reason"},
+				}
+				plain := stripANSIForTest(tui.renderToolEntry(te, false))
+				for _, want := range []string{tui.tr("tui.tool.guard.badge"), tui.tr(tt.labelKey), "review reason"} {
+					if !strings.Contains(plain, want) {
+						t.Fatalf("renderToolEntry() = %q, want guard summary substring %q", plain, want)
+					}
+				}
+				if badge := tui.tr("tui.tool.guard.write_badge"); strings.Contains(plain, badge) {
+					t.Fatalf("renderToolEntry() = %q, want no %q badge", plain, badge)
+				}
+				if badge := strings.TrimSpace(stripANSIForTest(tui.toolDetailDeps().ReadOnlyBadge(false))); badge != tui.tr("tui.tool.guard.write_badge") {
+					t.Fatalf("detail badge = %q, want action badge retained", badge)
+				}
+			})
+		}
 	}
+}
 
-	rendered := tui.renderToolEntry(te, false)
-	plain := stripANSIForTest(rendered)
-	for _, want := range []string{"Guard", "LLM approved", "action", "matches requested edit"} {
+func TestRenderToolEntryKeepsReadOnlyGuardPresentation(t *testing.T) {
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100}
+	te := &toolEntry{RawName: "readfile", Name: "readfile", Status: toolRunning,
+		Guard: &guardInfo{ReadOnly: true, Decision: "approve", Source: "static"},
+	}
+	if plain := stripANSIForTest(tui.renderToolEntry(te, false)); strings.Contains(plain, "Guard") {
+		t.Fatalf("renderToolEntry() = %q, want read-only approval without Guard summary", plain)
+	}
+	te.Guard.Decision, te.Guard.Source = "reject", "rule"
+	plain := stripANSIForTest(tui.renderToolEntry(te, false))
+	for _, want := range []string{"rule blocked", "read-only"} {
 		if !strings.Contains(plain, want) {
-			t.Fatalf("renderToolEntry() = %q, want guard summary substring %q", plain, want)
+			t.Fatalf("renderToolEntry() = %q, want %q", plain, want)
 		}
 	}
 }

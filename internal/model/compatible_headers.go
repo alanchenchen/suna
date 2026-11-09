@@ -1,6 +1,10 @@
 package model
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/alanchenchen/suna/internal/version"
+)
 
 type compatibleHeaderRoundTripper struct{ next http.RoundTripper }
 
@@ -13,7 +17,7 @@ func normalizeCompatibleHeaders(req *http.Request) {
 	// 一些 OpenAI/Anthropic compatible 中转网关会在业务层之前拦截 SDK 识别头，
 	// 导致请求变成 Cloudflare/网关 502，且供应商控制台看不到记录；这里仅清理
 	// Stainless SDK 追踪头和 User-Agent，不移除 Authorization、Content-Type 或协议必需头。
-	req.Header.Set("User-Agent", "Suna/1.0")
+	req.Header.Set("User-Agent", version.UserAgent())
 	for _, key := range []string{
 		"X-Stainless-Lang",
 		"X-Stainless-Package-Version",

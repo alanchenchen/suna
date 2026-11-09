@@ -28,7 +28,7 @@ func protocolConfigStateWithModels(n int) protocol.ConfigParams {
 // TestConfigViewRendersPickerOverForm 验证模型选择浮层打开时，viewConfig 在表单之上渲染浮层，
 // 而不是只显示表单（浮层"隐形"的回归保护）。
 func TestConfigViewRendersPickerOverForm(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100, height: 40}
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100, height: 40, configState: protocolConfigStateWithModels(1)}
 	tui.openProviderForm("provider-a/model", &tuiconfig.ModelConfig{
 		Provider: "provider-a", Protocol: coreconfig.ModelProtocolOpenAIChat,
 		Model: "model", BaseURL: "https://api.example.com/v1",
@@ -50,7 +50,7 @@ func TestConfigViewRendersPickerOverForm(t *testing.T) {
 // TestConfigKeysForwardToPickerWhileOpen 验证浮层打开时按键转发给浮层处理，
 // 而不是走表单导航（否则 enter 打开浮层后无法在浮层内选择/输入）。
 func TestConfigKeysForwardToPickerWhileOpen(t *testing.T) {
-	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100, height: 40}
+	tui := &TUI{i18n: newTranslator(LocaleEN), width: 100, height: 40, configState: protocolConfigStateWithModels(1)}
 	tui.openProviderForm("provider-a/model", &tuiconfig.ModelConfig{
 		Provider: "provider-a", Protocol: coreconfig.ModelProtocolOpenAIChat,
 		Model: "model", BaseURL: "https://api.example.com/v1",

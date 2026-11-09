@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/alanchenchen/suna/internal/tools"
+	"github.com/alanchenchen/suna/internal/version"
 )
 
 type HTTP struct{}
@@ -84,7 +85,7 @@ func (HTTP) Execute(ctx context.Context, params map[string]any) tools.Result {
 		req.Header.Set(k, v)
 	}
 	if req.Header.Get("User-Agent") == "" {
-		req.Header.Set("User-Agent", "Suna/1.0")
+		req.Header.Set("User-Agent", version.UserAgent())
 	}
 	resp, err := client.Do(req)
 	if err != nil {
