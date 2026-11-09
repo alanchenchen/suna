@@ -2,49 +2,37 @@
 
 ## 项目理解
 
-Suna 是本地终端 AI Agent：CLI 启动 TUI，TUI 通过 protocol/local transport 连接 daemon；daemon 持有 Agent、模型、工具、Guard、记忆、Skill、MCP 和持久化状态。TUI 只做交互与渲染，业务语义应留在 daemon/核心包。
+Suna 是本地优先的通用 AI Agent：CLI 启动 TUI，TUI 与第三方客户端通过 protocol 连接同一个 daemon；daemon 持有 Agent、模型、工具、Guard、记忆、Skill、MCP 和持久化状态。TUI 只做交互与渲染，业务语义应留在 daemon/核心包。
 
 ## 技术栈
 
-- Go CLI / daemon / 核心业务。
-- Bubble Tea 体系 TUI，负责终端页面、按键和浮层。
-- TOML 配置，本地 SQLite/文件目录保存记忆、会话、Skill、附件和日志；默认数据/配置目录为当前用户主目录下的 `.suna`，日志位于其 `logs/` 子目录。
-- OpenAI / Anthropic / OpenAI-compatible 模型适配。
-- JSON-RPC 风格 protocol 与本地 transport 通信。
+- Go 写 CLI / daemon / 核心业务。
+- Bubble Tea TUI，负责终端页面、按键、浮层、i18n 和主题。
+- TOML 配置，本地 SQLite/文件保存记忆、会话、Skill、附件和日志；默认 `~/.suna`，日志在其 `logs/`；时间戳统一 UTC。
+- 模型适配 OpenAI Responses、Anthropic Messages、OpenAI Chat 兼容。
+- JSON-RPC 风格 protocol；local 走 Unix socket / Named Pipe，TCP 走 loopback 且需 `runtime.hello`，两者共用 `transport/jsonrpc`。
 
 ## 主要包职责
 
-- `main.go`、`daemon_cmd.go`：CLI 命令、daemon 进程管理入口。
-- `internal/tui`：终端 UI、页面、快捷键、slash command、剪贴板输入和 daemon 事件适配。
-- `internal/protocol`、`internal/transport/local`：TUI 与 daemon 的请求、通知和本地连接；Agent 内容流、运行生命周期和用量统计分别使用 `agent.delta`、`agent.run`、`agent.usage`。
-- `internal/daemon`：长期运行服务，协调配置、会话、Agent、附件和状态通知。
-- `internal/agent`：主 Agent 编排、上下文、工具执行入口、Guard 协调、subtask 委派。
-- `internal/runner`：模型调用循环、流式输出、工具调用、上下文压缩和模型请求自动恢复。
-- `internal/model`：模型 provider、路由、请求/响应适配、结构化模型错误和 token 估算；provider 只实现具体协议，router 只做路由，公共 reasoning fields 逻辑不得依赖具体 SDK。
-- `internal/tools`：统一工具目录、Provider、schema 和执行路由。
-- `internal/tools/builtin`：文件、命令、HTTP 等内置工具。
-- `internal/tools/agenttools`：`askuser`、`spawn` 等 Agent runtime 工具。
-- `internal/tools/skilltools`、`internal/skill`：Skill 加载、检查、启用和工具适配。
-- `internal/tools/mcptools`、`internal/mcp`：MCP runtime、server 状态和 MCP tools 适配。
-- `internal/guard`：风险识别、Smart Review 和工具调用安全确认。
-- `internal/memory`、`internal/media`、`internal/config`：记忆、附件、配置和本地路径。
-- `internal/prompt`、`internal/logging`：提示词模板加载和结构化日志。
-- `internal/subtask`：独立上下文的子任务执行器，由主 Agent 显式指定模型和工具；子任务结果包含状态、文本和副作用披露。
-- `internal/update`、`internal/version`：自更新流程、GitHub Release 版本检查、构建版本来源。
+- 入口：`main.go`、`*_cmd.go`；`daemon_cmd.go` 管进程，`serve_cmd.go` 供第三方 TCP。
+- 通信：`internal/protocol` 定义方法、参数、结果和通知；`internal/transport` 承载 local 与 TCP 两种连接。事件语义见架构规则。
+- daemon：`internal/daemon` 单实例多 session 的长期运行服务，协调配置、会话、Agent、附件和状态通知。
+- 核心：`internal/agent` 编排、上下文、工具入口、Guard 协调、subtask 委派；`internal/runner` 模型循环、流式、工具调用、上下文压缩、请求自动恢复；`internal/model` provider（只实现协议，router 只做路由）、请求响应适配、结构化错误、token 估算。
+- 能力：`internal/tools` 是工具目录、Provider、schema 与执行路由；子包 `internal/tools/builtin` 放文件/命令/HTTP，`agenttools` 放 askuser/spawn，`skilltools` 适配 Skill，`mcptools` 适配 MCP。
+- 运行时：`internal/skill` 负责加载、检查、启用；`internal/mcp` 是 stdio runtime 并维护 server 状态；`internal/guard` 做风险识别、Smart Review 和工具调用安全确认；`internal/subtask` 是独立上下文子任务执行器，由主 Agent 显式指定模型和工具。
+- 状态：`internal/memory` 记忆、`internal/media` 附件、`internal/config` 配置与本地路径、`internal/prompt` 提示词模板加载、`internal/logging` 结构化日志、`internal/update` 自更新与 GitHub Release 版本检查、`internal/version` 构建版本来源。
+- TUI：`internal/tui` 终端 UI、页面、快捷键、slash command、剪贴板输入；其子包 `pages/` 放页面状态，`components/` 依赖由调用方注入，`theme/` 是纯子系统，`events/` 把 notification 转强类型消息，`internal/tui/transport` 只做连接适配。
 
 ## 架构规则
 
-- TUI 不直接依赖 `agent`、`runner`、`tools`、`guard` 等业务包；交互必须走 protocol。
-- Agent protocol 语义保持分层：`agent.delta` 只承载 assistant/reasoning 内容增量，`agent.run` 承载 running/retrying/cancelling/done/failed/cancelled 生命周期，`agent.usage` 承载 token/context/duration 统计。
-- Runner 负责模型请求自动恢复；Router/provider 只表示单次物理模型请求，retry 判断依赖结构化 `ModelError` 的 status code / kind，不靠错误字符串匹配。
-- 项目指令只从当前工作目录读取第一个非空文件，优先级为 `AGENTS.md`、`CLAUDE.md`、`GEMINI.md`、`.cursorrules`、`.windsurfrules`；不向父目录递归，不读取 `.suna/`。
-- 新模型可见工具优先以 `tools.Provider` 接入，不在 Agent/Runner 中手动拼 schema。
-- 新模型协议应以 `model.Adapter` 接入：`router` 只选择 adapter，具体协议文件只做请求/响应适配，公共 reasoning fields 校验/合并不得 import OpenAI、Anthropic 等具体 SDK。
-- Guard 决策由 Agent 统一处理，工具只声明自身 Guard policy。
-- Subtask 必须保持独立上下文，只能看到主 Agent 显式传入的任务、上下文、图片和授权工具；可分析也可行动，但应保持边界清晰并向主 Agent 返回精简结果与副作用披露。
-- Subtask 可见模型由模型配置和 `subtask_for` 过滤，提示词只展示当前可用候选；执行 spawn 时仍需二次校验。
-- MCP 单个 server 失败不得阻塞 Suna/daemon 启动；错误应作为运行态状态展示。
-- 系统剪贴板和粘贴图片识别属于 TUI 输入能力；daemon 只通过 protocol 暴露 attachment root 和接收 attachment refs，不直接访问系统剪贴板或 UI 输入源。
+- TUI 不直接依赖 `agent`、`runner`、`tools`、`guard` 等业务包，交互必须走 protocol。
+- protocol 语义不混用：`agent.delta` 只承载 assistant/reasoning 增量，`agent.run` 承载 running/retrying/cancelling/done/failed/cancelled，`agent.usage` 承载 token/context/duration。
+- 模型调用必须显式：Router 不拥有“当前模型”，按 `sessions.model_ref` 产出不可变 `ModelBinding`，主 run、Guard、Skill、compact 复用同一 binding，缺失必须显式失败，禁止回退 `active_model`；retry 依赖 `ModelError` 的 status code / kind，不靠错误字符串匹配。
+- daemon 生命周期由 transport retention 决定：persistent > 活跃连接 > 运行中 run > client_bound > idle_exit，run 未结束不得退出；每 session 至多一个 active run；detach 不取消 run，只有无人可回复的 ask/guard 等待会被取消。
+- 项目指令只读当前工作目录第一个非空文件，优先级 `AGENTS.md`、`CLAUDE.md`、`GEMINI.md`、`.cursorrules`、`.windsurfrules`；不递归父目录，不读 `.suna/`。
+- 扩展点固定：新工具走 `tools.Provider`，新模型协议走 `model.Adapter`（router 只选择 adapter，协议文件只做请求响应适配，公共 reasoning fields 不 import 具体 SDK），不在 Agent/Runner 手动拼 schema；Guard 决策只由 Agent 处理，工具只声明自身 Guard policy。
+- Subtask 保持独立上下文，只能看到主 Agent 显式传入的任务、上下文、图片和授权工具，返回状态、文本和副作用披露；可见模型由 `subtask_for` 过滤并在 spawn 时二次校验。
+- MCP 单个 server 失败不阻塞启动，错误作为运行态状态展示；剪贴板与粘贴图片识别属 TUI 输入，daemon 只收 attachment refs。
 
 ## 开发规则
 
