@@ -100,6 +100,7 @@ func (t *TUI) syncContent() {
 	t.chat.SyncTranscript(chatpage.TranscriptDeps{
 		Width:           t.width,
 		MarkdownWidth:   max(20, t.width-6),
+		CopyIndent:      transcriptBlockIndent,
 		Theme:           currentTheme.Name,
 		SubtaskKeys:     t.canToggleSubtaskDetailWithEnter(),
 		ReasoningHeight: t.height,

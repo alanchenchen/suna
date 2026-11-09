@@ -26,6 +26,8 @@ type TranscriptDeps struct {
 	MarkdownWidth int
 	Theme         string
 	RenderAll     bool
+	// CopyIndent 是渲染器明确添加的外层左边距，复制时移除，不猜测正文缩进。
+	CopyIndent string
 	// SubtaskKeys 跟踪展开子任务页脚是否允许使用 Enter。
 	SubtaskKeys bool
 	// ReasoningHeight 为终端高度，不使用受输入区影响的视口高度。
@@ -582,9 +584,8 @@ func blockLineRange(text string, start, end int) []string {
 	return lines
 }
 
-// SelectionPlainText 提取内容行范围 [start, end]（含端点）的纯文本（剥离 ANSI），
-// 供选区复制使用。数据源是 TranscriptBlocks（每块 Text + LineCount），
-// 按内容行偏移截取；越界范围自动 clamp。
+// SelectionPlainText 按显示行提取选区，保留折行和内容结构，只清理界面边距与行尾填充。
+// 数据源仍是已渲染块，不还原 Markdown；越界范围自动 clamp。
 func (m *Model) SelectionPlainText(start, end int) string {
 	if end < start {
 		return ""
@@ -592,11 +593,29 @@ func (m *Model) SelectionPlainText(start, end int) string {
 	start = max(0, start)
 	end = min(end, m.TranscriptTotalLines-1)
 	m.hydrateTranscriptRange(start, end+1)
-	lines := m.visibleTranscriptLines(start, end+1)
-	for i := range lines {
-		lines[i] = ansi.Strip(lines[i])
+	lines := make([]string, 0, max(0, end-start+1))
+	first, last, cursor := m.transcriptRange(start, end+1)
+	for slot := first; slot < last; slot = m.nextTranscriptSlot(slot, cursor) {
+		block := m.TranscriptBlocks[slot]
+		blockEnd := cursor + block.LineCount
+		if blockEnd > start && cursor <= end {
+			indent := m.transcript.deps.CopyIndent
+			// panel 直接接收完整展示内容，没有统一外边距，不能误删它自身的缩进。
+			if i := int(block.MsgIndex); i >= 0 && i < len(m.Messages) && m.Messages[i].Role == "panel" {
+				indent = ""
+			}
+			for _, line := range transcriptBlockLineRange(block, max(0, start-cursor), min(block.LineCount, end+1-cursor)) {
+				line = strings.TrimPrefix(ansi.Strip(line), indent)
+				lines = append(lines, strings.TrimRight(line, " \t"))
+			}
+		}
+		cursor = blockEnd
+		if cursor > end {
+			break
+		}
 	}
-	result := strings.TrimRight(strings.Join(lines, "\n"), "\n")
+	// 只去选区首尾的空白展示行；内部空行和每行真实左缩进保持不变。
+	result := strings.Trim(strings.Join(lines, "\n"), "\n")
 	// 复制可能补水全部历史；立即释放离屏文本及扩容后的映射。
 	if m.transcript.ready {
 		windowStart, windowEnd := m.desiredTranscriptWindowRange()
