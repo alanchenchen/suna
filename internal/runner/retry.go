@@ -78,6 +78,9 @@ func (p RetryPolicy) delay(attempt int) time.Duration {
 	return delay
 }
 
+// retryableModelRequestError 判定一次物理请求失败是否值得自动重试。
+// 判据是用户按 Enter 重试能否恢复：上游暂时性故障和协议不完整都能恢复，
+// 而请求本身的问题、用户主动取消、已产出内容后的失败都不能。
 func retryableModelRequestError(err error) bool {
 	if err == nil || errors.Is(err, context.Canceled) {
 		return false
@@ -89,18 +92,32 @@ func retryableModelRequestError(err error) bool {
 	if me == nil {
 		return false
 	}
-	if me.Kind == model.ModelErrorNetwork {
+	switch me.Kind {
+	case model.ModelErrorNetwork:
 		return true
-	}
-	if me.Kind != model.ModelErrorHTTP {
+	case model.ModelErrorCancelled, model.ModelErrorInternal:
+		// 用户主动取消不能重试；Internal 目前没有产生点，保持不重试。
 		return false
-	}
-	switch me.StatusCode {
-	case 408, 425, 429,
-		500, 502, 503, 504,
-		520, 521, 522, 523, 524, 529:
-		return true
+	case model.ModelErrorHTTP:
+		// 4xx 是请求本身的问题，重试得到同样结果；408/425/429 是暂时性例外。
+		if me.StatusCode >= 400 && me.StatusCode < 500 {
+			switch me.StatusCode {
+			case 408, 425, 429:
+				return true
+			}
+			return false
+		}
+		return me.StatusCode >= 500 && me.StatusCode < 600
 	default:
-		return false
+		// 未标记的上游失败多来自协议不完整（缺完成标记、流提前关闭、空闲超时），
+		// 用户按 Enter 通常能恢复，自动重试替用户完成这一步。
+		//
+		// 已知取舍：Adapter 在发出请求前的本地失败（如 max_output_tokens 未配置、
+		// 图片解析失败）也归为 Unknown，会被重试并白白消耗一次预算。这类错误极少见，
+		// 排除它们需要给三个 Adapter 分别加哨兵，目前不值得；真遇到时再按错误来源区分。
+		//
+		// default 同时覆盖未来新增的 Kind：默认偏向重试，因为漏重试会让用户
+		// 手动按 Enter，而多试一次只消耗预算。新增确定不可恢复的 Kind 时必须在此显式排除。
+		return true
 	}
 }

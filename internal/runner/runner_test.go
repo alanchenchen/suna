@@ -132,8 +132,17 @@ func TestRetryableModelRequestErrorUsesStructuredStatus(t *testing.T) {
 		{name: "cloudflare gateway", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 522}, want: true},
 		{name: "overloaded", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 529}, want: true},
 		{name: "bad request", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 400}, want: false},
+		{name: "unauthorized", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 401}, want: false},
+		{name: "forbidden", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 403}, want: false},
+		{name: "not found", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 404}, want: false},
+		{name: "payload too large", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 413}, want: false},
+		{name: "unprocessable", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 422}, want: false},
+		{name: "not implemented", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 501}, want: true},
+		{name: "storage shortage", err: &model.ModelError{Kind: model.ModelErrorHTTP, StatusCode: 507}, want: true},
 		{name: "network", err: &model.ModelError{Kind: model.ModelErrorNetwork, Message: "temporary network failure"}, want: true},
-		{name: "unknown", err: &model.ModelError{Kind: model.ModelErrorUnknown, Message: "temporarily unavailable"}, want: false},
+		{name: "unknown upstream failure", err: &model.ModelError{Kind: model.ModelErrorUnknown, Message: "model response has no completion marker"}, want: true},
+		{name: "user cancelled", err: &model.ModelError{Kind: model.ModelErrorCancelled, Message: "cancelled"}, want: false},
+		{name: "internal", err: &model.ModelError{Kind: model.ModelErrorInternal, Message: "internal"}, want: false},
 	}
 	for _, tt := range cases {
 		tt := tt
