@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestEditFileAppliesMultipleEditsAtomically(t *testing.T) {
@@ -389,4 +390,154 @@ func TestEditFileKeepsOriginalCRLFStyleAcrossOrderedEdits(t *testing.T) {
 	if got, want := string(data), "BETA\r\ninserted"; got != want {
 		t.Fatalf("file content = %q, want %q", got, want)
 	}
+}
+func TestEditFileReportsClosestLineWhenNoMatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "miss.txt")
+	if err := os.WriteFile(path, []byte("alpha\nbeta\ngamma\n"), 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	res := EditFile{}.Execute(context.Background(), map[string]any{
+		"path":  path,
+		"edits": []any{map[string]any{"old_string": "betaX", "new_string": "BETA"}},
+	})
+	if !res.IsError || !strings.Contains(res.Error, "EDIT_OLD_NOT_FOUND") {
+		t.Fatalf("EditFile.Execute() = %#v, want not-found error", res)
+	}
+	if !strings.Contains(res.Error, "line 2") || !strings.Contains(res.Error, "beta") {
+		t.Fatalf("error does not point at the closest line: %s", res.Error)
+	}
+}
+
+func TestEditFileAcceptsNumericTarget(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "numeric.txt")
+	if err := os.WriteFile(path, []byte("dup\ndup\n"), 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	// target 传数字而非字符串，应被接受而不是报参数错误。
+	res := EditFile{}.Execute(context.Background(), map[string]any{
+		"path":  path,
+		"edits": []any{map[string]any{"old_string": "dup", "new_string": "DUP", "target": float64(2)}},
+	})
+	if res.IsError {
+		t.Fatalf("EditFile.Execute() error = %v", res.Error)
+	}
+	data, _ := os.ReadFile(path)
+	if got := string(data); got != "dup\nDUP\n" {
+		t.Fatalf("file content = %q", got)
+	}
+}
+
+func TestEditFileBehaviorMatrix(t *testing.T) {
+	cases := []struct {
+		name, original, oldString, newString string
+		target                               any
+		wantErr                              bool
+		want                                 string
+	}{
+		{"LF unique", "a\nb\nc\n", "b", "B", nil, false, "a\nB\nc\n"},
+		{"CRLF unique", "a\r\nb\r\nc\r\n", "b", "B", nil, false, "a\r\nB\r\nc\r\n"},
+		{"LF all", "x\nx\n", "x", "Y", "all", false, "Y\nY\n"},
+		{"CRLF all", "x\r\nx\r\n", "x", "Y", "all", false, "Y\r\nY\r\n"},
+		{"LF nth", "x\nx\n", "x", "Y", "2", false, "x\nY\n"},
+		{"CRLF nth", "x\r\nx\r\n", "x", "Y", "2", false, "x\r\nY\r\n"},
+		{"numeric target", "x\nx\n", "x", "Y", float64(2), false, "x\nY\n"},
+		{"CRLF adapts LF input", "a\r\nb\r\nc\r\n", "a\nb", "A\nB", nil, false, "A\r\nB\r\nc\r\n"},
+		{"CRLF single line keeps CRLF", "a\r\nb\r\n", "b", "B", nil, false, "a\r\nB\r\n"},
+		{"delete with trailing newline", "a\nb\nc\n", "b\n", "", nil, false, "a\nc\n"},
+		{"delete without trailing newline", "a\nb\nc\n", "b", "", nil, false, "a\n\nc\n"},
+		{"grow lines", "a\nb\nc\n", "a\nb", "A1\nA2\nA3", nil, false, "A1\nA2\nA3\nc\n"},
+		{"shrink lines", "a\nb\nc\n", "a\nb\nc", "Z", nil, false, "Z\n"},
+		{"no trailing newline", "a\nb", "b", "B", nil, false, "a\nB"},
+		{"blank lines preserved", "a\n\n\nb\n", "a\n\n\nb", "X", nil, false, "X\n"},
+		{"single line file", "only\n", "only", "NEW", nil, false, "NEW\n"},
+		{"mixed newlines rejected", "a\r\nb\nc\r\n", "a\nb", "X", nil, true, ""},
+		{"ambiguous unique", "dup\ndup\n", "dup", "DUP", nil, true, ""},
+		{"nth out of range", "x\nx\n", "x", "Y", "5", true, ""},
+		{"missing old_string", "a\nb\n", "zzz", "X", nil, true, ""},
+		{"empty file", "", "x", "Y", nil, true, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "target.txt")
+			if err := os.WriteFile(path, []byte(tc.original), 0644); err != nil {
+				t.Fatalf("WriteFile() error = %v", err)
+			}
+			edit := map[string]any{"old_string": tc.oldString, "new_string": tc.newString}
+			if tc.target != nil {
+				edit["target"] = tc.target
+			}
+			res := EditFile{}.Execute(context.Background(), map[string]any{"path": path, "edits": []any{edit}})
+			data, _ := os.ReadFile(path)
+			if res.IsError != tc.wantErr {
+				t.Fatalf("IsError = %v, want %v (err=%s)", res.IsError, tc.wantErr, res.Error)
+			}
+			if !tc.wantErr && string(data) != tc.want {
+				t.Fatalf("file content = %q, want %q", string(data), tc.want)
+			}
+			if tc.wantErr && string(data) != tc.original {
+				t.Fatalf("file changed on failure: %q", string(data))
+			}
+		})
+	}
+}
+
+func TestEditFileNotFoundHintStaysCompact(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("CRLF line has no carriage return", func(t *testing.T) {
+		path := filepath.Join(dir, "crlf.txt")
+		if err := os.WriteFile(path, []byte("alpha\r\n\tbetaX\r\ngamma\r\n"), 0644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		res := EditFile{}.Execute(context.Background(), map[string]any{
+			"path":  path,
+			"edits": []any{map[string]any{"old_string": "betaZZZ", "new_string": "B"}},
+		})
+		if !res.IsError {
+			t.Fatal("expected not-found error")
+		}
+		if strings.Contains(res.Error, "\r") {
+			t.Fatalf("hint leaked carriage return: %q", res.Error)
+		}
+		if !strings.Contains(res.Error, "betaX") {
+			t.Fatalf("hint missing real text: %q", res.Error)
+		}
+	})
+
+	t.Run("long line is truncated", func(t *testing.T) {
+		path := filepath.Join(dir, "long.txt")
+		line := "func veryLongName" + strings.Repeat("X", 5000)
+		if err := os.WriteFile(path, []byte(line+"\n"), 0644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		res := EditFile{}.Execute(context.Background(), map[string]any{
+			"path":  path,
+			"edits": []any{map[string]any{"old_string": "func veryLongNameZZZ", "new_string": "B"}},
+		})
+		if !res.IsError {
+			t.Fatal("expected not-found error")
+		}
+		// 错误信息会进模型上下文，超长行必须截断。
+		if len(res.Error) > 400 {
+			t.Fatalf("hint too long: %d bytes", len(res.Error))
+		}
+	})
+
+	t.Run("CJK truncation stays valid UTF-8", func(t *testing.T) {
+		path := filepath.Join(dir, "cjk.txt")
+		line := "这是一个很长的中文函数名" + strings.Repeat("测试", 200)
+		if err := os.WriteFile(path, []byte(line+"\n"), 0644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		res := EditFile{}.Execute(context.Background(), map[string]any{
+			"path":  path,
+			"edits": []any{map[string]any{"old_string": "这是一个很长的中文函数名ZZZ", "new_string": "B"}},
+		})
+		if !res.IsError {
+			t.Fatal("expected not-found error")
+		}
+		if !utf8.ValidString(res.Error) {
+			t.Fatalf("truncation broke UTF-8: %q", res.Error)
+		}
+	})
 }

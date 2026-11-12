@@ -7,6 +7,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/alanchenchen/suna/internal/tools"
 )
@@ -23,7 +24,7 @@ func (EditFile) Spec() tools.Spec {
 			"edits": map[string]any{"type": "array", "minItems": 1, "description": "Ordered exact replacements; all edits succeed or no changes are written", "items": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"old_string":            map[string]any{"type": "string", "minLength": 1, "description": "Exact text to replace"},
+					"old_string":            map[string]any{"type": "string", "minLength": 1, "description": "Exact text to replace. Read the file first if it may have changed."},
 					"new_string":            map[string]any{"type": "string", "description": "Replacement text. Use an empty string to delete the matched text."},
 					"target":                map[string]any{"type": "string", "pattern": `^\s*(all|[1-9][0-9]*)\s*$`, "description": "Match target. Omit for a unique replacement, use \"all\" for every match, or a positive 1-based occurrence such as \"2\"."},
 					"expected_replacements": map[string]any{"type": "integer", "minimum": 1, "maximum": maxEditReplacementCount, "description": "Fail unless exactly this many replacements would be made"},
@@ -154,7 +155,13 @@ func applyEditTarget(position int, value any, exists bool, edit *editOperation) 
 	}
 	target, ok := value.(string)
 	if !ok {
-		return fmt.Errorf("edit %d target must be omitted, \"all\", or a positive 1-based occurrence number string", position)
+		// 模型常把 occurrence 写成数字，先按整数接受再归一成字符串，避免纯 schema 差异失败。
+		if n, isInt := positiveIntegerParam(value); isInt {
+			edit.Mode = "nth"
+			edit.Occurrence = n
+			return nil
+		}
+		return fmt.Errorf("edit %d target must be omitted, \"all\", or a positive 1-based occurrence number", position)
 	}
 	target = strings.TrimSpace(target)
 	if target == "all" {
@@ -163,7 +170,7 @@ func applyEditTarget(position int, value any, exists bool, edit *editOperation) 
 	}
 	n, ok := positiveIntegerString(target)
 	if !ok {
-		return fmt.Errorf("edit %d target must be omitted, \"all\", or a positive 1-based occurrence number string", position)
+		return fmt.Errorf("edit %d target must be omitted, \"all\", or a positive 1-based occurrence number", position)
 	}
 	edit.Mode = "nth"
 	edit.Occurrence = n
@@ -229,7 +236,7 @@ func applyEditOperation(content string, edit editOperation, originalUsesCRLF boo
 		adapted = adapted || count > 0
 	}
 	if count == 0 {
-		return content, 0, false, &editOperationError{Code: "EDIT_OLD_NOT_FOUND", Message: "old_string has no exact match in the current staged file. Read the target region and retry with exact text"}
+		return content, 0, false, editNotFoundError(content, edit.OldString)
 	}
 	replacements := 1
 	var updated string
@@ -290,6 +297,31 @@ func hasOnlyCRLFNewlines(content string) bool {
 
 func editOperationErrorResult(position int, err *editOperationError) tools.Result {
 	return editErrorResult(err.Code, fmt.Sprintf("edit %d: %s", position, err.Message))
+}
+
+// editNotFoundError 附带最接近的真实行，让模型一次就能改对。
+// 回显行会截断：错误信息直接进模型上下文，超长行会白白占掉大量 token。
+func editNotFoundError(content, target string) *editOperationError {
+	message := "old_string has no exact match in the current staged file"
+	if line, text, ok := closestEditLine(content, target); ok {
+		message = fmt.Sprintf("no exact match (closest line %d):\n  %d | %s\nRetry with the exact text above", line, line, truncateEditLine(text, maxEditHintBytes))
+	}
+	return &editOperationError{Code: "EDIT_OLD_NOT_FOUND", Message: message}
+}
+
+// maxEditHintBytes 限制错误回显行的字节数，避免超长行撑爆模型上下文。
+const maxEditHintBytes = 200
+
+// truncateEditLine 按字节截断并保证不切断 UTF-8 字符。
+func truncateEditLine(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut] + "..."
 }
 
 func editErrorResult(code, message string) tools.Result {
