@@ -7,7 +7,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/alanchenchen/suna/internal/tools"
 )
@@ -306,28 +305,12 @@ func editOperationErrorResult(position int, err *editOperationError) tools.Resul
 }
 
 // editNotFoundError 定位第一处不一致的行并回显真实内容，让模型一次就能改对。
-// 回显行会截断：错误信息直接进模型上下文，超长行会白白占掉大量 token。
 func editNotFoundError(content, target string) *editOperationError {
 	message := "old_string has no exact match in the current staged file"
 	if line, text, ok := locateMismatch(content, target); ok {
-		message = fmt.Sprintf("no exact match (differs at line %d):\n  %d | %s\nRetry with the exact text above", line, line, truncateEditLine(text, maxEditHintBytes))
+		message = fmt.Sprintf("no exact match (differs at line %d):\n  %d | %s\nRetry with the exact text above", line, line, text)
 	}
 	return &editOperationError{Code: "EDIT_OLD_NOT_FOUND", Message: message}
-}
-
-// maxEditHintBytes 限制错误回显行的字节数，避免超长行撑爆模型上下文。
-const maxEditHintBytes = 200
-
-// truncateEditLine 按字节截断并保证不切断 UTF-8 字符。
-func truncateEditLine(text string, limit int) string {
-	if len(text) <= limit {
-		return text
-	}
-	cut := limit
-	for cut > 0 && !utf8.RuneStart(text[cut]) {
-		cut--
-	}
-	return text[:cut] + "..."
 }
 
 func editErrorResult(code, message string) tools.Result {

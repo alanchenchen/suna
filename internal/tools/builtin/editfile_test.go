@@ -504,7 +504,7 @@ func TestEditFileNotFoundHintStaysCompact(t *testing.T) {
 		}
 	})
 
-	t.Run("long line is truncated", func(t *testing.T) {
+	t.Run("long line is reported in full", func(t *testing.T) {
 		path := filepath.Join(dir, "long.txt")
 		line := "func veryLongName" + strings.Repeat("X", 5000)
 		if err := os.WriteFile(path, []byte(line+"\n"), 0644); err != nil {
@@ -517,9 +517,9 @@ func TestEditFileNotFoundHintStaysCompact(t *testing.T) {
 		if !res.IsError {
 			t.Fatal("expected not-found error")
 		}
-		// 错误信息会进模型上下文，超长行必须截断。
-		if len(res.Error) > 400 {
-			t.Fatalf("hint too long: %d bytes", len(res.Error))
+		// 回显真实行不截断：模型需要看到完整内容才能改对。
+		if !strings.Contains(res.Error, strings.Repeat("X", 100)) {
+			t.Fatalf("hint should include the real line: %q", res.Error)
 		}
 	})
 
@@ -678,5 +678,45 @@ func TestEditFileAmbiguousHintStaysBounded(t *testing.T) {
 	}
 	if !strings.Contains(res.Error, "2000 locations") || !strings.Contains(res.Error, "more") {
 		t.Fatalf("hint should state the total and elide the rest: %s", res.Error)
+	}
+}
+
+func TestEditFileEveryErrorPathReturnsCode(t *testing.T) {
+	dir := t.TempDir()
+
+	var many strings.Builder
+	for i := 0; i < 5000; i++ {
+		many.WriteString("dup\n")
+	}
+	manyPath := filepath.Join(dir, "many.txt")
+	if err := os.WriteFile(manyPath, []byte(many.String()), 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cases := []struct {
+		name   string
+		params map[string]any
+		want   string
+	}{
+		{"invalid path", map[string]any{"path": 123, "edits": []any{}}, "EDIT_INVALID_PARAMS"},
+		{"invalid edits", map[string]any{"path": filepath.Join(dir, "x.txt"), "edits": "notarray"}, "EDIT_INVALID_PARAMS"},
+		{"system path", map[string]any{"path": "/etc/hosts", "edits": []any{map[string]any{"old_string": "a", "new_string": "b"}}}, "EDIT_SYSTEM_PATH"},
+		{"missing file", map[string]any{"path": filepath.Join(dir, "nope.txt"), "edits": []any{map[string]any{"old_string": "a", "new_string": "b"}}}, "EDIT_FILE_NOT_FOUND"},
+		{"ambiguous", map[string]any{"path": manyPath, "edits": []any{map[string]any{"old_string": "dup", "new_string": "b"}}}, "EDIT_AMBIGUOUS"},
+		{"occurrence out of range", map[string]any{"path": manyPath, "edits": []any{map[string]any{"old_string": "dup", "new_string": "b", "target": "99999"}}}, "EDIT_OCCURRENCE_NOT_FOUND"},
+		{"expected mismatch", map[string]any{"path": manyPath, "edits": []any{map[string]any{"old_string": "dup", "new_string": "b", "target": "all", "expected_replacements": float64(3)}}}, "EDIT_EXPECTED_MISMATCH"},
+		{"unsupported field", map[string]any{"path": manyPath, "edits": []any{map[string]any{"old_string": "a", "new_string": "b", "bogus": "z"}}}, "EDIT_INVALID_PARAMS"},
+		{"not found", map[string]any{"path": manyPath, "edits": []any{map[string]any{"old_string": "zzz", "new_string": "b"}}}, "EDIT_OLD_NOT_FOUND"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := EditFile{}.Execute(context.Background(), tc.params)
+			if !res.IsError {
+				t.Fatalf("expected an error, got %#v", res)
+			}
+			if !strings.Contains(res.Error, tc.want) {
+				t.Fatalf("error should carry %s, got: %s", tc.want, res.Error)
+			}
+		})
 	}
 }
