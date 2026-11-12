@@ -67,6 +67,11 @@ func (EditFile) Execute(ctx context.Context, params map[string]any) tools.Result
 	for i, edit := range edits {
 		updated, replacements, adapted, applyErr := applyEditOperation(content, edit, originalUsesCRLF)
 		if applyErr != nil {
+			// 第 2 条起失败时，前面的 edit 已改过内存里的 content，
+			// 必须告诉模型文件被改过，否则它会拿原始内容反复重试。
+			if i > 0 {
+				applyErr.Message += fmt.Sprintf(" (%d earlier edit(s) in this call matched but were not written)", i)
+			}
 			return editOperationErrorResult(i+1, applyErr)
 		}
 		content = updated
@@ -246,12 +251,13 @@ func applyEditOperation(content string, edit editOperation, originalUsesCRLF boo
 		replacements = count
 	case "nth":
 		if edit.Occurrence > count {
-			return content, 0, false, &editOperationError{Code: "EDIT_OCCURRENCE_NOT_FOUND", Message: fmt.Sprintf("old_string occurrence %d does not exist; found %d exact matches", edit.Occurrence, count)}
+			// 带上实际行号：模型知道只有几处、分别在哪，才能决定去掉 target 还是改序号。
+			return content, 0, false, &editOperationError{Code: "EDIT_OCCURRENCE_NOT_FOUND", Message: fmt.Sprintf("occurrence %d does not exist; old_string has %d match(es) at %s. Omit target to replace the only match, or use a valid occurrence", edit.Occurrence, count, formatMatchLines(content, oldString, count))}
 		}
 		updated = replaceOccurrence(content, oldString, newString, edit.Occurrence)
 	case "unique":
 		if count > 1 {
-			return content, 0, false, &editOperationError{Code: "EDIT_AMBIGUOUS", Message: fmt.Sprintf("old_string matched %d locations. Use target=\"all\" or a specific 1-based occurrence such as target=\"2\"", count)}
+			return content, 0, false, &editOperationError{Code: "EDIT_AMBIGUOUS", Message: fmt.Sprintf("old_string matched %d locations at %s. Use target=\"all\" or a specific 1-based occurrence such as target=\"2\"", count, formatMatchLines(content, oldString, count))}
 		}
 		updated = strings.Replace(content, oldString, newString, 1)
 	}

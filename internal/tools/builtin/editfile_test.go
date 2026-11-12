@@ -589,3 +589,94 @@ func TestEditFileHintPointsAtFirstMismatchingLine(t *testing.T) {
 		})
 	}
 }
+
+func TestEditFileErrorsCarryMatchLineNumbers(t *testing.T) {
+	content := "alpha\nbeta\ngamma\nbeta\ndelta\n"
+	cases := []struct {
+		name     string
+		edit     map[string]any
+		wantCode string
+		wantLine string
+	}{
+		{
+			name:     "occurrence out of range reports where the matches are",
+			edit:     map[string]any{"old_string": "beta", "new_string": "B", "target": "5"},
+			wantCode: "EDIT_OCCURRENCE_NOT_FOUND",
+			wantLine: "line 2, 4",
+		},
+		{
+			name:     "ambiguous match lists every location",
+			edit:     map[string]any{"old_string": "beta", "new_string": "B"},
+			wantCode: "EDIT_AMBIGUOUS",
+			wantLine: "line 2, 4",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "target.txt")
+			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+				t.Fatalf("WriteFile() error = %v", err)
+			}
+			res := EditFile{}.Execute(context.Background(), map[string]any{"path": path, "edits": []any{tc.edit}})
+			if !res.IsError {
+				t.Fatal("expected an error")
+			}
+			if !strings.Contains(res.Error, tc.wantCode) || !strings.Contains(res.Error, tc.wantLine) {
+				t.Fatalf("error should mention %s and %q, got: %s", tc.wantCode, tc.wantLine, res.Error)
+			}
+		})
+	}
+}
+
+func TestEditFileBatchFailureReportsEarlierEdits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "target.txt")
+	original := "a\nb\nc\n"
+	if err := os.WriteFile(path, []byte(original), 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	// 前两条能匹配，第三条失败：必须告知前面已匹配但未写入，否则模型会拿原始内容重试。
+	res := EditFile{}.Execute(context.Background(), map[string]any{
+		"path": path,
+		"edits": []any{
+			map[string]any{"old_string": "a", "new_string": "A"},
+			map[string]any{"old_string": "b", "new_string": "B"},
+			map[string]any{"old_string": "zzz", "new_string": "Z"},
+		},
+	})
+	if !res.IsError {
+		t.Fatal("expected an error")
+	}
+	if !strings.Contains(res.Error, "2 earlier edit(s)") {
+		t.Fatalf("error should mention earlier matched edits, got: %s", res.Error)
+	}
+	data, _ := os.ReadFile(path)
+	if string(data) != original {
+		t.Fatalf("file changed on failure: %q", string(data))
+	}
+}
+
+func TestEditFileAmbiguousHintStaysBounded(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString("package main\n")
+	for i := 0; i < 2000; i++ {
+		sb.WriteString("\tif value == xxxxxxxxxxxxxxxxxxxx {\n\t\treturn nil\n\t}\n")
+	}
+	path := filepath.Join(t.TempDir(), "many.go")
+	if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	res := EditFile{}.Execute(context.Background(), map[string]any{
+		"path":  path,
+		"edits": []any{map[string]any{"old_string": "if value == xxxxxxxxxxxxxxxxxxxx {", "new_string": "X"}},
+	})
+	if !res.IsError {
+		t.Fatal("expected ambiguous error")
+	}
+	// 上千处匹配时只列前几处并标注总数，否则提示会撑爆模型上下文。
+	if len(res.Error) > 400 {
+		t.Fatalf("hint too long: %d bytes", len(res.Error))
+	}
+	if !strings.Contains(res.Error, "2000 locations") || !strings.Contains(res.Error, "more") {
+		t.Fatalf("hint should state the total and elide the rest: %s", res.Error)
+	}
+}
