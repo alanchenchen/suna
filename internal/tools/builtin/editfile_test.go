@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -700,7 +701,6 @@ func TestEditFileEveryErrorPathReturnsCode(t *testing.T) {
 	}{
 		{"invalid path", map[string]any{"path": 123, "edits": []any{}}, "EDIT_INVALID_PARAMS"},
 		{"invalid edits", map[string]any{"path": filepath.Join(dir, "x.txt"), "edits": "notarray"}, "EDIT_INVALID_PARAMS"},
-		{"system path", map[string]any{"path": "/etc/hosts", "edits": []any{map[string]any{"old_string": "a", "new_string": "b"}}}, "EDIT_SYSTEM_PATH"},
 		{"missing file", map[string]any{"path": filepath.Join(dir, "nope.txt"), "edits": []any{map[string]any{"old_string": "a", "new_string": "b"}}}, "EDIT_FILE_NOT_FOUND"},
 		{"ambiguous", map[string]any{"path": manyPath, "edits": []any{map[string]any{"old_string": "dup", "new_string": "b"}}}, "EDIT_AMBIGUOUS"},
 		{"occurrence out of range", map[string]any{"path": manyPath, "edits": []any{map[string]any{"old_string": "dup", "new_string": "b", "target": "99999"}}}, "EDIT_OCCURRENCE_NOT_FOUND"},
@@ -718,5 +718,20 @@ func TestEditFileEveryErrorPathReturnsCode(t *testing.T) {
 				t.Fatalf("error should carry %s, got: %s", tc.want, res.Error)
 			}
 		})
+	}
+}
+
+func TestEditFileRejectsSystemPath(t *testing.T) {
+	// 系统目录前缀随平台不同，硬编码 /etc 在 Windows 上会被解析成当前盘符下的相对路径。
+	systemPath := "/etc/hosts"
+	if runtime.GOOS == "windows" {
+		systemPath = `C:\Windows\System32\drivers\etc\hosts`
+	}
+	res := EditFile{}.Execute(context.Background(), map[string]any{
+		"path":  systemPath,
+		"edits": []any{map[string]any{"old_string": "a", "new_string": "b"}},
+	})
+	if !res.IsError || !strings.Contains(res.Error, "EDIT_SYSTEM_PATH") {
+		t.Fatalf("system path should be rejected, got: %s", res.Error)
 	}
 }
