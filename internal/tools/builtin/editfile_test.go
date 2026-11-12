@@ -541,3 +541,51 @@ func TestEditFileNotFoundHintStaysCompact(t *testing.T) {
 		}
 	})
 }
+
+func TestEditFileHintPointsAtFirstMismatchingLine(t *testing.T) {
+	cases := []struct {
+		name, content, oldString string
+		wantLine                 string
+		wantText                 string
+	}{
+		{
+			name:      "single line misremembered",
+			content:   "alpha\n\tbeta\ngamma\n",
+			oldString: "betaX",
+			wantLine:  "line 2",
+			wantText:  "beta",
+		},
+		{
+			name:      "third line of a block wrong, first two correct",
+			content:   "func f() {\n\tif x {\n\t\treturn nil\n\t}\n}\n",
+			oldString: "func f() {\n\tif x {\n\t\treturn err\n\t}\n}",
+			wantLine:  "line 3",
+			wantText:  "return nil",
+		},
+		{
+			name:      "indent difference reports the real file line",
+			content:   "func f() {\n\treturn nil\n}\n",
+			oldString: "func f() {\n    return nil\n}",
+			wantLine:  "line 1",
+			wantText:  "func f() {",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "target.txt")
+			if err := os.WriteFile(path, []byte(tc.content), 0644); err != nil {
+				t.Fatalf("WriteFile() error = %v", err)
+			}
+			res := EditFile{}.Execute(context.Background(), map[string]any{
+				"path":  path,
+				"edits": []any{map[string]any{"old_string": tc.oldString, "new_string": "X"}},
+			})
+			if !res.IsError {
+				t.Fatal("expected not-found error")
+			}
+			if !strings.Contains(res.Error, tc.wantLine) || !strings.Contains(res.Error, tc.wantText) {
+				t.Fatalf("hint should point at %s containing %q, got: %s", tc.wantLine, tc.wantText, res.Error)
+			}
+		})
+	}
+}

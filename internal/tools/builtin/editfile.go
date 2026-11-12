@@ -299,12 +299,12 @@ func editOperationErrorResult(position int, err *editOperationError) tools.Resul
 	return editErrorResult(err.Code, fmt.Sprintf("edit %d: %s", position, err.Message))
 }
 
-// editNotFoundError 附带最接近的真实行，让模型一次就能改对。
+// editNotFoundError 定位第一处不一致的行并回显真实内容，让模型一次就能改对。
 // 回显行会截断：错误信息直接进模型上下文，超长行会白白占掉大量 token。
 func editNotFoundError(content, target string) *editOperationError {
 	message := "old_string has no exact match in the current staged file"
-	if line, text, ok := closestEditLine(content, target); ok {
-		message = fmt.Sprintf("no exact match (closest line %d):\n  %d | %s\nRetry with the exact text above", line, line, truncateEditLine(text, maxEditHintBytes))
+	if line, text, ok := locateMismatch(content, target); ok {
+		message = fmt.Sprintf("no exact match (differs at line %d):\n  %d | %s\nRetry with the exact text above", line, line, truncateEditLine(text, maxEditHintBytes))
 	}
 	return &editOperationError{Code: "EDIT_OLD_NOT_FOUND", Message: message}
 }
