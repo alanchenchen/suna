@@ -315,7 +315,8 @@ func (m *ContextMemory) Maintain(ctx context.Context, compressor *memory.Compres
 		}
 		replaced, newSummary, err := c.plan.Apply(messages, summary, c.output)
 		if err != nil {
-			m.emit(m.finish(c, "skipped", "source_changed", nil))
+			// 真实原因必须落日志：候选来源、输出对齐与保存失败在旧版本里全被压成空错误。
+			m.emit(m.finish(c, "skipped", "source_changed", err))
 			if hard {
 				return err
 			}

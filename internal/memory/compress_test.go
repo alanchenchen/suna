@@ -204,11 +204,11 @@ func compactToolBatch(groups, resultTokens, tailTokens int) []Message {
 func compactRequestTokens(t *testing.T, p *CompactPlan) int {
 	t.Helper()
 	payload, err := json.Marshal(struct {
-		Summary    string      `json:"previous_summary"`
-		Groups     []ToolGroup `json:"groups,omitempty"`
-		History    []Message   `json:"history,omitempty"`
-		Background []Message   `json:"readonly_background"`
-	}{p.Summary, p.Groups, p.Prefix, p.Background})
+		Summary    string          `json:"previous_summary"`
+		Groups     []toolGroupWire `json:"groups,omitempty"`
+		History    []Message       `json:"history,omitempty"`
+		Background []Message       `json:"readonly_background"`
+	}{p.Summary, compactToolGroups(p.Groups), p.Prefix, p.Background})
 	if err != nil {
 		t.Fatal(err)
 	}

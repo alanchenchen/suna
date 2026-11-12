@@ -336,9 +336,13 @@ func regressionCompactServer(t *testing.T) (*httptest.Server, func() []regressio
 			return
 		}
 		var payload struct {
-			Summary string             `json:"previous_summary"`
-			Groups  []memory.ToolGroup `json:"groups"`
-			History []memory.Message   `json:"history"`
+			Summary string `json:"previous_summary"`
+			// 发给模型的工具组编号是稠密的 0..N-1，不是消息位置。
+			Groups []struct {
+				ID       int              `json:"id"`
+				Messages []memory.Message `json:"messages"`
+			} `json:"groups"`
+			History []memory.Message `json:"history"`
 		}
 		if err := json.Unmarshal([]byte(strings.TrimSpace(parts[1])), &payload); err != nil {
 			http.Error(w, fmt.Sprintf("invalid compact payload: %v", err), http.StatusBadRequest)
@@ -362,7 +366,7 @@ func regressionCompactServer(t *testing.T) (*httptest.Server, func() []regressio
 			}
 			id := group.Messages[0].ToolCalls[0].ID
 			batch.Sources = append(batch.Sources, id)
-			observation := memory.ToolObservation{ID: group.Index, Text: "evidence " + id}
+			observation := memory.ToolObservation{ID: group.ID, Text: "evidence " + id}
 			batchMu.Lock()
 			firstBatch := len(batches) == 0
 			batchMu.Unlock()

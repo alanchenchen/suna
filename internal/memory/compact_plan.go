@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/model"
 )
 
@@ -26,9 +27,43 @@ const (
 	compactOutputReserveDivisor      = 3  // 期望输出按来源的三分之一预留。
 )
 
+// ToolGroup 是内存里的压缩候选单元，不直接序列化给模型；
+// 发给模型时经 compactToolGroups 转成稠密编号的 toolGroupWire。
 type ToolGroup struct {
-	Index    int       `json:"id"`
+	Index    int
+	Messages []Message
+}
+
+// toolGroupWire 是发给模型的工具组投影。Index 是消息位置，编号稀疏跳跃，
+// 模型容易自行重编或漏写；发给模型时改用稠密的 0..N-1，回来再还原。
+type toolGroupWire struct {
+	ID       int       `json:"id"`
 	Messages []Message `json:"messages"`
+}
+
+// compactToolGroups 把计划组投影成稠密编号，模型只需按顺序数数。
+func compactToolGroups(groups []ToolGroup) []toolGroupWire {
+	out := make([]toolGroupWire, len(groups))
+	for i, group := range groups {
+		out[i] = toolGroupWire{ID: i, Messages: group.Messages}
+	}
+	return out
+}
+
+// restoreToolGroupIndexes 把模型返回的稠密编号还原成真实消息位置。
+// 越界编号统一改成 -1，绝不能原样透传：真实位置可能恰好等于某个越界稠密编号，
+// 那会把模型给的证据套到另一组上，静默污染历史。
+func restoreToolGroupIndexes(groups []ToolGroup, observations []ToolObservation) []ToolObservation {
+	out := make([]ToolObservation, len(observations))
+	for i, v := range observations {
+		if v.ID >= 0 && v.ID < len(groups) {
+			v.ID = groups[v.ID].Index
+		} else {
+			v.ID = -1
+		}
+		out[i] = v
+	}
+	return out
 }
 
 type CompactPlan struct {
@@ -353,17 +388,55 @@ type ToolObservation struct {
 	Text string `json:"text"`
 }
 
+// normalizeToolObservations 把模型输出对齐到计划组集合。
+// 模型漏写、重复、给出计划外编号或声明可压缩却没给证据时，都退化为保留原文，
+// 而不是让整批压缩失败；只有来源本身改变才属于不可恢复的错误。
+func normalizeToolObservations(groups []ToolGroup, out CompactOutput) CompactOutput {
+	planned := make(map[int]bool, len(groups))
+	for _, group := range groups {
+		planned[group.Index] = true
+	}
+	seen := make(map[int]bool, len(out.Observations))
+	normalized := make([]ToolObservation, 0, len(groups))
+	unknown, duplicate, empty := 0, 0, 0
+	for _, v := range out.Observations {
+		if !planned[v.ID] {
+			unknown++
+			continue
+		}
+		if seen[v.ID] {
+			duplicate++
+			continue
+		}
+		seen[v.ID] = true
+		// 声明可压缩却没有证据时只能保留原文，不能写入空观察。
+		if !v.Keep && strings.TrimSpace(v.Text) == "" {
+			empty++
+			v.Keep, v.Text = true, ""
+		}
+		normalized = append(normalized, v)
+	}
+	missing := 0
+	for _, group := range groups {
+		if seen[group.Index] {
+			continue
+		}
+		missing++
+		normalized = append(normalized, ToolObservation{ID: group.Index, Keep: true})
+	}
+	if missing+unknown+duplicate+empty > 0 {
+		logging.Info("memory", "compact_repair", logging.Event{"groups": len(groups), "missing": missing, "unknown": unknown, "duplicate": duplicate, "empty": empty})
+	}
+	out.Observations = normalized
+	return out
+}
+
 // Apply 在当前历史上精准替换，新增后缀不属于候选来源。Consumed变化不使内容来源失效。
 func (p *CompactPlan) Apply(messages []Message, summary string, out CompactOutput) ([]Message, string, error) {
 	if p.Kind == CompactTools {
-		if len(out.Observations) != len(p.Groups) {
-			return nil, "", fmt.Errorf("compression omitted tool groups")
-		}
+		out = normalizeToolObservations(p.Groups, out)
 		observations := make(map[int]ToolObservation, len(out.Observations))
 		for _, v := range out.Observations {
-			if _, ok := observations[v.ID]; ok {
-				return nil, "", fmt.Errorf("duplicate tool observation")
-			}
 			observations[v.ID] = v
 		}
 		result := make([]Message, 0, len(messages))
@@ -373,17 +446,11 @@ func (p *CompactPlan) Apply(messages []Message, summary string, out CompactOutpu
 			if end > len(messages) || !sameSource(messages[group.Index:end], group.Messages) {
 				return nil, "", fmt.Errorf("compression source changed")
 			}
-			observation, ok := observations[group.Index]
-			if !ok {
-				return nil, "", fmt.Errorf("unknown tool observation")
-			}
+			observation := observations[group.Index]
 			result = append(result, messages[start:group.Index]...)
 			if observation.Keep {
 				result = append(result, messages[group.Index:end]...)
 			} else {
-				if strings.TrimSpace(observation.Text) == "" {
-					return nil, "", fmt.Errorf("empty tool observation")
-				}
 				original := messages[group.Index]
 				// 原正文与观察分别持久化；请求投影再按既有文本语义拼接。
 				original.TextContent = group.Messages[0].Text()

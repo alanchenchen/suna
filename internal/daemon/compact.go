@@ -12,6 +12,15 @@ import (
 	"github.com/alanchenchen/suna/internal/runner"
 )
 
+// logCompactState 是后台与手动终态共用的日志字段构造，避免两处字段漂移。
+func logCompactState(sessionID string, state runner.CompactState, manual bool) {
+	fields := logging.Event{"session_id": sessionID, "compact_id": state.ID, "kind": state.Kind, "state": state.State, "wait": state.Wait, "prepare_ms": state.PrepareElapsed.Milliseconds(), "wait_ms": state.WaitElapsed.Milliseconds(), "before_tokens": state.BeforeTokens, "after_tokens": state.AfterTokens, "reason": state.Reason, "error": state.Error}
+	if manual {
+		fields["manual"] = true
+	}
+	logging.Info("memory", "compact_state", fields)
+}
+
 func compactStatePayload(sessionID string, state runner.CompactState) protocol.CompactState {
 	out := protocol.CompactState{SessionID: sessionID, CompactID: state.ID, Kind: string(state.Kind), State: state.State, Wait: state.Wait, PrepareElapsedMs: state.PrepareElapsed.Milliseconds(), WaitElapsedMs: state.WaitElapsed.Milliseconds(), Reason: state.Reason, Error: state.Error}
 	if state.State == "applied" {
@@ -35,7 +44,7 @@ func (s *service) handleMemoryState(sessionID string, rt *sessionRuntime, state 
 		return
 	}
 	ctx := context.Background()
-	logging.Info("memory", "compact_state", logging.Event{"session_id": sessionID, "compact_id": state.ID, "kind": state.Kind, "state": state.State, "wait": state.Wait, "prepare_ms": state.PrepareElapsed.Milliseconds(), "wait_ms": state.WaitElapsed.Milliseconds(), "before_tokens": state.BeforeTokens, "after_tokens": state.AfterTokens, "reason": state.Reason, "error": state.Error})
+	logCompactState(sessionID, state, false)
 	if state.Wait == "hard_limit" {
 		s.daemon.sessions.mu.RLock()
 		current := s.daemon.sessions.runtime[sessionID]
@@ -113,6 +122,8 @@ func (s *service) handleCompact(ctx context.Context, req protocol.Request, _ pro
 			mu.Lock()
 			terminal = state
 			mu.Unlock()
+			// 手动终态不经过下面的 emit，必须单独落日志，否则手动压缩结果不可追溯。
+			logCompactState(sessionID, state, true)
 			return
 		}
 		emit(context.Background(), multiSink(s.daemon.sessions.sinksForSession(s.daemon, sessionID)), protocol.NotifyCompactState, compactStatePayload(sessionID, state))

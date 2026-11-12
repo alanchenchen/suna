@@ -62,11 +62,11 @@ func (c *Compressor) Generate(ctx context.Context, binding *model.ModelBinding, 
 		return result, nil, fmt.Errorf("compress prompt loader is not configured")
 	}
 	payload, err := json.Marshal(struct {
-		Summary    string      `json:"previous_summary"`
-		Groups     []ToolGroup `json:"groups,omitempty"`
-		History    []Message   `json:"history,omitempty"`
-		Background []Message   `json:"readonly_background"`
-	}{plan.Summary, plan.Groups, compactSources(plan.Prefix), compactSources(plan.Background)})
+		Summary    string          `json:"previous_summary"`
+		Groups     []toolGroupWire `json:"groups,omitempty"`
+		History    []Message       `json:"history,omitempty"`
+		Background []Message       `json:"readonly_background"`
+	}{plan.Summary, compactToolGroups(plan.Groups), compactSources(plan.Prefix), compactSources(plan.Background)})
 	if err != nil {
 		return result, nil, err
 	}
@@ -156,6 +156,9 @@ func (c *Compressor) Generate(ctx context.Context, binding *model.ModelBinding, 
 	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return result, usage, fmt.Errorf("compression returned extra JSON values")
+	}
+	if plan.Kind == CompactTools {
+		result.Observations = restoreToolGroupIndexes(plan.Groups, result.Observations)
 	}
 	return result, usage, nil
 }

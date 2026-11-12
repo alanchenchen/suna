@@ -29,7 +29,7 @@ func newBackgroundMemoryTest(t *testing.T, release <-chan struct{}) (*ContextMem
 		case <-r.Context().Done():
 			return
 		}
-		payload, _ := json.Marshal(map[string]any{"observations": []map[string]any{{"id": 1, "keep": false, "text": "Saved exact evidence; work remains unverified."}}})
+		payload, _ := json.Marshal(map[string]any{"observations": []map[string]any{{"id": 0, "keep": false, "text": "Saved exact evidence; work remains unverified."}}})
 		content, _ := json.Marshal(string(payload))
 		w.Header().Set("Content-Type", "text/event-stream")
 		fmt.Fprintf(w, "data: {\"id\":\"local\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"offline\",\"choices\":[{\"index\":0,\"delta\":{\"content\":%s},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n", content)
