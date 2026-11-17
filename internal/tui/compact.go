@@ -84,9 +84,14 @@ func (t *TUI) handleCompactStateNotification(p protocol.CompactState) {
 	if p.State == "applied" && p.Result != nil {
 		r := p.Result
 		t.applyContextStats(r.AfterTokens, r.ContextWindow)
-		label := t.tr("compact.tools_applied")
-		if p.Kind == "history" {
+		label := t.tr("compact.applied_generic")
+		switch p.Kind {
+		case protocol.CompactTools:
+			label = t.tr("compact.tools_applied")
+		case protocol.CompactHistory:
 			label = t.tr("compact.history_applied")
+		case protocol.CompactMixed:
+			label = t.tr("compact.mixed_applied")
 		}
 		text := t.tr("compact.applied", label, fmtTok(r.BeforeTokens-r.AfterTokens))
 		if manual {
@@ -126,9 +131,14 @@ func (t *TUI) backgroundCompactLabel() string {
 		return ""
 	}
 	elapsed := time.Duration(p.PrepareElapsedMs)*time.Millisecond + time.Since(t.compactReceivedAt)
-	key := "compact.background_tools"
-	if p.Kind == "history" {
+	key := "compact.background_generic"
+	switch p.Kind {
+	case protocol.CompactTools:
+		key = "compact.background_tools"
+	case protocol.CompactHistory:
 		key = "compact.background_history"
+	case protocol.CompactMixed:
+		key = "compact.background_mixed"
 	}
 	return t.tr(key, toolview.FormatCompactDuration(elapsed))
 }

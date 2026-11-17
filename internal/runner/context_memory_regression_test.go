@@ -253,7 +253,7 @@ func TestHardRejectsReadyCandidateWithoutActualGain(t *testing.T) {
 	if q.input(messages, state.Summary()) < q.budget() {
 		t.Fatal("测试未进入硬缺口")
 	}
-	plan, err := memory.PlanCompact(messages, "", memory.CompactTools, q.budget(), 1000000, 32000, 1, true)
+	plan, err := memory.PlanCompact(messages, "", memory.CompactOptions{Budget: q.budget(), TargetGain: 1000, MinimumGain: 1, InputLimit: 1000000, OutputLimit: 32000, Coefficient: 1})
 	if err != nil || plan == nil || len(plan.Groups) != 1 {
 		t.Fatalf("plan=%+v error=%v", plan, err)
 	}
@@ -350,11 +350,8 @@ func regressionCompactServer(t *testing.T) (*httptest.Server, func() []regressio
 		}
 		batch := regressionCompactBatch{Summary: payload.Summary}
 		output := memory.CompactOutput{}
-		for i, msg := range payload.History {
+		for _, msg := range payload.History {
 			batch.Sources = append(batch.Sources, msg.Text())
-			if memory.IsUserMessage(msg) && msg.Origin != memory.OriginLegacy {
-				output.Keep = append(output.Keep, i)
-			}
 		}
 		if len(payload.History) > 0 {
 			output.Summary = payload.Summary + fmt.Sprintf("|merged-%d", len(payload.History))
@@ -396,7 +393,7 @@ func regressionCompactServer(t *testing.T) (*httptest.Server, func() []regressio
 	}
 }
 
-func TestHardLimitContinuesAcrossMoreThanTwoFreshToolBatches(t *testing.T) {
+func TestHardLimitDoesNotStartSerialCompressionForSameSnapshot(t *testing.T) {
 	server, snapshot := regressionCompactServer(t)
 	loader, err := prompt.New()
 	if err != nil {
@@ -405,71 +402,25 @@ func TestHardLimitContinuesAcrossMoreThanTwoFreshToolBatches(t *testing.T) {
 	compressor := memory.NewCompressor()
 	compressor.SetPrompts(loader)
 	working := memory.NewWorkingMemory()
-	user := memory.NewTextMessage(model.RoleUser, "inspect evidence")
-	user.Origin, user.Consumed = memory.OriginUser, true
-	messages := []memory.Message{user}
+	messages := []memory.Message{{Role: model.RoleUser, Origin: memory.OriginUser, TextContent: "inspect evidence", Consumed: true}}
 	for i := 0; i < 8; i++ {
 		id := fmt.Sprintf("source-%d", i)
-		messages = append(messages,
-			memory.Message{Role: model.RoleAssistant, TextContent: "prose " + id, Consumed: true, ToolCalls: []memory.ToolCall{{ID: id, Name: "readfile", Arguments: `{}`}}},
-			memory.Message{Role: model.RoleTool, ToolCallID: id, TextContent: strings.Repeat("x", 4*24000), ToolStatus: "completed", Consumed: true},
-		)
+		messages = append(messages, memory.Message{Role: model.RoleAssistant, TextContent: "prose " + id, Consumed: true, ToolCalls: []memory.ToolCall{{ID: id, Name: "readfile", Arguments: `{}`}}}, memory.Message{Role: model.RoleTool, ToolCallID: id, TextContent: strings.Repeat("x", 4*24000), Consumed: true})
 	}
-	tail := memory.NewTextMessage(model.RoleUser, strings.Repeat("t", 4*7000))
-	tail.Origin, tail.Consumed = memory.OriginUser, true
-	messages = append(messages, memory.Message{Role: model.RoleAssistant, TextContent: "explained", Consumed: true}, tail)
+	messages = append(messages, memory.Message{Role: model.RoleUser, Origin: memory.OriginUser, TextContent: strings.Repeat("t", 4*7000), Consumed: true})
 	working.SetMessages(messages)
-	const oldSummary = "previous compacted facts"
-	state := NewContextMemory(oldSummary)
-	q := CompactRequest{Binding: regressionBind(t, regressionRouter(t, server.URL)), Working: working,
-		Request: model.CompletionRequest{MaxTokens: 32000}, Coefficient: 1, Calibrated: true}
-	if q.input(messages, oldSummary) < q.budget() {
-		t.Fatal("测试未进入硬缺口")
-	}
-	var appliedMu sync.Mutex
-	var beforeAfter [][2]int
-	state.Notify = func(s CompactState) {
-		if s.State == "applied" {
-			appliedMu.Lock()
-			beforeAfter = append(beforeAfter, [2]int{s.BeforeTokens, s.AfterTokens})
-			appliedMu.Unlock()
-		}
-	}
+	state := NewContextMemory("previous facts")
+	q := CompactRequest{Binding: regressionBind(t, regressionRouter(t, server.URL)), Working: working, Request: model.CompletionRequest{MaxTokens: 32000}, Coefficient: 1, Calibrated: true}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := state.Maintain(ctx, compressor, q, false); err != nil {
-		t.Fatal(err)
-	}
-	gotBatches := snapshot()
-	appliedMu.Lock()
-	gotBeforeAfter := append([][2]int(nil), beforeAfter...)
-	appliedMu.Unlock()
-	if len(gotBatches) < 3 || len(gotBeforeAfter) != len(gotBatches) || len(gotBatches[0].Sources) < 2 || gotBatches[0].Sources[0] != "source-0" {
-		t.Fatalf("batches=%d commits=%d，期望超过两批", len(gotBatches), len(gotBeforeAfter))
-	}
-	seen := make(map[string]bool)
-	for i, batch := range gotBatches {
-		if batch.Summary != oldSummary || len(batch.Sources) == 0 || gotBeforeAfter[i][1] >= gotBeforeAfter[i][0] {
-			t.Fatalf("batch %d = %+v before/after=%v", i, batch, gotBeforeAfter[i])
-		}
-		for _, id := range batch.Sources {
-			if seen[id] {
-				t.Fatalf("来源 %s 被重复提交", id)
-			}
-			seen[id] = true
-		}
-	}
-	if state.Summary() != oldSummary || q.input(working.Messages(), state.Summary()) >= q.budget() {
-		t.Fatalf("summary=%q，最终仍超预算", state.Summary())
-	}
-	got := working.Messages()
-	if len(seen) != 8 || len(got) != len(messages)-7 || len(got[1].ToolCalls) != 1 || got[2].ToolCallID != "source-0" {
-		t.Fatalf("处理来源=%v，最终消息=%d，期望保留第一组、压缩其余七组", seen, len(got))
+	err = state.Maintain(ctx, compressor, q, false)
+	// 单请求容量不足以整理全部来源时，允许保留一次真实收益，但不能原地无限串行付费。
+	if err == nil || len(snapshot()) != 1 || state.Snapshot().State != "applied" {
+		t.Fatalf("error=%v batches=%d state=%+v", err, len(snapshot()), state.Snapshot())
 	}
 }
 
-func TestHardHistoryContinuesWithOnlyFreshSourceAndPreservesOriginals(t *testing.T) {
-	// 与工具批次共用本机服务端，解析实际 prompt 并返回原话索引。
+func TestHardHistoryRemovesOnlySelectedPrefixInOneRequest(t *testing.T) {
 	server, snapshot := regressionCompactServer(t)
 	loader, err := prompt.New()
 	if err != nil {
@@ -479,62 +430,34 @@ func TestHardHistoryContinuesWithOnlyFreshSourceAndPreservesOriginals(t *testing
 	compressor.SetPrompts(loader)
 	working := memory.NewWorkingMemory()
 	var messages []memory.Message
-	var originals []string
-	for i := 0; i < 6; i++ {
-		original := fmt.Sprintf("original-%d", i)
-		user := memory.NewTextMessage(model.RoleUser, original)
+	for i := 0; i < 4; i++ {
+		user := memory.NewTextMessage(model.RoleUser, fmt.Sprintf("original-%d", i))
 		user.Origin, user.Consumed = memory.OriginUser, true
-		answer := memory.NewTextMessage(model.RoleAssistant, fmt.Sprintf("answer-%d:", i)+strings.Repeat("x", 4*40000))
+		answer := memory.NewTextMessage(model.RoleAssistant, fmt.Sprintf("answer-%d:", i)+strings.Repeat("x", 4*20000))
 		answer.Consumed = true
 		messages = append(messages, user, answer)
-		originals = append(originals, original)
 	}
-	tail := memory.NewTextMessage(model.RoleUser, "pending requirement")
-	tail.Origin = memory.OriginUser
-	messages = append(messages, tail)
+	pending := memory.NewTextMessage(model.RoleUser, "pending requirement")
+	pending.Origin = memory.OriginUser
+	messages = append(messages, pending)
 	working.SetMessages(messages)
-	const oldSummary = "earlier facts"
-	state := NewContextMemory(oldSummary)
-	q := CompactRequest{Binding: regressionBind(t, regressionRouter(t, server.URL)), Working: working,
-		Request: model.CompletionRequest{MaxTokens: 32000}, Coefficient: 1, Calibrated: true}
-	if q.input(messages, oldSummary) < q.budget() {
-		t.Fatal("测试未进入硬缺口")
-	}
+	state := NewContextMemory("earlier facts")
+	q := CompactRequest{Binding: regressionBind(t, regressionRouter(t, server.URL)), Working: working, Request: model.CompletionRequest{MaxTokens: 32000}, Coefficient: 1, Calibrated: true}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := state.Maintain(ctx, compressor, q, false); err != nil {
 		t.Fatal(err)
 	}
-	gotBatches := snapshot()
-	if len(gotBatches) < 3 {
-		t.Fatalf("history batches=%d，期望超过两批", len(gotBatches))
+	batches := snapshot()
+	if len(batches) != 1 || batches[0].Summary != "earlier facts" || len(batches[0].Sources) == 0 {
+		t.Fatalf("batches=%+v", batches)
 	}
-	seen := map[string]bool{}
-	summary := oldSummary
-	for i, batch := range gotBatches {
-		if batch.Summary != summary || len(batch.Sources) == 0 {
-			t.Fatalf("batch %d 的摘要或来源错误", i)
-		}
-		for _, text := range batch.Sources {
-			if strings.Contains(text, "Historical tool observation") || seen[text] {
-				t.Fatalf("已处理的历史来源被重复归并：%.40s", text)
-			}
-			seen[text] = true
-		}
-		summary += fmt.Sprintf("|merged-%d", len(batch.Sources))
+	removed := len(batches[0].Sources)
+	if removed >= len(messages)-1 || !reflect.DeepEqual(working.Messages(), messages[removed:]) {
+		t.Fatalf("removed=%d remaining=%d, want exact untouched suffix", removed, len(working.Messages()))
 	}
-	if state.Summary() != summary || q.input(working.Messages(), state.Summary()) >= q.budget() {
-		t.Fatalf("summary=%q，期望 %q 且最终不超预算", state.Summary(), summary)
-	}
-	var gotOriginals []string
-	for _, msg := range working.Messages() {
-		if memory.IsUserMessage(msg) {
-			gotOriginals = append(gotOriginals, msg.Text())
-		}
-	}
-	originals = append(originals, tail.Text())
-	if !reflect.DeepEqual(gotOriginals, originals) {
-		t.Fatalf("原话丢失或重排：%v", gotOriginals)
+	if q.input(working.Messages(), state.Summary()) >= q.budget() {
+		t.Fatal("history still exceeds capacity")
 	}
 }
 

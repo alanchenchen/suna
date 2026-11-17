@@ -3,11 +3,7 @@ package memory
 import (
 	"encoding/json"
 	"fmt"
-	"reflect"
-	"strconv"
-	"strings"
 
-	"github.com/alanchenchen/suna/internal/logging"
 	"github.com/alanchenchen/suna/internal/model"
 )
 
@@ -16,274 +12,336 @@ type CompactKind string
 const (
 	CompactTools   CompactKind = "tools"
 	CompactHistory CompactKind = "history"
+	CompactMixed   CompactKind = "mixed"
 )
 
-// 来源筛选、近期保护和历史释放目标属于选区策略，不与 Runner 的采用门槛混用。
 const (
-	compactToolTailPercent           = 10 // 工具模式保护的近期完整历史。
-	compactToolMinimumSourcePercent  = 8  // 工具可替换来源的普通准入下限。
-	compactHistoryTargetGainPercent  = 15 // 历史扩选争取的释放量，非采用硬门槛。
-	compactHistoryMinimumGainPercent = 8  // 历史候选的估算净收益下限。
-	compactOutputReserveDivisor      = 3  // 期望输出按来源的三分之一预留。
+	compactTailPercent       = 10
+	compactPromptReserve     = 2048
+	compactOutputDivisor     = 3
+	compactMinimumToolSaving = 128
 )
 
-// ToolGroup 是内存里的压缩候选单元，不直接序列化给模型；
-// 发给模型时经 compactToolGroups 转成稠密编号的 toolGroupWire。
+// CompactOptions 的目标与收益均使用主请求的校准尺度；输入限制属于摘要请求自身。
+// Planner 不选择模型、不决定何时采用，也不为失败来源自动发起新请求。
+type CompactOptions struct {
+	Budget, TargetGain, Tolerance, MinimumGain int
+	InputLimit, OutputLimit                    int
+	Coefficient                                float64
+	ExcludedTools                              map[string]bool
+}
+
 type ToolGroup struct {
 	Index    int
 	Messages []Message
 }
 
-// toolGroupWire 是发给模型的工具组投影。Index 是消息位置，编号稀疏跳跃，
-// 模型容易自行重编或漏写；发给模型时改用稠密的 0..N-1，回来再还原。
-type toolGroupWire struct {
-	ID       int       `json:"id"`
-	Messages []Message `json:"messages"`
-}
-
-// compactToolGroups 把计划组投影成稠密编号，模型只需按顺序数数。
-func compactToolGroups(groups []ToolGroup) []toolGroupWire {
-	out := make([]toolGroupWire, len(groups))
-	for i, group := range groups {
-		out[i] = toolGroupWire{ID: i, Messages: group.Messages}
-	}
-	return out
-}
-
-// restoreToolGroupIndexes 把模型返回的稠密编号还原成真实消息位置。
-// 越界编号统一改成 -1，绝不能原样透传：真实位置可能恰好等于某个越界稠密编号，
-// 那会把模型给的证据套到另一组上，静默污染历史。
-func restoreToolGroupIndexes(groups []ToolGroup, observations []ToolObservation) []ToolObservation {
-	out := make([]ToolObservation, len(observations))
-	for i, v := range observations {
-		if v.ID >= 0 && v.ID < len(groups) {
-			v.ID = groups[v.ID].Index
-		} else {
-			v.ID = -1
-		}
-		out[i] = v
-	}
-	return out
-}
-
 type CompactPlan struct {
-	Kind                CompactKind
-	Summary             string
-	Groups              []ToolGroup
-	Prefix              []Message
-	Background          []Message
-	HistoryStart        int
-	SourceTokens        int
-	OutputBudget        int
-	inputTokens         int
-	coefficient         float64
-	inputLimit          int
-	outputMinimum       int
-	summaryTokens       int
-	backgroundPositions []int
+	Kind         CompactKind
+	Summary      string
+	Groups       []ToolGroup
+	Prefix       []Message
+	Background   []Message
+	SourceTokens int
+	OutputBudget int
+	ExpectedGain int
+
+	inputTokens int
+	coefficient float64
+	inputLimit  int
 }
 
-// PlanCompact 只选择完整、已消费来源；任何真实输入容量限制都通过缩小完整批次满足。
-func PlanCompact(messages []Message, summary string, kind CompactKind, budget, inputLimit, outputLimit int, coefficient float64, force bool, sourceStart ...int) (*CompactPlan, error) {
-	start := 0
-	if len(sourceStart) > 0 {
-		start = sourceStart[0]
+type compactToolSource struct {
+	start, end int
+	saving     int
+	before     int
+	after      int
+}
+
+// compactSelection 增量维护来源和背景成本，选头部时只向前移动，避免反复序列化整段历史。
+type compactSelection struct {
+	messages                    []Message
+	costs, raw, prefixCost      []int
+	tools                       []compactToolSource
+	refs                        []int
+	selected                    []compactToolSource
+	head, removedTools          int
+	source, input, background   int
+	summaryTokens, summaryInput int
+	jsonCost                    compactJSONEstimator
+	options                     CompactOptions
+}
+
+// PlanCompact 先选足够的旧工具；不足时才扩选最短头部，重叠工具直接并入头部。
+// 最终只构造一个不重叠计划；模型不参与选区和原话去留决策。
+func PlanCompact(messages []Message, summary string, options CompactOptions) (*CompactPlan, error) {
+	if options.Budget <= 0 || options.InputLimit <= 0 || options.OutputLimit < 32 || options.TargetGain <= 0 {
+		return nil, fmt.Errorf("invalid compression budget")
 	}
-	if start < 0 || start > len(messages) {
-		return nil, fmt.Errorf("invalid compression source start")
+	if options.Coefficient <= 0 {
+		options.Coefficient = 1
 	}
 	projected := ProjectMessages(messages)
-	if coefficient <= 0 {
-		coefficient = 1
+	s := compactSelection{messages: projected, options: options, costs: make([]int, len(projected)), raw: make([]int, len(projected)), prefixCost: make([]int, len(projected)+1), refs: make([]int, len(projected))}
+	for i := range projected {
+		s.costs[i] = EstimateMessagesTokens(projected[i : i+1])
+		s.prefixCost[i+1] = s.prefixCost[i] + s.costs[i]
+		s.raw[i] = -1
 	}
-	encodedSummary, _ := json.Marshal(summary)
-	baseInput := model.EstimateTokens(string(encodedSummary)) + 2048
-	p := &CompactPlan{Kind: kind, Summary: summary, inputTokens: baseInput, coefficient: coefficient, inputLimit: inputLimit, summaryTokens: model.EstimateTokens(summary)}
-	costs := make([]int, len(projected))
-	rawCosts := make([]int, len(projected))
-	for i, m := range projected {
-		costs[i] = EstimateMessagesTokens(projected[i : i+1])
-		data, _ := json.Marshal(compactSource(m))
-		rawCosts[i] = model.EstimateTokens(string(data)) + 2
-	}
-	var selected bool
-	if kind == CompactTools {
-		selected = p.planToolGroups(projected, costs, rawCosts, budget, outputLimit, start, force)
-	} else {
-		selected = p.planHistory(projected, costs, rawCosts, budget, outputLimit, force)
-	}
-	if !selected {
-		return nil, nil
-	}
-	p.backgroundPositions = nil
-	if !planFits(p, p.inputLimit, outputLimit) {
-		return nil, fmt.Errorf("complete compression source exceeds request capacity")
-	}
-	return p, nil
-}
-
-// planToolGroups 从旧到新选完整工具组，并按消息位置去重只读背景。
-func (p *CompactPlan) planToolGroups(projected []Message, costs, rawCosts []int, budget, outputLimit, start int, force bool) bool {
-	backgroundSeen := make(map[int]bool)
-	addBackground := func(index int) {
-		if index >= 0 && !backgroundSeen[index] {
-			backgroundSeen[index] = true
-			p.Background = append(p.Background, plainReference(projected[index]))
-			p.backgroundPositions = append(p.backgroundPositions, index)
-			encoded, _ := json.Marshal(p.Background[len(p.Background)-1])
-			p.inputTokens += model.EstimateTokens(string(encoded)) + 2
-		}
-	}
-
-	addBackground(latestUserIndex(projected))
-	tail := len(projected)
-	tokens := 0
-	for tail > 0 && model.ApplyCoefficient(tokens, p.coefficient) < budget*compactToolTailPercent/100 {
-		tail--
-		tokens += costs[tail]
-	}
-	nextAssistant := make([]int, len(projected)+1)
-	nextAssistant[len(projected)] = -1
-	for j := len(projected) - 1; j >= 0; j-- {
-		nextAssistant[j] = nextAssistant[j+1]
-		// 新的工具声明不是后续完整解释，也不能把尚未消费的半成品当背景。
-		if projected[j].Role == model.RoleAssistant && projected[j].Consumed && len(projected[j].ToolCalls) == 0 && (projected[j].Text() != "" || projected[j].Observation != nil) {
-			nextAssistant[j] = j
-		}
-	}
-	lastUser := -1
-	for i := 0; i < start; i++ {
-		if IsUserMessage(projected[i]) {
-			lastUser = i
-		}
-	}
-	for i := start; i < tail; {
-		if IsUserMessage(projected[i]) {
-			lastUser = i
-		}
-		m := projected[i]
-		if len(m.ToolCalls) == 0 {
-			i++
+	tail := compactTail(projected, s.costs, options)
+	s.tools = s.toolSources(tail)
+	s.summaryInput = s.jsonCost.tokens(summary) + 2
+	s.summaryTokens = model.EstimateTokens(summary)
+	bestHead, bestCount, bestGain := -1, 0, 0
+	// 无论后续是否需要历史，工具都先按稳定顺序选择；达到软目标即停止扩选。
+	for _, source := range s.tools {
+		s.addTool(source, 1)
+		s.selected = append(s.selected, source)
+		if !s.fits() {
+			s.selected = s.selected[:len(s.selected)-1]
+			s.addTool(source, -1)
 			continue
 		}
-		end, ok := closedGroup(projected, i)
-		if !ok || end > tail {
-			i = max(i+1, end)
-			continue
+		if s.enough() {
+			return s.plan(summary), nil
 		}
-		group := ToolGroup{Index: i, Messages: append([]Message(nil), projected[i:end]...)}
-		added := -model.EstimateTokens(m.Text())
-		for j := i; j < end; j++ {
-			added += costs[j]
-		}
-		p.Groups = append(p.Groups, group)
-		p.SourceTokens += added
-		oldBackground, oldInput, oldOutput := len(p.Background), p.inputTokens, p.OutputBudget
-		// 背景只取真实 user 和无 ToolCalls 的完整解释，天然不与原生组来源重叠；
-		// 再按来源位置去重后才计量，不能在 fit 后删除重复内容却仍重复收费。
-		addBackground(lastUser)
-		if end < len(projected) {
-			addBackground(nextAssistant[end])
-		}
-		for j := i; j < end; j++ {
-			p.inputTokens += rawCosts[j]
-		}
-		p.inputTokens += 32
-		if !planFits(p, p.inputLimit, outputLimit) {
-			p.Groups = p.Groups[:len(p.Groups)-1]
-			p.SourceTokens -= added
-			for _, position := range p.backgroundPositions[oldBackground:] {
-				delete(backgroundSeen, position)
-			}
-			p.Background = p.Background[:oldBackground]
-			p.backgroundPositions = p.backgroundPositions[:oldBackground]
-			p.inputTokens = oldInput
-			p.OutputBudget = oldOutput
-			break
-		}
-
-		i = end
 	}
-	return len(p.Groups) > 0 && (force || model.ApplyCoefficient(p.SourceTokens, p.coefficient) >= budget*compactToolMinimumSourcePercent/100)
-}
-
-// planHistory 沿完整交流边界扩选连续历史，估算收益时扣除完整原话保留成本。
-func (p *CompactPlan) planHistory(projected []Message, costs, rawCosts []int, budget, outputLimit int, force bool) bool {
-	baseInput := p.inputTokens
-	latest := latestUserIndex(projected)
-	backgroundInput := 0
-	if latest >= 0 {
-		p.Background = []Message{plainReference(projected[latest])}
-		encoded, _ := json.Marshal(p.Background[0])
-		backgroundInput = model.EstimateTokens(string(encoded)) + 2
+	if s.gain() >= max(1, options.MinimumGain) && len(s.selected) > 0 {
+		bestHead, bestCount, bestGain = 0, len(s.selected), s.gain()
 	}
-	// 必须保留未消费材料；旧来源未知的 user 整条保留，不充真实原话配额。
-	retained := retainedOriginalCosts(projected)
-	end, source, input := 0, 0, baseInput
-	validEnd, validSource, validInput, validOutput, validMinimum := 0, 0, 0, 0, 0
-	keepBytes := []int{0}
-	for end < len(projected) {
+
+	// 历史只能覆盖从零开始的连续已消费来源，并在完整助手响应或闭合工具组后结束。
+	for end := 0; end < tail; {
 		m := projected[end]
-		if !m.Consumed {
+		if !m.Consumed || m.Role == model.RoleTool {
 			break
 		}
 		next := end + 1
 		if len(m.ToolCalls) > 0 {
 			var ok bool
 			next, ok = closedGroup(projected, end)
-			if !ok {
+			if !ok || next > tail {
 				break
 			}
 		}
-		for j := end; j < next; j++ {
-			source += costs[j]
-			input += rawCosts[j]
-			if IsUserMessage(projected[j]) && projected[j].Origin != OriginLegacy {
-				keepBytes = append(keepBytes, keepBytes[len(keepBytes)-1]+len(strconv.Itoa(j))+1)
-			}
-		}
-		// 完整助手消息或已消费闭合组都是交流边界；不要求等到下一个 user，
-		// 否则一条要求下持续 coding 的安全历史会被整段冻结。单独 user 不选。
+		s.extendHead(next)
 		end = next
 		if m.Role != model.RoleAssistant {
 			continue
 		}
-		p.SourceTokens = source
-		p.inputTokens = input
-		if latest >= end {
-			p.inputTokens += backgroundInput
+		// 为必要头部让出末尾独立工具的容量；只裁减计划，不修改原始历史。
+		for !s.fits() && len(s.selected) > s.removedTools {
+			last := s.selected[len(s.selected)-1]
+			s.addTool(last, -1)
+			s.selected = s.selected[:len(s.selected)-1]
 		}
-		// 至少半数完整原话的编号必须能输出，不能付费后才发现 JSON 本身装不下。
-		p.outputMinimum = 32 + keepBytes[len(keepBytes)/2]/4
-		if !planFits(p, p.inputLimit, outputLimit) {
+		if !s.fits() {
 			break
 		}
-		validEnd, validSource = end, source
-		validInput, validOutput, validMinimum = p.inputTokens, p.OutputBudget, p.outputMinimum
-		if model.ApplyCoefficient(source+p.summaryTokens-retained[end], p.coefficient)-p.OutputBudget >= budget*compactHistoryTargetGainPercent/100 {
-			break
+		if gain := s.gain(); gain >= max(1, options.MinimumGain) && gain > bestGain {
+			bestHead, bestCount, bestGain = s.head, len(s.selected), gain
+		}
+		if s.enough() {
+			return s.plan(summary), nil
 		}
 	}
-	if validEnd == 0 {
-		return false
+	if bestHead < 0 {
+		return nil, nil
 	}
-	p.Prefix = append([]Message(nil), projected[:validEnd]...)
-	p.SourceTokens, p.inputTokens, p.OutputBudget = validSource, validInput, validOutput
-	p.outputMinimum = validMinimum
-	if latest >= 0 && latest < validEnd {
-		// fit 已按来源只计一次；背景与其成本一起退出，而非提交前才去重。
-		p.Background = nil
+	// 扫描只记录边界，最后构造一次不可变来源，避免逐边界复制长历史。
+	chosen := s.selected[:bestCount]
+	s.selected = chosen
+	s.head, s.removedTools, s.source, s.input, s.background = 0, 0, 0, 0, 0
+	clear(s.refs)
+	for _, tool := range chosen {
+		s.addTool(tool, 1)
 	}
-	return force || model.ApplyCoefficient(p.SourceTokens+p.summaryTokens-retained[validEnd], p.coefficient)-p.OutputBudget >= budget*compactHistoryMinimumGainPercent/100
+	s.extendHead(bestHead)
+	return s.plan(summary), nil
 }
 
-func latestUserIndex(messages []Message) int {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if IsUserMessage(messages[i]) {
-			return i
+// compactTail 至少保护一个近期完整单元；大消息跨过保护线时整条留下，不切正文。
+func compactTail(messages []Message, costs []int, q CompactOptions) int {
+	tail, tokens := len(messages), 0
+	for tail > 0 && (tokens == 0 || model.ApplyCoefficient(tokens, q.Coefficient) < q.Budget*compactTailPercent/100) {
+		tail--
+		tokens += costs[tail]
+	}
+	return tail
+}
+
+func (s *compactSelection) toolSources(tail int) []compactToolSource {
+	nextAssistant := make([]int, len(s.messages)+1)
+	nextAssistant[len(s.messages)] = -1
+	for i := len(s.messages) - 1; i >= 0; i-- {
+		nextAssistant[i] = nextAssistant[i+1]
+		m := s.messages[i]
+		if IsUserMessage(m) {
+			// 下一轮用户要求之后的答复不属于前一工具组的关联解释。
+			nextAssistant[i] = -1
+		}
+		if m.Role == model.RoleAssistant && m.Consumed && len(m.ToolCalls) == 0 && (m.Text() != "" || m.Observation != nil) {
+			nextAssistant[i] = i
 		}
 	}
-	return -1
+	var out []compactToolSource
+	lastUser := -1
+	for i := 0; i < tail; {
+		m := s.messages[i]
+		if IsUserMessage(m) {
+			lastUser = i
+		}
+		if len(m.ToolCalls) == 0 {
+			i++
+			continue
+		}
+		end, ok := closedGroup(s.messages, i)
+		if !ok || end > tail {
+			i = max(i+1, end)
+			continue
+		}
+		prose := model.NewTextMessage(model.RoleAssistant, m.Text())
+		saving := s.prefixCost[end] - s.prefixCost[i] - model.EstimateMessagesTokens([]model.Message{prose})
+		if model.ApplyCoefficient(saving-max(96, saving/compactOutputDivisor+96), s.options.Coefficient) >= compactMinimumToolSaving {
+			group := ToolGroup{Index: i, Messages: s.messages[i:end]}
+			if len(s.options.ExcludedTools) == 0 || !s.options.ExcludedTools[group.SourceKey()] {
+				out = append(out, compactToolSource{start: i, end: end, saving: saving, before: lastUser, after: nextAssistant[end]})
+			}
+		}
+		i = end
+	}
+	return out
+}
+
+// rawCost 只序列化实际入选来源及必要背景，不为未发送的长尾构造 JSON 副本。
+func (s *compactSelection) rawCost(index int) int {
+	if s.raw[index] < 0 {
+		s.raw[index] = s.jsonCost.tokens(compactSource(s.messages[index])) + 2
+	}
+	return s.raw[index]
+}
+
+// compactJSONEstimator 直接统计编码器写出的 JSON，避免为估算复制完整字节和字符串。
+// 单次规划复用编码器，没有跨请求缓存；有效 UTF-8 的非 ASCII 首字节恰好对应一个字符。
+// Encoder 比 Marshal 多一个换行，计数时扣除，保持与既有 EstimateTokens 完全同尺度。
+type compactJSONEstimator struct {
+	encoder         *json.Encoder
+	ascii, nonASCII int
+}
+
+func (c *compactJSONEstimator) Write(data []byte) (int, error) {
+	for _, b := range data {
+		if b < 0x80 {
+			c.ascii++
+		} else if b&0xc0 != 0x80 {
+			c.nonASCII++
+		}
+	}
+	return len(data), nil
+}
+
+func (c *compactJSONEstimator) tokens(value any) int {
+	c.ascii, c.nonASCII = 0, 0
+	if c.encoder == nil {
+		c.encoder = json.NewEncoder(c)
+	}
+	// 来源只包含固定的历史字段，没有自定义编码或不可编码的动态值。
+	_ = c.encoder.Encode(value)
+	return max(0, c.ascii-1)/4 + c.nonASCII + 1
+}
+
+func (s *compactSelection) reference(index, delta int) {
+	if index < 0 || index < s.head {
+		return
+	}
+	if s.refs[index] == 0 && delta > 0 {
+		s.background += s.rawCost(index)
+	}
+	s.refs[index] += delta
+	if s.refs[index] == 0 {
+		s.background -= s.rawCost(index)
+	}
+}
+
+func (s *compactSelection) addTool(tool compactToolSource, delta int) {
+	s.source += delta * tool.saving
+	for i := tool.start; i < tool.end; i++ {
+		s.input += delta * s.rawCost(i)
+	}
+	s.input += delta * 32
+	s.reference(tool.before, delta)
+	s.reference(tool.after, delta)
+}
+
+func (s *compactSelection) extendHead(end int) {
+	// 先移出重叠工具及其背景，再将同一来源计入头部，不能重复收费或计算净收益。
+	for s.removedTools < len(s.selected) && s.selected[s.removedTools].start < end {
+		s.addTool(s.selected[s.removedTools], -1)
+		s.removedTools++
+	}
+	for i := s.head; i < end; i++ {
+		if s.refs[i] > 0 {
+			s.background -= s.rawCost(i)
+			s.refs[i] = 0
+		}
+		s.input += s.rawCost(i)
+	}
+	s.head = end
+}
+
+func (s *compactSelection) metrics() (source, output, input int) {
+	source = s.source
+	input = compactPromptReserve + s.input + s.background
+	groups := len(s.selected) - s.removedTools
+	if s.head > 0 {
+		source += s.prefixCost[s.head] + s.summaryTokens
+		input += s.summaryInput
+	}
+	output = min(s.options.OutputLimit, max(1024, source/compactOutputDivisor+groups*96))
+	return
+}
+func (s *compactSelection) gain() int {
+	source, output, _ := s.metrics()
+	return model.ApplyCoefficient(source-output, s.options.Coefficient)
+}
+func (s *compactSelection) enough() bool {
+	return s.gain() >= max(s.options.MinimumGain, s.options.TargetGain-s.options.Tolerance)
+}
+func (s *compactSelection) fits() bool {
+	_, output, input := s.metrics()
+	minimum := 32 + (len(s.selected)-s.removedTools)*16
+	return s.options.OutputLimit >= minimum && model.ApplyCoefficient(input, s.options.Coefficient)+output <= s.options.InputLimit
+}
+func (s *compactSelection) plan(summary string) *CompactPlan {
+	source, output, input := s.metrics()
+	p := &CompactPlan{SourceTokens: source, OutputBudget: output, ExpectedGain: s.gain(), inputTokens: input, coefficient: s.options.Coefficient, inputLimit: s.options.InputLimit}
+	if s.head > 0 {
+		p.Prefix = append([]Message(nil), s.messages[:s.head]...)
+		p.Summary = summary
+	}
+	for _, tool := range s.selected[s.removedTools:] {
+		p.Groups = append(p.Groups, ToolGroup{Index: tool.start, Messages: append([]Message(nil), s.messages[tool.start:tool.end]...)})
+	}
+	for i, refs := range s.refs {
+		if refs > 0 && i >= s.head {
+			p.Background = append(p.Background, plainReference(s.messages[i]))
+		}
+	}
+	p.Kind = compactKind(len(p.Prefix) > 0, len(p.Groups) > 0)
+	return p
+}
+
+func compactKind(history, tools bool) CompactKind {
+	switch {
+	case history && tools:
+		return CompactMixed
+	case history:
+		return CompactHistory
+	case tools:
+		return CompactTools
+	default:
+		return ""
+	}
 }
 
 func plainReference(m Message) Message {
@@ -291,6 +349,7 @@ func plainReference(m Message) Message {
 	out.Origin = m.Origin
 	return out
 }
+
 func closedGroup(messages []Message, index int) (int, bool) {
 	calls := messages[index].ToolCalls
 	if messages[index].Role != model.RoleAssistant || len(calls) == 0 {
@@ -315,211 +374,4 @@ func closedGroup(messages []Message, index int) (int, bool) {
 		end++
 	}
 	return end, len(seen) == 0 && consumed
-}
-
-// retainedOriginalCosts 线性估算完整原话的可行保留成本。按到达次序交替分两组，
-// 文本较重的一组满足半数 token；若它少一条，只补另一组最短的一条。
-// 这不是语义选择或最优背包，只用来避免把一条完整长原话错误估成半条；
-// Apply 仍对模型实际选择核验条数与文本双配额，采用处再计真实净收益。
-func retainedOriginalCosts(messages []Message) []int {
-	out := make([]int, len(messages)+1)
-	var counts, sums, shortest [2]int
-	known, legacy, total, longest := 0, 0, 0, 0
-	for i, m := range messages {
-		if IsUserMessage(m) {
-			n := model.EstimateTokens(m.Text())
-			if m.Origin == OriginLegacy {
-				legacy += n
-			} else {
-				group := known % 2
-				known++
-				total += n
-				longest = max(longest, n)
-				counts[group]++
-				sums[group] += n
-				if counts[group] == 1 || n < shortest[group] {
-					shortest[group] = n
-				}
-			}
-		}
-		group := 0
-		if sums[1] > sums[0] {
-			group = 1
-		}
-		retained := sums[group]
-		if counts[group]*2 < known {
-			retained += shortest[1-group]
-		}
-		// 极长单条以外的原话若已满足双配额，可避免离群值迫使扩大不必要的来源。
-		if known > 1 && (total-longest)*2 >= total {
-			retained = min(retained, total-longest)
-		}
-		out[i+1] = legacy + retained
-	}
-	return out
-}
-
-func planFits(p *CompactPlan, inputLimit, outputLimit int) bool {
-	// 3:1 仅用来预留输出空间，不是来源大小的物理上限。真实 binding 较小
-	// 时封顶，较大时随来源增长；只有完整请求容量或逐组结构下限才会缩批。
-	want := max(1024, (p.SourceTokens+p.summaryTokens)/compactOutputReserveDivisor)
-	minimum := max(32, p.outputMinimum)
-	if p.Kind == CompactTools {
-		want = max(1024, p.SourceTokens/compactOutputReserveDivisor+len(p.Groups)*96)
-		// 即便全 keep，也须放得下每组 id/keep/text 及 JSON 外壳；16 token
-		// 每项覆盖整数 id 的结构空间，96 是期望观察空间而非硬切批上限。
-		minimum = 32 + len(p.Groups)*16
-	}
-	if outputLimit < minimum {
-		return false
-	}
-	p.OutputBudget = min(want, outputLimit)
-	return model.ApplyCoefficient(p.inputTokens, p.coefficient) <= inputLimit-p.OutputBudget
-}
-
-type CompactOutput struct {
-	Observations []ToolObservation `json:"observations"`
-	Summary      string            `json:"summary"`
-	Keep         []int             `json:"keep"`
-}
-type ToolObservation struct {
-	ID   int    `json:"id"`
-	Keep bool   `json:"keep"`
-	Text string `json:"text"`
-}
-
-// normalizeToolObservations 把模型输出对齐到计划组集合。
-// 模型漏写、重复、给出计划外编号或声明可压缩却没给证据时，都退化为保留原文，
-// 而不是让整批压缩失败；只有来源本身改变才属于不可恢复的错误。
-func normalizeToolObservations(groups []ToolGroup, out CompactOutput) CompactOutput {
-	planned := make(map[int]bool, len(groups))
-	for _, group := range groups {
-		planned[group.Index] = true
-	}
-	seen := make(map[int]bool, len(out.Observations))
-	normalized := make([]ToolObservation, 0, len(groups))
-	unknown, duplicate, empty := 0, 0, 0
-	for _, v := range out.Observations {
-		if !planned[v.ID] {
-			unknown++
-			continue
-		}
-		if seen[v.ID] {
-			duplicate++
-			continue
-		}
-		seen[v.ID] = true
-		// 声明可压缩却没有证据时只能保留原文，不能写入空观察。
-		if !v.Keep && strings.TrimSpace(v.Text) == "" {
-			empty++
-			v.Keep, v.Text = true, ""
-		}
-		normalized = append(normalized, v)
-	}
-	missing := 0
-	for _, group := range groups {
-		if seen[group.Index] {
-			continue
-		}
-		missing++
-		normalized = append(normalized, ToolObservation{ID: group.Index, Keep: true})
-	}
-	if missing+unknown+duplicate+empty > 0 {
-		logging.Info("memory", "compact_repair", logging.Event{"groups": len(groups), "missing": missing, "unknown": unknown, "duplicate": duplicate, "empty": empty})
-	}
-	out.Observations = normalized
-	return out
-}
-
-// Apply 在当前历史上精准替换，新增后缀不属于候选来源。Consumed变化不使内容来源失效。
-func (p *CompactPlan) Apply(messages []Message, summary string, out CompactOutput) ([]Message, string, error) {
-	if p.Kind == CompactTools {
-		out = normalizeToolObservations(p.Groups, out)
-		observations := make(map[int]ToolObservation, len(out.Observations))
-		for _, v := range out.Observations {
-			observations[v.ID] = v
-		}
-		result := make([]Message, 0, len(messages))
-		start := 0
-		for _, group := range p.Groups {
-			end := group.Index + len(group.Messages)
-			if end > len(messages) || !sameSource(messages[group.Index:end], group.Messages) {
-				return nil, "", fmt.Errorf("compression source changed")
-			}
-			observation := observations[group.Index]
-			result = append(result, messages[start:group.Index]...)
-			if observation.Keep {
-				result = append(result, messages[group.Index:end]...)
-			} else {
-				original := messages[group.Index]
-				// 原正文与观察分别持久化；请求投影再按既有文本语义拼接。
-				original.TextContent = group.Messages[0].Text()
-				original.Content = []model.ContentBlock{{Type: model.ContentText, Text: original.TextContent}}
-				statuses := make(map[string]string, len(group.Messages)-1)
-				for _, result := range group.Messages[1:] {
-					statuses[result.ToolCallID] = result.ToolStatus
-				}
-				labels := make([]ToolLabel, len(original.ToolCalls))
-				for i, call := range original.ToolCalls {
-					labels[i] = ToolLabel{Name: call.Name, Intent: call.Intent, Status: statuses[call.ID]}
-				}
-				original.Observation = &Observation{Text: observation.Text, Calls: labels}
-				original.ToolCalls = nil
-				result = append(result, original)
-			}
-			start = end
-		}
-		return append(result, messages[start:]...), summary, nil
-	}
-	start, end := p.HistoryStart, p.HistoryStart+len(p.Prefix)
-	if start < 0 || p.Summary != summary || len(messages) < end || !sameSource(messages[start:end], p.Prefix) {
-		return nil, "", fmt.Errorf("compression source changed")
-	}
-	if strings.TrimSpace(out.Summary) == "" {
-		return nil, "", fmt.Errorf("empty historical memory")
-	}
-	keep := make(map[int]bool, len(out.Keep))
-	count, total, kept, keptTokens := 0, 0, 0, 0
-	for _, index := range out.Keep {
-		if index < 0 || index >= len(p.Prefix) || keep[index] || !IsUserMessage(p.Prefix[index]) {
-			return nil, "", fmt.Errorf("invalid retained user index")
-		}
-		keep[index] = true
-	}
-	result := make([]Message, 0, len(out.Keep)+len(messages)-len(p.Prefix))
-	result = append(result, messages[:start]...)
-	for i, m := range p.Prefix {
-		if m.Role != model.RoleUser {
-			continue
-		}
-		if m.Origin == OriginLegacy {
-			keep[i] = true
-		}
-		if m.Origin != OriginTool && m.Origin != OriginLegacy {
-			count++
-			total += model.EstimateTokens(m.Text())
-			if keep[i] {
-				kept++
-				keptTokens += model.EstimateTokens(m.Text())
-			}
-		}
-		if keep[i] {
-			result = append(result, messages[start+i])
-		}
-	}
-	if kept*2 < count || keptTokens*2 < total {
-		return nil, "", fmt.Errorf("retained user originals below required half")
-	}
-	return append(result, messages[end:]...), out.Summary, nil
-}
-func sameSource(a, b []Message) bool {
-	for i := range a {
-		x, y := ProjectMessage(a[i]), b[i]
-		x.Consumed = false
-		y.Consumed = false
-		if !reflect.DeepEqual(x, y) {
-			return false
-		}
-	}
-	return true
 }

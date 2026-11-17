@@ -22,7 +22,7 @@ func logCompactState(sessionID string, state runner.CompactState, manual bool) {
 }
 
 func compactStatePayload(sessionID string, state runner.CompactState) protocol.CompactState {
-	out := protocol.CompactState{SessionID: sessionID, CompactID: state.ID, Kind: string(state.Kind), State: state.State, Wait: state.Wait, PrepareElapsedMs: state.PrepareElapsed.Milliseconds(), WaitElapsedMs: state.WaitElapsed.Milliseconds(), Reason: state.Reason, Error: state.Error}
+	out := protocol.CompactState{SessionID: sessionID, CompactID: state.ID, Kind: protocol.CompactKind(state.Kind), State: state.State, Wait: state.Wait, PrepareElapsedMs: state.PrepareElapsed.Milliseconds(), WaitElapsedMs: state.WaitElapsed.Milliseconds(), Reason: state.Reason, Error: state.Error}
 	if state.State == "applied" {
 		out.Result = &protocol.CompactResult{BeforeTokens: state.BeforeTokens, AfterTokens: state.AfterTokens, ContextWindow: state.ContextWindow}
 	}

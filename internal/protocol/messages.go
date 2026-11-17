@@ -515,10 +515,18 @@ type UsagePeriod struct {
 	Requests     int `json:"requests"`
 }
 
+type CompactKind string
+
+const (
+	CompactTools   CompactKind = "tools"
+	CompactHistory CompactKind = "history"
+	CompactMixed   CompactKind = "mixed"
+)
+
 type CompactState struct {
 	SessionID        string         `json:"session_id"`
 	CompactID        string         `json:"compact_id"`
-	Kind             string         `json:"kind,omitempty"`
+	Kind             CompactKind    `json:"kind,omitempty"`
 	State            string         `json:"state"`
 	Wait             string         `json:"wait,omitempty"`
 	PrepareElapsedMs int64          `json:"prepare_elapsed_ms,omitempty"`

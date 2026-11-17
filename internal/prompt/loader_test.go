@@ -147,7 +147,7 @@ func TestRenderHistoryCompressionPreservesMediaReferenceContract(t *testing.T) {
 		"Preserve media references from previous_summary and history verbatim",
 		"including the complete source= value",
 		"Do not shorten, rewrite, or drop them",
-		"either the retained originals or the summary",
+		"Include every distinct reference in the updated summary",
 		"Do not invent visual conclusions",
 		content,
 	} {

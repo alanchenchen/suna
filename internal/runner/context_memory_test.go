@@ -166,7 +166,7 @@ func TestReadyCandidateAppliesOnceAndPreservesNewSuffix(t *testing.T) {
 	working := memory.NewWorkingMemory()
 	messages := []memory.Message{{Role: model.RoleUser, TextContent: "request", Consumed: true}, {Role: model.RoleAssistant, TextContent: "original", Consumed: true, ToolCalls: []memory.ToolCall{{ID: "call", Name: "readfile", Arguments: `{}`}}}, {Role: model.RoleTool, ToolCallID: "call", TextContent: strings.Repeat("data", 8000), Consumed: true}, {Role: model.RoleAssistant, TextContent: "explained", Consumed: true}, {Role: model.RoleUser, TextContent: strings.Repeat("tail", 1200), Consumed: true}}
 	working.SetMessages(messages)
-	plan, err := memory.PlanCompact(messages, "", memory.CompactTools, 10000, 100000, 32000, 1, true)
+	plan, err := memory.PlanCompact(messages, "", memory.CompactOptions{Budget: 10000, TargetGain: 1000, MinimumGain: 1, InputLimit: 100000, OutputLimit: 32000, Coefficient: 1})
 	if err != nil || plan == nil {
 		t.Fatalf("plan=%v err=%v", plan, err)
 	}

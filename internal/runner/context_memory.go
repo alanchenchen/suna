@@ -11,13 +11,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// 水位、增长冷却与实际收益各自独立；相同数值不代表同一项策略。
+// 提前准备与延后采用保护前缀缓存；软目标不要求精确命中，不为微小缺口牺牲原话。
 const (
-	compactPreparePercent            = 60 // 工具候选准备水位。
-	compactAdoptPercent              = 75 // 工具采用及历史准备水位。
-	compactGrowthPercent             = 8  // 普通周期结束后的新增量冷却。
-	compactToolMinimumGainPercent    = 2  // 工具采用的实际净收益下限。
-	compactHistoryMinimumGainPercent = 8  // 历史采用的实际净收益下限。
+	compactPreparePercent         = 60
+	compactAdoptPercent           = 75
+	compactTargetTolerancePercent = 2
+	compactMinimumGainPercent     = 2
+	compactFailureBackoff         = 30 * time.Second
 )
 
 type CompactState struct {
@@ -32,34 +32,35 @@ type CompactState struct {
 }
 
 type compactCandidate struct {
-	plan        *memory.CompactPlan
-	output      memory.CompactOutput
-	err         error
-	state       CompactState
-	started     time.Time
-	waitStarted time.Time
-	done        chan struct{}
-	cancel      context.CancelFunc
+	plan         *memory.CompactPlan
+	sourceLength int
+	output       memory.CompactOutput
+	err          error
+	state        CompactState
+	started      time.Time
+	waitStarted  time.Time
+	done         chan struct{}
+	cancel       context.CancelFunc
 }
 
 // ContextMemory 只持有一份候选；调用方串行执行历史修改，后台只生成不可变结果。
 // 通知回调永不在内部锁内调用，网络与持久化也不持此锁。
 type ContextMemory struct {
-	mu             sync.Mutex
-	notifyMu       sync.Mutex
-	commitMu       sync.Mutex
-	epoch          uint64
-	lastRequest    CompactRequest
-	candidate      *compactCandidate
-	current        CompactState
-	summary        string
-	growth         int
-	cooled         bool
-	toolsUnhelpful bool
-	manualID       string
-	binding        *model.ModelBinding
-	Notify         func(CompactState)
-	Ready          func()
+	mu            sync.Mutex
+	notifyMu      sync.Mutex
+	commitMu      sync.Mutex
+	epoch         uint64
+	lastRequest   CompactRequest
+	candidate     *compactCandidate
+	current       CompactState
+	summary       string
+	blockedSource string
+	retryAfter    time.Time
+	excludedTools map[string]bool
+	manualID      string
+	binding       *model.ModelBinding
+	Notify        func(CompactState)
+	Ready         func()
 }
 
 func NewContextMemory(summary string) *ContextMemory { return &ContextMemory{summary: summary} }
@@ -77,11 +78,6 @@ func (m *ContextMemory) Snapshot() CompactState {
 		}
 	}
 	return state
-}
-func (m *ContextMemory) AddGrowth(messages []memory.Message) {
-	m.mu.Lock()
-	m.growth += memory.EstimateMessagesTokens(messages)
-	m.mu.Unlock()
 }
 func (m *ContextMemory) emit(state CompactState) {
 	// 生成、采用与取消可以并发完成；串行发布并复核当前状态，丢弃迟到快照。
@@ -123,8 +119,6 @@ func (m *ContextMemory) cancel(notify bool) {
 	state.State = "cancelled"
 	state.Wait = ""
 	m.current = state
-	m.cooled = true
-	m.growth = 0
 	m.mu.Unlock()
 	m.commitMu.Unlock()
 	if notify {
@@ -137,6 +131,11 @@ func (m *ContextMemory) Bind(binding *model.ModelBinding) {
 	m.mu.Unlock()
 	if old != nil && !old.SameRoute(binding) {
 		m.Cancel()
+		m.mu.Lock()
+		m.blockedSource = ""
+		m.retryAfter = time.Time{}
+		m.excludedTools = nil
+		m.mu.Unlock()
 	}
 	m.mu.Lock()
 	m.binding = binding
@@ -196,9 +195,11 @@ func (m *ContextMemory) Maintain(ctx context.Context, compressor *memory.Compres
 		m.lastRequest = q
 	}
 	m.mu.Unlock()
-	// 普通周期只采用一次；硬缺口可继续处理尚未处理的来源，每次必须真正缩小上下文。
-	// 已处理的历史边界随替换前移，避免为同一份新摘要反复付费。
-	historyEnd, toolsEnd := 0, 0
+	// 仅接管旧候选期间新增后缀导致缺口时允许一次紧急重规划，不固定串联工具和历史。
+	m.mu.Lock()
+	initialCandidate := m.candidate != nil
+	m.mu.Unlock()
+	replanned := false
 	for {
 		messages := q.Working.Messages()
 		summary := m.Summary()
@@ -214,7 +215,7 @@ func (m *ContextMemory) Maintain(ctx context.Context, compressor *memory.Compres
 		}
 		m.mu.Lock()
 		c := m.candidate
-		cool := m.cooled && model.ApplyCoefficient(m.growth, q.Coefficient) < budget*compactGrowthPercent/100
+		backoff := time.Now().Before(m.retryAfter)
 		m.mu.Unlock()
 		if c == nil {
 			if q.ReadyOnly {
@@ -223,7 +224,7 @@ func (m *ContextMemory) Maintain(ctx context.Context, compressor *memory.Compres
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if !manual && !hard && (before < budget*compactPreparePercent/100 || cool) {
+			if !manual && !hard && (before < budget*compactPreparePercent/100 || backoff) {
 				return nil
 			}
 			deadline := time.Now().Add(memory.CompactDeadline)
@@ -253,13 +254,14 @@ func (m *ContextMemory) Maintain(ctx context.Context, compressor *memory.Compres
 			} else if !compressor.TryBackground() {
 				return nil
 			}
-			plan, err := m.planCandidate(q, messages, summary, before, manual || hard, historyEnd, toolsEnd)
+			if reservation != nil && ctx.Err() != nil {
+				compressor.ReleaseBackground()
+				m.emit(m.finish(reservation, "cancelled", "", ctx.Err()))
+				return ctx.Err()
+			}
+			plan, err := m.planCandidate(q, messages, summary, before, manual)
 			if err != nil || plan == nil {
 				compressor.ReleaseBackground()
-				m.mu.Lock()
-				m.cooled = true
-				m.growth = 0
-				m.mu.Unlock()
 				if reservation != nil {
 					status, reason := "skipped", "no_source"
 					if err != nil || hard {
@@ -289,7 +291,7 @@ func (m *ContextMemory) Maintain(ctx context.Context, compressor *memory.Compres
 			} else {
 				id = m.nextID()
 			}
-			c = &compactCandidate{plan: plan, started: time.Now(), done: make(chan struct{}), cancel: cancel, waitStarted: waitStarted, state: CompactState{ID: id, Kind: plan.Kind, State: "preparing", Wait: wait}}
+			c = &compactCandidate{plan: plan, sourceLength: len(messages), started: time.Now(), done: make(chan struct{}), cancel: cancel, waitStarted: waitStarted, state: CompactState{ID: id, Kind: plan.Kind, State: "preparing", Wait: wait}}
 			m.mu.Lock()
 			if m.epoch != epoch || ctx.Err() != nil {
 				m.mu.Unlock()
@@ -310,10 +312,10 @@ func (m *ContextMemory) Maintain(ctx context.Context, compressor *memory.Compres
 		if ready, err := m.waitCandidate(ctx, c, wait); err != nil || !ready {
 			return err
 		}
-		if !manual && !hard && ((c.plan.Kind == memory.CompactTools && before < budget*compactAdoptPercent/100) || pendingUser(messages)) {
+		if !manual && !hard && (before < budget*compactAdoptPercent/100 || pendingUser(messages)) {
 			return nil
 		}
-		replaced, newSummary, err := c.plan.Apply(messages, summary, c.output)
+		applied, err := c.plan.Apply(messages, summary, c.output)
 		if err != nil {
 			// 真实原因必须落日志：候选来源、输出对齐与保存失败在旧版本里全被压成空错误。
 			m.emit(m.finish(c, "skipped", "source_changed", err))
@@ -322,63 +324,80 @@ func (m *ContextMemory) Maintain(ctx context.Context, compressor *memory.Compres
 			}
 			return nil
 		}
-		after := q.input(replaced, newSummary)
-		required := budget * compactToolMinimumGainPercent / 100
-		if c.plan.Kind == memory.CompactHistory {
-			required = budget * compactHistoryMinimumGainPercent / 100
+		after := q.input(applied.Messages, applied.Summary)
+		required := budget * compactMinimumGainPercent / 100
+		if manual {
+			required = max(1, before/20)
 		}
-		if after >= before || (!manual && !hard && before-after < required) {
+		if after >= before || ((!hard || manual) && before-after < required) {
+			keys := make([]string, len(c.plan.Groups))
+			for i, group := range c.plan.Groups {
+				keys[i] = group.SourceKey()
+			}
+			m.mu.Lock()
+			if m.excludedTools == nil {
+				m.excludedTools = make(map[string]bool)
+			}
+			for _, key := range keys {
+				m.excludedTools[key] = true
+			}
+			m.mu.Unlock()
 			m.emit(m.finish(c, "skipped", "no_gain", nil))
 			if hard {
 				return fmt.Errorf("compression did not release enough context")
 			}
 			return nil
 		}
-		if err := m.commitCandidate(ctx, q, c, epoch, replaced, newSummary, before, after); err != nil {
+		if err := m.commitCandidate(ctx, q, c, epoch, applied, before, after); err != nil {
 			return err
 		}
-		removed := len(messages) - len(replaced)
-		if c.plan.Kind == memory.CompactHistory {
-			historyEnd = c.plan.HistoryStart + len(c.plan.Prefix) - removed
-			toolsEnd = max(historyEnd, toolsEnd-removed)
-		} else {
-			// keep 的组也属于本次已处理来源，硬缺口不能马上再次为同一组付费。
-			last := c.plan.Groups[len(c.plan.Groups)-1]
-			toolsEnd = last.Index + len(last.Messages) - removed
-		}
-		if manual || q.ReadyOnly || after < budget {
+		if q.ReadyOnly || after < budget {
 			return nil
 		}
+		if !initialCandidate || replanned || len(messages) <= c.sourceLength {
+			return fmt.Errorf("context capacity exceeded after compression")
+		}
+		replanned = true
 	}
 }
 
 // planCandidate 仅选择本周期来源；仍先占共享槽，避免无槽时规划和保留历史副本。
-func (m *ContextMemory) planCandidate(q CompactRequest, messages []memory.Message, summary string, before int, force bool, historyEnd, toolsEnd int) (*memory.CompactPlan, error) {
+func (m *ContextMemory) planCandidate(q CompactRequest, messages []memory.Message, summary string, before int, manual bool) (*memory.CompactPlan, error) {
 	budget := q.budget()
 	limit := usableInputBudget(q.Binding.ContextWindow(), 0)
 	limit -= estimatorSafetyTokens(limit, q.Calibrated)
+	target := max(before, budget*compactAdoptPercent/100) - budget*compactPreparePercent/100
+	minimum := max(1, budget*compactMinimumGainPercent/100)
+	if before >= budget && !manual {
+		minimum = 1
+	}
+	if manual && before < budget*compactAdoptPercent/100 {
+		target = max(before/5, before-budget*compactPreparePercent/100)
+		minimum = max(1, before/20)
+	}
 	m.mu.Lock()
-	if model.ApplyCoefficient(m.growth, q.Coefficient) >= budget*compactGrowthPercent/100 {
-		m.toolsUnhelpful = false
+	excluded := make(map[string]bool, len(m.excludedTools))
+	for key := range m.excludedTools {
+		excluded[key] = true
 	}
-	skipTools := m.toolsUnhelpful && !force
+	blocked := m.blockedSource
 	m.mu.Unlock()
-	var plan *memory.CompactPlan
-	var err error
-	if !skipTools {
-		start := max(historyEnd, toolsEnd)
-		plan, err = memory.PlanCompact(messages, summary, memory.CompactTools, budget, limit, q.Binding.MaxOutputTokens(), q.Coefficient, force, start)
+	excluded = memory.PruneToolSourceKeys(messages, excluded)
+	m.mu.Lock()
+	m.excludedTools = excluded
+	m.mu.Unlock()
+	plan, err := memory.PlanCompact(messages, summary, memory.CompactOptions{
+		Budget: budget, TargetGain: max(1, target), Tolerance: min(target/5, budget*compactTargetTolerancePercent/100),
+		MinimumGain: minimum, InputLimit: limit, OutputLimit: q.Binding.MaxOutputTokens(),
+		Coefficient: q.Coefficient, ExcludedTools: excluded,
+	})
+	if err != nil || plan == nil {
+		return plan, err
 	}
-	if err == nil && plan == nil && (force || before >= budget*compactAdoptPercent/100) {
-		// 同一次 hard 接管中，已归并的 summary/原话不再作为新来源。
-		// 剩余连续历史仍从其最早边界开始，旧 summary 仅作为只读背景。
-		start := max(0, historyEnd)
-		plan, err = memory.PlanCompact(messages[start:], summary, memory.CompactHistory, budget, limit, q.Binding.MaxOutputTokens(), q.Coefficient, force)
-		if plan != nil {
-			plan.HistoryStart = start
-		}
+	if plan.SourceKey() == blocked {
+		return nil, nil
 	}
-	return plan, err
+	return plan, nil
 }
 
 // waitCandidate 只在 hard/manual 等待；普通后台未完成或失败时不阻塞前台。
@@ -442,7 +461,7 @@ func (m *ContextMemory) waitCandidate(ctx context.Context, c *compactCandidate, 
 }
 
 // commitCandidate 与取消共用提交锁；落库成功后才更新 RAM 并在锁外发布成果。
-func (m *ContextMemory) commitCandidate(ctx context.Context, q CompactRequest, c *compactCandidate, epoch uint64, messages []memory.Message, summary string, before, after int) error {
+func (m *ContextMemory) commitCandidate(ctx context.Context, q CompactRequest, c *compactCandidate, epoch uint64, applied memory.CompactApplied, before, after int) error {
 	m.commitMu.Lock()
 	m.mu.Lock()
 	valid := m.candidate == c && m.epoch == epoch
@@ -453,15 +472,27 @@ func (m *ContextMemory) commitCandidate(ctx context.Context, q CompactRequest, c
 		return context.Canceled
 	}
 	if q.Commit != nil {
-		if err := q.Commit(ctx, summary, messages); err != nil {
+		if err := q.Commit(ctx, applied.Summary, applied.Messages); err != nil {
 			m.commitMu.Unlock()
 			m.emit(m.finish(c, "failed", "", err))
 			return err
 		}
 	}
-	q.Working.SetMessages(messages)
 	m.mu.Lock()
-	m.summary = summary
+	excluded := make(map[string]bool, len(m.excludedTools)+len(applied.RetainedTools))
+	for key := range m.excludedTools {
+		excluded[key] = true
+	}
+	m.mu.Unlock()
+	for _, key := range applied.RetainedTools {
+		excluded[key] = true
+	}
+	excluded = memory.PruneToolSourceKeys(applied.Messages, excluded)
+	q.Working.SetMessages(applied.Messages)
+	m.mu.Lock()
+	m.summary = applied.Summary
+	state.Kind = applied.Kind
+	m.excludedTools = excluded
 	state.BeforeTokens = before
 	state.AfterTokens = after
 	state.ContextWindow = q.Binding.ContextWindow()
@@ -511,6 +542,11 @@ func (m *ContextMemory) generate(ctx context.Context, c *memory.Compressor, q Co
 	}
 }
 func (m *ContextMemory) finish(c *compactCandidate, status, reason string, err error) CompactState {
+	// 指纹扫描不占状态锁；候选来源不可变，取消仍由锁内身份检查裁决。
+	blocked := ""
+	if c.plan != nil && status == "skipped" && reason == "no_gain" {
+		blocked = c.plan.SourceKey()
+	}
 	m.mu.Lock()
 	if m.candidate != c {
 		m.mu.Unlock()
@@ -528,15 +564,15 @@ func (m *ContextMemory) finish(c *compactCandidate, status, reason string, err e
 	}
 	m.current = state
 	m.candidate = nil
-	m.cooled = true
-	m.growth = 0
-	if c.plan != nil && c.plan.Kind == memory.CompactTools && status == "skipped" && reason == "no_gain" {
-		m.toolsUnhelpful = true
-		// 下一安全边界允许改选历史；仍不在本周期串联第二次生成。
-		m.cooled = false
+	if blocked != "" {
+		m.blockedSource = blocked
+	}
+	if status == "failed" {
+		m.retryAfter = time.Now().Add(compactFailureBackoff)
 	}
 	if status == "applied" {
-		m.toolsUnhelpful = false
+		m.blockedSource = ""
+		m.retryAfter = time.Time{}
 	}
 	m.lastRequest = CompactRequest{}
 	m.mu.Unlock()

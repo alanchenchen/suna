@@ -16,12 +16,13 @@ func TestStructuredObservationPreservesRequestMeaningAndSingleStoredEvidence(t *
 	messages := toolHistory()
 	messages[1].ToolCalls[0].Intent = "inspect source"
 	messages[1].ToolCalls[1].Intent = "check behavior"
-	plan, err := PlanCompact(messages, "summary", CompactTools, 10000, 100000, 32000, 1, true)
+	plan, err := PlanCompact(messages, "summary", testCompactOptions(500))
 	if err != nil || plan == nil {
 		t.Fatalf("plan = %v, error = %v", plan, err)
 	}
 	evidence := "exact observation: a:12 failed; source unchanged"
-	got, summary, err := plan.Apply(messages, "summary", CompactOutput{Observations: []ToolObservation{{ID: 1, Text: evidence}}})
+	applied, err := plan.Apply(messages, "summary", CompactOutput{Observations: []ToolObservation{{ID: 1, Text: evidence}}})
+	got, summary := applied.Messages, applied.Summary
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,11 +82,11 @@ func TestStructuredObservationPreservesRequestMeaningAndSingleStoredEvidence(t *
 
 func TestHistoryPromptKeepsObservationEvidenceWithoutDisplayLabels(t *testing.T) {
 	evidence := "exact observed evidence retained for future consolidation"
-	m := NewTextMessage(model.RoleAssistant, "")
+	m := NewTextMessage(model.RoleAssistant, compactSizedText(2000))
 	m.Consumed = true
 	m.Observation = &Observation{Text: evidence, Calls: []ToolLabel{{Name: "exec", Intent: "display-only label", Status: "failed"}}}
-	messages := []Message{consumedMessage(model.RoleUser, "keep requirement"), m, NewTextMessage(model.RoleUser, "pending")}
-	plan, err := PlanCompact(messages, "previous", CompactHistory, 10000, 100000, 32000, 1, true)
+	messages := []Message{consumedMessage(model.RoleUser, "keep requirement"), m, consumedMessage(model.RoleAssistant, compactSizedText(3000)), NewTextMessage(model.RoleUser, "pending")}
+	plan, err := PlanCompact(messages, "previous", testCompactOptions(1))
 	if err != nil || plan == nil {
 		t.Fatalf("plan = %v, error = %v", plan, err)
 	}
@@ -99,9 +100,9 @@ func TestHistoryPromptKeepsObservationEvidenceWithoutDisplayLabels(t *testing.T)
 	if plan.Prefix[1].Observation == nil {
 		t.Fatal("prompt projection changed exact replacement source")
 	}
-	got, _, err := plan.Apply(messages, "previous", CompactOutput{Summary: "continued state", Keep: []int{0}})
-	if err != nil || len(got) != 2 || got[0].Text() != "keep requirement" || got[1].Text() != "pending" {
-		t.Fatalf("history replacement = %#v, error = %v", got, err)
+	applied, err := plan.Apply(messages, "previous", CompactOutput{Summary: "continued state"})
+	if err != nil || !reflect.DeepEqual(applied.Messages, messages[2:]) {
+		t.Fatalf("history replacement = %#v, error = %v", applied, err)
 	}
 }
 
@@ -149,5 +150,70 @@ func BenchmarkHistoryModelProjection(b *testing.B) {
 				ModelMessages(messages)
 			}
 		})
+	}
+}
+
+func TestMixedSummaryRoundTripKeepsLegacySourcesAndExactUntouchedSuffix(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewStore(filepath.Join(t.TempDir(), "memory.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.DB().Exec(`INSERT INTO sessions(id,created_at,updated_at) VALUES ('mixed',datetime('now'),datetime('now'))`); err != nil {
+		t.Fatal(err)
+	}
+	states := NewSessionStateStore(store.DB())
+	headUser := consumedMessage(model.RoleUser, "earlier permission; inspect the reference")
+	headUser.Origin = OriginLegacy
+	headUser.Content = append(headUser.Content, model.ContentBlock{Type: model.ContentImage, Media: &model.MediaRef{Kind: model.MediaAttachment, Name: "reference.png"}})
+	headUser.TextContent = ""
+	headAnswer := consumedMessage(model.RoleAssistant, compactSizedText(6000))
+	headAnswer.Observation = &Observation{Text: "earlier tool failed; retry remains unverified", Calls: []ToolLabel{{Name: "exec", Status: "failed"}}}
+	messages := append([]Message{headUser, headAnswer}, compactToolBatch(1, 4000, 3000)...)
+	const oldSummary = "earlier facts"
+	if err := states.Save(ctx, "mixed", oldSummary, messages); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := states.Load(ctx, "mixed")
+	if err != nil || loaded == nil {
+		t.Fatalf("loaded=%v err=%v", loaded, err)
+	}
+	plan, err := PlanCompact(loaded.Messages, loaded.Summary, testCompactOptions(6000))
+	if err != nil || plan == nil || plan.Kind != CompactMixed || len(plan.Prefix) != 2 || len(plan.Groups) != 1 {
+		t.Fatalf("plan=%v err=%v", plan, err)
+	}
+	if plan.Prefix[0].Origin != OriginLegacy || plan.Prefix[1].Observation == nil {
+		t.Fatal("loaded source lost provenance or previous observation")
+	}
+	const newSummary = "Earlier permission has unknown provenance. Earlier execution failed; retry unverified. [image: reference.png, source=attachment:reference.png]"
+	pending := NewTextMessage(model.RoleUser, "new correction: analyze only")
+	pending.Origin = OriginUser
+	current := append(append([]Message(nil), loaded.Messages...), pending)
+	applied, err := plan.Apply(current, oldSummary, CompactOutput{Summary: newSummary, Observations: []ToolObservation{{ID: plan.Groups[0].Index, Text: "Current read evidence; validation pending."}}})
+	if err != nil || applied.Kind != CompactMixed {
+		t.Fatalf("applied kind=%s err=%v", applied.Kind, err)
+	}
+	wantSuffix := append(append([]Message(nil), loaded.Messages[5:]...), pending)
+	if !reflect.DeepEqual(applied.Messages[2:], wantSuffix) {
+		t.Fatal("unselected history or newly added correction changed")
+	}
+	wantProjection := ModelMessages(applied.Messages)
+	if err := states.Save(ctx, "mixed", applied.Summary, applied.Messages); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := states.Load(ctx, "mixed")
+	if err != nil || reloaded == nil || reloaded.Summary != newSummary {
+		t.Fatalf("reloaded=%v err=%v", reloaded, err)
+	}
+	recovered := RecoverMessages(reloaded.Messages)
+	if !reflect.DeepEqual(ModelMessages(recovered), wantProjection) {
+		t.Fatal("save/load/recovery changed effective model memory")
+	}
+	if !reflect.DeepEqual(ProjectMessages(recovered[2:]), ProjectMessages(wantSuffix)) {
+		t.Fatal("save/load/recovery changed untouched suffix")
+	}
+	if !reflect.DeepEqual(recovered[1].Observation, applied.Messages[1].Observation) {
+		t.Fatal("tool evidence or original status changed after reload")
 	}
 }

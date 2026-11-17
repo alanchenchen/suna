@@ -29,7 +29,7 @@ func TestRunnerAbsorbsSteeringAfterHardWaitAndRechecksBudgetBeforeTools(t *testi
 		{Role: model.RoleUser, Origin: memory.OriginUser, TextContent: strings.Repeat("p", budget*4*25/100)},
 	}
 	h.working.SetMessages(messages)
-	plan, err := memory.PlanCompact(messages, "", memory.CompactTools, budget, 1000000, 32000, 1, true)
+	plan, err := memory.PlanCompact(messages, "", memory.CompactOptions{Budget: budget, TargetGain: 1000, MinimumGain: 1, InputLimit: 1000000, OutputLimit: 32000, Coefficient: 1})
 	if err != nil || plan == nil || len(plan.Groups) != 1 {
 		t.Fatalf("plan = %+v/%v, want one complete tool group", plan, err)
 	}

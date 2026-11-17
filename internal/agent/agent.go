@@ -227,7 +227,6 @@ func (a *Agent) Run(ctx context.Context, input Input) <-chan Event {
 		defer a.finishMemory()
 		userMessage.Origin = memory.OriginUser
 		a.working.AddMessage(userMessage)
-		a.contextMemory.AddGrowth([]memory.Message{userMessage})
 		if err := a.saveConversationState(runCtx); err != nil {
 			a.rejectSteeringBeforeFailure(runIdentity.RunID, events)
 			events <- Event{Type: EventStatus, Content: err.Error(), Error: true}

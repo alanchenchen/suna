@@ -138,7 +138,6 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 		if len(toolCalls) == 0 {
 			if fullContent != "" {
 				req.Working.AddMessage(memory.NewTextMessage(model.RoleAssistant, fullContent))
-				req.Memory.AddGrowth([]memory.Message{memory.NewTextMessage(model.RoleAssistant, fullContent)})
 				if err := r.checkpoint(ctx); err != nil {
 					return result, err
 				}
@@ -185,7 +184,6 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 			ToolCalls:   cleanToolCalls,
 		}
 		req.Working.AddMessage(assistantMsg)
-		req.Memory.AddGrowth([]memory.Message{assistantMsg})
 		if err := r.checkpoint(ctx); err != nil {
 			return result, err
 		}
@@ -236,7 +234,6 @@ func (r *Runner) Run(ctx context.Context, req Request) (Result, error) {
 				}
 			}
 			req.Working.SetMessages(ordered)
-			req.Memory.AddGrowth([]memory.Message{message})
 			r.toolImages = append(r.toolImages, execResult.result.Images...)
 			pendingResults = append(pendingResults, ToolResultEvent{ID: execResult.tc.ID, Name: execResult.tc.Name, Result: execResult.result.Content, Error: execResult.result.IsError, Metadata: execResult.result.Metadata})
 			if err := r.checkpoint(ctx); err != nil {
@@ -298,7 +295,6 @@ func (r *Runner) applySteering(ctx context.Context, req Request, seal bool) (boo
 			req.Working.SetMessages(before)
 			return false, err
 		}
-		req.Memory.AddGrowth([]memory.Message{input.Message})
 		applied = true
 		if r.Hooks.OnSteeringApplied != nil {
 			r.Hooks.OnSteeringApplied(ctx, input)

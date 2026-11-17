@@ -196,12 +196,12 @@ func TestCompactResultUsesThemedSystemRenderingAndKeepsDraft(t *testing.T) {
 	for _, background := range []theme.Background{theme.LightBackground, theme.DarkBackground} {
 		applyThemePalette(theme.Adapt(theme.Default, theme.DefaultColors(), background))
 		for _, width := range []int{60, 110} {
-			for _, kind := range []string{"tools", "history"} {
+			for _, kind := range []string{"tools", "history", "mixed"} {
 				ui := &TUI{i18n: newTranslator(LocaleZH), width: width, height: 28}
 				ui.initChatComponents()
 				ui.manualCompactPending, ui.manualCompactID = true, "one"
 				ui.chat.Textarea.SetValue("kept draft")
-				ui.handleCompactStateNotification(protocol.CompactState{CompactID: "one", Kind: kind, State: "applied", WaitElapsedMs: 21000, Result: &protocol.CompactResult{BeforeTokens: 18300, AfterTokens: 7700, ContextWindow: 400000}})
+				ui.handleCompactStateNotification(protocol.CompactState{CompactID: "one", Kind: protocol.CompactKind(kind), State: "applied", WaitElapsedMs: 21000, Result: &protocol.CompactResult{BeforeTokens: 18300, AfterTokens: 7700, ContextWindow: 400000}})
 				message := ui.chat.Messages[0]
 				if message.Role != "system" || ui.chat.Textarea.Value() != "kept draft" {
 					t.Fatalf("role = %q, draft = %q, want system and kept draft", message.Role, ui.chat.Textarea.Value())
@@ -219,6 +219,8 @@ func TestCompactResultUsesThemedSystemRenderingAndKeepsDraft(t *testing.T) {
 				label := "工具记录已生成摘要"
 				if kind == "history" {
 					label = "较早对话已生成摘要"
+				} else if kind == "mixed" {
+					label = "工具记录与较早对话已生成摘要"
 				}
 				for _, want := range []string{"◆ " + label, "18.3k → 7.7k / 400.0k tokens", "腾出约 10.6k tokens", "等待 21s"} {
 					if !strings.Contains(plain, want) {
@@ -273,7 +275,7 @@ func TestCompactMessagesUseLocalizedTemplates(t *testing.T) {
 					if state.manual {
 						ui.manualCompactID = "one"
 					}
-					p := protocol.CompactState{CompactID: "one", Kind: state.kind, State: state.status, Reason: state.reason, Error: state.detail, WaitElapsedMs: 2000}
+					p := protocol.CompactState{CompactID: "one", Kind: protocol.CompactKind(state.kind), State: state.status, Reason: state.reason, Error: state.detail, WaitElapsedMs: 2000}
 					if state.status == "applied" {
 						p.Result = &protocol.CompactResult{BeforeTokens: 900, AfterTokens: 600, ContextWindow: 1000}
 					}
@@ -545,4 +547,21 @@ func bufferedCompactState(ui *TUI, id string) protocol.CompactState {
 		}
 	}
 	return protocol.CompactState{}
+}
+
+func TestMixedBackgroundLabelsAndUnknownKindsRemainGeneric(t *testing.T) {
+	for _, locale := range []LocaleID{LocaleZH, LocaleEN} {
+		ui := &TUI{i18n: newTranslator(locale)}
+		ui.compactReceivedAt = time.Now()
+		ui.compactState = protocol.CompactState{State: "preparing", Kind: protocol.CompactMixed, PrepareElapsedMs: 2000}
+		label := ui.backgroundCompactLabel()
+		want := ui.tr("compact.background_mixed", "2.0s")
+		if label != want {
+			t.Fatalf("label=%q want=%q", label, want)
+		}
+		ui.compactState.Kind = "future-kind"
+		if label = ui.backgroundCompactLabel(); label != ui.tr("compact.background_generic", "2.0s") {
+			t.Fatalf("unknown label=%q", label)
+		}
+	}
 }

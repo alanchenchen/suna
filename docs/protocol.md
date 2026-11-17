@@ -245,7 +245,7 @@ daemon lifecycle 使用 `starting / ready / stopping`。`ready` 只表示核心 
 | `session.updated` | 全局 | `session` | object | `SessionInfo`：`id` / `title` / `cwd` / `model_ref` / `message_count` / `created_at` / `updated_at` / `last_attached_at` / `status` / `client_count`。 | 按 `id` 合并 metadata、`status` 与 `client_count`。 |
 | `session.compact_state` | session | `session_id` | string | 事件归属 session。 | 按 session 路由。 |
 | | | `compact_id` | string | 候选／本次手动操作的关联 ID。 | 按 ID 合并，终态不被迟到进度覆盖。 |
-| | | `kind` | string? | `tools` / `history`；尚未选到来源时可缺省。 | 区分工具摘要与较早对话摘要。 |
+| | | `kind` | string? | `tools` / `history` / `mixed`；尚未选到来源时可缺省。准备时表示计划范围，`applied` 表示实际采用范围；`mixed` 指历史头部与头部之外的独立工具替换。 | 展示一次整体操作与成果；未知值使用通用文案，不默认为工具摘要。 |
 | | | `state` | string | `preparing` / `ready` / `applied` / `skipped` / `failed` / `cancelled`。 | 只有 `applied` 表示历史已替换；后四项为终态。 |
 | | | `wait` | string? | 缺省表示可选后台；`manual` / `hard_limit` 表示当前阻塞等待原因。 | 不因后台 preparing/ready 抢 busy、焦点或 Loading。 |
 | | | `prepare_elapsed_ms` / `wait_elapsed_ms` | int? | 准备耗时／阻塞等待耗时，毫秒。 | 不混作前台模型响应速度。 |
