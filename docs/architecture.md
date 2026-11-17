@@ -132,7 +132,7 @@ Suna 当前是单 daemon、多 session 形态。全局 config/runtime 共享；s
 - `session_state`：每个 session 的 `summary` 和完整有序有效历史 `messages`；包含保留的原文、未压缩工具声明／结果及原位工具观察。模型与 attach/create 快照从同一份历史各自投影，不维护独立的 UI-only 工具摘要或原文档案。
 - `memory_queue`：user profile memory 的临时提取队列，每条 item 只记录不可变的 `model_ref`，不绑定 `session_id`；daemon worker 按批量策略处理后删除；daemon 退出不会为未开始的队列强制触发记忆提取，pending item 会留在 SQLite 中等待下次启动恢复。
 
-模型请求尽量保持稳定 system/project/skill/tool schema 前缀，随后是历史连续性摘要与有序有效消息，user profile memory 靠近 latest user。摘要仍由 `CompletionRequest.SessionState` 承载，不拼进 system prompt；工具观察在消息的模型投影中展开，本地调用标签不发送给模型。
+模型请求尽量保持稳定 system/project/skill/tool schema 前缀，随后是历史连续性摘要与有序有效消息，user profile memory 靠近 latest user。主任务与子任务环境包含 daemon 本地时区的当前 UTC 偏移，地区名可用时一并提供；它不是客户端／用户时区，不注入持续变化的当前时间。提示词提醒按事件日期与夏令时换算 UTC 日志／数据库时间；主任务另提供按需查阅的官方文档索引，并提示核对安装版本。摘要仍由 `CompletionRequest.SessionState` 承载，不拼进 system prompt；工具观察在消息的模型投影中展开，本地调用标签不发送给模型。
 
 后台压缩先整理较早工具，必要时才归纳较早历史。`memory` 负责历史、存取、选区、替换和生成；Runner 负责完整预算、水位、候选与安全边界；Agent 负责具体会话的检查点、恢复、取消和空闲协调。后台只产候选，采用时先保存再更新内存，不能用旧快照覆盖新增后缀。普通后台生成失败不阻断仍有安全容量的主任务；真正到硬容量边界才等待或明确失败，不硬裁剪继续。流程、参数和迁移边界集中见[记忆与后台压缩](memory.md)。
 

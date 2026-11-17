@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
@@ -29,7 +30,7 @@ func (a *Agent) buildSystemPrompt(ctx context.Context) (string, error) {
 		skills = skill.RenderSummary(a.skills.EnabledDescriptors(), project, a.cfg.SkillsDir())
 	}
 	return a.prompts.RenderSystem(prompt.SystemPromptData{
-		OS: env["OS"], Arch: env["Arch"], WorkDir: wd, Workspace: a.cfg.Guard.Workspace, DataDir: a.cfg.DataDir, ActiveModel: a.activeModelSummary(),
+		OS: env["OS"], Arch: env["Arch"], WorkDir: wd, TimeZone: env["TimeZone"], Workspace: a.cfg.Guard.Workspace, DataDir: a.cfg.DataDir, ActiveModel: a.activeModelSummary(),
 		ModelRouting: a.modelRoutingSummary(), ProjectConfig: projectConfig.Content, ProjectConfigSource: projectConfig.Source, Skills: skills,
 	})
 }
@@ -144,7 +145,17 @@ func getEnvInfoForWorkDir(wd string) map[string]string {
 	if strings.TrimSpace(wd) == "" {
 		wd, _ = os.Getwd()
 	}
-	return map[string]string{"OS": runtime.GOOS, "Arch": runtime.GOARCH, "WorkDir": wd}
+	return map[string]string{"OS": runtime.GOOS, "Arch": runtime.GOARCH, "WorkDir": wd, "TimeZone": formatRuntimeTimeZone(time.Now())}
+}
+
+// 时区描述取自 daemon 的本地时区，不推断客户端或用户位置；地区名不可用时只给无歧义偏移。
+// 不加入日期或时刻，避免每次请求无意义地改变系统提示词前缀；偏移随夏令时自然更新。
+func formatRuntimeTimeZone(now time.Time) string {
+	offset := now.Format("UTC-07:00")
+	if name := now.Location().String(); strings.Contains(name, "/") {
+		return name + " (" + offset + ")"
+	}
+	return offset
 }
 
 func formatContextWindow(n int) string {

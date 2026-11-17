@@ -8,7 +8,8 @@ Task:
 {{.Task}}
 
 Environment: {{.OS}}/{{.Arch}}, cwd `{{.WorkDir}}`.
-{{if .Workspace}}Workspace boundary: `{{.Workspace}}`. File operations, command paths, working directories, and redirection targets must stay inside it.
+{{if .TimeZone}}Runtime timezone: {{.TimeZone}} (current; user may differ). Suna logs/DB: UTC; convert by event date/DST.
+{{end}}{{if .Workspace}}Workspace boundary: `{{.Workspace}}`. File operations, command paths, working directories, and redirection targets must stay inside it.
 {{end}}Available tools: {{.Tools}}.
 
 {{if .Context}}Context:

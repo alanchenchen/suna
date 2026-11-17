@@ -15,6 +15,7 @@ func TestRenderSystemKeepsCapabilitiesWithoutPrescriptiveDelegation(t *testing.T
 		OS:                  "linux",
 		Arch:                "amd64",
 		WorkDir:             "/workspace/project",
+		TimeZone:            "UTC+08:00",
 		Workspace:           "/workspace",
 		DataDir:             "/home/test/.suna",
 		ActiveModel:         "provider-a/model-a",
@@ -30,6 +31,9 @@ func TestRenderSystemKeepsCapabilitiesWithoutPrescriptiveDelegation(t *testing.T
 		"Prefer issuing independent tool calls together when useful",
 		"Suna runs calls from the same response concurrently, including multiple `spawn` calls",
 		"Keep dependencies, user decisions, destructive actions, and writes to the same target sequential",
+		"Runtime timezone: UTC+08:00 (current; user may differ)",
+		"Suna logs/DB: UTC; convert by event date/DST",
+		"Suna help: https://github.com/alanchenchen/suna/blob/main/docs/README.md (as needed; check installed version)",
 		"Project workspace: `/workspace`",
 		"redirection targets inside it",
 		"Suna data directory: `/home/test/.suna`",
@@ -62,7 +66,7 @@ func TestRenderSystemOmitsWorkspaceBoundaryWhenNotConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderSystem() error = %v", err)
 	}
-	if strings.Contains(got, "Project workspace:") || strings.Contains(got, "Suna data directory:") {
+	if strings.Contains(got, "Project workspace:") || strings.Contains(got, "Suna data directory:") || strings.Contains(got, "Runtime timezone:") {
 		t.Fatalf("rendered prompt contains unconfigured workspace boundary: %q", got)
 	}
 
@@ -70,7 +74,7 @@ func TestRenderSystemOmitsWorkspaceBoundaryWhenNotConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderSubtaskSystem() error = %v", err)
 	}
-	if strings.Contains(subtask, "Workspace boundary:") || strings.Contains(subtask, "Suna data directory:") {
+	if strings.Contains(subtask, "Workspace boundary:") || strings.Contains(subtask, "Suna data directory:") || strings.Contains(subtask, "Runtime timezone:") {
 		t.Fatalf("rendered subtask prompt contains unconfigured workspace boundary: %q", subtask)
 	}
 }
@@ -81,11 +85,11 @@ func TestRenderSubtaskSystemKeepsOutputContract(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	got, err := loader.RenderSubtaskSystem(SubtaskPromptData{Task: "Review the change.", Tools: "readfile", Context: "Focus on concurrency.", OS: "linux", Arch: "amd64", WorkDir: "/workspace/project", Workspace: "/workspace"})
+	got, err := loader.RenderSubtaskSystem(SubtaskPromptData{Task: "Review the change.", Tools: "readfile", Context: "Focus on concurrency.", OS: "linux", Arch: "amd64", WorkDir: "/workspace/project", TimeZone: "Asia/Shanghai (UTC+08:00)", Workspace: "/workspace"})
 	if err != nil {
 		t.Fatalf("RenderSubtaskSystem() error = %v", err)
 	}
-	for _, want := range []string{"Review the change.", "Available tools: readfile", "Workspace boundary: `/workspace`", "Focus on concurrency.", "Prefer issuing independent tool calls together when useful", "Suna runs them concurrently", `"side_effects"`, `"status":"none|cleaned|remaining|unknown"`} {
+	for _, want := range []string{"Review the change.", "Runtime timezone: Asia/Shanghai (UTC+08:00) (current; user may differ)", "Suna logs/DB: UTC; convert by event date/DST", "Available tools: readfile", "Workspace boundary: `/workspace`", "Focus on concurrency.", "Prefer issuing independent tool calls together when useful", "Suna runs them concurrently", `"side_effects"`, `"status":"none|cleaned|remaining|unknown"`} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("rendered prompt missing %q: %q", want, got)
 		}

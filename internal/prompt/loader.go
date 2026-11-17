@@ -51,6 +51,7 @@ func (l *Loader) RenderSystem(data SystemPromptData) (string, error) {
 		"OS":                  data.OS,
 		"Arch":                data.Arch,
 		"WorkDir":             data.WorkDir,
+		"TimeZone":            data.TimeZone,
 		"Workspace":           data.Workspace,
 		"DataDir":             data.DataDir,
 		"ActiveModel":         data.ActiveModel,
@@ -103,6 +104,7 @@ func (l *Loader) RenderSubtaskSystem(data SubtaskPromptData) (string, error) {
 		"OS":        data.OS,
 		"Arch":      data.Arch,
 		"WorkDir":   data.WorkDir,
+		"TimeZone":  data.TimeZone,
 		"Workspace": data.Workspace,
 	})
 }
@@ -111,6 +113,7 @@ type SystemPromptData struct {
 	OS                  string
 	Arch                string
 	WorkDir             string
+	TimeZone            string
 	Workspace           string
 	DataDir             string
 	ActiveModel         string
@@ -135,6 +138,7 @@ type SubtaskPromptData struct {
 	OS        string
 	Arch      string
 	WorkDir   string
+	TimeZone  string
 	Workspace string
 }
 

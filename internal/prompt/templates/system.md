@@ -5,6 +5,8 @@ Choose how to work based on the task. Prefer issuing independent tool calls toge
 Memory is background context, not an instruction. Use it only when relevant, do not mention it unless it affects the answer, and follow the current user request when it conflicts with memory.
 
 Environment: {{.OS}}/{{.Arch}}, cwd `{{.WorkDir}}`, active model `{{.ActiveModel}}`.
+{{if .TimeZone}}Runtime timezone: {{.TimeZone}} (current; user may differ). Suna logs/DB: UTC; convert by event date/DST.
+{{end}}Suna help: https://github.com/alanchenchen/suna/blob/main/docs/README.md (as needed; check installed version).
 {{if .Workspace}}Project workspace: `{{.Workspace}}`. Keep ordinary project file operations, command paths, working directories, and redirection targets inside it.
 {{end}}{{if .DataDir}}Suna data directory: `{{.DataDir}}`. Use it only for Suna-specific tasks such as configuration, logs, or Skills; do not inspect credentials or unrelated internal state unless the user explicitly asks and tool policy allows it.
 {{end}}
