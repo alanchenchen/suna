@@ -23,7 +23,7 @@ func (EditFile) Spec() tools.Spec {
 			"edits": map[string]any{"type": "array", "minItems": 1, "description": "Ordered exact replacements; all edits succeed or no changes are written", "items": map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"old_string":            map[string]any{"type": "string", "minLength": 1, "description": "Exact text to replace. Read the file first if it may have changed."},
+					"old_string":            map[string]any{"type": "string", "minLength": 1, "description": "Exact text to replace. Preserve whitespace and omit readfile line-number prefixes. Read the file first if it may have changed."},
 					"new_string":            map[string]any{"type": "string", "description": "Replacement text. Use an empty string to delete the matched text."},
 					"target":                map[string]any{"type": "string", "pattern": `^\s*(all|[1-9][0-9]*)\s*$`, "description": "Match target. Omit for a unique replacement, use \"all\" for every match, or a positive 1-based occurrence such as \"2\"."},
 					"expected_replacements": map[string]any{"type": "integer", "minimum": 1, "maximum": maxEditReplacementCount, "description": "Fail unless exactly this many replacements would be made"},
@@ -66,10 +66,9 @@ func (EditFile) Execute(ctx context.Context, params map[string]any) tools.Result
 	for i, edit := range edits {
 		updated, replacements, adapted, applyErr := applyEditOperation(content, edit, originalUsesCRLF)
 		if applyErr != nil {
-			// 第 2 条起失败时，前面的 edit 已改过内存里的 content，
-			// 必须告诉模型文件被改过，否则它会拿原始内容反复重试。
+			// 诊断基于已应用前面 edit 的暂存内容；失败后磁盘仍是调用前版本。
 			if i > 0 {
-				applyErr.Message += fmt.Sprintf(" (%d earlier edit(s) in this call matched but were not written)", i)
+				applyErr.Message += fmt.Sprintf("\n%d earlier edit(s) matched only in memory. The entire batch was rolled back; these locations refer to staged content. Fix and resend the whole edits array, not only this edit", i)
 			}
 			return editOperationErrorResult(i+1, applyErr)
 		}
@@ -240,7 +239,7 @@ func applyEditOperation(content string, edit editOperation, originalUsesCRLF boo
 		adapted = adapted || count > 0
 	}
 	if count == 0 {
-		return content, 0, false, editNotFoundError(content, edit.OldString)
+		return content, 0, false, editNotFoundError(content, oldString)
 	}
 	replacements := 1
 	var updated string
@@ -302,15 +301,6 @@ func hasOnlyCRLFNewlines(content string) bool {
 
 func editOperationErrorResult(position int, err *editOperationError) tools.Result {
 	return editErrorResult(err.Code, fmt.Sprintf("edit %d: %s", position, err.Message))
-}
-
-// editNotFoundError 定位第一处不一致的行并回显真实内容，让模型一次就能改对。
-func editNotFoundError(content, target string) *editOperationError {
-	message := "old_string has no exact match in the current staged file"
-	if line, text, ok := locateMismatch(content, target); ok {
-		message = fmt.Sprintf("no exact match (differs at line %d):\n  %d | %s\nRetry with the exact text above", line, line, text)
-	}
-	return &editOperationError{Code: "EDIT_OLD_NOT_FOUND", Message: message}
 }
 
 func editErrorResult(code, message string) tools.Result {
