@@ -3,6 +3,7 @@ package media
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -40,30 +41,45 @@ func (s *Store) Resolve(ctx context.Context, ref model.MediaRef, mode model.Reso
 	if ctx.Err() != nil {
 		return model.ResolvedMedia{}, ctx.Err()
 	}
+	if mode != model.ResolveAsURL && mode != model.ResolveAsBase64 {
+		return model.ResolvedMedia{}, fmt.Errorf("unsupported resolve mode: %s", mode)
+	}
+	if mode == model.ResolveAsURL && ref.Kind != model.MediaURL {
+		return model.ResolvedMedia{}, fmt.Errorf("image source %s cannot resolve as URL", ref.Kind)
+	}
+	kind := ref.Kind
 	ref, err := s.ValidateImage(ref)
 	if err != nil {
+		return imageResolveFailure(ctx, kind, err)
+	}
+	if err := ctx.Err(); err != nil {
 		return model.ResolvedMedia{}, err
-	}
-	if mode == model.ResolveAsURL {
-		if ref.Kind != model.MediaURL {
-			return model.ResolvedMedia{}, fmt.Errorf("image source %s cannot resolve as URL", ref.Kind)
-		}
-		return model.ResolvedMedia{URL: ref.URL, MimeType: ref.MimeType, Name: ref.Name, Size: ref.Size}, nil
-	}
-	if mode != model.ResolveAsBase64 {
-		return model.ResolvedMedia{}, fmt.Errorf("unsupported resolve mode: %s", mode)
 	}
 	if ref.Kind == model.MediaURL {
 		return model.ResolvedMedia{URL: ref.URL, MimeType: ref.MimeType, Name: ref.Name, Size: ref.Size}, nil
 	}
 	data, err := os.ReadFile(ref.Path)
 	if err != nil {
-		return model.ResolvedMedia{}, fmt.Errorf("read image: %w", err)
+		return imageResolveFailure(ctx, kind, fmt.Errorf("read image: %w", err))
 	}
 	if int64(len(data)) > MaxImageBytes {
 		return model.ResolvedMedia{}, fmt.Errorf("image too large: %d bytes (max %d)", len(data), MaxImageBytes)
 	}
+	if err := ctx.Err(); err != nil {
+		return model.ResolvedMedia{}, err
+	}
 	return model.ResolvedMedia{Base64: base64.StdEncoding.EncodeToString(data), MimeType: ref.MimeType, Name: ref.Name, Size: int64(len(data))}, nil
+}
+
+// imageResolveFailure 只把实际校验或读取发现的本地文件缺失分类为 Missing，取消与其他错误保持失败。
+func imageResolveFailure(ctx context.Context, kind model.MediaKind, err error) (model.ResolvedMedia, error) {
+	if ctx.Err() != nil {
+		return model.ResolvedMedia{}, ctx.Err()
+	}
+	if (kind == model.MediaPath || kind == model.MediaAttachment) && errors.Is(err, os.ErrNotExist) {
+		return model.ResolvedMedia{Missing: true}, nil
+	}
+	return model.ResolvedMedia{}, err
 }
 
 func (s *Store) Usage() (int64, int, error) {

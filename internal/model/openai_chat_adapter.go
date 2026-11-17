@@ -181,11 +181,13 @@ func (p *OpenAIChatAdapter) buildMessages(ctx context.Context, req *CompletionRe
 	for _, m := range req.Messages {
 		switch m.Role {
 		case RoleUser:
-			msg, err := p.buildChatUserMessage(ctx, m)
+			msg, ok, err := p.buildChatUserMessage(ctx, m)
 			if err != nil {
 				return nil, err
 			}
-			msgs = append(msgs, msg)
+			if ok {
+				msgs = append(msgs, msg)
+			}
 		case RoleAssistant:
 			msgs = append(msgs, buildChatAssistantMessage(m))
 		case RoleTool:
@@ -195,9 +197,9 @@ func (p *OpenAIChatAdapter) buildMessages(ctx context.Context, req *CompletionRe
 	return msgs, nil
 }
 
-func (p *OpenAIChatAdapter) buildChatUserMessage(ctx context.Context, m Message) (openai.ChatCompletionMessageParamUnion, error) {
+func (p *OpenAIChatAdapter) buildChatUserMessage(ctx context.Context, m Message) (openai.ChatCompletionMessageParamUnion, bool, error) {
 	if !hasImagePart(m.Content) {
-		return openai.UserMessage(m.Text()), nil
+		return openai.UserMessage(m.Text()), true, nil
 	}
 	parts := make([]openai.ChatCompletionContentPartUnionParam, 0, len(m.Content))
 	for _, c := range m.Content {
@@ -209,7 +211,7 @@ func (p *OpenAIChatAdapter) buildChatUserMessage(ctx context.Context, m Message)
 		case ContentImage:
 			imageURL, err := p.openAIImageURL(ctx, c)
 			if err != nil {
-				return openai.ChatCompletionMessageParamUnion{}, err
+				return openai.ChatCompletionMessageParamUnion{}, false, err
 			}
 			if imageURL != "" {
 				parts = append(parts, openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{URL: imageURL}))
@@ -219,7 +221,11 @@ func (p *OpenAIChatAdapter) buildChatUserMessage(ctx context.Context, m Message)
 	if len(parts) == 0 && m.TextContent != "" {
 		parts = append(parts, openai.TextContentPart(m.TextContent))
 	}
-	return openai.UserMessage(parts), nil
+	// 纯图片消息可能在过滤缺失来源后为空，不能向服务端发送空内容。
+	if len(parts) == 0 {
+		return openai.ChatCompletionMessageParamUnion{}, false, nil
+	}
+	return openai.UserMessage(parts), true, nil
 }
 
 func buildChatAssistantMessage(m Message) openai.ChatCompletionMessageParamUnion {
@@ -256,6 +262,9 @@ func (p *OpenAIChatAdapter) openAIImageURL(ctx context.Context, block ContentBlo
 	resolved, err := p.media.Resolve(ctx, *block.Media, ResolveAsBase64)
 	if err != nil {
 		return "", err
+	}
+	if resolved.Missing {
+		return "", nil
 	}
 	if resolved.URL != "" {
 		return resolved.URL, nil

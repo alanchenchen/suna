@@ -52,6 +52,9 @@ const (
 )
 
 type ResolvedMedia struct {
+	// Missing 表示解析器确认来源已不存在；不携带内容，协议适配时省略该媒体块。
+	// 其他读取失败仍通过 error 返回，不能用 Missing 掩盖权限、校验或取消错误。
+	Missing  bool
 	URL      string
 	Base64   string
 	MimeType string
@@ -59,6 +62,7 @@ type ResolvedMedia struct {
 	Size     int64
 }
 
+// MediaResolver 负责来源读取与结果分类；Missing 不代表模型看过内容，也不改变原始引用。
 type MediaResolver interface {
 	Resolve(ctx context.Context, ref MediaRef, mode ResolveMode) (ResolvedMedia, error)
 }

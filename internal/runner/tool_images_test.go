@@ -2,11 +2,23 @@ package runner
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
+	"github.com/alanchenchen/suna/internal/config"
+	"github.com/alanchenchen/suna/internal/media"
 	"github.com/alanchenchen/suna/internal/memory"
 	"github.com/alanchenchen/suna/internal/model"
 	"github.com/alanchenchen/suna/internal/tools"
+	"github.com/alanchenchen/suna/internal/tools/builtin"
 )
 
 type imageExecutor struct {
@@ -84,5 +96,99 @@ func TestInjectToolImagesInjectsAcrossTurns(t *testing.T) {
 	last := msgs[len(msgs)-1]
 	if len(last.Content) != 1 || last.Content[0].Type != model.ContentImage {
 		t.Fatalf("injected content should contain the image block")
+	}
+}
+
+type cleanupImageExecutor struct {
+	path string
+}
+
+func (e cleanupImageExecutor) ExecuteTool(ctx context.Context, call ToolExecution) tools.Result {
+	switch call.Name {
+	case "read_image":
+		return (builtin.ReadImage{}).Execute(ctx, map[string]any{"source": e.path})
+	case "cleanup":
+		if err := os.Remove(e.path); err != nil {
+			return tools.ErrorResult(err.Error())
+		}
+		return tools.TextResult("temporary image removed")
+	default:
+		return tools.ErrorResult("unexpected tool")
+	}
+}
+
+func TestReadImageThenCleanupFinishesSameRunWithoutResendingMissingImage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "temporary.png")
+	if err := os.WriteFile(path, []byte("test image contents"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var bodies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		var body json.RawMessage
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		bodies = append(bodies, string(body))
+		turn := len(bodies)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch turn {
+		case 1, 2:
+			name := "read_image"
+			if turn == 2 {
+				name = "cleanup"
+			}
+			fmt.Fprintf(w, "data: {\"id\":\"test\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-%d\",\"type\":\"function\",\"function\":{\"name\":\"%s\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n", turn, name)
+		case 3:
+			fmt.Fprint(w, checkpointTextSSE)
+		default:
+			t.Errorf("unexpected extra model request %d", turn)
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+	router, err := model.NewRouter(&config.Config{Models: []config.ModelConfig{{Provider: "example-provider", Model: "example-model", Protocol: config.ModelProtocolOpenAIChat, BaseURL: server.URL, APIKey: "test-api-key", ContextWindow: 100000, MaxOutputTokens: 1000}}}, media.NewContextResolver(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := router.Bind("example-provider/example-model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	working := memory.NewWorkingMemory()
+	working.AddMessage(memory.NewTextMessage(model.RoleUser, "inspect image, remove it, then finish"))
+	r := &Runner{Executor: cleanupImageExecutor{path: path}}
+	result, err := r.Run(context.Background(), Request{Binding: binding, Working: working, MaxTurns: 3, MaxTokens: 1000})
+	if err != nil || result.FinalText != "complete" || result.HadToolError {
+		t.Fatalf("result=%+v err=%v, want successful same-run completion", result, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 3 {
+		t.Fatalf("model requests=%d, want 3 with no paid retry", len(bodies))
+	}
+	image := base64.StdEncoding.EncodeToString([]byte("test image contents"))
+	if strings.Contains(bodies[0], image) || !strings.Contains(bodies[1], image) || strings.Contains(bodies[2], image) || strings.Contains(bodies[2], `"content":[]`) {
+		t.Fatal("image was not sent exactly while its source was available")
+	}
+	for _, value := range []string{"temporary image removed", "call-1", "call-2", "source="} {
+		if !strings.Contains(bodies[2], value) {
+			t.Fatalf("final request missing retained tool fact %q", value)
+		}
+	}
+	images := 0
+	for _, message := range working.Messages() {
+		for _, block := range message.Content {
+			if block.Type == model.ContentImage {
+				images++
+			}
+		}
+	}
+	if images != 1 {
+		t.Fatalf("working image blocks=%d, want 1 until Agent run-end projection", images)
 	}
 }

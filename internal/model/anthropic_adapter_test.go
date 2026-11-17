@@ -206,3 +206,46 @@ func TestAnthropicToolInputSchemaPreservesRequiredAndProperties(t *testing.T) {
 		t.Fatalf("additionalProperties = true, want false; json = %s", string(b))
 	}
 }
+
+func TestAnthropicBuildMessagesMapsMissingMedia(t *testing.T) {
+	checkAdapterMediaInput(t, func(resolver MediaResolver, req *CompletionRequest) ([]byte, error) {
+		adapter := NewAnthropicAdapter(testAdapterSpec("example-model"), AdapterDependencies{MediaResolver: resolver})
+		messages, err := adapter.buildMessages(context.Background(), req)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(messages)
+	})
+}
+
+func TestAnthropicMissingAssistantImageKeepsToolUseAndOtherText(t *testing.T) {
+	resolver := &adapterMediaResolver{result: ResolvedMedia{Missing: true}}
+	image := ContentBlock{Type: ContentImage, Media: &MediaRef{Kind: MediaPath, Path: "missing.png"}}
+	req := &CompletionRequest{Messages: []Message{
+		NewTextMessage(RoleUser, "inspect"),
+		{Role: RoleAssistant, Content: []ContentBlock{image}},
+		{Role: RoleAssistant, Content: []ContentBlock{{Type: ContentText, Text: ""}, image}, ToolCalls: []ToolCall{{ID: "call", Name: "cleanup", Arguments: `{}`}}},
+		{Role: RoleTool, ToolCallID: "call", Content: []ContentBlock{{Type: ContentText, Text: "cleanup done"}}},
+		{Role: RoleAssistant, TextContent: "cached assistant prose", Content: []ContentBlock{image}},
+	}}
+	adapter := NewAnthropicAdapter(testAdapterSpec("example-model"), AdapterDependencies{MediaResolver: resolver})
+	messages, err := adapter.buildMessages(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 4 {
+		t.Fatalf("messages=%d, want 4 after omitting only pure image message", len(messages))
+	}
+	wire, err := json.Marshal(messages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"cleanup", "call", "cleanup done", "cached assistant prose"} {
+		if !strings.Contains(string(wire), text) {
+			t.Fatalf("wire missing %q", text)
+		}
+	}
+	if strings.Contains(string(wire), `"content":[]`) || strings.Contains(string(wire), `"type":"image"`) {
+		t.Fatal("empty message or unavailable image remains")
+	}
+}

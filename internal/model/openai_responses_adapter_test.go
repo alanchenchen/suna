@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -158,4 +159,15 @@ func TestSessionScopeIsStableAndAnonymous(t *testing.T) {
 	if other := SessionScope("session-b"); other == got {
 		t.Fatalf("different SessionScope = %q, must differ", other)
 	}
+}
+
+func TestOpenAIResponsesBuildInputMapsMissingMedia(t *testing.T) {
+	checkAdapterMediaInput(t, func(resolver MediaResolver, req *CompletionRequest) ([]byte, error) {
+		adapter := NewOpenAIResponsesAdapter(testAdapterSpec("example-model"), AdapterDependencies{MediaResolver: resolver})
+		input, err := adapter.buildInput(context.Background(), req)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(input)
+	})
 }

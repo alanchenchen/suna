@@ -185,7 +185,10 @@ func (p *OpenAIResponsesAdapter) buildInput(ctx context.Context, req *Completion
 			if err != nil {
 				return nil, err
 			}
-			input = append(input, responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleUser))
+			// 缺失图片可被省略；过滤后没有正文的消息不生成空协议项。
+			if len(content) > 0 || !hasImagePart(m.Content) {
+				input = append(input, responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleUser))
+			}
 		case RoleAssistant:
 			if text := m.Text(); text != "" {
 				input = append(input, responses.ResponseInputItemParamOfMessage(text, responses.EasyInputMessageRoleAssistant))
@@ -233,6 +236,9 @@ func (p *OpenAIResponsesAdapter) openAIImageURL(ctx context.Context, block Conte
 	resolved, err := p.media.Resolve(ctx, *block.Media, ResolveAsBase64)
 	if err != nil {
 		return "", err
+	}
+	if resolved.Missing {
+		return "", nil
 	}
 	if resolved.URL != "" {
 		return resolved.URL, nil

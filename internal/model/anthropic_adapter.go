@@ -291,6 +291,10 @@ func (p *AnthropicAdapter) buildMessages(ctx context.Context, req *CompletionReq
 			if err != nil {
 				return nil, err
 			}
+			// 纯图片消息在省略失效来源后可能为空，不能生成空协议消息。
+			if len(blocks) == 0 && hasImagePart(m.Content) {
+				continue
+			}
 			// Anthropic 协议要求相邻 user 消息合并为一条（如 read_image 注入的图片消息紧跟 tool result）；
 			// 后续 user 消息的块追加到上一条，避免出现连续 user 消息导致请求被拒。
 			// SessionState 注入的消息是内部上下文，不与历史第一条 user 合并，保持状态块独立。
@@ -307,7 +311,9 @@ func (p *AnthropicAdapter) buildMessages(ctx context.Context, req *CompletionReq
 			if err != nil {
 				return nil, err
 			}
-			msgs = append(msgs, anthropic.NewAssistantMessage(blocks...))
+			if len(blocks) > 0 || !hasImagePart(m.Content) {
+				msgs = append(msgs, anthropic.NewAssistantMessage(blocks...))
+			}
 		case RoleTool:
 			blocks := []anthropic.ContentBlockParamUnion{
 				anthropic.NewToolResultBlock(m.ToolCallID, m.Text(), false),
@@ -328,7 +334,9 @@ func (p *AnthropicAdapter) buildUserBlocks(ctx context.Context, m Message) ([]an
 	for _, c := range m.Content {
 		switch c.Type {
 		case ContentText:
-			blocks = append(blocks, anthropic.NewTextBlock(c.Text))
+			if c.Text != "" {
+				blocks = append(blocks, anthropic.NewTextBlock(c.Text))
+			}
 		case ContentImage:
 			imageBlock, ok, err := p.anthropicImageBlock(ctx, c)
 			if err != nil {
@@ -380,6 +388,9 @@ func (p *AnthropicAdapter) anthropicImageBlock(ctx context.Context, block Conten
 	resolved, err := p.media.Resolve(ctx, *block.Media, ResolveAsBase64)
 	if err != nil {
 		return anthropic.ContentBlockParamUnion{}, false, err
+	}
+	if resolved.Missing {
+		return anthropic.ContentBlockParamUnion{}, false, nil
 	}
 	if resolved.URL != "" {
 		return anthropic.NewImageBlock(anthropic.URLImageSourceParam{URL: resolved.URL}), true, nil
