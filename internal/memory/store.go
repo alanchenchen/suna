@@ -8,8 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/alanchenchen/suna/internal/logging"
 	_ "modernc.org/sqlite"
 )
+
+// autoVacuumFull 对应 SQLite 的 PRAGMA auto_vacuum=FULL。
+const autoVacuumFull = 1
 
 type Store struct {
 	db *sql.DB
@@ -20,7 +24,7 @@ func NewStore(dbPath string) (*Store, error) {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)")
+	db, err := sql.Open("sqlite", dbPath+dsnParams)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
@@ -30,7 +34,33 @@ func NewStore(dbPath string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	// 老库在 DSN 里声明 auto_vacuum 不会生效，必须 VACUUM 重建一次才能切换页回收模式。
+	if err := s.enableAutoVacuum(); err != nil {
+		// 空间回收属于可选维护：磁盘不足等失败只保留诊断，不能阻止 daemon 启动。
+		logging.Error("memory", "auto_vacuum_enable_failed", err, nil)
+	}
 	return s, nil
+}
+
+// dsnParams 集中声明连接级 pragma。auto_vacuum(FULL) 只在建库时生效，
+// 之后由 SQLite 在每次提交时自行把空闲页归还文件，无需再手动 VACUUM。
+const dsnParams = "?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_pragma=auto_vacuum(1)"
+
+// enableAutoVacuum 把老库一次性切换到 auto_vacuum=FULL。
+// 已切换的库直接返回，新库在 DSN 建库时就是 FULL，因此这里只对升级用户执行一次。
+func (s *Store) enableAutoVacuum() error {
+	var mode int
+	if err := s.db.QueryRow(`PRAGMA auto_vacuum`).Scan(&mode); err != nil {
+		return fmt.Errorf("read auto_vacuum: %w", err)
+	}
+	if mode == autoVacuumFull {
+		return nil
+	}
+	// VACUUM 需要临时空间约等于库大小，且必须独占；调用点在建 daemon 之前，没有并发连接。
+	if _, err := s.db.Exec(`VACUUM`); err != nil {
+		return fmt.Errorf("vacuum to enable auto_vacuum: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) DB() *sql.DB {
